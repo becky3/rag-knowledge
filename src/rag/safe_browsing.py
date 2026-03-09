@@ -157,7 +157,7 @@ class SafeBrowsingClient:
             return SafeBrowsingResult(
                 url=result.url,
                 is_safe=result.is_safe,
-                threats=result.threats,
+                threats=list(result.threats),
                 error=result.error,
                 cached=True,
             )
@@ -167,7 +167,7 @@ class SafeBrowsingClient:
     ) -> None:
         """結果をキャッシュに保存する.
 
-        キャッシュが最大サイズを超えた場合、最も古いエントリを削除する（LRU方式）。
+        キャッシュが最大サイズを超えた場合、有効期限が最も近いエントリを削除する。
         """
         cache_key = self._get_cache_key(url)
         # ttl=0 を有効値として扱うため、is not None で分岐
