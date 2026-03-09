@@ -1,0 +1,734 @@
+{
+  "description": "RAG評価用拡充データセット - Wikipedia公開データ (CC BY-SA 4.0)",
+  "version": "1.0.0",
+  "queries": [
+    {
+      "id": "ext-q1",
+      "query": "織田信長の出身地",
+      "description": "戦国武将の基本情報。尾張出身という事実を正確に検索できるか。",
+      "category": "normal",
+      "expected_sources": [
+        "https://ja.wikipedia.org/wiki/織田信長"
+      ],
+      "expected_keywords": ["尾張", "織田信長"],
+      "negative_sources": [
+        "https://ja.wikipedia.org/wiki/豊臣秀吉"
+      ],
+      "notes": "武将間の情報混同を検出"
+    },
+    {
+      "id": "ext-q2",
+      "query": "関ヶ原の戦いはいつ起きたか",
+      "description": "歴史的イベントの日付検索。",
+      "category": "normal",
+      "expected_sources": [
+        "https://ja.wikipedia.org/wiki/関ヶ原の戦い"
+      ],
+      "expected_keywords": ["1600年", "関ヶ原"],
+      "negative_sources": [],
+      "notes": "基本的なファクト検索"
+    },
+    {
+      "id": "ext-q3",
+      "query": "本能寺の変で誰が謀反を起こしたか",
+      "description": "歴史イベントの人物特定。明智光秀を正しく検索できるか。",
+      "category": "normal",
+      "expected_sources": [
+        "https://ja.wikipedia.org/wiki/本能寺の変",
+        "https://ja.wikipedia.org/wiki/織田信長"
+      ],
+      "expected_keywords": ["明智光秀", "本能寺"],
+      "negative_sources": [],
+      "notes": "複数ドキュメントに情報が分散するケース"
+    },
+    {
+      "id": "ext-q4",
+      "query": "寿司の歴史と起源",
+      "description": "食文化の歴史情報。日本語と英語の両ページが関連。",
+      "category": "normal",
+      "expected_sources": [
+        "https://ja.wikipedia.org/wiki/寿司",
+        "https://en.wikipedia.org/wiki/Sushi"
+      ],
+      "expected_keywords": ["寿司", "酢飯"],
+      "negative_sources": [],
+      "notes": "日英両言語のドキュメントが関連するケース"
+    },
+    {
+      "id": "ext-q5",
+      "query": "ラーメンのスープの種類",
+      "description": "食文化の詳細情報。",
+      "category": "normal",
+      "expected_sources": [
+        "https://ja.wikipedia.org/wiki/ラーメン"
+      ],
+      "expected_keywords": ["ラーメン", "スープ"],
+      "negative_sources": [
+        "https://ja.wikipedia.org/wiki/うどん"
+      ],
+      "notes": "麺料理間の混同を検出"
+    },
+    {
+      "id": "ext-q6",
+      "query": "人工知能の定義と概要",
+      "description": "技術分野の基本情報。日英両方のAI記事が関連。",
+      "category": "normal",
+      "expected_sources": [
+        "https://ja.wikipedia.org/wiki/人工知能",
+        "https://en.wikipedia.org/wiki/Artificial_intelligence"
+      ],
+      "expected_keywords": ["人工知能", "AI"],
+      "negative_sources": [],
+      "notes": "技術用語の日英マッチング"
+    },
+    {
+      "id": "ext-q7",
+      "query": "富士山の標高",
+      "description": "地理情報のファクト検索。",
+      "category": "normal",
+      "expected_sources": [
+        "https://ja.wikipedia.org/wiki/富士山",
+        "https://en.wikipedia.org/wiki/Mount_Fuji"
+      ],
+      "expected_keywords": ["富士山", "3776"],
+      "negative_sources": [],
+      "notes": "具体的な数値情報の検索"
+    },
+    {
+      "id": "ext-q8",
+      "query": "北海道の県庁所在地",
+      "description": "地理的ファクト検索。札幌市を正しく返せるか。",
+      "category": "normal",
+      "expected_sources": [
+        "https://ja.wikipedia.org/wiki/北海道"
+      ],
+      "expected_keywords": ["北海道", "札幌"],
+      "negative_sources": [
+        "https://ja.wikipedia.org/wiki/沖縄県"
+      ],
+      "notes": "他県との混同を検出"
+    },
+    {
+      "id": "ext-q9",
+      "query": "太陽系の惑星",
+      "description": "科学の基本情報。",
+      "category": "normal",
+      "expected_sources": [
+        "https://ja.wikipedia.org/wiki/太陽系",
+        "https://en.wikipedia.org/wiki/Solar_System"
+      ],
+      "expected_keywords": ["太陽系", "惑星"],
+      "negative_sources": [],
+      "notes": "天文学の基本クエリ"
+    },
+    {
+      "id": "ext-q10",
+      "query": "柔道の創始者",
+      "description": "武道の基本情報。嘉納治五郎を正しく検索できるか。",
+      "category": "normal",
+      "expected_sources": [
+        "https://ja.wikipedia.org/wiki/柔道",
+        "https://en.wikipedia.org/wiki/Judo"
+      ],
+      "expected_keywords": ["柔道", "嘉納治五郎"],
+      "negative_sources": [
+        "https://ja.wikipedia.org/wiki/剣道"
+      ],
+      "notes": "武道間の混同を検出"
+    },
+    {
+      "id": "ext-q11",
+      "query": "ドラゴンクエストの開発会社",
+      "description": "ゲームの基本情報。",
+      "category": "normal",
+      "expected_sources": [
+        "https://ja.wikipedia.org/wiki/ドラゴンクエスト"
+      ],
+      "expected_keywords": ["ドラゴンクエスト", "スクウェア・エニックス"],
+      "negative_sources": [
+        "https://ja.wikipedia.org/wiki/ファイナルファンタジー"
+      ],
+      "notes": "同じ開発会社のゲーム間での混同を検出"
+    },
+    {
+      "id": "ext-q12",
+      "query": "天ぷらの調理方法",
+      "description": "料理の具体的な手順。",
+      "category": "normal",
+      "expected_sources": [
+        "https://ja.wikipedia.org/wiki/天ぷら",
+        "https://en.wikipedia.org/wiki/Tempura"
+      ],
+      "expected_keywords": ["天ぷら", "揚げ"],
+      "negative_sources": [],
+      "notes": "調理に関する具体的なクエリ"
+    },
+    {
+      "id": "ext-q13",
+      "query": "明治維新の概要",
+      "description": "歴史的事件の概要検索。",
+      "category": "normal",
+      "expected_sources": [
+        "https://ja.wikipedia.org/wiki/明治維新"
+      ],
+      "expected_keywords": ["明治維新", "近代化"],
+      "negative_sources": [],
+      "notes": "基本的な歴史概要検索"
+    },
+    {
+      "id": "ext-q14",
+      "query": "琵琶湖の面積と所在地",
+      "description": "地理情報の基本検索。",
+      "category": "normal",
+      "expected_sources": [
+        "https://ja.wikipedia.org/wiki/琵琶湖"
+      ],
+      "expected_keywords": ["琵琶湖", "滋賀県"],
+      "negative_sources": [
+        "https://ja.wikipedia.org/wiki/瀬戸内海"
+      ],
+      "notes": "水域間の混同を検出"
+    },
+    {
+      "id": "ext-q15",
+      "query": "相撲のルールと特徴",
+      "description": "スポーツの基本情報。",
+      "category": "normal",
+      "expected_sources": [
+        "https://ja.wikipedia.org/wiki/相撲",
+        "https://en.wikipedia.org/wiki/Sumo"
+      ],
+      "expected_keywords": ["相撲", "力士"],
+      "negative_sources": [],
+      "notes": "日英両方のドキュメントが関連"
+    },
+    {
+      "id": "ext-q16",
+      "query": "ポケットモンスターとドラゴンクエスト",
+      "description": "2つのゲームの比較クエリ。両方のページが返されるべき。",
+      "category": "close_ranking",
+      "expected_sources": [
+        "https://ja.wikipedia.org/wiki/ポケットモンスター",
+        "https://ja.wikipedia.org/wiki/ドラゴンクエスト"
+      ],
+      "expected_keywords": ["ポケットモンスター", "ドラゴンクエスト"],
+      "negative_sources": [],
+      "notes": "2つのゲーム情報を両方返す必要がある"
+    },
+    {
+      "id": "ext-q17",
+      "query": "織田信長と豊臣秀吉の関係",
+      "description": "2人の武将の関係性。僅差ランキングが求められる。",
+      "category": "close_ranking",
+      "expected_sources": [
+        "https://ja.wikipedia.org/wiki/織田信長",
+        "https://ja.wikipedia.org/wiki/豊臣秀吉"
+      ],
+      "expected_keywords": ["織田信長", "豊臣秀吉"],
+      "negative_sources": [],
+      "notes": "関連する2人の武将の情報を正確にランキング"
+    },
+    {
+      "id": "ext-q18",
+      "query": "量子力学と相対性理論の違い",
+      "description": "2つの物理理論の比較。両方のドキュメントが返されるべき。",
+      "category": "close_ranking",
+      "expected_sources": [
+        "https://ja.wikipedia.org/wiki/量子力学",
+        "https://ja.wikipedia.org/wiki/相対性理論"
+      ],
+      "expected_keywords": ["量子力学", "相対性理論"],
+      "negative_sources": [],
+      "notes": "物理学の2大理論を両方返す必要がある"
+    },
+    {
+      "id": "ext-q19",
+      "query": "京都と奈良の歴史的違い",
+      "description": "2つの古都の比較。類似テーマのランキング精度テスト。",
+      "category": "close_ranking",
+      "expected_sources": [
+        "https://ja.wikipedia.org/wiki/京都市",
+        "https://ja.wikipedia.org/wiki/奈良県"
+      ],
+      "expected_keywords": ["京都", "奈良"],
+      "negative_sources": [],
+      "notes": "地理的に近い2都市の情報を正確にランキング"
+    },
+    {
+      "id": "ext-q20",
+      "query": "歌舞伎と能楽の違い",
+      "description": "2つの伝統芸能の比較。両方のページが関連。",
+      "category": "close_ranking",
+      "expected_sources": [
+        "https://ja.wikipedia.org/wiki/歌舞伎",
+        "https://ja.wikipedia.org/wiki/能楽"
+      ],
+      "expected_keywords": ["歌舞伎", "能楽"],
+      "negative_sources": [],
+      "notes": "伝統芸能の比較テスト"
+    },
+    {
+      "id": "ext-q21",
+      "query": "将棋と囲碁のルール比較",
+      "description": "2つのボードゲームの比較クエリ。",
+      "category": "close_ranking",
+      "expected_sources": [
+        "https://ja.wikipedia.org/wiki/将棋",
+        "https://ja.wikipedia.org/wiki/囲碁"
+      ],
+      "expected_keywords": ["将棋", "囲碁"],
+      "negative_sources": [
+        "https://ja.wikipedia.org/wiki/麻雀"
+      ],
+      "notes": "ボードゲーム間で正確にランキングされるか"
+    },
+    {
+      "id": "ext-q22",
+      "query": "機械学習とディープラーニングの関係",
+      "description": "技術用語の親子関係。両方のドキュメントが関連。",
+      "category": "close_ranking",
+      "expected_sources": [
+        "https://ja.wikipedia.org/wiki/機械学習",
+        "https://ja.wikipedia.org/wiki/ディープラーニング"
+      ],
+      "expected_keywords": ["機械学習", "ディープラーニング"],
+      "negative_sources": [],
+      "notes": "上位概念と下位概念のランキングテスト"
+    },
+    {
+      "id": "ext-q23",
+      "query": "寿司とラーメンの比較",
+      "description": "2つの日本料理の比較。両方のページが返されるべき。",
+      "category": "close_ranking",
+      "expected_sources": [
+        "https://ja.wikipedia.org/wiki/寿司",
+        "https://ja.wikipedia.org/wiki/ラーメン"
+      ],
+      "expected_keywords": ["寿司", "ラーメン"],
+      "negative_sources": [],
+      "notes": "日本料理同士の僅差ランキング"
+    },
+    {
+      "id": "ext-q24",
+      "query": "坂本龍馬 薩長同盟",
+      "description": "vector↔BM25不一致テスト。BM25は坂本龍馬ページを優先、ベクトル検索は明治維新も関連付ける可能性。",
+      "category": "method_mismatch",
+      "expected_sources": [
+        "https://ja.wikipedia.org/wiki/坂本龍馬",
+        "https://ja.wikipedia.org/wiki/明治維新"
+      ],
+      "expected_keywords": ["坂本龍馬", "薩長"],
+      "negative_sources": [],
+      "notes": "固有名詞＋歴史的文脈の手法間不一致"
+    },
+    {
+      "id": "ext-q25",
+      "query": "嘉納治五郎 オリンピック",
+      "description": "vector↔BM25不一致テスト。BM25は柔道ページを優先するが、意味的には相撲も関連しうる。",
+      "category": "method_mismatch",
+      "expected_sources": [
+        "https://ja.wikipedia.org/wiki/柔道",
+        "https://en.wikipedia.org/wiki/Judo"
+      ],
+      "expected_keywords": ["嘉納治五郎", "柔道", "オリンピック"],
+      "negative_sources": [],
+      "notes": "人名でBM25が正確にヒットするケース"
+    },
+    {
+      "id": "ext-q26",
+      "query": "ニューラルネットワーク 学習アルゴリズム",
+      "description": "vector↔BM25不一致テスト。ベクトル検索は機械学習・強化学習も関連、BM25はニューラルネットワークを優先。",
+      "category": "method_mismatch",
+      "expected_sources": [
+        "https://ja.wikipedia.org/wiki/ニューラルネットワーク",
+        "https://ja.wikipedia.org/wiki/機械学習"
+      ],
+      "expected_keywords": ["ニューラルネットワーク", "学習"],
+      "negative_sources": [],
+      "notes": "技術用語の意味的広がりでの手法間不一致"
+    },
+    {
+      "id": "ext-q27",
+      "query": "日本酒の醸造プロセス",
+      "description": "vector↔BM25不一致テスト。BM25は日本酒ページを優先、ベクトル検索は抹茶や味噌汁も関連付ける可能性。",
+      "category": "method_mismatch",
+      "expected_sources": [
+        "https://ja.wikipedia.org/wiki/日本酒"
+      ],
+      "expected_keywords": ["日本酒", "醸造"],
+      "negative_sources": [
+        "https://ja.wikipedia.org/wiki/抹茶"
+      ],
+      "notes": "飲料間の混同を検出しつつ手法間ランキング差異を確認"
+    },
+    {
+      "id": "ext-q28",
+      "query": "DNA 遺伝子 構造",
+      "description": "vector↔BM25不一致テスト。BM25はDNAページ、ベクトル検索は進化論も関連付ける可能性。",
+      "category": "method_mismatch",
+      "expected_sources": [
+        "https://ja.wikipedia.org/wiki/デオキシリボ核酸"
+      ],
+      "expected_keywords": ["DNA", "デオキシリボ核酸", "遺伝"],
+      "negative_sources": [],
+      "notes": "科学用語の正式名称と略称のマッチング差異"
+    },
+    {
+      "id": "ext-q29",
+      "query": "浮世絵 葛飾北斎",
+      "description": "vector↔BM25不一致テスト。BM25は浮世絵ページの固有名詞ヒット、ベクトル検索は文化全般を関連付ける。",
+      "category": "method_mismatch",
+      "expected_sources": [
+        "https://ja.wikipedia.org/wiki/浮世絵"
+      ],
+      "expected_keywords": ["浮世絵", "北斎"],
+      "negative_sources": [],
+      "notes": "芸術家名でのBM25精度テスト"
+    },
+    {
+      "id": "ext-q30",
+      "query": "Tetris game history and creator",
+      "description": "vector↔BM25不一致テスト（英語）。固有名詞 Tetris でBM25が正確にヒットすべき。",
+      "category": "method_mismatch",
+      "expected_sources": [
+        "https://en.wikipedia.org/wiki/Tetris"
+      ],
+      "expected_keywords": ["Tetris"],
+      "negative_sources": [
+        "https://en.wikipedia.org/wiki/Minecraft"
+      ],
+      "notes": "英語ゲーム名でのBM25精度テスト"
+    },
+    {
+      "id": "ext-q31",
+      "query": "スーパーマリオ 任天堂",
+      "description": "vector↔BM25不一致テスト。BM25はマリオページを、ベクトル検索はゼルダや他の任天堂ゲームも関連付ける。",
+      "category": "method_mismatch",
+      "expected_sources": [
+        "https://ja.wikipedia.org/wiki/スーパーマリオブラザーズ"
+      ],
+      "expected_keywords": ["スーパーマリオ", "任天堂"],
+      "negative_sources": [],
+      "notes": "ゲームブランドの手法間不一致"
+    },
+    {
+      "id": "ext-q32",
+      "query": "日本の伝統芸能について教えて",
+      "description": "意味的検索テスト。「伝統芸能」という直接キーワードは少ないが、歌舞伎・能楽が該当。",
+      "category": "semantic_only",
+      "expected_sources": [
+        "https://ja.wikipedia.org/wiki/歌舞伎",
+        "https://ja.wikipedia.org/wiki/能楽"
+      ],
+      "expected_keywords": ["歌舞伎", "能楽", "伝統"],
+      "negative_sources": [],
+      "notes": "抽象的カテゴリから具体的なドキュメントを検索"
+    },
+    {
+      "id": "ext-q33",
+      "query": "日本の食事文化の特徴",
+      "description": "意味的検索テスト。「食事文化」で和食・懐石等を意味的に検索。",
+      "category": "semantic_only",
+      "expected_sources": [
+        "https://ja.wikipedia.org/wiki/日本料理",
+        "https://ja.wikipedia.org/wiki/懐石"
+      ],
+      "expected_keywords": ["和食", "日本料理"],
+      "negative_sources": [],
+      "notes": "「食事文化」→「日本料理」「懐石」への意味的接続"
+    },
+    {
+      "id": "ext-q34",
+      "query": "宇宙にある星の最後",
+      "description": "意味的検索テスト。BM25ゼロヒット想定。「星の最後」→ブラックホールへの意味的接続。",
+      "category": "semantic_only",
+      "expected_sources": [
+        "https://ja.wikipedia.org/wiki/ブラックホール"
+      ],
+      "expected_keywords": ["ブラックホール"],
+      "negative_sources": [],
+      "notes": "「星の最後」からブラックホールを意味的に検索"
+    },
+    {
+      "id": "ext-q35",
+      "query": "コンピュータに考える力を持たせる研究",
+      "description": "意味的検索テスト。「考える力」→人工知能・機械学習への意味的接続。",
+      "category": "semantic_only",
+      "expected_sources": [
+        "https://ja.wikipedia.org/wiki/人工知能",
+        "https://ja.wikipedia.org/wiki/機械学習"
+      ],
+      "expected_keywords": ["人工知能", "機械学習"],
+      "negative_sources": [],
+      "notes": "日常表現からの技術概念検索"
+    },
+    {
+      "id": "ext-q36",
+      "query": "武士の時代はいつまで続いたか",
+      "description": "意味的検索テスト。「武士の時代」→江戸時代・明治維新への意味的接続。",
+      "category": "semantic_only",
+      "expected_sources": [
+        "https://ja.wikipedia.org/wiki/江戸時代",
+        "https://ja.wikipedia.org/wiki/明治維新"
+      ],
+      "expected_keywords": ["江戸時代", "明治維新"],
+      "negative_sources": [],
+      "notes": "抽象的な時代区分からの検索"
+    },
+    {
+      "id": "ext-q37",
+      "query": "植物がエネルギーを作る仕組み",
+      "description": "意味的検索テスト。BM25ゼロヒット想定。「エネルギーを作る」→光合成への接続。",
+      "category": "semantic_only",
+      "expected_sources": [
+        "https://ja.wikipedia.org/wiki/光合成",
+        "https://en.wikipedia.org/wiki/Photosynthesis"
+      ],
+      "expected_keywords": ["光合成"],
+      "negative_sources": [],
+      "notes": "日常言語から科学概念への意味的接続"
+    },
+    {
+      "id": "ext-q38",
+      "query": "日本一大きい湖はどこにあるか",
+      "description": "意味的検索テスト。「日本一大きい湖」→琵琶湖への意味的接続。",
+      "category": "semantic_only",
+      "expected_sources": [
+        "https://ja.wikipedia.org/wiki/琵琶湖"
+      ],
+      "expected_keywords": ["琵琶湖", "滋賀県"],
+      "negative_sources": [],
+      "notes": "記述的クエリから具体的な固有名詞を検索"
+    },
+    {
+      "id": "ext-q39",
+      "query": "How computers learn from data",
+      "description": "意味的検索テスト（英語）。抽象的な表現からML関連ドキュメントを検索。",
+      "category": "semantic_only",
+      "expected_sources": [
+        "https://en.wikipedia.org/wiki/Machine_learning",
+        "https://en.wikipedia.org/wiki/Deep_learning"
+      ],
+      "expected_keywords": ["machine learning", "deep learning"],
+      "negative_sources": [],
+      "notes": "英語の抽象クエリからの意味的検索"
+    },
+    {
+      "id": "ext-q40",
+      "query": "天気予報 明日の降水確率",
+      "description": "無関係クエリ。どのテーマにも該当しない。",
+      "category": "noise_rejection",
+      "expected_sources": [],
+      "expected_keywords": [],
+      "negative_sources": [],
+      "notes": "ノイズ排除テスト"
+    },
+    {
+      "id": "ext-q41",
+      "query": "確定申告の締切日",
+      "description": "無関係クエリ。税金関連はどのクラスタにも存在しない。",
+      "category": "noise_rejection",
+      "expected_sources": [],
+      "expected_keywords": [],
+      "negative_sources": [],
+      "notes": "ノイズ排除テスト"
+    },
+    {
+      "id": "ext-q42",
+      "query": "Pythonのデコレータの使い方",
+      "description": "無関係クエリ。プログラミング具体コードはドキュメントに含まれない。",
+      "category": "noise_rejection",
+      "expected_sources": [],
+      "expected_keywords": [],
+      "negative_sources": [],
+      "notes": "ノイズ排除テスト。AI関連ドキュメントからの誤ヒットがないことを確認"
+    },
+    {
+      "id": "ext-q43",
+      "query": "最寄りのコンビニの場所",
+      "description": "無関係クエリ。地理ドキュメントからの誤ヒットがないことを確認。",
+      "category": "noise_rejection",
+      "expected_sources": [],
+      "expected_keywords": [],
+      "negative_sources": [],
+      "notes": "地理系ドキュメントとの誤マッチを検出"
+    },
+    {
+      "id": "ext-q44",
+      "query": "How to cook pasta at home",
+      "description": "無関係クエリ（英語）。食文化ドキュメントとの誤ヒットを検出。",
+      "category": "noise_rejection",
+      "expected_sources": [],
+      "expected_keywords": [],
+      "negative_sources": [],
+      "notes": "英語ノイズ排除テスト"
+    },
+    {
+      "id": "ext-q45",
+      "query": "iPhoneの最新モデル",
+      "description": "無関係クエリ。テクノロジークラスタとの誤ヒットを検出。",
+      "category": "noise_rejection",
+      "expected_sources": [],
+      "expected_keywords": [],
+      "negative_sources": [],
+      "notes": "技術系ドキュメントとの誤マッチを検出"
+    },
+    {
+      "id": "ext-q46",
+      "query": "聖徳太子",
+      "description": "キーワード完全一致テスト。固有名詞での検索でBM25が有利。",
+      "category": "keyword_exact",
+      "expected_sources": [
+        "https://ja.wikipedia.org/wiki/聖徳太子"
+      ],
+      "expected_keywords": ["聖徳太子"],
+      "negative_sources": [],
+      "notes": "固有名詞の完全一致でBM25が正確にヒット"
+    },
+    {
+      "id": "ext-q47",
+      "query": "ブロックチェーン",
+      "description": "キーワード完全一致テスト。カタカナ技術用語。",
+      "category": "keyword_exact",
+      "expected_sources": [
+        "https://ja.wikipedia.org/wiki/ブロックチェーン"
+      ],
+      "expected_keywords": ["ブロックチェーン"],
+      "negative_sources": [
+        "https://ja.wikipedia.org/wiki/クラウドコンピューティング"
+      ],
+      "notes": "IT用語間の混同を検出"
+    },
+    {
+      "id": "ext-q48",
+      "query": "Minecraft",
+      "description": "キーワード完全一致テスト（英語固有名詞）。",
+      "category": "keyword_exact",
+      "expected_sources": [
+        "https://en.wikipedia.org/wiki/Minecraft"
+      ],
+      "expected_keywords": ["Minecraft"],
+      "negative_sources": [
+        "https://en.wikipedia.org/wiki/Tetris"
+      ],
+      "notes": "英語ゲーム名でのBM25完全一致テスト"
+    },
+    {
+      "id": "ext-q49",
+      "query": "ファイナルファンタジー",
+      "description": "キーワード完全一致テスト。長いカタカナ固有名詞。",
+      "category": "keyword_exact",
+      "expected_sources": [
+        "https://ja.wikipedia.org/wiki/ファイナルファンタジー"
+      ],
+      "expected_keywords": ["ファイナルファンタジー"],
+      "negative_sources": [
+        "https://ja.wikipedia.org/wiki/ドラゴンクエスト"
+      ],
+      "notes": "RPGゲーム間の混同を検出"
+    },
+    {
+      "id": "ext-q50",
+      "query": "瀬戸内海",
+      "description": "キーワード完全一致テスト。地名の完全一致。",
+      "category": "keyword_exact",
+      "expected_sources": [
+        "https://ja.wikipedia.org/wiki/瀬戸内海"
+      ],
+      "expected_keywords": ["瀬戸内海"],
+      "negative_sources": [
+        "https://ja.wikipedia.org/wiki/琵琶湖"
+      ],
+      "notes": "水域名の完全一致テスト"
+    },
+    {
+      "id": "ext-q51",
+      "query": "強化学習",
+      "description": "キーワード完全一致テスト。AI分野の専門用語。",
+      "category": "keyword_exact",
+      "expected_sources": [
+        "https://ja.wikipedia.org/wiki/強化学習"
+      ],
+      "expected_keywords": ["強化学習"],
+      "negative_sources": [
+        "https://ja.wikipedia.org/wiki/機械学習"
+      ],
+      "notes": "関連する技術用語間の混同を検出"
+    },
+    {
+      "id": "ext-q52",
+      "query": "おにぎりの具材と種類",
+      "description": "食文化の詳細クエリ。",
+      "category": "normal",
+      "expected_sources": [
+        "https://ja.wikipedia.org/wiki/おにぎり"
+      ],
+      "expected_keywords": ["おにぎり"],
+      "negative_sources": [
+        "https://ja.wikipedia.org/wiki/寿司"
+      ],
+      "notes": "米料理間の混同を検出"
+    },
+    {
+      "id": "ext-q53",
+      "query": "徳川家康と江戸幕府",
+      "description": "人物と政権の関連検索。",
+      "category": "normal",
+      "expected_sources": [
+        "https://ja.wikipedia.org/wiki/徳川家康",
+        "https://ja.wikipedia.org/wiki/江戸時代"
+      ],
+      "expected_keywords": ["徳川家康", "江戸"],
+      "negative_sources": [],
+      "notes": "人物と時代の複合検索"
+    },
+    {
+      "id": "ext-q54",
+      "query": "自然言語処理の応用分野",
+      "description": "技術分野の応用に関するクエリ。",
+      "category": "normal",
+      "expected_sources": [
+        "https://ja.wikipedia.org/wiki/自然言語処理",
+        "https://en.wikipedia.org/wiki/Natural_language_processing"
+      ],
+      "expected_keywords": ["自然言語処理", "NLP"],
+      "negative_sources": [],
+      "notes": "技術の応用に関する基本クエリ"
+    },
+    {
+      "id": "ext-q55",
+      "query": "広島市の特徴と歴史",
+      "description": "都市情報の基本クエリ。",
+      "category": "normal",
+      "expected_sources": [
+        "https://ja.wikipedia.org/wiki/広島市"
+      ],
+      "expected_keywords": ["広島"],
+      "negative_sources": [
+        "https://ja.wikipedia.org/wiki/大阪市"
+      ],
+      "notes": "都市間の混同を検出"
+    }
+  ],
+  "metadata": {
+    "created_at": "2026-02-19",
+    "updated_at": "2026-02-19",
+    "purpose": "RAG検索精度の定量評価（Precision/Recall/NDCG/MRR計測）- 拡充版",
+    "related_issues": ["#512", "#516"],
+    "categories": {
+      "normal": "正常検索（両手法ヒット・明確差）",
+      "close_ranking": "僅差ランキング（類似トピック比較）",
+      "method_mismatch": "手法間不一致（vector↔BM25）",
+      "semantic_only": "意味的検索（BM25ゼロヒット想定）",
+      "noise_rejection": "無関係クエリ（ノイズ排除）",
+      "keyword_exact": "キーワード完全一致（BM25有利）"
+    },
+    "notes": [
+      "55クエリ / 6カテゴリで構成",
+      "expected_sources: 検索結果に含まれるべきソースURL（Wikipedia URL）",
+      "negative_sources: 検索結果に含まれてはいけないソースURL（テーマ間混同検出）",
+      "既存の rag_evaluation_dataset.json（勇者の冒険テーマ）とは別管理",
+      "ドキュメントは tests/fixtures/rag_evaluation_extended/rag_test_documents_extended.json を使用"
+    ]
+  }
+}

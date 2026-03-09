@@ -1,0 +1,166 @@
+{
+  "version": "1.0.0",
+  "description": "RAG評価データ収集用トピック設定。テーマ別クラスタでWikipediaからドキュメントを収集する。",
+  "max_content_length": 2000,
+  "request_delay_sec": 1.0,
+  "output_dir": "tests/fixtures/rag_evaluation_extended",
+  "topics": {
+    "japanese_history": {
+      "description": "日本の歴史（戦国〜近現代）",
+      "ja": [
+        "織田信長",
+        "豊臣秀吉",
+        "徳川家康",
+        "関ヶ原の戦い",
+        "本能寺の変",
+        "武田信玄",
+        "上杉謙信",
+        "坂本龍馬",
+        "明治維新",
+        "源頼朝",
+        "聖徳太子",
+        "江戸時代"
+      ],
+      "en": [
+        "Oda_Nobunaga",
+        "Tokugawa_Ieyasu",
+        "Battle_of_Sekigahara"
+      ]
+    },
+    "japanese_food": {
+      "description": "日本の食文化",
+      "ja": [
+        "寿司",
+        "ラーメン",
+        "天ぷら",
+        "うどん",
+        "味噌汁",
+        "和食",
+        "懐石料理",
+        "おにぎり",
+        "焼き鳥",
+        "日本酒",
+        "抹茶"
+      ],
+      "en": [
+        "Sushi",
+        "Ramen",
+        "Tempura"
+      ]
+    },
+    "technology": {
+      "description": "情報技術・AI",
+      "ja": [
+        "人工知能",
+        "機械学習",
+        "自然言語処理",
+        "ディープラーニング",
+        "ニューラルネットワーク",
+        "強化学習",
+        "クラウドコンピューティング",
+        "ブロックチェーン"
+      ],
+      "en": [
+        "Artificial_intelligence",
+        "Machine_learning",
+        "Natural_language_processing",
+        "Deep_learning",
+        "Cloud_computing"
+      ]
+    },
+    "japanese_geography": {
+      "description": "日本の地理・都市",
+      "ja": [
+        "富士山",
+        "東京都",
+        "京都市",
+        "大阪市",
+        "北海道",
+        "沖縄県",
+        "奈良県",
+        "広島市",
+        "琵琶湖",
+        "瀬戸内海"
+      ],
+      "en": [
+        "Mount_Fuji",
+        "Tokyo",
+        "Kyoto"
+      ]
+    },
+    "science": {
+      "description": "自然科学",
+      "ja": [
+        "太陽系",
+        "量子力学",
+        "相対性理論",
+        "DNA",
+        "光合成",
+        "元素周期表",
+        "進化論",
+        "ブラックホール"
+      ],
+      "en": [
+        "Solar_System",
+        "Quantum_mechanics",
+        "Theory_of_relativity",
+        "Photosynthesis",
+        "Black_hole"
+      ]
+    },
+    "culture": {
+      "description": "日本の伝統文化・武道",
+      "ja": [
+        "歌舞伎",
+        "能楽",
+        "茶道",
+        "華道",
+        "書道",
+        "柔道",
+        "剣道",
+        "相撲",
+        "浮世絵",
+        "折り紙",
+        "着物"
+      ],
+      "en": [
+        "Kabuki",
+        "Japanese_tea_ceremony",
+        "Judo",
+        "Sumo"
+      ]
+    },
+    "games": {
+      "description": "ゲーム関連",
+      "ja": [
+        "将棋",
+        "囲碁",
+        "麻雀",
+        "ポケットモンスター",
+        "スーパーマリオブラザーズ",
+        "ファイナルファンタジー",
+        "ドラゴンクエスト",
+        "ゼルダの伝説"
+      ],
+      "en": [
+        "Chess",
+        "Tetris",
+        "Minecraft"
+      ]
+    },
+    "noise_topics": {
+      "description": "ノイズ排除テスト用（他テーマと無関連）",
+      "ja": [
+        "サッカー",
+        "バスケットボール",
+        "テニス",
+        "水泳"
+      ],
+      "en": [
+        "Football",
+        "Basketball",
+        "Ice_hockey"
+      ]
+    }
+  }
+}
