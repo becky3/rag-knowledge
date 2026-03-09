@@ -1,6 +1,6 @@
 ---
 name: test-run
-description: pytest・ruff・mypy によるコード品質チェックの実行・分析・修正提案
+description: pytest・ruff・mypy・shellcheck によるコード品質チェックの実行・分析・修正提案
 user-invocable: true
 allowed-tools: Bash, Read, Grep, Glob, Edit
 argument-hint: "[diff|full]"
@@ -8,7 +8,7 @@ argument-hint: "[diff|full]"
 
 ## タスク
 
-pytest による自動テスト実行、ruff によるリント、mypy による型チェックを実行し、結果を分析して修正提案を行う。
+pytest による自動テスト実行、ruff によるリント、mypy による型チェック、shellcheck によるシェルスクリプトチェックを実行し、結果を分析して修正提案を行う。ドキュメント品質チェック（markdownlint・mermaid-lint・GitHub 互換チェック）は `/doc-lint` スキルに委譲する。
 
 ## 引数
 
@@ -23,6 +23,8 @@ pytest による自動テスト実行、ruff によるリント、mypy による
 - `tests/*.py` の pytest テストファイル
 - `src/` および `tests/` のリントチェック（ruff）
 - `src/` の型チェック（mypy）
+- プロジェクト内の `*.sh` ファイルのシェルスクリプトチェック（shellcheck）
+- ドキュメント品質チェック（markdownlint・mermaid-lint・GitHub 互換チェック）は `/doc-lint` スキルに委譲
 - プロジェクトは `uv` によるパッケージ管理を使用
 
 ## 実行コマンド
@@ -30,6 +32,7 @@ pytest による自動テスト実行、ruff によるリント、mypy による
 - テスト: `uv run pytest`
 - リント: `uv run ruff check src/ tests/`
 - 型チェック: `uv run mypy src/`
+- ドキュメント品質チェック: `/doc-lint` スキルに委譲
 
 ## 処理手順
 
@@ -55,7 +58,8 @@ pytest による自動テスト実行、ruff によるリント、mypy による
 **特殊ケース**:
 
 - 変更ファイル 0 件で指定もなし → `full` モードにフォールバック
-- Markdown ファイル（`*.md`）のみの変更 → pytest・ruff・mypy はスキップ
+- Markdown ファイル（`*.md`）のみの変更 → pytest・ruff・mypy・shellcheck はスキップ、`/doc-lint` のみ実行
+- シェルスクリプト（`*.sh`）のみの変更 → pytest・ruff・mypy はスキップ、shellcheck のみ実行（`/doc-lint` もスキップ）
 - `pyproject.toml`, `conftest.py` の変更 → `full` モードにフォールバック
 
 #### full モードの場合
@@ -89,31 +93,62 @@ uv run mypy src/
 
 diff モードでは変更された `src/**/*.py` ファイルのみを対象にする。
 
-### 6. 結果の解析
+### 6. ドキュメント品質チェック（/doc-lint 委譲）
+
+`/doc-lint` スキルに委譲する。実行モード（diff/full）は test-run の現在のモードを引き継ぐ。
+
+`/doc-lint` は markdownlint・md-mermaid-lint・GitHub 互換チェックを一括実行する。チェック対象やバージョン管理は `/doc-lint` 側の責務であり、test-run では管理しない。
+
+### 7. シェルスクリプトチェック (shellcheck) 実行
+
+**CRLF 自動修正（Windows 環境・前処理）**: shellcheck 実行前に、対象 `*.sh` ファイルの CRLF 改行を LF に変換する。Windows の Write ツールが CRLF で書き出す問題への対策。この変換は shellcheck を正常実行するための前処理であり、「ユーザー承認後の修正適用」（ステップ 12）とは別の工程として自動実行する。変換があった場合はログ出力する。diff モードでは shellcheck 対象ファイル（変更された `*.sh`）のみを変換対象とする。
+
+```bash
+# CRLF → LF 自動変換（shellcheck SC1017 防止）
+# - NUL 区切りでスペース/改行を含むパスを安全に列挙
+# - sed -i で in-place 変換
+find . -name '*.sh' -not -path './.git/*' -print0 | while IFS= read -r -d '' f; do
+  if grep -q $'\r' "$f" 2>/dev/null; then
+    sed -i 's/\r$//' "$f"
+    echo "[fix] CRLF→LF: $f"
+  fi
+done
+```
+
+プロジェクト内の `*.sh` ファイルを対象に shellcheck を実行する。
+
+diff モードでは変更された `*.sh` ファイルのみを対象にする（CRLF 変換も同じ対象に限定する）。対象ファイルがなければスキップする。
+
+**重要**: pytest・ruff・mypy・`/doc-lint`・shellcheck のいずれかが失敗してもプロセスを中断せず、すべてのチェックを実行して統合レポートを生成する。
+
+### 8. 結果の解析
 
 - **pytest 成功時**: 実行件数、実行時間、カバレッジ率（要求された場合）
 - **pytest 失敗時**: 成功/失敗件数、各失敗テストのエラーメッセージ、スタックトレース
 - **ruff 違反あり時**: 違反ファイル、ルールコード、行番号、違反内容
 - **mypy エラーあり時**: エラーファイル、エラー種別、行番号、エラー内容
+- **/doc-lint 違反あり時**: `/doc-lint` の出力を統合レポートに含める
+- **shellcheck 違反あり時**: 違反ファイル、エラーコード（SC????）、行番号、違反内容、重大度（error/warning/info）
 
-### 7. 失敗時の詳細調査
+### 9. 失敗時の詳細調査
 
 - 失敗したテストファイルを Read で読み込み
 - テスト対象のソースコードを Read で読み込み
 - エラーの種類を特定（AssertionError, TypeError, AttributeError 等）
 - 根本原因を分析（テストコードの問題、ソースコードの問題、依存関係の問題）
-- リント違反・型エラー時も該当箇所のコードを Read で確認
+- リント違反・型エラー・shellcheck 違反時も該当箇所のコードを Read で確認
+- ドキュメント違反は `/doc-lint` の出力を参照
 
-### 8. 修正案の生成
+### 10. 修正案の生成
 
-各失敗テスト・リント違反・型エラーに対して:
+各失敗テスト・リント違反・型エラー・shellcheck 違反に対して:
 
 - エラー内容の要約
 - 原因の説明
 - 具体的な修正案（ファイルパス、行番号、修正コード）
 - 修正の優先度（Critical/Warning/Suggestion）
 
-### 9. 検出した問題への対処（必須）
+### 11. 検出した問題への対処（必須）
 
 検出した問題を「対応範囲外」「既存問題」としてスキップしてはならない。以下のルールに従って必ず対処すること:
 
@@ -121,10 +156,11 @@ diff モードでは変更された `src/**/*.py` ファイルのみを対象に
 - **大きな問題**（設計変更が必要、影響範囲が広い等）: Issue を作成して記録する
 - **判断に迷う場合**: ユーザーに相談する（自己判断でスキップしない）
 
-### 10. 修正適用と再実行
+### 12. 修正適用と再実行
 
 - 修正が必要な場合、Edit ツールで修正を適用
-- 修正後に再度テスト・リント・型チェックを実行して確認
+- ドキュメント修正は `/doc-lint` に再実行を委譲
+- 修正後に再度テスト・リント・型チェック・shellcheck を実行して確認
 
 ## 出力フォーマット
 
@@ -142,6 +178,12 @@ diff モードでは変更された `src/**/*.py` ファイルのみを対象に
 
 #### mypy (型チェック)
 - **型エラー**: なし
+
+#### /doc-lint
+- **違反**: なし
+
+#### shellcheck
+- **違反**: なし
 
 すべてのチェックが成功しました。
 ```
@@ -177,6 +219,12 @@ diff モードでは変更された `src/**/*.py` ファイルのみを対象に
 #### mypy (型チェック)
 - **型エラー**: {N}件（または「なし」）
 
+#### /doc-lint
+- **違反**: {N}件（または「なし」）
+
+#### shellcheck
+- **違反**: {N}件（または「なし」）
+
 ---
 
 #### 次のステップ
@@ -197,9 +245,16 @@ diff モードでは変更された `src/**/*.py` ファイルのみを対象に
 | pytest | ❌ 未実行 | {権限エラー等で起動できなかった場合} |
 | ruff | ⚠️ 実行失敗 | {実行したが途中で失敗した場合} |
 | mypy | ✅ 完了 | — |
+| /doc-lint | ❌ 未実行 | {具体的な理由} |
+| shellcheck | ❌ 未実行 | {具体的な理由} |
 
 **再実行が必要です。**
 ```
+
+- 状態ラベル: `✅ 完了`（正常終了）/ `⚠️ 実行失敗`（起動したが途中で失敗）/ `❌ 未実行`（権限エラー等で起動できなかった）
+- 全チェックが実行できなかった場合も、個別の失敗理由を記載する
+- 「問題なし」「成功」と誤解される表現（`✅` のみのレポート等）を使わない
+- diff 取得コマンドが権限エラーやツール実行失敗で実行できなかった場合、「変更0件」として扱わず、必ず本フォーマットで失敗理由を報告する
 
 ## 差分テストのマッピングルール
 
@@ -247,7 +302,7 @@ RAG 精度テストが必要と判断した場合、確認なしで自動実行�
 1. テスト用 DB を初期化（ChromaDB + BM25）:
 
    ```bash
-   python -m rag.cli init-test-db \
+   uv run python -m rag.cli init-test-db \
      --chunk-size 200 --chunk-overlap 30 \
      --persist-dir .tmp/test_chroma_db \
      --bm25-persist-dir .tmp/test_bm25_index \
@@ -257,7 +312,7 @@ RAG 精度テストが必要と判断した場合、確認なしで自動実行�
 2. 精度評価を実行:
 
    ```bash
-   python -m rag.cli evaluate \
+   uv run python -m rag.cli evaluate \
      --persist-dir .tmp/test_chroma_db \
      --output-dir reports/rag-evaluation \
      --chunk-size 200 --chunk-overlap 30 \
@@ -272,14 +327,15 @@ RAG 精度テストが必要と判断した場合、確認なしで自動実行�
 テスト名は `test_` プレフィックス + snake_case で、テスト対象の振る舞いがわかる名前をつける:
 
 ```python
-def test_rss_feed_is_fetched_and_parsed():
-def test_duplicate_articles_skipped():
+def test_crawled_page_is_chunked_and_stored():
+def test_duplicate_url_replaces_existing_chunks():
 ```
 
 ## 注意事項
 
 - `uv` コマンドが利用できない環境では適切にエラーを報告する
+- `shellcheck` コマンドが利用できない環境（`command -v shellcheck` が失敗する場合）では shellcheck をスキップし、他のチェックは続行する
 - テスト失敗時は必ず失敗したテストのソースコードを読んでから分析する
-- リント違反・型エラー時は該当箇所のコードを読んでから分析する
+- リント違反・型エラー・ドキュメント違反時は該当箇所のコードを読んでから分析する
 - 修正案は具体的で、ファイルパス・行番号を含める
 - 修正を適用する場合は、必ずユーザーの承認を得る
