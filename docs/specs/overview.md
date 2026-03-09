@@ -58,3 +58,9 @@ git-flow ベースのブランチ戦略を採用。詳細は `~/.claude/docs/spe
   - `hotfix/{修正内容}-#{Issue番号}` — 緊急修正（`main` → `main` + `develop`）
 - コミット: `type(scope): 説明 (#Issue番号)` ※scope は仕様書ファイル名（拡張子なし）
 - PR 作成時に `Closes #{Issue番号}` で Issue を紐付け
+
+## 5. Claude Code 拡張（agentic）
+
+**プロジェクト固有エージェント:**
+
+- [テストランナーエージェント](agentic/agents/test-runner-agent.md)
