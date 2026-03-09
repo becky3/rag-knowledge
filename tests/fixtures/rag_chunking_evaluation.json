@@ -1,0 +1,168 @@
+{
+  "description": "RAGチャンキング改善評価用テストデータセット",
+  "version": "1.0.0",
+  "test_pages_dir": "tests/fixtures/rag_test_pages/",
+  "test_cases": [
+    {
+      "id": "tc1",
+      "description": "テーブル内のキャラクター名検索（Issue #195の元ケース）",
+      "page": "table_numeric.html",
+      "query": "りゅうおう",
+      "expected_in_results": true,
+      "expected_keywords": ["りゅうおう", "HP", "200"],
+      "max_distance": 0.5,
+      "notes": "数値テーブル内のキャラクター名が検索できること"
+    },
+    {
+      "id": "tc2",
+      "description": "テーブル内の複数キャラクター検索",
+      "page": "table_numeric.html",
+      "query": "ゾーマのステータス",
+      "expected_in_results": true,
+      "expected_keywords": ["ゾーマ", "HP", "500", "MP", "255"],
+      "max_distance": 0.5,
+      "notes": "特定キャラクターのステータス情報が取得できること"
+    },
+    {
+      "id": "tc3",
+      "description": "テーブル内の数値条件検索",
+      "page": "table_numeric.html",
+      "query": "攻撃力が最も高いモンスター",
+      "expected_in_results": true,
+      "expected_keywords": ["デスピサロ", "250"],
+      "max_distance": 0.6,
+      "notes": "数値比較を含む検索"
+    },
+    {
+      "id": "tc4",
+      "description": "混合テーブルの商品検索",
+      "page": "table_mixed.html",
+      "query": "MacBook Pro の価格",
+      "expected_in_results": true,
+      "expected_keywords": ["MacBook Pro", "298,000円", "Apple"],
+      "max_distance": 0.5,
+      "notes": "テキストと数値が混在するテーブルからの検索"
+    },
+    {
+      "id": "tc5",
+      "description": "混合テーブルのスペック検索",
+      "page": "table_mixed.html",
+      "query": "32GB メモリのノートパソコン",
+      "expected_in_results": true,
+      "expected_keywords": ["XPS 15", "32GB", "Dell"],
+      "max_distance": 0.5,
+      "notes": "スペック条件での商品検索"
+    },
+    {
+      "id": "tc6",
+      "description": "深い見出し階層の検索",
+      "page": "headings_deep.html",
+      "query": "Rustの所有権システム",
+      "expected_in_results": true,
+      "expected_keywords": ["Rust", "所有権", "借用", "ライフタイム"],
+      "max_distance": 0.5,
+      "notes": "深い見出し階層でも適切にチャンキングされていること"
+    },
+    {
+      "id": "tc7",
+      "description": "見出し階層のコンテキスト保持",
+      "page": "headings_deep.html",
+      "query": "Pythonの制御構文",
+      "expected_in_results": true,
+      "expected_keywords": ["Python", "制御構文", "if文", "for文"],
+      "max_distance": 0.5,
+      "notes": "見出し階層のコンテキストが検索結果に反映されること"
+    },
+    {
+      "id": "tc8",
+      "description": "日本語固有名詞の検索（ひらがな）",
+      "page": "japanese_names.html",
+      "query": "まほうつかい",
+      "expected_in_results": true,
+      "expected_keywords": ["まほうつかい", "魔法使い", "メラゾーマ"],
+      "max_distance": 0.5,
+      "notes": "ひらがなの固有名詞検索"
+    },
+    {
+      "id": "tc9",
+      "description": "日本語固有名詞の検索（漢字混じり）",
+      "page": "japanese_names.html",
+      "query": "四天王",
+      "expected_in_results": true,
+      "expected_keywords": ["四天王", "してんのう", "炎", "氷", "風", "大地"],
+      "max_distance": 0.5,
+      "notes": "漢字を含む固有名詞検索"
+    },
+    {
+      "id": "tc10",
+      "description": "長文ドキュメントからの情報抽出",
+      "page": "long_document.html",
+      "query": "SOLID原則",
+      "expected_in_results": true,
+      "expected_keywords": ["SOLID", "単一責任", "開放閉鎖"],
+      "max_distance": 0.5,
+      "notes": "長文から特定トピックを抽出"
+    },
+    {
+      "id": "tc11",
+      "description": "長文ドキュメントの複数箇所検索",
+      "page": "long_document.html",
+      "query": "テスト駆動開発",
+      "expected_in_results": true,
+      "expected_keywords": ["TDD", "ユニットテスト", "テスト"],
+      "max_distance": 0.5,
+      "notes": "複数箇所に分散した関連情報の検索"
+    },
+    {
+      "id": "tc12",
+      "description": "通常テキストの意味検索",
+      "page": "prose_only.html",
+      "query": "大規模言語モデル",
+      "expected_in_results": true,
+      "expected_keywords": ["LLM", "言語モデル", "対話"],
+      "max_distance": 0.5,
+      "notes": "通常テキストからの意味検索"
+    },
+    {
+      "id": "tc13",
+      "description": "エッジケース: 特殊文字を含むテキスト",
+      "page": "edge_cases.html",
+      "query": "計算量表記",
+      "expected_in_results": true,
+      "expected_keywords": ["O(n log n)"],
+      "max_distance": 0.6,
+      "notes": "特殊文字を含むテキストの検索"
+    },
+    {
+      "id": "tc14",
+      "description": "エッジケース: コードブロック",
+      "page": "edge_cases.html",
+      "query": "hello world python",
+      "expected_in_results": true,
+      "expected_keywords": ["def hello_world", "print"],
+      "max_distance": 0.6,
+      "notes": "コードブロック内のテキスト検索"
+    },
+    {
+      "id": "tc15",
+      "description": "BM25テスト: 完全一致キーワード",
+      "page": "table_numeric.html",
+      "query": "スライム",
+      "expected_in_results": true,
+      "expected_keywords": ["スライム"],
+      "max_distance": 0.5,
+      "notes": "キーワード完全一致でBM25が効果を発揮すること"
+    }
+  ],
+  "metadata": {
+    "created_at": "2026-02-10",
+    "purpose": "RAGチャンキング改善とハイブリッド検索の評価",
+    "related_issues": ["#195"],
+    "notes": [
+      "page: tests/fixtures/rag_test_pages/ 内のHTMLファイル名",
+      "expected_in_results: 検索結果に含まれるべきかどうか",
+      "expected_keywords: 検索結果に含まれるべきキーワード",
+      "max_distance: この値より小さいdistanceで検索されるべき"
+    ]
+  }
+}
