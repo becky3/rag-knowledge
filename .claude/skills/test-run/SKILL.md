@@ -101,15 +101,15 @@ diff モードでは変更された `src/**/*.py` ファイルのみを対象に
 
 ### 7. シェルスクリプトチェック (shellcheck) 実行
 
-**CRLF 自動修正（Windows 環境）**: shellcheck 実行前に、対象 `*.sh` ファイルの CRLF 改行を LF に変換する。Windows の Write ツールが CRLF で書き出す問題への対策。変換があった場合はログ出力する。diff モードでは shellcheck 対象ファイル（変更された `*.sh`）のみを変換対象とする。
+**CRLF 自動修正（Windows 環境・前処理）**: shellcheck 実行前に、対象 `*.sh` ファイルの CRLF 改行を LF に変換する。Windows の Write ツールが CRLF で書き出す問題への対策。この変換は shellcheck を正常実行するための前処理であり、「ユーザー承認後の修正適用」（ステップ 12）とは別の工程として自動実行する。変換があった場合はログ出力する。diff モードでは shellcheck 対象ファイル（変更された `*.sh`）のみを変換対象とする。
 
 ```bash
 # CRLF → LF 自動変換（shellcheck SC1017 防止）
 # - NUL 区切りでスペース/改行を含むパスを安全に列挙
-# - perl -pi -e で in-place 変換しパーミッションを維持
+# - sed -i で in-place 変換
 find . -name '*.sh' -not -path './.git/*' -print0 | while IFS= read -r -d '' f; do
   if grep -q $'\r' "$f" 2>/dev/null; then
-    perl -pi -e 's/\r$//' "$f"
+    sed -i 's/\r$//' "$f"
     echo "[fix] CRLF→LF: $f"
   fi
 done
@@ -334,7 +334,7 @@ def test_duplicate_url_replaces_existing_chunks():
 ## 注意事項
 
 - `uv` コマンドが利用できない環境では適切にエラーを報告する
-- `shellcheck` コマンドが利用できない環境（`uv run shellcheck --version` が失敗する場合）では shellcheck をスキップし、他のチェックは続行する
+- `shellcheck` コマンドが利用できない環境（`command -v shellcheck` が失敗する場合）では shellcheck をスキップし、他のチェックは続行する
 - テスト失敗時は必ず失敗したテストのソースコードを読んでから分析する
 - リント違反・型エラー・ドキュメント違反時は該当箇所のコードを読んでから分析する
 - 修正案は具体的で、ファイルパス・行番号を含める
