@@ -7,11 +7,12 @@
 | ディレクトリ | 説明 |
 |---|---|
 | `src/rag/` | RAG サービス本体 |
-| `docs/` | 仕様書 |
-| `tests/` | テストコード・フィクスチャ |
-| `scripts/` | 評価・分析スクリプト |
-| `.claude/` | Claude Code プロジェクト設定 |
-| `.github/` | GitHub Actions ワークフロー・PR テンプレート |
+| `docs/specs/` | 機能仕様書・エージェント定義（実装の根拠） |
+| `tests/` | pytest テストコード |
+| `tests/fixtures/` | テスト用フィクスチャ（評価データセット・テスト文書） |
+| `scripts/` | 評価データ収集・パラメータスイープ・分析スクリプト |
+| `.claude/` | Claude Code プロジェクト設定（エージェント・スキル） |
+| `.github/` | GitHub Actions ワークフロー |
 
 ## src/rag/ モジュール構成
 
@@ -39,17 +40,6 @@
 | `src/rag/content_detector.py` | コンテンツタイプ検出（通常テキスト・テーブル・見出し構造） |
 | `src/rag/evaluation.py` | 検索精度評価ツール（Precision・Recall・F1・NDCG・MRR） |
 | `src/rag/safe_browsing.py` | URL 安全性チェック（Google Safe Browsing API） |
-
-## 補助ディレクトリ
-
-| ディレクトリ | 説明 |
-|---|---|
-| `docs/specs/` | 機能仕様書・エージェント定義（実装の根拠） |
-| `tests/` | pytest テストコード |
-| `tests/fixtures/` | テスト用フィクスチャ（評価データセット・テスト文書） |
-| `scripts/` | 評価データ収集・パラメータスイープ・分析スクリプト |
-| `.claude/` | Claude Code プロジェクト設定（エージェント・スキル） |
-| `.github/` | GitHub Actions ワークフロー・PR テンプレート |
 
 ## 仕様書 — 実装モジュール対応表
 

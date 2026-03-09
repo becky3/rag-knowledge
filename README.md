@@ -90,6 +90,10 @@ git-flow ベースのブランチ戦略を採用。詳細は `~/.claude/docs/spe
 - コミット: `type(scope): 説明 (#Issue番号)` ※scope は仕様書ファイル名（拡張子なし）
 - PR は `develop` をベースに作成
 
+## 開発ガイドライン
+
+**開発を始める前に必ず [CLAUDE.md](CLAUDE.md) を読んでください。**
+
 ## ドキュメント
 
 ### 全体仕様
