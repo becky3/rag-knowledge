@@ -117,9 +117,10 @@ Windows の Write ツールが CRLF で書き出す問題への対策。
 
 ```bash
 # CRLF → LF 自動変換（shellcheck SC1017 防止）
+# - git ls-files で git 管理下の *.sh のみを対象（.venv 等の非管理ファイルを除外）
 # - NUL 区切りでスペース/改行を含むパスを安全に列挙
 # - sed -i で in-place 変換
-find . -name '*.sh' -not -path './.git/*' -print0 | while IFS= read -r -d '' f; do
+git ls-files -z '*.sh' | while IFS= read -r -d '' f; do
   if grep -q $'\r' "$f" 2>/dev/null; then
     sed -i 's/\r$//' "$f"
     echo "[fix] CRLF→LF: $f"
