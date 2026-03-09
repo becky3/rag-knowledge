@@ -1,6 +1,6 @@
 ---
 name: test-runner
-description: pytest・ruff・mypy によるコード品質チェックの実行・分析・修正提案を行う専門家。
+description: pytest・ruff・mypy・shellcheck によるコード品質チェックと /doc-lint によるドキュメント品質チェックの実行・分析・修正提案を行う専門家。
 tools: Bash, Read, Grep, Glob, Edit
 permissionMode: bypassPermissions
 ---
