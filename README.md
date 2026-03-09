@@ -20,6 +20,19 @@
 - **ランタイム**: Python 3.11+
 - **パッケージ管理**: uv
 
+## 技術スタック
+
+| カテゴリ | 技術 |
+|---------|------|
+| 言語 | Python 3.11+ |
+| パッケージ管理 | uv |
+| MCP SDK | FastMCP |
+| HTTP クライアント | aiohttp |
+| ベクトル DB | ChromaDB |
+| キーワード検索 | BM25s |
+| Embedding | OpenAI SDK / LM Studio (OpenAI 互換 API) |
+| HTML 解析 | BeautifulSoup4 |
+
 ## セットアップ
 
 ```bash
@@ -64,19 +77,31 @@ uv run ruff check .
 uv run mypy src
 ```
 
-## 開発ガイドライン
-
-**開発を始める前に必ず [CLAUDE.md](CLAUDE.md) を読んでください。**
-
 ## プロジェクト構成
 
-```
-src/rag/           # RAG サービスのソースコード
-  embedding/       # Embedding プロバイダー
-tests/             # テスト
-  fixtures/        # テスト用フィクスチャ
-scripts/           # 評価・分析スクリプト
-docs/
-  specs/           # 仕様書
-```
+プロジェクトのディレクトリ構成・モジュール責務・仕様書との対応は [ARCHITECTURE.md](ARCHITECTURE.md) を参照。
 
+## Git 運用
+
+git-flow ベースのブランチ戦略を採用。詳細は `~/.claude/docs/specs/workflows/git-flow.md` を参照。
+
+- **常設ブランチ**: `main`（安定版）/ `develop`（開発統合）
+- **作業ブランチ**: `feature/{機能名}-#{Issue番号}` / `bugfix/{修正内容}-#{Issue番号}`
+- コミット: `type(scope): 説明 (#Issue番号)` ※scope は仕様書ファイル名（拡張子なし）
+- PR は `develop` をベースに作成
+
+## ドキュメント
+
+### 全体仕様
+
+- [全体仕様概要](docs/specs/overview.md)
+
+### 基盤仕様
+
+- [RAG ナレッジ](docs/specs/rag-knowledge.md)
+
+### Claude Code 拡張（agentic）
+
+**プロジェクト固有エージェント:**
+
+- [Test Runner エージェント](docs/specs/agentic/agents/test-runner-agent.md)
