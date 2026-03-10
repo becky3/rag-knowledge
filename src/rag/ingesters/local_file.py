@@ -6,6 +6,7 @@ Issue: #71
 
 from __future__ import annotations
 
+import asyncio
 import logging
 from pathlib import Path
 
@@ -75,7 +76,7 @@ class LocalFileIngester(BaseIngester):
         path = Path(validated_path)
 
         try:
-            text = path.read_text(encoding="utf-8")
+            text = await asyncio.to_thread(path.read_text, encoding="utf-8")
         except OSError:
             logger.warning("Failed to read file: %s", validated_path)
             return None
@@ -113,14 +114,17 @@ class LocalFileIngester(BaseIngester):
             raise ValueError(f"ディレクトリではありません: {dir_path}")
 
         pattern = kwargs.get("pattern")
-        if isinstance(pattern, str):
-            paths = sorted(dir_path.glob(pattern))
-        else:
-            paths = sorted(
+
+        def _glob() -> list[Path]:
+            if isinstance(pattern, str):
+                return sorted(dir_path.glob(pattern))
+            return sorted(
                 p
                 for ext in SUPPORTED_EXTENSIONS
                 for p in dir_path.glob(f"**/*{ext}")
             )
+
+        paths = await asyncio.to_thread(_glob)
 
         return [
             str(p.resolve())
@@ -145,7 +149,7 @@ class LocalFileIngester(BaseIngester):
         if path.suffix.lower() == ".md":
             for line in text.splitlines():
                 stripped = line.strip()
-                if stripped.startswith("# ") and not stripped.startswith("## "):
+                if stripped.startswith("# "):
                     return stripped[2:].strip()
 
         return path.stem
