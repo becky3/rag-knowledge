@@ -1,17 +1,19 @@
 """インジェスター基盤のテスト
 
 仕様: docs/specs/rag-knowledge.md
-Issue: #62
+Issue: #62, #71
 """
 
 from __future__ import annotations
 
+from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock
 
 import aiohttp
 import pytest
 
 from rag.ingesters.base import BaseIngester, IngestedContent
+from rag.ingesters.local_file import SUPPORTED_EXTENSIONS, LocalFileIngester
 from rag.ingesters.web import WebIngester
 from rag.ingesters.zenn import ZennIngester
 from rag.rag_knowledge import RAGKnowledgeService
@@ -1009,3 +1011,243 @@ class TestZennIngesterInheritance:
 
         assert len(results) == 1
         assert results[0].source_type == "zenn"
+
+
+# --- LocalFileIngester テスト ---
+
+
+@pytest.fixture
+def local_ingester() -> LocalFileIngester:
+    """LocalFileIngester インスタンスを作成する."""
+    return LocalFileIngester()
+
+
+class TestLocalFileIngesterValidate:
+    """LocalFileIngester.validate_identifier() のテスト."""
+
+    def test_validate_md_file(
+        self, local_ingester: LocalFileIngester, tmp_path: Path
+    ) -> None:
+        """Markdown ファイルのパスが正常に検証されること."""
+        md_file = tmp_path / "test.md"
+        md_file.write_text("# Title\nContent", encoding="utf-8")
+
+        result = local_ingester.validate_identifier(str(md_file))
+        assert result == str(md_file.resolve())
+
+    def test_validate_txt_file(
+        self, local_ingester: LocalFileIngester, tmp_path: Path
+    ) -> None:
+        """テキストファイルのパスが正常に検証されること."""
+        txt_file = tmp_path / "test.txt"
+        txt_file.write_text("Plain text", encoding="utf-8")
+
+        result = local_ingester.validate_identifier(str(txt_file))
+        assert result == str(txt_file.resolve())
+
+    def test_validate_nonexistent_file(
+        self, local_ingester: LocalFileIngester, tmp_path: Path
+    ) -> None:
+        """存在しないファイルで ValueError が発生すること."""
+        with pytest.raises(ValueError, match="ファイルが存在しません"):
+            local_ingester.validate_identifier(str(tmp_path / "nonexistent.md"))
+
+    def test_validate_directory(
+        self, local_ingester: LocalFileIngester, tmp_path: Path
+    ) -> None:
+        """ディレクトリパスで ValueError が発生すること."""
+        with pytest.raises(ValueError, match="ファイルではありません"):
+            local_ingester.validate_identifier(str(tmp_path))
+
+    def test_validate_unsupported_extension(
+        self, local_ingester: LocalFileIngester, tmp_path: Path
+    ) -> None:
+        """未対応の拡張子で ValueError が発生すること."""
+        pdf_file = tmp_path / "test.pdf"
+        pdf_file.write_text("content", encoding="utf-8")
+
+        with pytest.raises(ValueError, match="未対応の拡張子です"):
+            local_ingester.validate_identifier(str(pdf_file))
+
+
+class TestLocalFileIngesterFetchSingle:
+    """LocalFileIngester.fetch_single() のテスト."""
+
+    async def test_fetch_md_file(
+        self, local_ingester: LocalFileIngester, tmp_path: Path
+    ) -> None:
+        """Markdown ファイルを正常に読み込めること."""
+        md_file = tmp_path / "test.md"
+        md_file.write_text("# My Title\nSome content", encoding="utf-8")
+
+        result = await local_ingester.fetch_single(str(md_file))
+
+        assert result is not None
+        assert result.source_id == str(md_file.resolve())
+        assert result.title == "My Title"
+        assert result.text == "# My Title\nSome content"
+        assert result.source_type == "file"
+        assert result.metadata["file_extension"] == ".md"
+        assert result.metadata["file_name"] == "test.md"
+        assert result.ingested_at
+
+    async def test_fetch_txt_file(
+        self, local_ingester: LocalFileIngester, tmp_path: Path
+    ) -> None:
+        """テキストファイルを正常に読み込めること."""
+        txt_file = tmp_path / "notes.txt"
+        txt_file.write_text("Plain text content", encoding="utf-8")
+
+        result = await local_ingester.fetch_single(str(txt_file))
+
+        assert result is not None
+        assert result.title == "notes"
+        assert result.text == "Plain text content"
+        assert result.source_type == "file"
+        assert result.metadata["file_extension"] == ".txt"
+
+    async def test_fetch_md_without_heading(
+        self, local_ingester: LocalFileIngester, tmp_path: Path
+    ) -> None:
+        """見出しなし Markdown のタイトルがファイル名になること."""
+        md_file = tmp_path / "no_heading.md"
+        md_file.write_text("No heading here", encoding="utf-8")
+
+        result = await local_ingester.fetch_single(str(md_file))
+
+        assert result is not None
+        assert result.title == "no_heading"
+
+    async def test_fetch_nonexistent_returns_none(
+        self, local_ingester: LocalFileIngester, tmp_path: Path
+    ) -> None:
+        """存在しないファイルで None を返すこと."""
+        result = await local_ingester.fetch_single(str(tmp_path / "missing.md"))
+        assert result is None
+
+    async def test_fetch_unsupported_extension_returns_none(
+        self, local_ingester: LocalFileIngester, tmp_path: Path
+    ) -> None:
+        """未対応拡張子で None を返すこと."""
+        pdf_file = tmp_path / "doc.pdf"
+        pdf_file.write_text("content", encoding="utf-8")
+
+        result = await local_ingester.fetch_single(str(pdf_file))
+        assert result is None
+
+
+class TestLocalFileIngesterDiscover:
+    """LocalFileIngester.discover() のテスト."""
+
+    async def test_discover_finds_supported_files(
+        self, local_ingester: LocalFileIngester, tmp_path: Path
+    ) -> None:
+        """対応拡張子のファイルを発見すること."""
+        (tmp_path / "a.md").write_text("md", encoding="utf-8")
+        (tmp_path / "b.txt").write_text("txt", encoding="utf-8")
+        (tmp_path / "c.pdf").write_text("pdf", encoding="utf-8")
+
+        result = await local_ingester.discover(str(tmp_path))
+
+        assert len(result) == 2
+        names = [Path(p).name for p in result]
+        assert "a.md" in names
+        assert "b.txt" in names
+        assert "c.pdf" not in names
+
+    async def test_discover_recursive(
+        self, local_ingester: LocalFileIngester, tmp_path: Path
+    ) -> None:
+        """サブディレクトリのファイルも再帰的に発見すること."""
+        sub = tmp_path / "sub"
+        sub.mkdir()
+        (tmp_path / "root.md").write_text("root", encoding="utf-8")
+        (sub / "nested.md").write_text("nested", encoding="utf-8")
+
+        result = await local_ingester.discover(str(tmp_path))
+
+        assert len(result) == 2
+
+    async def test_discover_with_pattern(
+        self, local_ingester: LocalFileIngester, tmp_path: Path
+    ) -> None:
+        """glob パターンでフィルタリングできること."""
+        (tmp_path / "a.md").write_text("md", encoding="utf-8")
+        (tmp_path / "b.txt").write_text("txt", encoding="utf-8")
+
+        result = await local_ingester.discover(str(tmp_path), pattern="*.md")
+
+        assert len(result) == 1
+        assert Path(result[0]).name == "a.md"
+
+    async def test_discover_nonexistent_directory(
+        self, local_ingester: LocalFileIngester, tmp_path: Path
+    ) -> None:
+        """存在しないディレクトリで ValueError が発生すること."""
+        with pytest.raises(ValueError, match="ディレクトリが存在しません"):
+            await local_ingester.discover(str(tmp_path / "nonexistent"))
+
+    async def test_discover_file_as_directory(
+        self, local_ingester: LocalFileIngester, tmp_path: Path
+    ) -> None:
+        """ファイルをディレクトリとして指定すると ValueError が発生すること."""
+        f = tmp_path / "file.md"
+        f.write_text("content", encoding="utf-8")
+
+        with pytest.raises(ValueError, match="ディレクトリではありません"):
+            await local_ingester.discover(str(f))
+
+    async def test_discover_empty_directory(
+        self, local_ingester: LocalFileIngester, tmp_path: Path
+    ) -> None:
+        """空ディレクトリで空リストを返すこと."""
+        result = await local_ingester.discover(str(tmp_path))
+        assert result == []
+
+
+class TestLocalFileIngesterExtractTitle:
+    """LocalFileIngester._extract_title() のテスト."""
+
+    def test_extract_title_from_h1(self) -> None:
+        """Markdown の # 見出しからタイトルを抽出すること."""
+        text = "# My Title\n\nContent"
+        title = LocalFileIngester._extract_title(text, Path("test.md"))
+        assert title == "My Title"
+
+    def test_skip_h2_heading(self) -> None:
+        """## 見出しはタイトルとして使わないこと."""
+        text = "## Sub Heading\n\nContent"
+        title = LocalFileIngester._extract_title(text, Path("test.md"))
+        assert title == "test"
+
+    def test_fallback_to_filename(self) -> None:
+        """見出しがない場合、ファイル名をタイトルとすること."""
+        text = "No heading here"
+        title = LocalFileIngester._extract_title(text, Path("my_notes.md"))
+        assert title == "my_notes"
+
+    def test_txt_uses_filename(self) -> None:
+        """テキストファイルはファイル名をタイトルとすること."""
+        text = "# Heading"
+        title = LocalFileIngester._extract_title(text, Path("notes.txt"))
+        assert title == "notes"
+
+    def test_first_h1_wins(self) -> None:
+        """複数 # 見出しがある場合、最初のものが使われること."""
+        text = "# First\n# Second"
+        title = LocalFileIngester._extract_title(text, Path("test.md"))
+        assert title == "First"
+
+
+class TestLocalFileIngesterReExport:
+    """__init__.py からの re-export テスト."""
+
+    def test_import_from_ingesters_package(self) -> None:
+        """rag.ingesters パッケージから LocalFileIngester をインポートできること."""
+        from rag.ingesters import LocalFileIngester as LFI
+
+        assert LFI is LocalFileIngester
+
+    def test_supported_extensions(self) -> None:
+        """対応拡張子が .md と .txt であること."""
+        assert SUPPORTED_EXTENSIONS == frozenset({".md", ".txt"})
