@@ -661,6 +661,47 @@ class TestRagSearchResponseTruncation:
         assert "https://example.com/page2" in call_log
         assert "切り詰めました" not in result
 
+    async def test_exact_fit_separator_does_not_trigger_truncation(self) -> None:
+        """内容が上限ちょうどに収まった時、空セパレータで誤って打ち切り通知が出ないこと."""
+        mod = import_module("rag.server")
+
+        page_text = "テスト内容"
+        self.mock_service.retrieve_raw_results = AsyncMock(
+            return_value=RawSearchResults(
+                vector_results=[
+                    VectorSearchItem(
+                        text="テキスト",
+                        source_url="https://example.com/page1",
+                        distance=0.1,
+                        chunk_index=0,
+                    ),
+                ],
+                bm25_results=[],
+            )
+        )
+        self.mock_service.get_full_page_text = AsyncMock(return_value=page_text)
+
+        # まず上限なしで実行し、実際のレスポンス長を取得
+        self.mock_settings.rag_max_response_chars = None
+        with (
+            patch.object(mod, "_get_rag_service", return_value=self.mock_service),
+            patch.object(mod, "get_settings", return_value=self.mock_settings),
+        ):
+            unlimited_result = await mod.rag_search("テスト")
+
+        # rstrip 後のレスポンス長をちょうど上限に設定
+        # （空セパレータが上限超過の原因にならないことを確認）
+        exact_limit = len(unlimited_result.rstrip())
+        self.mock_settings.rag_max_response_chars = exact_limit
+
+        with (
+            patch.object(mod, "_get_rag_service", return_value=self.mock_service),
+            patch.object(mod, "get_settings", return_value=self.mock_settings),
+        ):
+            result = await mod.rag_search("テスト")
+
+        assert "切り詰めました" not in result
+
     async def test_empty_results_not_affected_by_limit(self) -> None:
         """0件結果は上限設定に影響されないこと（#26）."""
         mod = import_module("rag.server")
