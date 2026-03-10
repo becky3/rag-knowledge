@@ -1024,6 +1024,64 @@ class TestSafeBrowsingIntegration:
         mock_web_crawler.crawl_page.assert_called_once()
 
 
+class TestGetFullPageText:
+    """get_full_page_text() のテスト (Issue #27)."""
+
+    async def test_get_full_page_text_joins_chunks(
+        self,
+        rag_service: RAGKnowledgeService,
+        mock_vector_store: MagicMock,
+    ) -> None:
+        """チャンクが '\\n' で結合されること."""
+        # Arrange
+        mock_vector_store.get_chunks_by_source = AsyncMock(
+            return_value=[
+                RetrievalResult(
+                    text="チャンク1のテキスト",
+                    metadata={"source_url": "https://example.com/page", "chunk_index": 0},
+                    distance=0.0,
+                ),
+                RetrievalResult(
+                    text="チャンク2のテキスト",
+                    metadata={"source_url": "https://example.com/page", "chunk_index": 1},
+                    distance=0.0,
+                ),
+                RetrievalResult(
+                    text="チャンク3のテキスト",
+                    metadata={"source_url": "https://example.com/page", "chunk_index": 2},
+                    distance=0.0,
+                ),
+            ]
+        )
+
+        # Act
+        result = await rag_service.get_full_page_text("https://example.com/page")
+
+        # Assert
+        assert result == "チャンク1のテキスト\nチャンク2のテキスト\nチャンク3のテキスト"
+        mock_vector_store.get_chunks_by_source.assert_called_once_with(
+            "https://example.com/page"
+        )
+
+    async def test_get_full_page_text_empty_chunks(
+        self,
+        rag_service: RAGKnowledgeService,
+        mock_vector_store: MagicMock,
+    ) -> None:
+        """チャンクが存在しない場合に空文字列が返ること."""
+        # Arrange
+        mock_vector_store.get_chunks_by_source = AsyncMock(return_value=[])
+
+        # Act
+        result = await rag_service.get_full_page_text("https://example.com/nonexistent")
+
+        # Assert
+        assert result == ""
+        mock_vector_store.get_chunks_by_source.assert_called_once_with(
+            "https://example.com/nonexistent"
+        )
+
+
 class TestRetrieveRawResults:
     """retrieve_raw_results() のテスト（準Agentic Search, Issue #548）."""
 

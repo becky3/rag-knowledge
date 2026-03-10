@@ -145,6 +145,8 @@ async def rag_search(query: str, n_results: int | None = None) -> str:
         検索結果テキスト。ベクトル検索結果とBM25検索結果をセクション分けして返す。
         ヒットしたチャンクのページ全文を返却し、同一URLの重複は参照テキストで省略する。
         結果が0件の場合は「該当する情報が見つかりませんでした」を返す。
+        RAG_MAX_RESPONSE_CHARS 設定時、レスポンスが上限を超えた場合はトランケートされ
+        末尾にトランケート通知が付記される。未設定時は無制限。
     """
     service = await _get_rag_service()
     if n_results is None:
@@ -203,7 +205,18 @@ async def rag_search(query: str, n_results: int | None = None) -> str:
                 )
             parts.append("")
 
-    return "\n".join(parts).rstrip()
+    response = "\n".join(parts).rstrip()
+
+    # レスポンスサイズ上限ガード
+    max_chars = get_settings().rag_max_response_chars
+    if max_chars is not None and len(response) > max_chars:
+        truncated = response[:max_chars]
+        truncated += "\n\n…（レスポンスが上限の{:,}文字を超えたため切り詰めました）".format(
+            max_chars
+        )
+        return truncated
+
+    return response
 
 
 @mcp.tool()
@@ -319,9 +332,17 @@ def _configure_and_run() -> None:
                     "transport_security is None; "
                     "cannot disable DNS rebinding protection"
                 )
-        mcp.run(transport="streamable-http")
+
+    try:
+        if transport == "http":
+            mcp.run(transport="streamable-http")
+        else:
+            mcp.run()
+    except KeyboardInterrupt:
+        logger.info("MCP server shut down")
+        raise SystemExit(130)
     else:
-        mcp.run()
+        logger.info("MCP server shut down")
 
 
 if __name__ == "__main__":
