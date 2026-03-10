@@ -305,11 +305,17 @@ def _configure_and_run() -> None:
         # HTTP モードではデータ変更ツールを非公開にする
         # （外部公開時の安全性のため、読み取り専用ツールのみ提供）
         _write_tools = ["rag_add", "rag_crawl", "rag_delete"]
+        _failed: list[str] = []
         for tool_name in _write_tools:
             try:
                 mcp.remove_tool(tool_name)
             except KeyError:
-                pass
+                _failed.append(tool_name)
+        if _failed:
+            raise RuntimeError(
+                f"HTTP mode: failed to remove write tools {_failed}. "
+                "Aborting to prevent unintended tool exposure."
+            )
         logger.info(
             "HTTP mode: write tools removed, exposing read-only tools only"
         )

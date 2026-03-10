@@ -83,7 +83,7 @@ class RAGSettings(BaseSettings):
     # トランスポート
     rag_transport: Literal["stdio", "http"] = "stdio"
     rag_http_host: str = "127.0.0.1"
-    rag_http_port: int = 8081
+    rag_http_port: int = Field(default=8081, ge=1, le=65535)
     rag_dns_rebinding_protection: bool = True
 
     # デバッグ
