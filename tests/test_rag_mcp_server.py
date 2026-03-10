@@ -325,7 +325,7 @@ class TestConfigureAndRun:
         assert mod.mcp.settings.port == 9090
 
     def test_keyboard_interrupt_graceful_shutdown(self) -> None:
-        """Ctrl+C (KeyboardInterrupt) でトレースバックなく終了すること (#42)."""
+        """Ctrl+C (KeyboardInterrupt) で終了コード130で終了すること (#42)."""
         mod = import_module("rag.server")
         mock_settings = MagicMock()
         mock_settings.rag_transport = "http"
@@ -339,13 +339,14 @@ class TestConfigureAndRun:
                 mod.mcp, "run", side_effect=KeyboardInterrupt
             ),
             patch.object(mod.logger, "info") as mock_log,
+            pytest.raises(SystemExit, match="130"),
         ):
             _configure_and_run()
 
         mock_log.assert_called_once_with("MCP server shut down")
 
     def test_stdio_keyboard_interrupt_graceful_shutdown(self) -> None:
-        """stdio モードでも KeyboardInterrupt でグレースフルシャットダウンすること (#42)."""
+        """stdio モードでも KeyboardInterrupt で終了コード130で終了すること (#42)."""
         mod = import_module("rag.server")
         mock_settings = MagicMock()
         mock_settings.rag_transport = "stdio"
@@ -356,6 +357,7 @@ class TestConfigureAndRun:
                 mod.mcp, "run", side_effect=KeyboardInterrupt
             ),
             patch.object(mod.logger, "info") as mock_log,
+            pytest.raises(SystemExit, match="130"),
         ):
             _configure_and_run()
 

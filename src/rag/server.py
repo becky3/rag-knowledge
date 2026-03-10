@@ -326,8 +326,9 @@ def _configure_and_run() -> None:
         else:
             mcp.run()
     except KeyboardInterrupt:
-        pass
-    finally:
+        logger.info("MCP server shut down")
+        raise SystemExit(130)
+    else:
         logger.info("MCP server shut down")
 
 
