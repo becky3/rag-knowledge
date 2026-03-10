@@ -26,7 +26,7 @@ class LMStudioEmbedding(EmbeddingProvider):
     def __init__(
         self,
         base_url: str = DEFAULT_LMSTUDIO_BASE_URL,
-        model: str = "nomic-embed-text",
+        model: str = "ruri-v3-310m",
         prefix_enabled: bool = False,
     ) -> None:
         normalized = base_url.rstrip("/")
@@ -45,13 +45,13 @@ class LMStudioEmbedding(EmbeddingProvider):
         return [item.embedding for item in response.data]
 
     async def embed_documents(self, texts: list[str]) -> list[list[float]]:
-        """ドキュメント用Embedding（プレフィックス有効時はsearch_document:を付加）."""
+        """ドキュメント用Embedding（プレフィックス有効時は検索文書:を付加）."""
         if self._prefix_enabled:
             texts = [self.DOCUMENT_PREFIX + t for t in texts]
         return await self.embed(texts)
 
     async def embed_query(self, text: str) -> list[float]:
-        """クエリ用Embedding（プレフィックス有効時はsearch_query:を付加）."""
+        """クエリ用Embedding（プレフィックス有効時は検索クエリ:を付加）."""
         if self._prefix_enabled:
             text = self.QUERY_PREFIX + text
         result = await self.embed([text])

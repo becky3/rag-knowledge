@@ -41,7 +41,7 @@ async def test_lmstudio_embedding_converts_text() -> None:
     """AC2: LMStudioEmbedding が LM Studio 経由でテキストをベクトルに変換できること."""
     provider = LMStudioEmbedding(
         base_url=DEFAULT_LMSTUDIO_BASE_URL,
-        model="nomic-embed-text",
+        model="ruri-v3-310m",
     )
 
     # AsyncOpenAI.embeddings.create をモック
@@ -59,7 +59,7 @@ async def test_lmstudio_embedding_converts_text() -> None:
 
     assert result == [[0.1, 0.2, 0.3], [0.4, 0.5, 0.6]]
     provider._client.embeddings.create.assert_awaited_once_with(
-        model="nomic-embed-text",
+        model="ruri-v3-310m",
         input=["hello", "world"],
     )
 
@@ -158,7 +158,7 @@ def test_embedding_settings_defaults(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.delenv("EMBEDDING_MODEL_ONLINE", raising=False)
     settings = Settings(_env_file=None)  # type: ignore[call-arg]
     assert settings.embedding_provider == "local"
-    assert settings.embedding_model_local == "nomic-embed-text"
+    assert settings.embedding_model_local == "ruri-v3-310m"
     assert settings.embedding_model_online == "text-embedding-3-small"
 
 
@@ -179,7 +179,7 @@ def test_lmstudio_embedding_default_params() -> None:
     assert provider._client.base_url.host == "localhost"
     # base_url にホストのみ指定しても /v1 がコード側で付加される
     assert provider._client.base_url.path == "/v1/"
-    assert provider._model == "nomic-embed-text"
+    assert provider._model == "ruri-v3-310m"
 
 
 def test_lmstudio_embedding_custom_params() -> None:
@@ -216,7 +216,7 @@ async def test_embed_documents_default_delegates_to_embed() -> None:
     result = await provider.embed_documents(["hello"])
     assert result == [[0.1, 0.2, 0.3]]
     provider._client.embeddings.create.assert_awaited_once_with(
-        model="nomic-embed-text",
+        model="ruri-v3-310m",
         input=["hello"],
     )
 
@@ -235,7 +235,7 @@ async def test_embed_query_default_delegates_to_embed() -> None:
     result = await provider.embed_query("hello")
     assert result == [0.4, 0.5, 0.6]
     provider._client.embeddings.create.assert_awaited_once_with(
-        model="nomic-embed-text",
+        model="ruri-v3-310m",
         input=["hello"],
     )
 
@@ -253,7 +253,7 @@ async def test_prefix_enabled_adds_document_prefix() -> None:
 
     await provider.embed_documents(["hello"])
     provider._client.embeddings.create.assert_awaited_once_with(
-        model="nomic-embed-text",
+        model="ruri-v3-310m",
         input=["search_document: hello"],
     )
 
@@ -271,7 +271,7 @@ async def test_prefix_enabled_adds_query_prefix() -> None:
 
     await provider.embed_query("hello")
     provider._client.embeddings.create.assert_awaited_once_with(
-        model="nomic-embed-text",
+        model="ruri-v3-310m",
         input=["search_query: hello"],
     )
 
@@ -289,7 +289,7 @@ async def test_prefix_disabled_no_prefix_on_documents() -> None:
 
     await provider.embed_documents(["hello"])
     provider._client.embeddings.create.assert_awaited_once_with(
-        model="nomic-embed-text",
+        model="ruri-v3-310m",
         input=["hello"],
     )
 
