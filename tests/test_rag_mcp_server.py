@@ -18,6 +18,7 @@ from rag.rag_knowledge import (
     VectorSearchItem,
 )
 from rag.server import _configure_and_run, _reset_rag_service
+from rag.web_crawler import CrawlPreviewPage
 
 
 @pytest.fixture(autouse=True)
@@ -27,26 +28,29 @@ def _reset_rag_global_state() -> None:
 
 
 @pytest.mark.asyncio
-async def test_rag_server_exposes_five_tools() -> None:
-    """AC20: RAG MCPサーバーが5つのツールを公開すること."""
+async def test_rag_server_exposes_six_tools() -> None:
+    """RAG MCPサーバーが6つのツールを公開すること."""
     mod = import_module("rag.server")
     server = mod.mcp
 
     tools = await server.list_tools()
     tool_names = {t.name for t in tools}
 
-    expected = {"rag_search", "rag_add", "rag_crawl", "rag_delete", "rag_stats"}
+    expected = {
+        "rag_search", "rag_add", "rag_crawl", "rag_crawl_preview",
+        "rag_delete", "rag_stats",
+    }
     assert tool_names == expected, f"Expected {expected}, got {tool_names}"
 
 
 @pytest.mark.asyncio
 async def test_rag_server_tool_count() -> None:
-    """AC20: RAG MCPサーバーのツール数が正確に5であること."""
+    """RAG MCPサーバーのツール数が正確に6であること."""
     mod = import_module("rag.server")
     server = mod.mcp
 
     tools = await server.list_tools()
-    assert len(tools) == 5
+    assert len(tools) == 6
 
 
 class TestRagSearchOutput:
@@ -323,3 +327,101 @@ class TestConfigureAndRun:
         mock_run.assert_called_once_with(transport="streamable-http")
         assert mod.mcp.settings.host == "0.0.0.0"
         assert mod.mcp.settings.port == 9090
+
+
+class TestRagCrawlPreviewTool:
+    """rag_crawl_preview ツールのテスト（Issue #45）."""
+
+    @pytest.mark.asyncio
+    async def test_crawl_preview_returns_page_list(self) -> None:
+        """クロール対象ページの一覧テキストが返ること."""
+        mod = import_module("rag.server")
+        mock_service = AsyncMock()
+        mock_service.crawl_preview = AsyncMock(
+            return_value=[
+                CrawlPreviewPage(url="https://example.com/page1", title="ページ1"),
+                CrawlPreviewPage(url="https://example.com/page2", title="ページ2"),
+            ]
+        )
+
+        with patch.object(mod, "_get_rag_service", return_value=mock_service):
+            result = await mod.rag_crawl_preview("https://example.com/index")
+
+        assert "クロール対象: 2ページ" in result
+        assert "ページ1" in result
+        assert "https://example.com/page1" in result
+        assert "ページ2" in result
+        assert "https://example.com/page2" in result
+
+    @pytest.mark.asyncio
+    async def test_crawl_preview_empty_result(self) -> None:
+        """対象ページが見つからない場合のメッセージが返ること."""
+        mod = import_module("rag.server")
+        mock_service = AsyncMock()
+        mock_service.crawl_preview = AsyncMock(return_value=[])
+
+        with patch.object(mod, "_get_rag_service", return_value=mock_service):
+            result = await mod.rag_crawl_preview("https://example.com/empty")
+
+        assert result == "対象ページが見つかりませんでした"
+
+    @pytest.mark.asyncio
+    async def test_crawl_preview_shows_fallback_title(self) -> None:
+        """タイトル取得不可の場合にフォールバックテキストが表示されること."""
+        mod = import_module("rag.server")
+        mock_service = AsyncMock()
+        mock_service.crawl_preview = AsyncMock(
+            return_value=[
+                CrawlPreviewPage(url="https://example.com/page1", title=""),
+            ]
+        )
+
+        with patch.object(mod, "_get_rag_service", return_value=mock_service):
+            result = await mod.rag_crawl_preview("https://example.com/index")
+
+        assert "(タイトル取得不可)" in result
+
+    @pytest.mark.asyncio
+    async def test_crawl_preview_with_pattern(self) -> None:
+        """patternパラメータがservice.crawl_previewに渡されること."""
+        mod = import_module("rag.server")
+        mock_service = AsyncMock()
+        mock_service.crawl_preview = AsyncMock(return_value=[])
+
+        with patch.object(mod, "_get_rag_service", return_value=mock_service):
+            await mod.rag_crawl_preview(
+                "https://example.com/index", pattern=r"\.html$"
+            )
+
+        mock_service.crawl_preview.assert_called_once_with(
+            "https://example.com/index", url_pattern=r"\.html$"
+        )
+
+    @pytest.mark.asyncio
+    async def test_crawl_preview_value_error(self) -> None:
+        """URL検証エラー時にエラーメッセージが返ること."""
+        mod = import_module("rag.server")
+        mock_service = AsyncMock()
+        mock_service.crawl_preview = AsyncMock(
+            side_effect=ValueError("許可されていないスキームです")
+        )
+
+        with patch.object(mod, "_get_rag_service", return_value=mock_service):
+            result = await mod.rag_crawl_preview("ftp://example.com")
+
+        assert "エラー:" in result
+        assert "許可されていないスキームです" in result
+
+    @pytest.mark.asyncio
+    async def test_crawl_preview_unexpected_error(self) -> None:
+        """予期しないエラー時にエラーメッセージが返ること."""
+        mod = import_module("rag.server")
+        mock_service = AsyncMock()
+        mock_service.crawl_preview = AsyncMock(
+            side_effect=RuntimeError("Unexpected")
+        )
+
+        with patch.object(mod, "_get_rag_service", return_value=mock_service):
+            result = await mod.rag_crawl_preview("https://example.com/index")
+
+        assert "エラー: プレビューに失敗しました" in result

@@ -23,7 +23,7 @@ if TYPE_CHECKING:
     from .bm25_index import BM25Index
     from .hybrid_search import HybridSearchEngine
     from .safe_browsing import SafeBrowsingClient
-    from .web_crawler import CrawledPage, WebCrawler
+    from .web_crawler import CrawlPreviewPage, CrawledPage, WebCrawler
 
 logger = logging.getLogger(__name__)
 
@@ -195,6 +195,27 @@ class RAGKnowledgeService:
                 vector_weight=vector_weight,
             )
             logger.info("Hybrid search engine initialized")
+
+    async def crawl_preview(
+        self,
+        index_url: str,
+        url_pattern: str = "",
+    ) -> list[CrawlPreviewPage]:
+        """クロール対象ページのタイトルとURLを一覧取得する（プレビュー）.
+
+        実際の取り込み（チャンキング・ベクトル化）は行わない。
+
+        Args:
+            index_url: リンク集ページのURL
+            url_pattern: 正規表現パターンでリンクをフィルタリング（任意）
+
+        Returns:
+            CrawlPreviewPage のリスト（タイトルとURL）
+
+        Raises:
+            ValueError: URL検証に失敗した場合
+        """
+        return await self._web_crawler.crawl_preview(index_url, url_pattern)
 
     async def ingest_from_index(
         self,
