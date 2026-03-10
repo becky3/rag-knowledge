@@ -5,10 +5,6 @@
 @README.md
 @docs/specs/overview.md
 
-## 自動進行ルール（auto-progress）
-
-自動実装の詳細ルール・品質チェック手順・GA環境の制約は `.claude/CLAUDE-auto-progress.md` を参照。
-
 ## Claude Code 拡張機能
 
 ### 自律呼び出しルール（プロジェクト固有）
