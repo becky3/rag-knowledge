@@ -323,3 +323,55 @@ class TestConfigureAndRun:
         mock_run.assert_called_once_with(transport="streamable-http")
         assert mod.mcp.settings.host == "0.0.0.0"
         assert mod.mcp.settings.port == 9090
+
+    def test_keyboard_interrupt_graceful_shutdown(self) -> None:
+        """Ctrl+C (KeyboardInterrupt) でトレースバックなく終了すること (#42)."""
+        mod = import_module("rag.server")
+        mock_settings = MagicMock()
+        mock_settings.rag_transport = "http"
+        mock_settings.rag_http_host = "127.0.0.1"
+        mock_settings.rag_http_port = 8080
+        mock_settings.rag_dns_rebinding_protection = True
+
+        with (
+            patch.object(mod, "get_settings", return_value=mock_settings),
+            patch.object(
+                mod.mcp, "run", side_effect=KeyboardInterrupt
+            ),
+            patch.object(mod.logger, "info") as mock_log,
+        ):
+            _configure_and_run()
+
+        mock_log.assert_called_once_with("MCP server shut down")
+
+    def test_stdio_keyboard_interrupt_graceful_shutdown(self) -> None:
+        """stdio モードでも KeyboardInterrupt でグレースフルシャットダウンすること (#42)."""
+        mod = import_module("rag.server")
+        mock_settings = MagicMock()
+        mock_settings.rag_transport = "stdio"
+
+        with (
+            patch.object(mod, "get_settings", return_value=mock_settings),
+            patch.object(
+                mod.mcp, "run", side_effect=KeyboardInterrupt
+            ),
+            patch.object(mod.logger, "info") as mock_log,
+        ):
+            _configure_and_run()
+
+        mock_log.assert_called_once_with("MCP server shut down")
+
+    def test_shutdown_log_on_normal_exit(self) -> None:
+        """正常終了時もシャットダウンログが出力されること (#42)."""
+        mod = import_module("rag.server")
+        mock_settings = MagicMock()
+        mock_settings.rag_transport = "stdio"
+
+        with (
+            patch.object(mod, "get_settings", return_value=mock_settings),
+            patch.object(mod.mcp, "run"),
+            patch.object(mod.logger, "info") as mock_log,
+        ):
+            _configure_and_run()
+
+        mock_log.assert_called_once_with("MCP server shut down")
