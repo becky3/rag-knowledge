@@ -292,6 +292,216 @@ class TestWebCrawlerTextExtraction:
         assert "ボディ内のテキスト" in text
 
 
+class TestWebCrawlerMarkdownConversion:
+    """WebCrawler HTML→Markdown変換のテスト."""
+
+    def test_headings_converted_to_markdown(self) -> None:
+        """見出し（h1-h6）がMarkdown見出しに変換されること."""
+        html = """
+        <html><head><title>見出しテスト</title></head>
+        <body>
+            <article>
+                <h1>大見出し</h1>
+                <p>本文1</p>
+                <h2>中見出し</h2>
+                <p>本文2</p>
+                <h3>小見出し</h3>
+                <p>本文3</p>
+            </article>
+        </body></html>
+        """
+        crawler = WebCrawler(respect_robots_txt=False)
+        title, text = crawler._extract_text(html)
+
+        assert "# 大見出し" in text
+        assert "## 中見出し" in text
+        assert "### 小見出し" in text
+
+    def test_table_converted_to_markdown(self) -> None:
+        """テーブルがMarkdownテーブル形式に変換されること."""
+        html = """
+        <html><head><title>テーブルテスト</title></head>
+        <body>
+            <article>
+                <table>
+                    <thead>
+                        <tr><th>名前</th><th>年齢</th></tr>
+                    </thead>
+                    <tbody>
+                        <tr><td>太郎</td><td>30</td></tr>
+                        <tr><td>花子</td><td>25</td></tr>
+                    </tbody>
+                </table>
+            </article>
+        </body></html>
+        """
+        crawler = WebCrawler(respect_robots_txt=False)
+        _, text = crawler._extract_text(html)
+
+        # Markdown テーブル形式の検証
+        assert "| 名前 | 年齢 |" in text
+        assert "| 太郎 | 30 |" in text
+        assert "| 花子 | 25 |" in text
+        # セパレータ行の存在
+        assert "| --- | --- |" in text
+
+    def test_list_converted_to_markdown(self) -> None:
+        """リスト（ul/ol）がMarkdownリストに変換されること."""
+        html = """
+        <html><head><title>リストテスト</title></head>
+        <body>
+            <article>
+                <ul>
+                    <li>項目A</li>
+                    <li>項目B</li>
+                    <li>項目C</li>
+                </ul>
+            </article>
+        </body></html>
+        """
+        crawler = WebCrawler(respect_robots_txt=False)
+        _, text = crawler._extract_text(html)
+
+        assert "項目A" in text
+        assert "項目B" in text
+        assert "項目C" in text
+        # リスト記号が付与されていること（markdownify のデフォルトは * + - ）
+        assert "* 項目A" in text or "- 項目A" in text
+
+    def test_link_text_only_no_url(self) -> None:
+        """リンクはテキストのみ保持され、URLは除去されること."""
+        html = """
+        <html><head><title>リンクテスト</title></head>
+        <body>
+            <article>
+                <p>詳しくは<a href="https://example.com/details">こちら</a>をご覧ください。</p>
+            </article>
+        </body></html>
+        """
+        crawler = WebCrawler(respect_robots_txt=False)
+        _, text = crawler._extract_text(html)
+
+        assert "こちら" in text
+        assert "https://example.com/details" not in text
+        assert "[こちら]" not in text
+
+    def test_image_alt_text_only(self) -> None:
+        """画像はalt属性のテキストのみ保持されること."""
+        html = """
+        <html><head><title>画像テスト</title></head>
+        <body>
+            <article>
+                <p>以下は画像です。</p>
+                <img src="photo.jpg" alt="風景写真">
+            </article>
+        </body></html>
+        """
+        crawler = WebCrawler(respect_robots_txt=False)
+        _, text = crawler._extract_text(html)
+
+        assert "風景写真" in text
+        assert "photo.jpg" not in text
+        assert "![" not in text
+
+    def test_image_without_alt_excluded(self) -> None:
+        """alt属性のない画像は出力に含まれないこと."""
+        html = """
+        <html><head><title>画像テスト</title></head>
+        <body>
+            <article>
+                <p>テキスト</p>
+                <img src="photo.jpg">
+            </article>
+        </body></html>
+        """
+        crawler = WebCrawler(respect_robots_txt=False)
+        _, text = crawler._extract_text(html)
+
+        assert "photo.jpg" not in text
+
+    def test_code_block_preserved(self) -> None:
+        """コードブロックがMarkdownコードブロック形式で保持されること."""
+        html = """
+        <html><head><title>コードテスト</title></head>
+        <body>
+            <article>
+                <pre><code>def hello():
+    print("hello")</code></pre>
+            </article>
+        </body></html>
+        """
+        crawler = WebCrawler(respect_robots_txt=False)
+        _, text = crawler._extract_text(html)
+
+        assert "```" in text
+        assert 'print("hello")' in text
+
+    def test_strong_em_preserved(self) -> None:
+        """強調（bold/italic）がMarkdown形式で保持されること."""
+        html = """
+        <html><head><title>強調テスト</title></head>
+        <body>
+            <article>
+                <p>これは<strong>重要な</strong>テキストで、<em>強調された</em>部分があります。</p>
+            </article>
+        </body></html>
+        """
+        crawler = WebCrawler(respect_robots_txt=False)
+        _, text = crawler._extract_text(html)
+
+        assert "**重要な**" in text
+        assert "*強調された*" in text
+
+    def test_unwanted_tags_still_removed(self) -> None:
+        """Markdown変換後も不要タグ（script, style, nav等）が除去されていること."""
+        html = """
+        <html><head><title>除去テスト</title>
+        <script>alert('xss');</script>
+        <style>.hidden{display:none}</style>
+        </head>
+        <body>
+            <nav>ナビゲーション</nav>
+            <header>ヘッダー部分</header>
+            <article>
+                <h1>本文</h1>
+                <p>記事のテキスト</p>
+            </article>
+            <aside>サイドバー</aside>
+            <footer>フッター</footer>
+        </body></html>
+        """
+        crawler = WebCrawler(respect_robots_txt=False)
+        _, text = crawler._extract_text(html)
+
+        assert "記事のテキスト" in text
+        assert "alert" not in text
+        assert "display:none" not in text
+        assert "ナビゲーション" not in text
+        assert "ヘッダー部分" not in text
+        assert "サイドバー" not in text
+        assert "フッター" not in text
+
+    def test_consecutive_blank_lines_normalized(self) -> None:
+        """連続する空白行が正規化されること."""
+        html = """
+        <html><head><title>空白テスト</title></head>
+        <body>
+            <article>
+                <p>段落1</p>
+                <br><br><br>
+                <p>段落2</p>
+            </article>
+        </body></html>
+        """
+        crawler = WebCrawler(respect_robots_txt=False)
+        _, text = crawler._extract_text(html)
+
+        # 3行以上の連続空行がないこと
+        assert "\n\n\n" not in text
+        assert "段落1" in text
+        assert "段落2" in text
+
+
 class TestWebCrawlerCrawlIndexPage:
     """WebCrawler.crawl_index_page のテスト."""
 

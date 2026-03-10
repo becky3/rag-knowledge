@@ -14,11 +14,13 @@ import time
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from urllib.parse import urldefrag, urljoin, urlparse
+from typing import Any
 from urllib.robotparser import RobotFileParser
 
 import aiohttp
 from bs4 import BeautifulSoup
 from charset_normalizer import from_bytes
+from markdownify import MarkdownConverter
 
 logger = logging.getLogger(__name__)
 
@@ -32,6 +34,24 @@ class _RobotsCacheEntry:
     parser: RobotFileParser
     fetched_at: float
     crawl_delay: float | None = field(default=None)
+
+
+class _RagMarkdownConverter(MarkdownConverter):  # type: ignore[misc]
+    """RAG用カスタムMarkdownコンバーター.
+
+    リンクURLと画像URLを除去し、テキスト情報のみを保持する。
+    RAGではリンク先URLはチャンクサイズの無駄遣いとなり、
+    出典情報は source_url メタデータで管理するため不要。
+    """
+
+    def convert_a(self, el: Any, text: str, convert_as_inline: bool) -> str:
+        """リンクはテキストのみ保持（URLは出典管理で別途管理）."""
+        return text or ""
+
+    def convert_img(self, el: Any, text: str, convert_as_inline: bool) -> str:
+        """画像タグはalt属性のみ保持（RAGでは画像不要）."""
+        alt: str = el.attrs.get("alt", None) or ""
+        return alt
 
 
 @dataclass
@@ -48,7 +68,7 @@ class CrawledPage:
 
     url: str
     title: str
-    text: str  # 抽出済みプレーンテキスト
+    text: str  # Markdown形式テキスト
     crawled_at: str  # ISO 8601 タイムスタンプ
 
 
@@ -231,6 +251,12 @@ class WebCrawler:
             if respect_robots_txt
             else None
         )
+        self._md_converter = _RagMarkdownConverter(
+            heading_style="ATX",
+            table_infer_header=True,
+            escape_underscores=False,
+            escape_asterisks=False,
+        )
 
     def validate_url(self, url: str) -> str:
         """URL検証・正規化. 問題なければ正規化済みURLを返す.
@@ -352,18 +378,19 @@ class WebCrawler:
                 )
 
     def _extract_text(self, html: str) -> tuple[str, str]:
-        """HTMLから本文テキストを抽出する.
+        """HTMLから本文をMarkdown形式で抽出する.
 
         抽出ロジック:
-        1. <script>, <style>, <nav>, <header>, <footer> タグを除去
+        1. <script>, <style>, <nav>, <header>, <footer>, <aside>, <noscript> タグを除去
         2. <article> → <main> → <body> の優先順で本文領域を特定
-        3. テキストを抽出してクリーンアップ
+        3. markdownify でHTML→Markdown変換
+        4. クリーンアップ（連続空行・行末空白の正規化）
 
         Args:
             html: HTML文字列
 
         Returns:
-            (title, text) のタプル
+            (title, text) のタプル。textはMarkdown形式。
         """
         soup = BeautifulSoup(html, "html.parser")
 
@@ -387,12 +414,14 @@ class WebCrawler:
         if content_element is None:
             content_element = soup
 
-        # テキスト抽出とクリーンアップ
-        text = content_element.get_text(separator="\n", strip=True)
+        # HTML→Markdown変換
+        markdown_text = self._md_converter.convert_soup(content_element)
+
+        # クリーンアップ
+        # 行末空白を除去（空白のみの行も空行に正規化）
+        text = re.sub(r"[ \t]+\n", "\n", markdown_text)
         # 連続する空白行を1つにまとめる
         text = re.sub(r"\n{3,}", "\n\n", text)
-        # 連続するスペースを1つにまとめる
-        text = re.sub(r"[ \t]+", " ", text)
 
         return title, text.strip()
 
