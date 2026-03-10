@@ -136,6 +136,7 @@ async def rag_search(query: str, n_results: int | None = None) -> str:
 
     knowledge base, vector search, BM25, retrieval-augmented generation.
     ナレッジベースにはゲーム攻略情報・技術文書等が格納されている。
+    蓄積データの詳細は rag_stats ツールで確認できる。
     知らない用語や固有名詞を含む質問でも必ず検索すること。
 
     Args:
@@ -331,19 +332,71 @@ async def rag_delete(url: str) -> str:
 
 @mcp.tool()
 async def rag_stats() -> str:
-    """[rag-knowledge] RAG stats - ナレッジベースの統計情報を表示.
+    """[rag-knowledge] RAG stats - ナレッジベースの統計情報と蓄積データ概要を表示.
 
-    knowledge base, statistics, chunk count, source count.
+    knowledge base, statistics, chunk count, source count, source list.
+    蓄積されているナレッジの概要（ソースURL一覧とタイトル）を返す。
+    検索前にこのツールを呼ぶことで、ナレッジベースの内容を把握し
+    適切な検索キーワードを構成できる。
 
     Returns:
-        統計情報のテキスト
+        統計情報と蓄積データ概要のテキスト
     """
     service = await _get_rag_service()
     try:
         stats = await service.get_stats()
         total_chunks = stats.get("total_chunks", 0)
         source_count = stats.get("source_count", 0)
-        return f"ナレッジベース統計:\n  総チャンク数: {total_chunks}\n  ソースURL数: {source_count}"
+        sources = stats.get("sources", [])
+
+        parts: list[str] = [
+            "ナレッジベース統計:",
+            f"  総チャンク数: {total_chunks}",
+            f"  ソースURL数: {source_count}",
+        ]
+
+        if sources and isinstance(sources, list):
+            max_sources = get_settings().rag_stats_max_sources
+            parts.append("")
+            parts.append("蓄積データ概要:")
+
+            displayed = 0
+            hit_limit = False
+            for group in sources:
+                if not isinstance(group, dict):
+                    continue
+                domain = group.get("domain", "unknown")
+                pages = group.get("pages", [])
+                if not isinstance(pages, list):
+                    continue
+                page_count = len(pages)
+                parts.append(f"\n[{domain}] ({page_count}ページ)")
+
+                shown_in_domain = 0
+                for page in pages:
+                    if displayed >= max_sources:
+                        hit_limit = True
+                        remaining = page_count - shown_in_domain
+                        if remaining > 0:
+                            parts.append(f"  ... 他 {remaining} ページ")
+                        break
+                    if not isinstance(page, dict):
+                        continue
+                    title = page.get("title", "") or "(タイトル取得不可)"
+                    url = page.get("url", "")
+                    parts.append(f"  - {title} ({url})")
+                    displayed += 1
+                    shown_in_domain += 1
+
+                if hit_limit:
+                    break
+
+            if hit_limit:
+                parts.append(
+                    f"\n(表示上限 {max_sources} 件に達したため省略されたソースがあります)"
+                )
+
+        return "\n".join(parts)
     except Exception:
         logger.exception("Failed to get stats")
         return "エラー: 統計情報の取得に失敗しました。"
