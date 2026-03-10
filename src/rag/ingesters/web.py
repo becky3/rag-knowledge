@@ -148,7 +148,7 @@ class WebIngester(BaseIngester):
 
         results: list[IngestedContent] = []
         for page in pages:
-            if isinstance(page, Exception):
+            if isinstance(page, BaseException):
                 logger.warning("Failed to crawl page in batch: %s", page)
                 continue
             if page is not None:
