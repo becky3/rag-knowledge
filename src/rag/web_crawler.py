@@ -548,43 +548,50 @@ class WebCrawler:
         if not urls:
             return []
 
-        # 各URLのタイトルを取得
-        results: list[CrawlPreviewPage] = []
-        for url in urls:
-            title = await self._fetch_title(url)
-            results.append(CrawlPreviewPage(url=url, title=title))
+        # 各URLのタイトルを並列取得する（セッションを使い回し、semaphore で同時接続数を制限）
+        async with aiohttp.ClientSession(
+            timeout=self._timeout,
+            headers={"User-Agent": USER_AGENT},
+        ) as session:
+            title_tasks = [
+                asyncio.create_task(self._fetch_title(url, session))
+                for url in urls
+            ]
+            titles = await asyncio.gather(*title_tasks)
+
+        results: list[CrawlPreviewPage] = [
+            CrawlPreviewPage(url=url, title=title)
+            for url, title in zip(urls, titles)
+        ]
 
         return results
 
-    async def _fetch_title(self, url: str) -> str:
+    async def _fetch_title(self, url: str, session: aiohttp.ClientSession) -> str:
         """URLからページタイトルのみを取得する.
 
         タイトル取得に失敗した場合は空文字列を返す（処理を中断しない）。
 
         Args:
             url: タイトルを取得するURL
+            session: 再利用する aiohttp.ClientSession
 
         Returns:
             ページタイトル（取得失敗時は空文字列）
         """
         try:
             async with self._semaphore:
-                async with aiohttp.ClientSession(
-                    timeout=self._timeout,
-                    headers={"User-Agent": USER_AGENT},
-                ) as session:
-                    async with session.get(url, allow_redirects=False) as resp:
-                        if resp.status in (301, 302, 303, 307, 308):
-                            logger.debug(
-                                "Redirect detected during title fetch: %s", url
-                            )
-                            return ""
-                        if resp.status != 200:
-                            logger.debug(
-                                "Failed to fetch title: %s (status=%d)", url, resp.status
-                            )
-                            return ""
-                        html = await self._decode_response(resp)
+                async with session.get(url, allow_redirects=False) as resp:
+                    if resp.status in (301, 302, 303, 307, 308):
+                        logger.debug(
+                            "Redirect detected during title fetch: %s", url
+                        )
+                        return ""
+                    if resp.status != 200:
+                        logger.debug(
+                            "Failed to fetch title: %s (status=%d)", url, resp.status
+                        )
+                        return ""
+                    html = await self._decode_response(resp)
 
             return self._extract_title(html)
         except (asyncio.TimeoutError, aiohttp.ClientError):
