@@ -1,6 +1,6 @@
 """Embeddingプレフィックスあり/なし比較スクリプト.
 
-nomic-embed-text のタスク固有プレフィックス（search_document: / search_query:）が
+Embeddingモデルのタスク固有プレフィックス（検索文書: / 検索クエリ:）が
 検索品質に与える影響を計測する。
 
 Usage:
@@ -19,7 +19,7 @@ Usage:
       --fixture tests/fixtures/rag_evaluation_extended/rag_test_documents_extended.json
 
 Note:
-    LM Studio が起動中で nomic-embed-text がロード済みである必要がある。
+    LM Studio が起動中で Embeddingモデルがロード済みである必要がある。
 """
 
 from __future__ import annotations
