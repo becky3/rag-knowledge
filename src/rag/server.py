@@ -154,8 +154,8 @@ async def rag_search(query: str, n_results: int | None = None) -> str:
         検索結果テキスト。ベクトル検索結果とBM25検索結果をセクション分けして返す。
         ヒットしたチャンクのページ全文を返却し、同一URLの重複は参照テキストで省略する。
         結果が0件の場合は「該当する情報が見つかりませんでした」を返す。
-        RAG_MAX_RESPONSE_CHARS 設定時、レスポンスが上限を超えた場合はトランケートされ
-        末尾にトランケート通知が付記される。未設定時は無制限。
+        RAG_MAX_RESPONSE_CHARS 設定時、累積文字数を追跡し上限到達後はページ全文取得を
+        早期打ち切りする。末尾にトランケート通知が付記される。未設定時は無制限。
     """
     service = await _get_rag_service()
     if n_results is None:
@@ -165,6 +165,8 @@ async def rag_search(query: str, n_results: int | None = None) -> str:
 
     if not raw.vector_results and not raw.bm25_results:
         return "該当する情報が見つかりませんでした"
+
+    max_chars = get_settings().rag_max_response_chars
 
     # ページ全文キャッシュ（同一URLの多重DB問い合わせ防止）
     page_cache: dict[str, str] = {}
@@ -177,53 +179,90 @@ async def rag_search(query: str, n_results: int | None = None) -> str:
         return page_cache[url]
 
     parts: list[str] = []
+    # 累積文字数を追跡（改行セパレータ分も含む）
+    current_chars = 0
+    budget_exceeded = False
+
+    def _append_part(text: str) -> None:
+        """parts にテキストを追加し、累積文字数を更新する."""
+        nonlocal current_chars, budget_exceeded
+        # 改行セパレータ分を加算（最初の要素以外）
+        sep_len = 1 if parts else 0
+        new_chars = sep_len + len(text)
+
+        if max_chars is not None and current_chars + new_chars > max_chars:
+            # 空セパレータは装飾目的なので、超過しても打ち切りとみなさずスキップ
+            if not text:
+                return
+            # 残り文字数分だけ追加してトランケート
+            remaining = max_chars - current_chars - sep_len
+            if remaining > 0:
+                parts.append(text[:remaining])
+                current_chars = max_chars
+            budget_exceeded = True
+            return
+
+        parts.append(text)
+        current_chars += new_chars
 
     # ベクトル検索結果
     if raw.vector_results:
-        parts.append("## ベクトル検索結果 (意味的類似度)\n")
+        _append_part("## ベクトル検索結果 (意味的類似度)\n")
         for i, vec_item in enumerate(raw.vector_results, start=1):
-            parts.append(f"### Result {i} [distance={vec_item.distance:.3f}]")
-            parts.append(f"Source: {vec_item.source_url}")
+            if budget_exceeded:
+                break
+            _append_part(f"### Result {i} [distance={vec_item.distance:.3f}]")
+            if budget_exceeded:
+                break
+            _append_part(f"Source: {vec_item.source_url}")
+            if budget_exceeded:
+                break
 
             if vec_item.source_url not in url_first_seen:
                 url_first_seen[vec_item.source_url] = ("ベクトル検索結果", i)
                 full_text = await _get_page_text(vec_item.source_url)
-                parts.append(full_text)
+                _append_part(full_text)
             else:
                 section, num = url_first_seen[vec_item.source_url]
-                parts.append(
+                _append_part(
                     f"（この URL のページ全文は{section} Result {num} に掲載済み）"
                 )
-            parts.append("")
+            if budget_exceeded:
+                break
+            _append_part("")
 
     # BM25検索結果
-    if raw.bm25_results:
-        parts.append("## BM25検索結果 (キーワード一致)\n")
+    if raw.bm25_results and not budget_exceeded:
+        _append_part("## BM25検索結果 (キーワード一致)\n")
         for i, bm25_item in enumerate(raw.bm25_results, start=1):
-            parts.append(f"### Result {i} [score={bm25_item.score:.3f}]")
-            parts.append(f"Source: {bm25_item.source_url}")
+            if budget_exceeded:
+                break
+            _append_part(f"### Result {i} [score={bm25_item.score:.3f}]")
+            if budget_exceeded:
+                break
+            _append_part(f"Source: {bm25_item.source_url}")
+            if budget_exceeded:
+                break
 
             if bm25_item.source_url not in url_first_seen:
                 url_first_seen[bm25_item.source_url] = ("BM25検索結果", i)
                 full_text = await _get_page_text(bm25_item.source_url)
-                parts.append(full_text)
+                _append_part(full_text)
             else:
                 section, num = url_first_seen[bm25_item.source_url]
-                parts.append(
+                _append_part(
                     f"（この URL のページ全文は{section} Result {num} に掲載済み）"
                 )
-            parts.append("")
+            if budget_exceeded:
+                break
+            _append_part("")
 
     response = "\n".join(parts).rstrip()
 
-    # レスポンスサイズ上限ガード
-    max_chars = get_settings().rag_max_response_chars
-    if max_chars is not None and len(response) > max_chars:
-        truncated = response[:max_chars]
-        truncated += "\n\n…（レスポンスが上限の{:,}文字を超えたため切り詰めました）".format(
+    if budget_exceeded:
+        response += "\n\n…（レスポンスが上限の{:,}文字を超えたため切り詰めました）".format(
             max_chars
         )
-        return truncated
 
     return response
 
