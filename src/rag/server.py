@@ -3,10 +3,11 @@
 仕様: docs/specs/rag-knowledge.md
 独立リポジトリとして動作する。
 
-FastMCP を使用して 5 つの RAG ツールを公開する:
+FastMCP を使用して 6 つの RAG ツールを公開する:
 - rag_search: ナレッジベースから関連情報を検索
 - rag_add: 単一ページをナレッジベースに取り込み
 - rag_crawl: リンク集ページからクロール＆一括取り込み
+- rag_crawl_preview: クロール対象ページのプレビュー（タイトル・URL一覧）
 - rag_delete: ソースURL指定でナレッジから削除
 - rag_stats: ナレッジベースの統計情報を表示
 """
@@ -269,6 +270,40 @@ async def rag_crawl(url: str, pattern: str = "") -> str:
     except Exception:
         logger.exception("Failed to crawl: %s", url)
         return f"エラー: クロールに失敗しました。URL: {url}"
+
+
+@mcp.tool()
+async def rag_crawl_preview(url: str, pattern: str = "") -> str:
+    """[rag-knowledge] RAG crawl preview - クロール対象ページのプレビュー.
+
+    knowledge base, crawl preview, dry run, link list.
+    実際の取り込み（チャンキング・ベクトル化）は行わず、
+    クロール対象となるページのタイトルとURLの一覧を返す。
+
+    Args:
+        url: リンク集ページのURL
+        pattern: URLフィルタリング用の正規表現パターン（任意）
+
+    Returns:
+        クロール対象ページの一覧テキスト
+    """
+    service = await _get_rag_service()
+    try:
+        pages = await service.crawl_preview(url, url_pattern=pattern)
+        if not pages:
+            return "対象ページが見つかりませんでした"
+
+        lines: list[str] = [f"クロール対象: {len(pages)}ページ", ""]
+        for i, page in enumerate(pages, start=1):
+            title = page.title or "(タイトル取得不可)"
+            lines.append(f"{i}. {title}")
+            lines.append(f"   {page.url}")
+        return "\n".join(lines)
+    except ValueError as e:
+        return f"エラー: {e}"
+    except Exception:
+        logger.exception("Failed to preview crawl: %s", url)
+        return f"エラー: プレビューに失敗しました。URL: {url}"
 
 
 @mcp.tool()

@@ -11,7 +11,7 @@ from unittest.mock import AsyncMock, patch
 import aiohttp
 import pytest
 
-from rag.web_crawler import CrawledPage, RobotsChecker, WebCrawler
+from rag.web_crawler import CrawlPreviewPage, CrawledPage, RobotsChecker, WebCrawler
 
 
 # テスト用HTMLサンプル
@@ -1136,3 +1136,193 @@ class TestWebCrawlerRobotsTxt:
 
         # 設定値の 10 秒が採用される
         assert delay == 10.0
+
+
+class TestCrawlPreviewPage:
+    """CrawlPreviewPage データクラスのテスト."""
+
+    def test_crawl_preview_page_creation(self) -> None:
+        """CrawlPreviewPage が正しく作成されること."""
+        page = CrawlPreviewPage(
+            url="https://example.com/test",
+            title="テストタイトル",
+        )
+        assert page.url == "https://example.com/test"
+        assert page.title == "テストタイトル"
+
+
+class TestWebCrawlerExtractTitle:
+    """WebCrawler._extract_title のテスト."""
+
+    def test_extract_title_from_html(self) -> None:
+        """HTMLからタイトルを抽出できること."""
+        title = WebCrawler._extract_title(SAMPLE_HTML_WITH_ARTICLE)
+        assert title == "テスト記事"
+
+    def test_extract_title_empty_when_no_title_tag(self) -> None:
+        """<title>タグがない場合に空文字列を返すこと."""
+        html = "<html><body><p>No title</p></body></html>"
+        title = WebCrawler._extract_title(html)
+        assert title == ""
+
+    def test_extract_title_empty_when_title_tag_empty(self) -> None:
+        """<title>タグが空の場合に空文字列を返すこと."""
+        html = "<html><head><title></title></head><body></body></html>"
+        title = WebCrawler._extract_title(html)
+        assert title == ""
+
+
+SAMPLE_PAGE_HTML_TITLE_A = """
+<!DOCTYPE html>
+<html>
+<head><title>記事Aのタイトル</title></head>
+<body><p>記事A</p></body>
+</html>
+"""
+
+SAMPLE_PAGE_HTML_TITLE_B = """
+<!DOCTYPE html>
+<html>
+<head><title>記事Bのタイトル</title></head>
+<body><p>記事B</p></body>
+</html>
+"""
+
+
+class TestWebCrawlerCrawlPreview:
+    """WebCrawler.crawl_preview のテスト."""
+
+    @pytest.mark.asyncio
+    async def test_crawl_preview_returns_titles_and_urls(self) -> None:
+        """クロール対象ページのタイトルとURLの一覧を返すこと."""
+        crawler = WebCrawler(respect_robots_txt=False)
+
+        class MockSessionForPreview:
+            """crawl_preview テスト用のモックセッション."""
+
+            async def __aenter__(self) -> "MockSessionForPreview":
+                return self
+
+            async def __aexit__(self, *args: object) -> None:
+                pass
+
+            def get(self, url: str, **kwargs: object) -> MockContextManager:  # noqa: ARG002
+                if url == "https://example.com/articles":
+                    return MockContextManager(200, SAMPLE_INDEX_HTML)
+                elif url == "https://example.com/article/1":
+                    return MockContextManager(200, SAMPLE_PAGE_HTML_TITLE_A)
+                elif url == "https://example.com/article/2":
+                    return MockContextManager(200, SAMPLE_PAGE_HTML_TITLE_B)
+                return MockContextManager(200, SAMPLE_HTML_WITH_ARTICLE)
+
+        with patch(
+            "rag.web_crawler.aiohttp.ClientSession",
+            return_value=MockSessionForPreview(),
+        ):
+            pages = await crawler.crawl_preview("https://example.com/articles")
+
+        assert len(pages) > 0
+        assert all(isinstance(p, CrawlPreviewPage) for p in pages)
+        # URLが含まれていること
+        urls = [p.url for p in pages]
+        assert "https://example.com/article/1" in urls
+        assert "https://example.com/article/2" in urls
+
+    @pytest.mark.asyncio
+    async def test_crawl_preview_returns_empty_for_no_links(self) -> None:
+        """リンクがない場合に空リストを返すこと."""
+        crawler = WebCrawler(respect_robots_txt=False)
+
+        empty_html = """
+        <!DOCTYPE html>
+        <html><head><title>空ページ</title></head>
+        <body><p>リンクなし</p></body>
+        </html>
+        """
+
+        with patch(
+            "rag.web_crawler.aiohttp.ClientSession",
+            return_value=MockClientSession(200, empty_html),
+        ):
+            pages = await crawler.crawl_preview("https://example.com/empty")
+
+        assert pages == []
+
+    @pytest.mark.asyncio
+    async def test_crawl_preview_with_pattern(self) -> None:
+        """URLパターンフィルタリングが機能すること."""
+        crawler = WebCrawler(respect_robots_txt=False)
+
+        class MockSessionForPattern:
+            """パターンフィルタリングテスト用のモックセッション."""
+
+            async def __aenter__(self) -> "MockSessionForPattern":
+                return self
+
+            async def __aexit__(self, *args: object) -> None:
+                pass
+
+            def get(self, url: str, **kwargs: object) -> MockContextManager:  # noqa: ARG002
+                if url == "https://example.com/articles":
+                    return MockContextManager(200, SAMPLE_INDEX_HTML)
+                return MockContextManager(200, SAMPLE_HTML_WITH_ARTICLE)
+
+        with patch(
+            "rag.web_crawler.aiohttp.ClientSession",
+            return_value=MockSessionForPattern(),
+        ):
+            pages = await crawler.crawl_preview(
+                "https://example.com/articles",
+                url_pattern=r"\.html$",
+            )
+
+        assert len(pages) == 2
+        assert all(p.url.endswith(".html") for p in pages)
+
+    @pytest.mark.asyncio
+    async def test_crawl_preview_title_fetch_failure_returns_empty_title(self) -> None:
+        """タイトル取得に失敗した場合、タイトルが空文字列になること."""
+        crawler = WebCrawler(respect_robots_txt=False)
+
+        class MockSessionWithTitleError:
+            """タイトル取得失敗テスト用のモックセッション."""
+
+            async def __aenter__(self) -> "MockSessionWithTitleError":
+                return self
+
+            async def __aexit__(self, *args: object) -> None:
+                pass
+
+            def get(self, url: str, **kwargs: object) -> MockContextManager:  # noqa: ARG002
+                if url == "https://example.com/articles":
+                    return MockContextManager(200, SAMPLE_INDEX_HTML)
+                # 子ページのタイトル取得は全て404
+                return MockContextManager(404, "Not Found")
+
+        with patch(
+            "rag.web_crawler.aiohttp.ClientSession",
+            return_value=MockSessionWithTitleError(),
+        ):
+            pages = await crawler.crawl_preview("https://example.com/articles")
+
+        assert len(pages) > 0
+        # タイトル取得失敗 → 空文字列
+        assert all(p.title == "" for p in pages)
+
+    @pytest.mark.asyncio
+    async def test_crawl_preview_does_not_ingest(self) -> None:
+        """crawl_preview は取り込み処理を行わない（副作用なし）ことの確認."""
+        crawler = WebCrawler(respect_robots_txt=False)
+
+        with patch(
+            "rag.web_crawler.aiohttp.ClientSession",
+            return_value=MockClientSession(200, SAMPLE_INDEX_HTML),
+        ):
+            pages = await crawler.crawl_preview("https://example.com/articles")
+
+        # CrawlPreviewPage にはテキストフィールドがない（取り込みしていない）
+        for p in pages:
+            assert hasattr(p, "url")
+            assert hasattr(p, "title")
+            assert not hasattr(p, "text")
+            assert not hasattr(p, "crawled_at")

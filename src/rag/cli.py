@@ -222,12 +222,33 @@ def main() -> None:
         help="BM25 bパラメータ（例: 0.75）",
     )
 
+    # crawl-preview サブコマンド
+    preview_parser = subparsers.add_parser("crawl-preview", help="クロール対象ページをプレビュー")
+    preview_parser.add_argument(
+        "--url",
+        required=True,
+        help="リンク集ページのURL",
+    )
+    preview_parser.add_argument(
+        "--pattern",
+        default="",
+        help="URLフィルタリング用の正規表現パターン（任意）",
+    )
+    preview_parser.add_argument(
+        "--format",
+        choices=["text", "json"],
+        default="text",
+        help="出力フォーマット（text/json）",
+    )
+
     args = parser.parse_args()
 
     if args.command == "evaluate":
         asyncio.run(run_evaluation(args))
     elif args.command == "init-test-db":
         asyncio.run(init_test_db(args))
+    elif args.command == "crawl-preview":
+        asyncio.run(run_crawl_preview(args))
 
 
 async def create_rag_service(
@@ -705,6 +726,40 @@ async def init_test_db(args: argparse.Namespace) -> None:
         "BM25 index persisted at %s (%d documents)",
         args.bm25_persist_dir, bm25_index.get_document_count(),
     )
+
+
+async def run_crawl_preview(args: argparse.Namespace) -> None:
+    """クロール対象ページのプレビューを実行する.
+
+    Args:
+        args: コマンドライン引数
+    """
+    from .web_crawler import WebCrawler
+
+    logger.info("Starting crawl preview for: %s", args.url)
+
+    crawler = WebCrawler()
+
+    try:
+        pages = await crawler.crawl_preview(args.url, url_pattern=args.pattern)
+    except ValueError as e:
+        logger.error("URL validation failed: %s", e)
+        sys.exit(1)
+
+    if not pages:
+        print("対象ページが見つかりませんでした")
+        return
+
+    if args.format == "json":
+        data = [{"title": p.title, "url": p.url} for p in pages]
+        print(json.dumps(data, ensure_ascii=False, indent=2))
+    else:
+        print(f"クロール対象: {len(pages)}ページ")
+        print()
+        for i, page in enumerate(pages, start=1):
+            title = page.title or "(タイトル取得不可)"
+            print(f"{i}. {title}")
+            print(f"   {page.url}")
 
 
 if __name__ == "__main__":
