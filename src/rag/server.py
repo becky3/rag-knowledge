@@ -293,33 +293,11 @@ async def rag_stats() -> str:
 
 
 def _configure_and_run() -> None:
-    """トランスポート設定に基づいて MCP サーバーを起動する.
-
-    HTTP モード時はデータ変更ツール（rag_add, rag_crawl, rag_delete）を
-    削除し、読み取り専用ツールのみ公開する。
-    """
+    """トランスポート設定に基づいて MCP サーバーを起動する."""
     settings = get_settings()
     transport = settings.rag_transport
 
     if transport == "http":
-        # HTTP モードではデータ変更ツールを非公開にする
-        # （外部公開時の安全性のため、読み取り専用ツールのみ提供）
-        _write_tools = ["rag_add", "rag_crawl", "rag_delete"]
-        _failed: list[str] = []
-        for tool_name in _write_tools:
-            try:
-                mcp.remove_tool(tool_name)
-            except KeyError:
-                _failed.append(tool_name)
-        if _failed:
-            raise RuntimeError(
-                f"HTTP mode: failed to remove write tools {_failed}. "
-                "Aborting to prevent unintended tool exposure."
-            )
-        logger.info(
-            "HTTP mode: write tools removed, exposing read-only tools only"
-        )
-
         mcp.settings.host = settings.rag_http_host
         mcp.settings.port = settings.rag_http_port
         if not settings.rag_dns_rebinding_protection:
