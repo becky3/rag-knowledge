@@ -37,7 +37,7 @@
 | `src/rag/chunker.py` | テキストチャンカー（段落・文・文字数ベース分割） |
 | `src/rag/heading_chunker.py` | 見出しチャンカー（見出し単位分割・階層情報保持） |
 | `src/rag/table_chunker.py` | テーブルチャンカー（行単位分割・ヘッダー付加） |
-| `src/rag/content_detector.py` | コンテンツタイプ検出（通常テキスト・テーブル・見出し構造） |
+| `src/rag/content_detector.py` | コンテンツタイプ検出（通常テキスト・テーブル・見出し付きテキスト） |
 | `src/rag/evaluation.py` | 検索精度評価ツール（Precision・Recall・F1・NDCG・MRR） |
 | `src/rag/safe_browsing.py` | URL 安全性チェック（Google Safe Browsing API） |
 
