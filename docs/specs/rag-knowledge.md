@@ -103,7 +103,7 @@ flowchart LR
     CRAWL["Web クローラー"] --> DETECT["コンテンツタイプ検出"]
     DETECT -->|通常テキスト| CP["テキストチャンカー"]
     DETECT -->|テーブル| CT["テーブルチャンカー"]
-    DETECT -->|見出し構造| CH["見出しチャンカー"]
+    DETECT -->|見出し付きテキスト| CH["見出しチャンカー"]
     CP --> VS["ベクトルストア"]
     CT --> VS
     CH --> VS
