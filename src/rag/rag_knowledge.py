@@ -284,25 +284,31 @@ class RAGKnowledgeService:
             logger.warning("No URLs found in index page: %s", index_url)
             return {"pages_crawled": 0, "chunks_stored": 0, "errors": 0, "unsafe_urls": 0}
 
-        # Safe Browsing フィルタリング（WebIngester 内部で実施）
-        safe_urls = await self._web_ingester._filter_safe_urls(urls)
+        # Safe Browsing フィルタリング
+        safe_urls = await self._web_ingester.filter_safe_urls(urls)
         unsafe_count = len(urls) - len(safe_urls)
 
         if not safe_urls:
             logger.warning("No safe URLs to crawl after Safe Browsing check")
             return {"pages_crawled": 0, "chunks_stored": 0, "errors": 0, "unsafe_urls": unsafe_count}
 
-        # 並行クロール（進捗報告付き）
+        # 並行クロール（進捗報告付き、Safe Browsing チェック済みなのでスキップ）
         total_urls = len(safe_urls)
         tasks = [
-            asyncio.create_task(self._web_ingester.fetch_single(url))
+            asyncio.create_task(
+                self._web_ingester.fetch_single(url, skip_safety_check=True)
+            )
             for url in safe_urls
         ]
 
         contents: list[IngestedContent] = []
         completed_count = 0
         for coro in asyncio.as_completed(tasks):
-            content = await coro
+            try:
+                content = await coro
+            except Exception:
+                logger.exception("Failed to fetch content in batch")
+                content = None
             completed_count += 1
             if content is not None:
                 contents.append(content)
