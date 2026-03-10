@@ -332,9 +332,17 @@ def _configure_and_run() -> None:
                     "transport_security is None; "
                     "cannot disable DNS rebinding protection"
                 )
-        mcp.run(transport="streamable-http")
+
+    try:
+        if transport == "http":
+            mcp.run(transport="streamable-http")
+        else:
+            mcp.run()
+    except KeyboardInterrupt:
+        logger.info("MCP server shut down")
+        raise SystemExit(130)
     else:
-        mcp.run()
+        logger.info("MCP server shut down")
 
 
 if __name__ == "__main__":
