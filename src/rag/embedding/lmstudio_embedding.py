@@ -20,8 +20,8 @@ class LMStudioEmbedding(EmbeddingProvider):
     仕様: docs/specs/rag-knowledge.md
     """
 
-    DOCUMENT_PREFIX = "検索文書: "
-    QUERY_PREFIX = "検索クエリ: "
+    DOCUMENT_PREFIX = "search_document: "
+    QUERY_PREFIX = "search_query: "
 
     def __init__(
         self,
