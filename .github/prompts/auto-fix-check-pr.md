@@ -75,7 +75,7 @@ gh api graphql -f query="
 
 ```bash
 uv run pytest && uv run ruff check src/ tests/ && uv run mypy src/
-npx markdownlint-cli2
+npx markdownlint-cli2@0.20.0
 ```
 
 Markdown のみの変更の場合、pytest / ruff / mypy はスキップ可（markdownlint のみ実行）。
