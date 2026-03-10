@@ -184,6 +184,9 @@ async def rag_search(query: str, n_results: int | None = None) -> str:
         new_chars = sep_len + len(text)
 
         if max_chars is not None and current_chars + new_chars > max_chars:
+            # 空セパレータは装飾目的なので、超過しても打ち切りとみなさずスキップ
+            if not text:
+                return
             # 残り文字数分だけ追加してトランケート
             remaining = max_chars - current_chars - sep_len
             if remaining > 0:
