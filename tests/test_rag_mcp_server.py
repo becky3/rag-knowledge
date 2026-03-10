@@ -61,6 +61,7 @@ class TestRagSearchOutput:
         )
         self.mock_settings = MagicMock()
         self.mock_settings.rag_retrieval_count = 3
+        self.mock_settings.rag_max_response_chars = None
 
     async def test_output_contains_vector_and_bm25_sections(self) -> None:
         """出力にベクトル検索結果とBM25検索結果のセクションが含まれること（#548）."""
@@ -323,3 +324,215 @@ class TestConfigureAndRun:
         mock_run.assert_called_once_with(transport="streamable-http")
         assert mod.mcp.settings.host == "0.0.0.0"
         assert mod.mcp.settings.port == 9090
+
+    def test_keyboard_interrupt_graceful_shutdown(self) -> None:
+        """Ctrl+C (KeyboardInterrupt) で終了コード130で終了すること (#42)."""
+        mod = import_module("rag.server")
+        mock_settings = MagicMock()
+        mock_settings.rag_transport = "http"
+        mock_settings.rag_http_host = "127.0.0.1"
+        mock_settings.rag_http_port = 8080
+        mock_settings.rag_dns_rebinding_protection = True
+
+        with (
+            patch.object(mod, "get_settings", return_value=mock_settings),
+            patch.object(
+                mod.mcp, "run", side_effect=KeyboardInterrupt
+            ),
+            patch.object(mod.logger, "info") as mock_log,
+            pytest.raises(SystemExit, match="130"),
+        ):
+            _configure_and_run()
+
+        mock_log.assert_called_once_with("MCP server shut down")
+
+    def test_stdio_keyboard_interrupt_graceful_shutdown(self) -> None:
+        """stdio モードでも KeyboardInterrupt で終了コード130で終了すること (#42)."""
+        mod = import_module("rag.server")
+        mock_settings = MagicMock()
+        mock_settings.rag_transport = "stdio"
+
+        with (
+            patch.object(mod, "get_settings", return_value=mock_settings),
+            patch.object(
+                mod.mcp, "run", side_effect=KeyboardInterrupt
+            ),
+            patch.object(mod.logger, "info") as mock_log,
+            pytest.raises(SystemExit, match="130"),
+        ):
+            _configure_and_run()
+
+        mock_log.assert_called_once_with("MCP server shut down")
+
+    def test_shutdown_log_on_normal_exit(self) -> None:
+        """正常終了時もシャットダウンログが出力されること (#42)."""
+        mod = import_module("rag.server")
+        mock_settings = MagicMock()
+        mock_settings.rag_transport = "stdio"
+
+        with (
+            patch.object(mod, "get_settings", return_value=mock_settings),
+            patch.object(mod.mcp, "run"),
+            patch.object(mod.logger, "info") as mock_log,
+        ):
+            _configure_and_run()
+
+        mock_log.assert_called_once_with("MCP server shut down")
+
+
+class TestRagSearchResponseTruncation:
+    """rag_search レスポンスサイズ上限ガードのテスト（#26）."""
+
+    @pytest.fixture(autouse=True)
+    def _patch_rag_service(self) -> None:
+        """rag_search のテスト用に RAGKnowledgeService をモックする."""
+        self.mock_service = AsyncMock()
+        self.mock_settings = MagicMock()
+        self.mock_settings.rag_retrieval_count = 3
+
+    async def test_response_not_truncated_when_limit_is_none(self) -> None:
+        """上限未設定時はレスポンスがそのまま返ること（#26）."""
+        mod = import_module("rag.server")
+
+        self.mock_service.retrieve_raw_results = AsyncMock(
+            return_value=RawSearchResults(
+                vector_results=[
+                    VectorSearchItem(
+                        text="テキスト",
+                        source_url="https://example.com/page1",
+                        distance=0.1,
+                        chunk_index=0,
+                    ),
+                ],
+                bm25_results=[],
+            )
+        )
+        self.mock_service.get_full_page_text = AsyncMock(
+            return_value="ページ全文テキスト"
+        )
+        self.mock_settings.rag_max_response_chars = None
+
+        with (
+            patch.object(mod, "_get_rag_service", return_value=self.mock_service),
+            patch.object(mod, "get_settings", return_value=self.mock_settings),
+        ):
+            result = await mod.rag_search("テスト")
+
+        assert "切り詰めました" not in result
+        assert "ページ全文テキスト" in result
+
+    async def test_response_not_truncated_when_within_limit(self) -> None:
+        """レスポンスが上限以下の場合はそのまま返ること（#26）."""
+        mod = import_module("rag.server")
+
+        self.mock_service.retrieve_raw_results = AsyncMock(
+            return_value=RawSearchResults(
+                vector_results=[
+                    VectorSearchItem(
+                        text="テキスト",
+                        source_url="https://example.com/page1",
+                        distance=0.1,
+                        chunk_index=0,
+                    ),
+                ],
+                bm25_results=[],
+            )
+        )
+        self.mock_service.get_full_page_text = AsyncMock(
+            return_value="短いテキスト"
+        )
+        self.mock_settings.rag_max_response_chars = 100000
+
+        with (
+            patch.object(mod, "_get_rag_service", return_value=self.mock_service),
+            patch.object(mod, "get_settings", return_value=self.mock_settings),
+        ):
+            result = await mod.rag_search("テスト")
+
+        assert "切り詰めました" not in result
+        assert "短いテキスト" in result
+
+    async def test_response_truncated_when_exceeds_limit(self) -> None:
+        """レスポンスが上限を超えた場合にトランケートされること（#26）."""
+        mod = import_module("rag.server")
+
+        long_text = "あ" * 500
+        self.mock_service.retrieve_raw_results = AsyncMock(
+            return_value=RawSearchResults(
+                vector_results=[
+                    VectorSearchItem(
+                        text="テキスト",
+                        source_url="https://example.com/page1",
+                        distance=0.1,
+                        chunk_index=0,
+                    ),
+                ],
+                bm25_results=[],
+            )
+        )
+        self.mock_service.get_full_page_text = AsyncMock(
+            return_value=long_text
+        )
+        self.mock_settings.rag_max_response_chars = 100
+
+        with (
+            patch.object(mod, "_get_rag_service", return_value=self.mock_service),
+            patch.object(mod, "get_settings", return_value=self.mock_settings),
+        ):
+            result = await mod.rag_search("テスト")
+
+        assert "切り詰めました" in result
+        assert "100" in result
+
+    async def test_truncated_response_starts_with_original_content(self) -> None:
+        """トランケートされたレスポンスが元の内容の先頭部分を含むこと（#26）."""
+        mod = import_module("rag.server")
+
+        self.mock_service.retrieve_raw_results = AsyncMock(
+            return_value=RawSearchResults(
+                vector_results=[
+                    VectorSearchItem(
+                        text="テキスト",
+                        source_url="https://example.com/page1",
+                        distance=0.1,
+                        chunk_index=0,
+                    ),
+                ],
+                bm25_results=[],
+            )
+        )
+        self.mock_service.get_full_page_text = AsyncMock(
+            return_value="あ" * 1000
+        )
+        self.mock_settings.rag_max_response_chars = 50
+
+        with (
+            patch.object(mod, "_get_rag_service", return_value=self.mock_service),
+            patch.object(mod, "get_settings", return_value=self.mock_settings),
+        ):
+            result = await mod.rag_search("テスト")
+
+        # トランケート通知の前の部分が正確に50文字であること
+        truncation_marker = "\n\n…（レスポンスが上限の"
+        marker_pos = result.index(truncation_marker)
+        assert marker_pos == 50
+
+    async def test_empty_results_not_affected_by_limit(self) -> None:
+        """0件結果は上限設定に影響されないこと（#26）."""
+        mod = import_module("rag.server")
+
+        self.mock_service.retrieve_raw_results = AsyncMock(
+            return_value=RawSearchResults(
+                vector_results=[],
+                bm25_results=[],
+            )
+        )
+        self.mock_settings.rag_max_response_chars = 10
+
+        with (
+            patch.object(mod, "_get_rag_service", return_value=self.mock_service),
+            patch.object(mod, "get_settings", return_value=self.mock_settings),
+        ):
+            result = await mod.rag_search("テスト")
+
+        assert result == "該当する情報が見つかりませんでした"
