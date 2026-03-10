@@ -15,11 +15,9 @@ from .base import BaseIngester, IngestedContent
 
 logger = logging.getLogger(__name__)
 
-ZENN_API_BASE = "https://zenn.dev/api"
-"""Zenn API のベース URL."""
+ZENN_API_BASE = "https://zenn.dev/api"  # Zenn API のベース URL.
 
-_SLUG_PATTERN = re.compile(r"^[a-z0-9]+(?:[-_][a-z0-9]+)*$")
-"""slug の形式: 英小文字・数字・ハイフン・アンダースコア."""
+_SLUG_PATTERN = re.compile(r"^[a-z0-9]+(?:[-_][a-z0-9]+)*$")  # slug の形式: 英小文字・数字・ハイフン・アンダースコア.
 
 
 class ZennIngester(BaseIngester):
