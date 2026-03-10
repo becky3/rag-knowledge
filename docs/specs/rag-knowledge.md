@@ -83,6 +83,10 @@ flowchart TB
         end
     end
 
+    subgraph Ingesters["インジェスター"]
+        WING["WebIngester"]
+    end
+
     CRAWLER["Web クローラー"]
     CHUNKER["チャンカー"]
     VECTOR["ベクトルストア"]
@@ -91,7 +95,8 @@ flowchart TB
 
     CLIENT -->|stdio / http| TOOLS
     TOOLS --> Service
-    Service --> CRAWLER
+    Service --> Ingesters
+    WING --> CRAWLER
     Service --> CHUNKER
     Service --> VECTOR
     Service --> BM25
@@ -146,6 +151,8 @@ flowchart LR
 | コンポーネント | 役割 |
 | --- | --- |
 | ナレッジサービス | 取り込み・検索・削除のオーケストレーション |
+| インジェスター基盤 | データソースの抽象化（BaseIngester / IngestedContent） |
+| WebIngester | Web ページ取り込み用インジェスター。WebCrawler に委譲し、Safe Browsing チェックを統合する |
 | Web クローラー | ページの取得と本文テキスト抽出。SSRF 対策・robots.txt 遵守を含む |
 | コンテンツタイプ検出 | テキストの種類（通常・テーブル・見出し付きテキスト）を判定する |
 | テキストチャンカー | 段落・文・文字数の優先順で分割する。チャンク間にオーバーラップを適用する |
