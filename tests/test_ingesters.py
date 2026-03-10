@@ -9,11 +9,13 @@ from __future__ import annotations
 from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock
 
+import aiohttp
 import pytest
 
 from rag.ingesters.base import BaseIngester, IngestedContent
 from rag.ingesters.local_file import SUPPORTED_EXTENSIONS, LocalFileIngester
 from rag.ingesters.web import WebIngester
+from rag.ingesters.zenn import ZennIngester
 from rag.rag_knowledge import RAGKnowledgeService
 from rag.vector_store import VectorStore
 from rag.web_crawler import CrawledPage, WebCrawler
@@ -636,6 +638,379 @@ class TestRAGServiceWithWebIngester:
         ).hexdigest()[:16]
         assert chunk.id.startswith(expected_hash)
         assert chunk.metadata["source_url"] == "https://example.com/page"
+
+
+# --- ZennIngester テスト ---
+
+
+class TestZennIngesterValidate:
+    """ZennIngester.validate_identifier() のテスト."""
+
+    def test_valid_slug(self) -> None:
+        """正常な slug が検証を通過すること."""
+        ingester = ZennIngester()
+        assert ingester.validate_identifier("my-article") == "my-article"
+
+    def test_valid_slug_with_numbers(self) -> None:
+        """数字を含む slug が検証を通過すること."""
+        ingester = ZennIngester()
+        assert ingester.validate_identifier("article123") == "article123"
+
+    def test_valid_slug_with_underscore(self) -> None:
+        """アンダースコアを含む slug が検証を通過すること."""
+        ingester = ZennIngester()
+        assert ingester.validate_identifier("my_article") == "my_article"
+
+    def test_slug_normalized_to_lowercase(self) -> None:
+        """大文字を含む slug が小文字に正規化されること."""
+        ingester = ZennIngester()
+        assert ingester.validate_identifier("My-Article") == "my-article"
+
+    def test_slug_trimmed(self) -> None:
+        """前後の空白がトリムされること."""
+        ingester = ZennIngester()
+        assert ingester.validate_identifier("  my-article  ") == "my-article"
+
+    def test_empty_slug_raises(self) -> None:
+        """空の slug で ValueError が発生すること."""
+        ingester = ZennIngester()
+        with pytest.raises(ValueError, match="slugが空です"):
+            ingester.validate_identifier("")
+
+    def test_whitespace_only_slug_raises(self) -> None:
+        """空白のみの slug で ValueError が発生すること."""
+        ingester = ZennIngester()
+        with pytest.raises(ValueError, match="slugが空です"):
+            ingester.validate_identifier("   ")
+
+    def test_invalid_slug_with_special_chars(self) -> None:
+        """特殊文字を含む slug で ValueError が発生すること."""
+        ingester = ZennIngester()
+        with pytest.raises(ValueError, match="不正なslug形式です"):
+            ingester.validate_identifier("my article!")
+
+    def test_invalid_slug_with_slash(self) -> None:
+        """スラッシュを含む slug で ValueError が発生すること."""
+        ingester = ZennIngester()
+        with pytest.raises(ValueError, match="不正なslug形式です"):
+            ingester.validate_identifier("user/article")
+
+
+class TestZennIngesterFetchSingle:
+    """ZennIngester.fetch_single() のテスト."""
+
+    async def test_fetch_single_success(self) -> None:
+        """正常に記事を取得して IngestedContent を返すこと."""
+        ingester = ZennIngester()
+        mock_response = AsyncMock()
+        mock_response.status = 200
+        mock_response.json = AsyncMock(return_value={
+            "article": {
+                "title": "テスト記事",
+                "body_markdown": "# テスト\n\nこれはテスト記事です。",
+                "slug": "test-article",
+                "emoji": "📝",
+                "article_type": "tech",
+                "published": True,
+            }
+        })
+
+        mock_session = AsyncMock()
+        mock_session.get = MagicMock(return_value=AsyncMock(
+            __aenter__=AsyncMock(return_value=mock_response),
+            __aexit__=AsyncMock(return_value=False),
+        ))
+
+        with pytest.MonkeyPatch.context() as mp:
+            mp.setattr(
+                "aiohttp.ClientSession",
+                lambda **kwargs: AsyncMock(
+                    __aenter__=AsyncMock(return_value=mock_session),
+                    __aexit__=AsyncMock(return_value=False),
+                ),
+            )
+            result = await ingester.fetch_single("test-article")
+
+        assert result is not None
+        assert result.source_id == "https://zenn.dev/articles/test-article"
+        assert result.title == "テスト記事"
+        assert result.text == "# テスト\n\nこれはテスト記事です。"
+        assert result.source_type == "zenn"
+        assert result.metadata["slug"] == "test-article"
+        assert result.metadata["emoji"] == "📝"
+        assert result.metadata["article_type"] == "tech"
+        assert result.metadata["published"] is True
+
+    async def test_fetch_single_not_found(self) -> None:
+        """404 レスポンスで None を返すこと."""
+        ingester = ZennIngester()
+        mock_response = AsyncMock()
+        mock_response.status = 404
+
+        mock_session = AsyncMock()
+        mock_session.get = MagicMock(return_value=AsyncMock(
+            __aenter__=AsyncMock(return_value=mock_response),
+            __aexit__=AsyncMock(return_value=False),
+        ))
+
+        with pytest.MonkeyPatch.context() as mp:
+            mp.setattr(
+                "aiohttp.ClientSession",
+                lambda **kwargs: AsyncMock(
+                    __aenter__=AsyncMock(return_value=mock_session),
+                    __aexit__=AsyncMock(return_value=False),
+                ),
+            )
+            result = await ingester.fetch_single("nonexistent")
+
+        assert result is None
+
+    async def test_fetch_single_api_error(self) -> None:
+        """API エラー（500）で None を返すこと."""
+        ingester = ZennIngester()
+        mock_response = AsyncMock()
+        mock_response.status = 500
+
+        mock_session = AsyncMock()
+        mock_session.get = MagicMock(return_value=AsyncMock(
+            __aenter__=AsyncMock(return_value=mock_response),
+            __aexit__=AsyncMock(return_value=False),
+        ))
+
+        with pytest.MonkeyPatch.context() as mp:
+            mp.setattr(
+                "aiohttp.ClientSession",
+                lambda **kwargs: AsyncMock(
+                    __aenter__=AsyncMock(return_value=mock_session),
+                    __aexit__=AsyncMock(return_value=False),
+                ),
+            )
+            result = await ingester.fetch_single("error-article")
+
+        assert result is None
+
+    async def test_fetch_single_network_error(self) -> None:
+        """ネットワークエラーで None を返すこと."""
+        ingester = ZennIngester()
+
+        with pytest.MonkeyPatch.context() as mp:
+            mp.setattr(
+                "aiohttp.ClientSession",
+                lambda **kwargs: AsyncMock(
+                    __aenter__=AsyncMock(
+                        side_effect=aiohttp.ClientError("connection failed")
+                    ),
+                    __aexit__=AsyncMock(return_value=False),
+                ),
+            )
+            result = await ingester.fetch_single("test-article")
+
+        assert result is None
+
+    async def test_fetch_single_empty_body(self) -> None:
+        """本文が空の場合 None を返すこと."""
+        ingester = ZennIngester()
+        mock_response = AsyncMock()
+        mock_response.status = 200
+        mock_response.json = AsyncMock(return_value={
+            "article": {
+                "title": "Empty Article",
+                "body_markdown": "",
+                "slug": "empty-article",
+            }
+        })
+
+        mock_session = AsyncMock()
+        mock_session.get = MagicMock(return_value=AsyncMock(
+            __aenter__=AsyncMock(return_value=mock_response),
+            __aexit__=AsyncMock(return_value=False),
+        ))
+
+        with pytest.MonkeyPatch.context() as mp:
+            mp.setattr(
+                "aiohttp.ClientSession",
+                lambda **kwargs: AsyncMock(
+                    __aenter__=AsyncMock(return_value=mock_session),
+                    __aexit__=AsyncMock(return_value=False),
+                ),
+            )
+            result = await ingester.fetch_single("empty-article")
+
+        assert result is None
+
+
+class TestZennIngesterDiscover:
+    """ZennIngester.discover() のテスト."""
+
+    async def test_discover_returns_slugs(self) -> None:
+        """ユーザーの記事 slug 一覧を取得すること."""
+        ingester = ZennIngester()
+        mock_response = AsyncMock()
+        mock_response.status = 200
+        mock_response.json = AsyncMock(return_value={
+            "articles": [
+                {"slug": "article-1"},
+                {"slug": "article-2"},
+                {"slug": "article-3"},
+            ],
+            "next_page": None,
+        })
+
+        mock_session = AsyncMock()
+        mock_session.get = MagicMock(return_value=AsyncMock(
+            __aenter__=AsyncMock(return_value=mock_response),
+            __aexit__=AsyncMock(return_value=False),
+        ))
+
+        with pytest.MonkeyPatch.context() as mp:
+            mp.setattr(
+                "aiohttp.ClientSession",
+                lambda **kwargs: AsyncMock(
+                    __aenter__=AsyncMock(return_value=mock_session),
+                    __aexit__=AsyncMock(return_value=False),
+                ),
+            )
+            result = await ingester.discover("testuser")
+
+        assert result == ["article-1", "article-2", "article-3"]
+
+    async def test_discover_empty_username(self) -> None:
+        """空のユーザー名で空リストを返すこと."""
+        ingester = ZennIngester()
+        result = await ingester.discover("")
+        assert result == []
+
+    async def test_discover_api_error(self) -> None:
+        """API エラー時に途中までの結果を返すこと."""
+        ingester = ZennIngester()
+        mock_response = AsyncMock()
+        mock_response.status = 500
+
+        mock_session = AsyncMock()
+        mock_session.get = MagicMock(return_value=AsyncMock(
+            __aenter__=AsyncMock(return_value=mock_response),
+            __aexit__=AsyncMock(return_value=False),
+        ))
+
+        with pytest.MonkeyPatch.context() as mp:
+            mp.setattr(
+                "aiohttp.ClientSession",
+                lambda **kwargs: AsyncMock(
+                    __aenter__=AsyncMock(return_value=mock_session),
+                    __aexit__=AsyncMock(return_value=False),
+                ),
+            )
+            result = await ingester.discover("testuser")
+
+        assert result == []
+
+    async def test_discover_network_error(self) -> None:
+        """ネットワークエラーでも空リストを返すこと."""
+        ingester = ZennIngester()
+
+        with pytest.MonkeyPatch.context() as mp:
+            mp.setattr(
+                "aiohttp.ClientSession",
+                lambda **kwargs: AsyncMock(
+                    __aenter__=AsyncMock(
+                        side_effect=aiohttp.ClientError("connection failed")
+                    ),
+                    __aexit__=AsyncMock(return_value=False),
+                ),
+            )
+            result = await ingester.discover("testuser")
+
+        assert result == []
+
+    async def test_discover_pagination(self) -> None:
+        """ページネーションが正しく処理されること."""
+        ingester = ZennIngester()
+
+        page1_response = AsyncMock()
+        page1_response.status = 200
+        page1_response.json = AsyncMock(return_value={
+            "articles": [{"slug": "article-1"}],
+            "next_page": "2",
+        })
+
+        page2_response = AsyncMock()
+        page2_response.status = 200
+        page2_response.json = AsyncMock(return_value={
+            "articles": [{"slug": "article-2"}],
+            "next_page": None,
+        })
+
+        call_count = 0
+
+        def make_context_manager(*args: object, **kwargs: object) -> AsyncMock:
+            nonlocal call_count
+            call_count += 1
+            resp = page1_response if call_count == 1 else page2_response
+            return AsyncMock(
+                __aenter__=AsyncMock(return_value=resp),
+                __aexit__=AsyncMock(return_value=False),
+            )
+
+        mock_session = AsyncMock()
+        mock_session.get = MagicMock(side_effect=make_context_manager)
+
+        with pytest.MonkeyPatch.context() as mp:
+            mp.setattr(
+                "aiohttp.ClientSession",
+                lambda **kwargs: AsyncMock(
+                    __aenter__=AsyncMock(return_value=mock_session),
+                    __aexit__=AsyncMock(return_value=False),
+                ),
+            )
+            result = await ingester.discover("testuser")
+
+        assert result == ["article-1", "article-2"]
+
+
+class TestZennIngesterInheritance:
+    """ZennIngester が BaseIngester を正しく継承していることのテスト."""
+
+    def test_is_subclass_of_base_ingester(self) -> None:
+        """ZennIngester が BaseIngester のサブクラスであること."""
+        assert issubclass(ZennIngester, BaseIngester)
+
+    def test_instance_is_base_ingester(self) -> None:
+        """ZennIngester インスタンスが BaseIngester のインスタンスであること."""
+        ingester = ZennIngester()
+        assert isinstance(ingester, BaseIngester)
+
+    async def test_fetch_batch_inherited(self) -> None:
+        """fetch_batch() がデフォルト実装で動作すること."""
+        ingester = ZennIngester()
+
+        mock_response = AsyncMock()
+        mock_response.status = 200
+        mock_response.json = AsyncMock(return_value={
+            "article": {
+                "title": "Test",
+                "body_markdown": "Content",
+                "slug": "test",
+            }
+        })
+
+        mock_session = AsyncMock()
+        mock_session.get = MagicMock(return_value=AsyncMock(
+            __aenter__=AsyncMock(return_value=mock_response),
+            __aexit__=AsyncMock(return_value=False),
+        ))
+
+        with pytest.MonkeyPatch.context() as mp:
+            mp.setattr(
+                "aiohttp.ClientSession",
+                lambda **kwargs: AsyncMock(
+                    __aenter__=AsyncMock(return_value=mock_session),
+                    __aexit__=AsyncMock(return_value=False),
+                ),
+            )
+            results = await ingester.fetch_batch(["test"])
+
+        assert len(results) == 1
+        assert results[0].source_type == "zenn"
 
 
 # --- LocalFileIngester テスト ---
