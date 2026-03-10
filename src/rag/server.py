@@ -131,8 +131,9 @@ def _build_rag_service() -> RAGKnowledgeService:
 
 @mcp.tool()
 async def rag_search(query: str, n_results: int | None = None) -> str:
-    """ユーザーの質問に答えるためにナレッジベースを検索する。挨拶・雑談以外の質問では必ずこのツールを最初に呼び出すこと。
+    """[rag-knowledge] RAG search - ナレッジベース検索。挨拶・雑談以外の質問では必ずこのツールを最初に呼び出すこと。
 
+    knowledge base, vector search, BM25, retrieval-augmented generation.
     ナレッジベースにはゲーム攻略情報・技術文書等が格納されている。
     知らない用語や固有名詞を含む質問でも必ず検索すること。
 
@@ -207,7 +208,9 @@ async def rag_search(query: str, n_results: int | None = None) -> str:
 
 @mcp.tool()
 async def rag_add(url: str) -> str:
-    """単一ページをナレッジベースに取り込む.
+    """[rag-knowledge] RAG add - 単一ページをナレッジベースに取り込む.
+
+    knowledge base, ingest, web page, crawl single URL.
 
     Args:
         url: 取り込むページのURL
@@ -230,7 +233,9 @@ async def rag_add(url: str) -> str:
 
 @mcp.tool()
 async def rag_crawl(url: str, pattern: str = "") -> str:
-    """リンク集ページからクロール＆一括取り込み.
+    """[rag-knowledge] RAG crawl - リンク集ページからクロール＆一括取り込み.
+
+    knowledge base, bulk ingest, web crawl, link index.
 
     Args:
         url: リンク集ページのURL
@@ -255,7 +260,9 @@ async def rag_crawl(url: str, pattern: str = "") -> str:
 
 @mcp.tool()
 async def rag_delete(url: str) -> str:
-    """ソースURL指定でナレッジから削除.
+    """[rag-knowledge] RAG delete - ソースURL指定でナレッジから削除.
+
+    knowledge base, remove source, delete document.
 
     Args:
         url: 削除するソースURL
@@ -276,7 +283,9 @@ async def rag_delete(url: str) -> str:
 
 @mcp.tool()
 async def rag_stats() -> str:
-    """ナレッジベースの統計情報を表示.
+    """[rag-knowledge] RAG stats - ナレッジベースの統計情報を表示.
+
+    knowledge base, statistics, chunk count, source count.
 
     Returns:
         統計情報のテキスト
