@@ -19,8 +19,17 @@ from urllib.parse import urldefrag
 
 from .evaluation import (
     EvaluationReport,
+    FailureTag,
     evaluate_retrieval,
 )
+
+# 失敗タグの日本語説明と改善ターゲット
+FAILURE_TAG_DESCRIPTIONS: dict[str, tuple[str, str]] = {
+    FailureTag.RETRIEVAL_MISS.value: ("関連文書が検索されなかった", "チャンキング / Embedding"),
+    FailureTag.RETRIEVAL_NOISE.value: ("無関係な文書が上位に来た", "スコアリング / フィルタリング"),
+    FailureTag.CHUNK_FRAGMENTATION.value: ("回答に必要な情報が分断された", "チャンクサイズ"),
+    FailureTag.QUERY_MISMATCH.value: ("クエリと文書の表現が異なる", "クエリ拡張 / Embedding"),
+}
 
 if TYPE_CHECKING:
     from .bm25_index import BM25Index
@@ -529,6 +538,7 @@ def write_json_report(
             "average_ndcg": report.average_ndcg,
             "average_mrr": report.average_mrr,
             "negative_source_violations": len(report.negative_source_violations),
+            "failure_tag_summary": report.failure_tag_summary,
         },
         "regression": regression,
         "query_results": [
@@ -543,6 +553,7 @@ def write_json_report(
                 "retrieved_sources": qr.retrieved_sources,
                 "expected_sources": qr.expected_sources,
                 "negative_violations": qr.negative_violations,
+                "failure_tags": [tag.value for tag in qr.failure_tags],
             }
             for qr in report.query_results
         ],
@@ -602,6 +613,18 @@ def write_markdown_report(
         "",
     ])
 
+    if report.failure_tag_summary:
+        lines.extend([
+            "## 失敗タグ分類",
+            "",
+            "| タグ | 件数 | 意味 | 改善ターゲット |",
+            "|------|------|------|----------------|",
+        ])
+        for tag_value, count in sorted(report.failure_tag_summary.items(), key=lambda x: -x[1]):
+            desc, target = FAILURE_TAG_DESCRIPTIONS.get(tag_value, (tag_value, "-"))
+            lines.append(f"| {tag_value} | {count} | {desc} | {target} |")
+        lines.append("")
+
     if regression:
         lines.extend([
             "## リグレッション検出",
@@ -643,6 +666,9 @@ def write_markdown_report(
         ])
         if qr.negative_violations:
             lines.append(f"- **禁止ソース違反**: {qr.negative_violations}")
+        if qr.failure_tags:
+            tag_strs = [tag.value for tag in qr.failure_tags]
+            lines.append(f"- **失敗タグ**: {', '.join(tag_strs)}")
         lines.append("")
 
     with open(output_path, "w", encoding="utf-8") as f:

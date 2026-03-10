@@ -14,12 +14,14 @@ import pytest
 from rag.evaluation import (
     EvaluationDatasetQuery,
     EvaluationReport,
+    FailureTag,
     PrecisionRecallResult,
     QueryEvaluationResult,
     calculate_ndcg,
     calculate_mrr,
     calculate_precision_recall,
     check_negative_sources,
+    classify_failure_tags,
     evaluate_retrieval,
     load_evaluation_dataset,
 )
@@ -656,3 +658,341 @@ class TestEvaluationDatasetQueryDataclass:
         assert query.expected_keywords == []
         assert query.description == ""
         assert query.notes == ""
+
+
+class TestClassifyFailureTags:
+    """classify_failure_tags() のテスト."""
+
+    def test_perfect_retrieval_no_tags(self) -> None:
+        """完璧な検索結果の場合、失敗タグなし."""
+        pr_result = PrecisionRecallResult(
+            precision=1.0, recall=1.0, f1=1.0,
+            true_positives=2, false_positives=0, false_negatives=0,
+        )
+        tags = classify_failure_tags(
+            pr_result=pr_result,
+            retrieved_sources=["https://a.com", "https://b.com"],
+            expected_sources=["https://a.com", "https://b.com"],
+            ndcg=1.0,
+        )
+        assert tags == []
+
+    def test_retrieval_miss(self) -> None:
+        """関連文書が検索されなかった場合、retrieval_missタグ."""
+        pr_result = PrecisionRecallResult(
+            precision=1.0, recall=0.5, f1=0.667,
+            true_positives=1, false_positives=0, false_negatives=1,
+        )
+        tags = classify_failure_tags(
+            pr_result=pr_result,
+            retrieved_sources=["https://a.com"],
+            expected_sources=["https://a.com", "https://b.com"],
+            ndcg=1.0,
+        )
+        assert FailureTag.RETRIEVAL_MISS in tags
+
+    def test_retrieval_noise(self) -> None:
+        """無関係な文書が上位に来た場合、retrieval_noiseタグ."""
+        pr_result = PrecisionRecallResult(
+            precision=0.5, recall=1.0, f1=0.667,
+            true_positives=1, false_positives=1, false_negatives=0,
+        )
+        tags = classify_failure_tags(
+            pr_result=pr_result,
+            retrieved_sources=["https://a.com", "https://x.com"],
+            expected_sources=["https://a.com"],
+            ndcg=1.0,
+        )
+        assert FailureTag.RETRIEVAL_NOISE in tags
+
+    def test_chunk_fragmentation(self) -> None:
+        """情報が分断された場合、chunk_fragmentationタグ."""
+        pr_result = PrecisionRecallResult(
+            precision=0.5, recall=0.5, f1=0.5,
+            true_positives=1, false_positives=1, false_negatives=1,
+        )
+        tags = classify_failure_tags(
+            pr_result=pr_result,
+            retrieved_sources=["https://a.com", "https://x.com"],
+            expected_sources=["https://a.com", "https://b.com"],
+            ndcg=0.3,
+        )
+        assert FailureTag.CHUNK_FRAGMENTATION in tags
+
+    def test_no_chunk_fragmentation_when_ndcg_high(self) -> None:
+        """NDCGが高い場合、chunk_fragmentationタグなし."""
+        pr_result = PrecisionRecallResult(
+            precision=0.5, recall=0.5, f1=0.5,
+            true_positives=1, false_positives=1, false_negatives=1,
+        )
+        tags = classify_failure_tags(
+            pr_result=pr_result,
+            retrieved_sources=["https://a.com", "https://x.com"],
+            expected_sources=["https://a.com", "https://b.com"],
+            ndcg=0.8,
+        )
+        assert FailureTag.CHUNK_FRAGMENTATION not in tags
+
+    def test_query_mismatch_no_tp(self) -> None:
+        """取得したが正解が1つも含まれない場合、query_mismatchタグ."""
+        pr_result = PrecisionRecallResult(
+            precision=0.0, recall=0.0, f1=0.0,
+            true_positives=0, false_positives=2, false_negatives=1,
+        )
+        tags = classify_failure_tags(
+            pr_result=pr_result,
+            retrieved_sources=["https://x.com", "https://y.com"],
+            expected_sources=["https://a.com"],
+            ndcg=0.0,
+        )
+        assert FailureTag.QUERY_MISMATCH in tags
+
+    def test_query_mismatch_empty_retrieval(self) -> None:
+        """取得結果がゼロの場合もquery_mismatchタグ."""
+        pr_result = PrecisionRecallResult(
+            precision=0.0, recall=0.0, f1=0.0,
+            true_positives=0, false_positives=0, false_negatives=1,
+        )
+        tags = classify_failure_tags(
+            pr_result=pr_result,
+            retrieved_sources=[],
+            expected_sources=["https://a.com"],
+            ndcg=0.0,
+        )
+        assert FailureTag.QUERY_MISMATCH in tags
+        assert FailureTag.RETRIEVAL_MISS in tags
+
+    def test_multiple_tags(self) -> None:
+        """複数の失敗タグが同時に付与されるケース."""
+        pr_result = PrecisionRecallResult(
+            precision=0.0, recall=0.0, f1=0.0,
+            true_positives=0, false_positives=3, false_negatives=2,
+        )
+        tags = classify_failure_tags(
+            pr_result=pr_result,
+            retrieved_sources=["https://x.com", "https://y.com", "https://z.com"],
+            expected_sources=["https://a.com", "https://b.com"],
+            ndcg=0.0,
+        )
+        assert FailureTag.RETRIEVAL_MISS in tags
+        assert FailureTag.RETRIEVAL_NOISE in tags
+        assert FailureTag.QUERY_MISMATCH in tags
+
+    def test_both_empty_no_tags(self) -> None:
+        """両方空の場合（完璧）、失敗タグなし."""
+        pr_result = PrecisionRecallResult(
+            precision=1.0, recall=1.0, f1=1.0,
+            true_positives=0, false_positives=0, false_negatives=0,
+        )
+        tags = classify_failure_tags(
+            pr_result=pr_result,
+            retrieved_sources=[],
+            expected_sources=[],
+            ndcg=1.0,
+        )
+        assert tags == []
+
+
+class TestFailureTagEnum:
+    """FailureTag Enumのテスト."""
+
+    def test_values(self) -> None:
+        """各タグの値が正しいこと."""
+        assert FailureTag.RETRIEVAL_MISS.value == "retrieval_miss"
+        assert FailureTag.RETRIEVAL_NOISE.value == "retrieval_noise"
+        assert FailureTag.CHUNK_FRAGMENTATION.value == "chunk_fragmentation"
+        assert FailureTag.QUERY_MISMATCH.value == "query_mismatch"
+
+    def test_all_members(self) -> None:
+        """4つのタグが定義されていること."""
+        assert len(FailureTag) == 4
+
+
+class TestEvaluateRetrievalWithFailureTags:
+    """evaluate_retrieval() の失敗タグ統合テスト."""
+
+    @pytest.fixture
+    def mock_rag_service(self) -> MagicMock:
+        """モックRAGKnowledgeServiceを作成する."""
+        mock = MagicMock()
+        mock.retrieve = AsyncMock()
+        return mock
+
+    @pytest.fixture
+    def sample_dataset_path(self, tmp_path: Path) -> str:
+        """サンプルデータセットファイルを作成する."""
+        dataset = {
+            "queries": [
+                {
+                    "id": "q1",
+                    "query": "完璧な検索",
+                    "expected_sources": ["https://example.com/a.html"],
+                    "negative_sources": [],
+                },
+                {
+                    "id": "q2",
+                    "query": "失敗する検索",
+                    "expected_sources": [
+                        "https://example.com/b.html",
+                        "https://example.com/c.html",
+                    ],
+                    "negative_sources": [],
+                },
+            ]
+        }
+        dataset_path = tmp_path / "eval_dataset.json"
+        dataset_path.write_text(json.dumps(dataset, ensure_ascii=False), encoding="utf-8")
+        return str(dataset_path)
+
+    async def test_failure_tags_in_query_results(
+        self,
+        mock_rag_service: MagicMock,
+        sample_dataset_path: str,
+    ) -> None:
+        """クエリ結果に失敗タグが含まれること."""
+        mock_rag_service.retrieve.side_effect = [
+            RAGRetrievalResult(
+                context="参考情報",
+                sources=["https://example.com/a.html"],
+            ),
+            RAGRetrievalResult(
+                context="参考情報",
+                sources=["https://example.com/x.html"],  # 不正解のみ
+            ),
+        ]
+
+        report = await evaluate_retrieval(mock_rag_service, sample_dataset_path)
+
+        # q1: 完璧な検索 → タグなし
+        assert report.query_results[0].failure_tags == []
+        # q2: 不正解のみ → retrieval_miss + retrieval_noise + query_mismatch
+        q2_tags = report.query_results[1].failure_tags
+        assert FailureTag.RETRIEVAL_MISS in q2_tags
+        assert FailureTag.RETRIEVAL_NOISE in q2_tags
+        assert FailureTag.QUERY_MISMATCH in q2_tags
+
+    async def test_failure_tag_summary_in_report(
+        self,
+        mock_rag_service: MagicMock,
+        sample_dataset_path: str,
+    ) -> None:
+        """レポートに失敗タグ集計が含まれること."""
+        mock_rag_service.retrieve.side_effect = [
+            RAGRetrievalResult(
+                context="参考情報",
+                sources=["https://example.com/a.html"],
+            ),
+            RAGRetrievalResult(
+                context="参考情報",
+                sources=["https://example.com/x.html"],  # 不正解のみ
+            ),
+        ]
+
+        report = await evaluate_retrieval(mock_rag_service, sample_dataset_path)
+
+        assert report.failure_tag_summary is not None
+        assert report.failure_tag_summary.get("retrieval_miss", 0) >= 1
+        assert report.failure_tag_summary.get("retrieval_noise", 0) >= 1
+        assert report.failure_tag_summary.get("query_mismatch", 0) >= 1
+
+    async def test_perfect_retrieval_no_failure_tags(
+        self,
+        mock_rag_service: MagicMock,
+        sample_dataset_path: str,
+    ) -> None:
+        """完璧な検索結果の場合、失敗タグ集計が空."""
+        mock_rag_service.retrieve.side_effect = [
+            RAGRetrievalResult(
+                context="参考情報",
+                sources=["https://example.com/a.html"],
+            ),
+            RAGRetrievalResult(
+                context="参考情報",
+                sources=[
+                    "https://example.com/b.html",
+                    "https://example.com/c.html",
+                ],
+            ),
+        ]
+
+        report = await evaluate_retrieval(mock_rag_service, sample_dataset_path)
+
+        assert report.failure_tag_summary == {}
+        for qr in report.query_results:
+            assert qr.failure_tags == []
+
+
+class TestQueryEvaluationResultFailureTags:
+    """QueryEvaluationResult の failure_tags フィールドテスト."""
+
+    def test_default_failure_tags(self) -> None:
+        """failure_tagsのデフォルト値は空リスト."""
+        result = QueryEvaluationResult(
+            query_id="q1",
+            query="テスト",
+            precision=0.8,
+            recall=0.6,
+            f1=0.685,
+            ndcg=0.9,
+            mrr=1.0,
+            retrieved_sources=["https://a.com"],
+            expected_sources=["https://a.com", "https://b.com"],
+            negative_violations=[],
+        )
+        assert result.failure_tags == []
+
+    def test_failure_tags_with_values(self) -> None:
+        """failure_tagsに値を設定できること."""
+        result = QueryEvaluationResult(
+            query_id="q1",
+            query="テスト",
+            precision=0.0,
+            recall=0.0,
+            f1=0.0,
+            ndcg=0.0,
+            mrr=0.0,
+            retrieved_sources=[],
+            expected_sources=["https://a.com"],
+            negative_violations=[],
+            failure_tags=[FailureTag.RETRIEVAL_MISS, FailureTag.QUERY_MISMATCH],
+        )
+        assert len(result.failure_tags) == 2
+        assert FailureTag.RETRIEVAL_MISS in result.failure_tags
+        assert FailureTag.QUERY_MISMATCH in result.failure_tags
+
+
+class TestEvaluationReportFailureTagSummary:
+    """EvaluationReport の failure_tag_summary フィールドテスト."""
+
+    def test_default_failure_tag_summary(self) -> None:
+        """failure_tag_summaryのデフォルト値は空辞書."""
+        report = EvaluationReport(
+            queries_evaluated=0,
+            average_precision=0.0,
+            average_recall=0.0,
+            average_f1=0.0,
+            average_ndcg=0.0,
+            average_mrr=0.0,
+            negative_source_violations=[],
+        )
+        assert report.failure_tag_summary == {}
+
+    def test_failure_tag_summary_with_values(self) -> None:
+        """failure_tag_summaryに値を設定できること."""
+        report = EvaluationReport(
+            queries_evaluated=5,
+            average_precision=0.5,
+            average_recall=0.5,
+            average_f1=0.5,
+            average_ndcg=0.5,
+            average_mrr=0.5,
+            negative_source_violations=[],
+            failure_tag_summary={
+                "retrieval_miss": 3,
+                "retrieval_noise": 2,
+                "query_mismatch": 1,
+            },
+        )
+        assert report.failure_tag_summary["retrieval_miss"] == 3
+        assert report.failure_tag_summary["retrieval_noise"] == 2
+        assert report.failure_tag_summary["query_mismatch"] == 1
