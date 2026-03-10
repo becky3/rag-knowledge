@@ -38,7 +38,11 @@ def mock_vector_store(mock_embedding_provider: MagicMock) -> MagicMock:
     mock.search = AsyncMock(return_value=[])
     mock.delete_by_source = AsyncMock(return_value=0)
     mock.delete_stale_chunks = AsyncMock(return_value=0)
-    mock.get_stats = MagicMock(return_value={"total_chunks": 10, "source_count": 2})
+    mock.get_stats = MagicMock(return_value={
+        "total_chunks": 10,
+        "source_count": 2,
+        "sources": [],
+    })
     return mock
 
 
@@ -328,6 +332,14 @@ class TestGetStats:
         mock_vector_store.get_stats.return_value = {
             "total_chunks": 100,
             "source_count": 10,
+            "sources": [
+                {
+                    "domain": "example.com",
+                    "pages": [
+                        {"url": "https://example.com/p1", "title": "Page 1", "chunks": 5},
+                    ],
+                },
+            ],
         }
 
         # Act
@@ -336,6 +348,8 @@ class TestGetStats:
         # Assert
         assert result["total_chunks"] == 100
         assert result["source_count"] == 10
+        assert isinstance(result["sources"], list)
+        assert len(result["sources"]) == 1
 
 
 class TestConfiguration:

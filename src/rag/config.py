@@ -89,6 +89,9 @@ class RAGSettings(BaseSettings):
     # レスポンスサイズ制限
     rag_max_response_chars: int | None = Field(default=None, ge=1)
 
+    # rag_stats ソース一覧の最大表示件数
+    rag_stats_max_sources: int = Field(default=100, ge=1)
+
     # デバッグ
     rag_debug_log_enabled: bool = False
 
