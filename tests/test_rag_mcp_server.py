@@ -638,3 +638,169 @@ class TestRagCrawlPreviewTool:
             result = await mod.rag_crawl_preview("https://example.com/index")
 
         assert "エラー: プレビューに失敗しました" in result
+
+
+class TestRagStatsOutput:
+    """rag_stats ツールの出力フォーマットテスト（Issue #25）."""
+
+    @pytest.fixture(autouse=True)
+    def _patch_rag_service(self) -> None:
+        """rag_stats のテスト用に RAGKnowledgeService をモックする."""
+        self.mock_service = AsyncMock()
+        self.mock_settings = MagicMock()
+        self.mock_settings.rag_stats_max_sources = 100
+
+    async def test_stats_contains_sources_section(self) -> None:
+        """蓄積データ概要セクションが出力に含まれること（#25）."""
+        mod = import_module("rag.server")
+
+        self.mock_service.get_stats = AsyncMock(
+            return_value={
+                "total_chunks": 150,
+                "source_count": 3,
+                "sources": [
+                    {
+                        "domain": "example.com",
+                        "pages": [
+                            {
+                                "url": "https://example.com/page1",
+                                "title": "テストページ1",
+                                "chunks": 5,
+                            },
+                            {
+                                "url": "https://example.com/page2",
+                                "title": "テストページ2",
+                                "chunks": 3,
+                            },
+                        ],
+                    },
+                    {
+                        "domain": "other.com",
+                        "pages": [
+                            {
+                                "url": "https://other.com/doc",
+                                "title": "ドキュメント",
+                                "chunks": 10,
+                            },
+                        ],
+                    },
+                ],
+            }
+        )
+
+        with (
+            patch.object(mod, "_get_rag_service", return_value=self.mock_service),
+            patch.object(mod, "get_settings", return_value=self.mock_settings),
+        ):
+            result = await mod.rag_stats()
+
+        assert "ナレッジベース統計:" in result
+        assert "総チャンク数: 150" in result
+        assert "ソースURL数: 3" in result
+        assert "蓄積データ概要:" in result
+        assert "[example.com] (2ページ)" in result
+        assert "テストページ1 (https://example.com/page1)" in result
+        assert "テストページ2 (https://example.com/page2)" in result
+        assert "[other.com] (1ページ)" in result
+        assert "ドキュメント (https://other.com/doc)" in result
+
+    async def test_stats_empty_sources(self) -> None:
+        """ソースが空の場合は蓄積データ概要セクションが含まれないこと（#25）."""
+        mod = import_module("rag.server")
+
+        self.mock_service.get_stats = AsyncMock(
+            return_value={
+                "total_chunks": 0,
+                "source_count": 0,
+                "sources": [],
+            }
+        )
+
+        with (
+            patch.object(mod, "_get_rag_service", return_value=self.mock_service),
+            patch.object(mod, "get_settings", return_value=self.mock_settings),
+        ):
+            result = await mod.rag_stats()
+
+        assert "ナレッジベース統計:" in result
+        assert "総チャンク数: 0" in result
+        assert "蓄積データ概要:" not in result
+
+    async def test_stats_truncation_when_exceeds_limit(self) -> None:
+        """表示上限を超える場合に省略メッセージが出ること（#25）."""
+        mod = import_module("rag.server")
+
+        # 3ページ分のデータを用意し、上限を2に設定
+        self.mock_settings.rag_stats_max_sources = 2
+        self.mock_service.get_stats = AsyncMock(
+            return_value={
+                "total_chunks": 30,
+                "source_count": 3,
+                "sources": [
+                    {
+                        "domain": "example.com",
+                        "pages": [
+                            {
+                                "url": "https://example.com/page1",
+                                "title": "ページ1",
+                                "chunks": 10,
+                            },
+                            {
+                                "url": "https://example.com/page2",
+                                "title": "ページ2",
+                                "chunks": 10,
+                            },
+                            {
+                                "url": "https://example.com/page3",
+                                "title": "ページ3",
+                                "chunks": 10,
+                            },
+                        ],
+                    },
+                ],
+            }
+        )
+
+        with (
+            patch.object(mod, "_get_rag_service", return_value=self.mock_service),
+            patch.object(mod, "get_settings", return_value=self.mock_settings),
+        ):
+            result = await mod.rag_stats()
+
+        # 最初の2ページは表示される
+        assert "ページ1" in result
+        assert "ページ2" in result
+        # 3ページ目は省略される
+        assert "ページ3" not in result
+        assert "表示上限 2 件に達したため省略されたソースがあります" in result
+
+    async def test_stats_fallback_title(self) -> None:
+        """タイトルが空の場合にフォールバックテキストが表示されること（#25）."""
+        mod = import_module("rag.server")
+
+        self.mock_service.get_stats = AsyncMock(
+            return_value={
+                "total_chunks": 5,
+                "source_count": 1,
+                "sources": [
+                    {
+                        "domain": "example.com",
+                        "pages": [
+                            {
+                                "url": "https://example.com/page1",
+                                "title": "",
+                                "chunks": 5,
+                            },
+                        ],
+                    },
+                ],
+            }
+        )
+
+        with (
+            patch.object(mod, "_get_rag_service", return_value=self.mock_service),
+            patch.object(mod, "get_settings", return_value=self.mock_settings),
+        ):
+            result = await mod.rag_stats()
+
+        assert "(タイトル取得不可)" in result

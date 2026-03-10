@@ -254,7 +254,7 @@ async def test_prefix_enabled_adds_document_prefix() -> None:
     await provider.embed_documents(["hello"])
     provider._client.embeddings.create.assert_awaited_once_with(
         model="ruri-v3-310m",
-        input=["検索文書: hello"],
+        input=["search_document: hello"],
     )
 
 
@@ -272,7 +272,7 @@ async def test_prefix_enabled_adds_query_prefix() -> None:
     await provider.embed_query("hello")
     provider._client.embeddings.create.assert_awaited_once_with(
         model="ruri-v3-310m",
-        input=["検索クエリ: hello"],
+        input=["search_query: hello"],
     )
 
 
