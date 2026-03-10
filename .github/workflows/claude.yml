@@ -1,0 +1,31 @@
+# Claude Code — Caller
+#
+# @claude メンション応答 + auto-implement 自動実装。
+# Reusable Workflow (shared-workflows) を呼び出す。
+# 設計書: shared-workflows/docs/specs/claude-code-actions.md
+
+name: Claude Code
+
+permissions:
+  contents: write
+  pull-requests: write
+  issues: write
+  id-token: write
+
+on:
+  issue_comment:
+    types: [created]
+  pull_request_review_comment:
+    types: [created]
+  issues:
+    types: [opened, assigned, labeled]
+  pull_request_review:
+    types: [submitted]
+
+jobs:
+  claude:
+    uses: becky3/shared-workflows/.github/workflows/claude.yml@main
+    with:
+      allowed_user: becky3
+      auto_progress_prompt: "GA環境専用ルールが .claude/CLAUDE-auto-progress.md にあります。このファイルを必ず読んでから作業を開始してください。ファイルが見つからない・読めない場合は、その旨をIssue/PRにコメントして作業を中断してください。"
+    secrets: inherit

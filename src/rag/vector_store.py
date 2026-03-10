@@ -1,0 +1,340 @@
+"""ChromaDBベクトルストアモジュール
+
+仕様: docs/specs/rag-knowledge.md
+"""
+
+from __future__ import annotations
+
+import asyncio
+import logging
+from dataclasses import dataclass
+from typing import cast
+
+import chromadb
+from chromadb.api.types import Embeddings, IncludeEnum
+from chromadb.config import Settings as ChromaSettings
+
+from .embedding.base import EmbeddingProvider
+
+logger = logging.getLogger(__name__)
+
+
+@dataclass
+class DocumentChunk:
+    """ベクトルストアに格納するチャンク."""
+
+    id: str  # ユニークID（URLハッシュ + chunk_index）
+    text: str  # チャンク本文
+    metadata: dict[str, str | int]  # source_url, title, chunk_index, crawled_at
+
+
+@dataclass
+class RetrievalResult:
+    """検索結果."""
+
+    text: str
+    metadata: dict[str, str | int]
+    distance: float  # 小さいほど類似度が高い
+
+
+class VectorStore:
+    """ChromaDBベースのベクトルストア.
+
+    仕様: docs/specs/rag-knowledge.md
+    """
+
+    def __init__(
+        self,
+        embedding_provider: EmbeddingProvider,
+        persist_directory: str = "./chroma_db",
+        collection_name: str = "knowledge",
+    ) -> None:
+        """VectorStoreを初期化する.
+
+        Args:
+            embedding_provider: Embedding生成プロバイダー
+            persist_directory: ChromaDBの永続化ディレクトリ
+            collection_name: コレクション名
+        """
+        self._embedding = embedding_provider
+        self._persist_directory = persist_directory
+        self._collection_name = collection_name
+        # テレメトリを無効化
+        chroma_settings = ChromaSettings(anonymized_telemetry=False)
+        self._client = chromadb.PersistentClient(
+            path=persist_directory, settings=chroma_settings
+        )
+        self._collection = self._client.get_or_create_collection(
+            name=collection_name,
+            metadata={"hnsw:space": "cosine"},
+        )
+
+    @classmethod
+    def create_ephemeral(
+        cls,
+        embedding_provider: EmbeddingProvider,
+        collection_name: str = "knowledge",
+    ) -> "VectorStore":
+        """テスト用のインメモリVectorStoreを作成する.
+
+        Args:
+            embedding_provider: Embedding生成プロバイダー
+            collection_name: コレクション名
+
+        Returns:
+            インメモリのVectorStoreインスタンス
+        """
+        instance = cls.__new__(cls)
+        instance._embedding = embedding_provider
+        instance._persist_directory = ""
+        instance._collection_name = collection_name
+        # テレメトリを無効化
+        chroma_settings = ChromaSettings(anonymized_telemetry=False)
+        instance._client = chromadb.EphemeralClient(settings=chroma_settings)
+        instance._collection = instance._client.get_or_create_collection(
+            name=collection_name,
+            metadata={"hnsw:space": "cosine"},
+        )
+        return instance
+
+    async def add_documents(self, chunks: list[DocumentChunk]) -> int:
+        """チャンクをEmbedding→ベクトルストアに追加（upsert動作）.
+
+        同じIDのドキュメントが既に存在する場合は上書きする。
+
+        Args:
+            chunks: 追加するチャンクのリスト
+
+        Returns:
+            追加件数
+        """
+        if not chunks:
+            return 0
+
+        # テキストをEmbeddingに変換
+        texts = [chunk.text for chunk in chunks]
+        raw_embeddings = await self._embedding.embed_documents(texts)
+        embeddings: Embeddings = cast(Embeddings, raw_embeddings)
+
+        # ChromaDBにupsert（同期APIなのでto_threadでラップ）
+        ids = [chunk.id for chunk in chunks]
+        metadatas = [chunk.metadata for chunk in chunks]
+
+        await asyncio.to_thread(
+            self._collection.upsert,
+            ids=ids,
+            embeddings=embeddings,
+            documents=texts,
+            metadatas=metadatas,  # type: ignore[arg-type]
+        )
+
+        logger.info("Upserted %d documents to vector store", len(chunks))
+        return len(chunks)
+
+    async def search(
+        self,
+        query: str,
+        n_results: int = 5,
+        similarity_threshold: float | None = None,
+    ) -> list[RetrievalResult]:
+        """クエリに類似するチャンクを検索する.
+
+        Args:
+            query: 検索クエリ
+            n_results: 返却する結果の最大数
+            similarity_threshold: 類似度閾値（cosine距離）。指定時、この値より大きいdistanceの結果を除外
+
+        Returns:
+            検索結果のリスト（類似度の高い順）
+        """
+        # クエリをEmbeddingに変換
+        raw_query_embedding = await self._embedding.embed_query(query)
+        query_embeddings: Embeddings = cast(Embeddings, [raw_query_embedding])
+
+        # 閾値フィルタリングを行う場合、多めに取得してからフィルタリング
+        fetch_count = n_results
+        if similarity_threshold is not None:
+            # 閾値フィルタリング後にn_results件返すため、多めに取得
+            # 3倍（最低20件）: 閾値で除外される可能性を考慮し余裕を持って取得
+            fetch_count = max(n_results * 3, 20)
+
+        # コレクションサイズを超えないように制限（ChromaDBバージョンによる例外を防止）
+        collection_count = await asyncio.to_thread(self._collection.count)
+        if collection_count > 0:
+            fetch_count = min(fetch_count, collection_count)
+        else:
+            # コレクションが空の場合は空リストを返す
+            return []
+
+        # ChromaDBで検索（同期APIなのでto_threadでラップ）
+        results = await asyncio.to_thread(
+            self._collection.query,
+            query_embeddings=query_embeddings,
+            n_results=fetch_count,
+            include=[IncludeEnum.documents, IncludeEnum.metadatas, IncludeEnum.distances],
+        )
+
+        # 結果を変換
+        retrieval_results: list[RetrievalResult] = []
+        excluded_count = 0
+        if results["documents"] and results["documents"][0]:
+            documents = results["documents"][0]
+            metadatas = results["metadatas"][0] if results["metadatas"] else [{}] * len(documents)
+            distances = results["distances"][0] if results["distances"] else [0.0] * len(documents)
+
+            for doc, meta, dist in zip(documents, metadatas, distances):
+                # 閾値フィルタリング
+                if similarity_threshold is not None and dist > similarity_threshold:
+                    excluded_count += 1
+                    continue
+
+                retrieval_results.append(
+                    RetrievalResult(
+                        text=doc,
+                        metadata=meta or {},  # type: ignore[arg-type]
+                        distance=dist,
+                    )
+                )
+
+                # n_results件に達したら終了
+                if len(retrieval_results) >= n_results:
+                    break
+
+        if excluded_count > 0:
+            logger.debug(
+                "Similarity threshold filtering: excluded %d results (threshold=%.3f)",
+                excluded_count,
+                similarity_threshold,
+            )
+
+        return retrieval_results
+
+    async def get_chunks_by_source(self, source_url: str) -> list[RetrievalResult]:
+        """ソースURL指定で全チャンクを取得する（chunk_index 昇順）.
+
+        Args:
+            source_url: 取得するソースURL
+
+        Returns:
+            チャンクのリスト（chunk_index 昇順）
+        """
+        results = await asyncio.to_thread(
+            self._collection.get,
+            where={"source_url": source_url},
+            include=[IncludeEnum.documents, IncludeEnum.metadatas],
+        )
+
+        if not results["ids"]:
+            return []
+
+        chunks: list[RetrievalResult] = []
+        documents = results["documents"] or []
+        metadatas = results["metadatas"] or []
+
+        for doc, meta in zip(documents, metadatas):
+            chunks.append(
+                RetrievalResult(
+                    text=doc or "",
+                    metadata=meta or {},  # type: ignore[arg-type]
+                    distance=0.0,
+                )
+            )
+
+        # chunk_index 昇順でソート
+        chunks.sort(key=lambda c: int(c.metadata.get("chunk_index", 0)))
+        return chunks
+
+    async def delete_by_source(self, source_url: str) -> int:
+        """ソースURL指定でチャンクを削除.
+
+        Args:
+            source_url: 削除するソースURL
+
+        Returns:
+            削除件数
+        """
+        # まず該当するドキュメントを検索
+        results = await asyncio.to_thread(
+            self._collection.get,
+            where={"source_url": source_url},
+            include=[IncludeEnum.metadatas],
+        )
+
+        if not results["ids"]:
+            return 0
+
+        ids_to_delete = results["ids"]
+        count = len(ids_to_delete)
+
+        # 削除実行
+        await asyncio.to_thread(
+            self._collection.delete,
+            ids=ids_to_delete,
+        )
+
+        logger.info("Deleted %d documents from vector store (source: %s)", count, source_url)
+        return count
+
+    async def delete_stale_chunks(self, source_url: str, valid_ids: set[str]) -> int:
+        """ソースURLのチャンクのうち、valid_idsに含まれないものを削除.
+
+        upsert後に古いチャンクを削除するために使用。
+
+        Args:
+            source_url: 対象ソースURL
+            valid_ids: 保持するID（これ以外のIDを削除）
+
+        Returns:
+            削除件数
+        """
+        # ソースURLの全チャンクを取得
+        results = await asyncio.to_thread(
+            self._collection.get,
+            where={"source_url": source_url},
+            include=[IncludeEnum.metadatas],
+        )
+
+        if not results["ids"]:
+            return 0
+
+        # valid_idsに含まれないIDを特定
+        stale_ids = [id_ for id_ in results["ids"] if id_ not in valid_ids]
+
+        if not stale_ids:
+            return 0
+
+        # 削除実行
+        await asyncio.to_thread(
+            self._collection.delete,
+            ids=stale_ids,
+        )
+
+        logger.info(
+            "Deleted %d stale chunks from vector store (source: %s)", len(stale_ids), source_url
+        )
+        return len(stale_ids)
+
+    def get_stats(self) -> dict[str, int]:
+        """ナレッジベース統計（総チャンク数等）を返す.
+
+        Note:
+            この関数は全チャンクのメタデータを走査するため O(N) のコストがかかる。
+            チャンク数が多い場合は頻繁な呼び出しを避けること。
+
+        Returns:
+            統計情報の辞書
+        """
+        count = self._collection.count()
+
+        # ユニークなソースURL数を取得
+        all_docs = self._collection.get(include=[IncludeEnum.metadatas])
+        source_urls: set[str] = set()
+        if all_docs["metadatas"]:
+            for meta in all_docs["metadatas"]:
+                if meta and "source_url" in meta:
+                    source_urls.add(str(meta["source_url"]))
+
+        return {
+            "total_chunks": count,
+            "source_count": len(source_urls),
+        }

@@ -1,0 +1,25 @@
+# Post Merge — Caller
+#
+# マージ後の自動処理（review-batch Issue 更新）。
+# Reusable Workflow (shared-workflows) を呼び出す。
+# 設計書: shared-workflows/docs/specs/auto-progress.md
+
+name: Post Merge
+
+permissions:
+  contents: read
+  pull-requests: write
+  issues: write
+  id-token: write
+
+on:
+  pull_request:
+    types: [closed]
+
+jobs:
+  post-merge:
+    if: >-
+      github.event.pull_request.merged == true
+      && contains(github.event.pull_request.labels.*.name, 'auto:merged')
+    uses: becky3/shared-workflows/.github/workflows/post-merge.yml@main
+    secrets: inherit

@@ -1,0 +1,41 @@
+# Copilot Auto Fix — Caller
+#
+# Copilot レビュー指摘の自動修正 + マージ。
+# Reusable Workflow (shared-workflows) を呼び出す。
+# 設計書: shared-workflows/docs/specs/copilot-auto-fix.md
+
+name: Copilot Auto Fix
+
+permissions:
+  contents: write
+  pull-requests: write
+  issues: write
+  checks: read
+  actions: read
+  id-token: write
+
+on:
+  pull_request:
+    types: [opened]
+  workflow_dispatch:
+    inputs:
+      pr_number:
+        description: 'PR number to process (for manual re-trigger after failure recovery)'
+        required: true
+        type: number
+
+jobs:
+  copilot-auto-fix:
+    if: >-
+      github.event_name == 'workflow_dispatch'
+      || (
+        github.event.pull_request.head.repo.full_name == github.repository
+        && startsWith(github.event.pull_request.head.ref, 'auto/')
+      )
+    uses: becky3/shared-workflows/.github/workflows/copilot-auto-fix.yml@main
+    with:
+      forbidden_patterns: |
+        .env*
+        pyproject.toml
+      auto_progress_prompt: "GA環境専用ルールが .claude/CLAUDE-auto-progress.md にあります。品質チェック・完了処理の手順はこのファイルを必ず読んでから作業を開始してください。"
+    secrets: inherit
