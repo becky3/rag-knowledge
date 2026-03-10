@@ -449,8 +449,8 @@ class TestWebCrawlerMarkdownConversion:
         crawler = WebCrawler(respect_robots_txt=False)
         _, text = crawler._extract_text(html)
 
-        assert "重要な" in text
-        assert "強調された" in text
+        assert "**重要な**" in text
+        assert "*強調された*" in text
 
     def test_unwanted_tags_still_removed(self) -> None:
         """Markdown変換後も不要タグ（script, style, nav等）が除去されていること."""
