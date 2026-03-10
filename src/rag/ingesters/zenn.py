@@ -111,6 +111,72 @@ class ZennIngester(BaseIngester):
             },
         )
 
+    async def fetch_batch(self, identifiers: list[str]) -> list[IngestedContent]:
+        """複数記事を一括取得する（セッション使い回し）.
+
+        Args:
+            identifiers: 記事 slug のリスト
+
+        Returns:
+            取得に成功した IngestedContent のリスト
+        """
+        if not identifiers:
+            return []
+
+        results: list[IngestedContent] = []
+        try:
+            async with aiohttp.ClientSession(timeout=self._timeout) as session:
+                for identifier in identifiers:
+                    try:
+                        slug = self.validate_identifier(identifier)
+                    except ValueError:
+                        logger.warning("Invalid slug: %s", identifier)
+                        continue
+
+                    url = f"{ZENN_API_BASE}/articles/{slug}"
+                    try:
+                        async with session.get(url) as resp:
+                            if resp.status == 404:
+                                logger.warning("Article not found: %s", slug)
+                                continue
+                            if resp.status != 200:
+                                logger.warning(
+                                    "Zenn API error: status=%d, slug=%s",
+                                    resp.status,
+                                    slug,
+                                )
+                                continue
+                            data = await resp.json()
+                    except (aiohttp.ClientError, TimeoutError) as e:
+                        logger.warning("Failed to fetch article %s: %s", slug, e)
+                        continue
+
+                    article = data.get("article", {})
+                    body = article.get("body_markdown", "")
+                    if not body:
+                        logger.warning("Article has no body: %s", slug)
+                        continue
+
+                    results.append(
+                        IngestedContent(
+                            source_id=f"https://zenn.dev/articles/{slug}",
+                            title=article.get("title", ""),
+                            text=body,
+                            ingested_at=IngestedContent.now_iso(),
+                            source_type="zenn",
+                            metadata={
+                                "slug": slug,
+                                "emoji": article.get("emoji", ""),
+                                "article_type": article.get("article_type", ""),
+                                "published": article.get("published", False),
+                            },
+                        )
+                    )
+        except (aiohttp.ClientError, TimeoutError) as e:
+            logger.warning("Session error during batch fetch: %s", e)
+
+        return results
+
     async def discover(self, source: str, **kwargs: object) -> list[str]:
         """ユーザー名から記事 slug 一覧を取得する.
 
