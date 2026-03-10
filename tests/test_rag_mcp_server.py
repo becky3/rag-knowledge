@@ -17,7 +17,7 @@ from rag.rag_knowledge import (
     RawSearchResults,
     VectorSearchItem,
 )
-from rag.server import _reset_rag_service
+from rag.server import _configure_and_run, _reset_rag_service
 
 
 @pytest.fixture(autouse=True)
@@ -286,3 +286,79 @@ class TestRagSearchOutput:
         assert "全文テキスト" in result
         # Result 2 には参照テキストが出る
         assert "ベクトル検索結果 Result 1 に掲載済み" in result
+
+
+class TestConfigureAndRun:
+    """_configure_and_run の起動分岐テスト."""
+
+    def test_stdio_mode_calls_run_without_transport(self) -> None:
+        """stdio モードでは mcp.run() が引数なしで呼ばれること."""
+        mod = import_module("rag.server")
+        mock_settings = MagicMock()
+        mock_settings.rag_transport = "stdio"
+
+        with (
+            patch.object(mod, "get_settings", return_value=mock_settings),
+            patch.object(mod.mcp, "run") as mock_run,
+        ):
+            _configure_and_run()
+
+        mock_run.assert_called_once_with()
+
+    def test_http_mode_removes_write_tools(self) -> None:
+        """HTTP モードでは write ツールが削除されること."""
+        mod = import_module("rag.server")
+        mock_settings = MagicMock()
+        mock_settings.rag_transport = "http"
+        mock_settings.rag_http_host = "127.0.0.1"
+        mock_settings.rag_http_port = 8081
+        mock_settings.rag_dns_rebinding_protection = True
+
+        removed_tools: list[str] = []
+
+        with (
+            patch.object(mod, "get_settings", return_value=mock_settings),
+            patch.object(
+                mod.mcp,
+                "remove_tool",
+                side_effect=lambda name: removed_tools.append(name),
+            ),
+            patch.object(mod.mcp, "run"),
+        ):
+            _configure_and_run()
+
+        assert set(removed_tools) == {"rag_add", "rag_crawl", "rag_delete"}
+
+    def test_http_mode_calls_run_with_streamable_http(self) -> None:
+        """HTTP モードでは mcp.run(transport='streamable-http') が呼ばれること."""
+        mod = import_module("rag.server")
+        mock_settings = MagicMock()
+        mock_settings.rag_transport = "http"
+        mock_settings.rag_http_host = "0.0.0.0"
+        mock_settings.rag_http_port = 9090
+        mock_settings.rag_dns_rebinding_protection = True
+
+        with (
+            patch.object(mod, "get_settings", return_value=mock_settings),
+            patch.object(mod.mcp, "remove_tool"),
+            patch.object(mod.mcp, "run") as mock_run,
+        ):
+            _configure_and_run()
+
+        mock_run.assert_called_once_with(transport="streamable-http")
+        assert mod.mcp.settings.host == "0.0.0.0"
+        assert mod.mcp.settings.port == 9090
+
+    def test_http_mode_aborts_if_tool_removal_fails(self) -> None:
+        """HTTP モードで write ツール削除に失敗したら RuntimeError で中断すること."""
+        mod = import_module("rag.server")
+        mock_settings = MagicMock()
+        mock_settings.rag_transport = "http"
+
+        with (
+            patch.object(mod, "get_settings", return_value=mock_settings),
+            patch.object(mod.mcp, "remove_tool", side_effect=KeyError("rag_add")),
+            patch.object(mod.mcp, "run"),
+            pytest.raises(RuntimeError, match="failed to remove write tools"),
+        ):
+            _configure_and_run()

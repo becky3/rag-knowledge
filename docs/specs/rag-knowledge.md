@@ -26,6 +26,8 @@ MCP サーバーとして独立動作し、5 つのツールを提供する。
 - プロジェクトルートの `.env` で設定を管理する
 - Embedding モデルを変更した場合、既存データとの類似度計算が不正確になるため、コレクション再構築が必要
 - 呼び出し元が MCP クライアントとして本サーバーに接続することで RAG 機能を利用できる
+- トランスポートは stdio（デフォルト）と http（Streamable HTTP）を切替可能。環境変数でトランスポート種別・ホスト・ポート・DNS リバインディング保護を設定する
+- HTTP モード時はデータ変更ツール（`rag_add`, `rag_crawl`, `rag_delete`）を非公開にし、読み取り専用ツールのみ提供する
 
 ## インターフェース
 
@@ -85,7 +87,7 @@ flowchart TB
     BM25["BM25 インデックス"]
     EMBED["Embedding プロバイダー"]
 
-    CLIENT --> TOOLS
+    CLIENT -->|stdio / http| TOOLS
     TOOLS --> Service
     Service --> CRAWLER
     Service --> CHUNKER

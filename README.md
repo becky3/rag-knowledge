@@ -43,7 +43,11 @@ cp .env.example .env  # Embedding 設定等を編集
 ## 起動
 
 ```bash
-# MCP サーバー (stdio モード)
+# MCP サーバー (stdio モード、デフォルト)
+uv run python -m rag.server
+
+# MCP サーバー (HTTP モード)
+# .env で RAG_TRANSPORT=http を設定
 uv run python -m rag.server
 
 # CLI
