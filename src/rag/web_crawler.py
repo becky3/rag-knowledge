@@ -35,6 +35,14 @@ class _RobotsCacheEntry:
 
 
 @dataclass
+class CrawlPreviewPage:
+    """クロールプレビュー結果（タイトルとURLのみ）."""
+
+    url: str
+    title: str
+
+
+@dataclass
 class CrawledPage:
     """クロール結果."""
 
@@ -388,6 +396,22 @@ class WebCrawler:
 
         return title, text.strip()
 
+    @staticmethod
+    def _extract_title(html: str) -> str:
+        """HTMLからタイトルのみを抽出する.
+
+        Args:
+            html: HTML文字列
+
+        Returns:
+            ページタイトル（取得できない場合は空文字列）
+        """
+        soup = BeautifulSoup(html, "html.parser")
+        title_tag = soup.find("title")
+        if title_tag and title_tag.string:
+            return title_tag.string.strip()
+        return ""
+
     async def crawl_index_page(
         self,
         index_url: str,
@@ -497,6 +521,78 @@ class WebCrawler:
             urls = allowed_urls
 
         return urls
+
+    async def crawl_preview(
+        self,
+        index_url: str,
+        url_pattern: str = "",
+    ) -> list[CrawlPreviewPage]:
+        """リンク集ページからクロール対象ページのタイトルとURLを一覧取得する.
+
+        実際の取り込み（チャンキング・ベクトル化）は行わず、
+        対象ページのタイトルとURLのみを返す。
+
+        Args:
+            index_url: リンク集ページのURL
+            url_pattern: 正規表現パターンでリンクをフィルタリング（任意）
+
+        Returns:
+            CrawlPreviewPage のリスト（タイトルとURL）
+
+        Raises:
+            ValueError: URL検証に失敗した場合
+        """
+        # crawl_index_page でリンク抽出（URL検証・robots.txt チェック込み）
+        urls = await self.crawl_index_page(index_url, url_pattern)
+
+        if not urls:
+            return []
+
+        # 各URLのタイトルを取得
+        results: list[CrawlPreviewPage] = []
+        for url in urls:
+            title = await self._fetch_title(url)
+            results.append(CrawlPreviewPage(url=url, title=title))
+
+        return results
+
+    async def _fetch_title(self, url: str) -> str:
+        """URLからページタイトルのみを取得する.
+
+        タイトル取得に失敗した場合は空文字列を返す（処理を中断しない）。
+
+        Args:
+            url: タイトルを取得するURL
+
+        Returns:
+            ページタイトル（取得失敗時は空文字列）
+        """
+        try:
+            async with self._semaphore:
+                async with aiohttp.ClientSession(
+                    timeout=self._timeout,
+                    headers={"User-Agent": USER_AGENT},
+                ) as session:
+                    async with session.get(url, allow_redirects=False) as resp:
+                        if resp.status in (301, 302, 303, 307, 308):
+                            logger.debug(
+                                "Redirect detected during title fetch: %s", url
+                            )
+                            return ""
+                        if resp.status != 200:
+                            logger.debug(
+                                "Failed to fetch title: %s (status=%d)", url, resp.status
+                            )
+                            return ""
+                        html = await self._decode_response(resp)
+
+            return self._extract_title(html)
+        except (asyncio.TimeoutError, aiohttp.ClientError):
+            logger.debug("Error fetching title for %s", url)
+            return ""
+        except Exception:
+            logger.debug("Unexpected error fetching title for %s", url, exc_info=True)
+            return ""
 
     async def crawl_page(self, url: str) -> CrawledPage | None:
         """単一ページの本文テキストを取得する. 失敗時は None.
