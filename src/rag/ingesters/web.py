@@ -78,16 +78,20 @@ class WebIngester(BaseIngester):
                 f"(検出された脅威: {', '.join(threat_types)})"
             )
 
-    async def fetch_single(self, identifier: str) -> IngestedContent | None:
+    async def fetch_single(
+        self, identifier: str, *, skip_safety_check: bool = False
+    ) -> IngestedContent | None:
         """単一 URL からコンテンツを取得する.
 
         1. URL 検証
-        2. Safe Browsing チェック
+        2. Safe Browsing チェック（skip_safety_check=True で省略可能）
         3. WebCrawler でクロール
         4. CrawledPage → IngestedContent に変換
 
         Args:
             identifier: 取得する URL
+            skip_safety_check: True の場合、Safe Browsing チェックを省略する
+                （バッチ処理で事前にチェック済みの場合に使用）
 
         Returns:
             IngestedContent、または取得失敗時は None
@@ -96,7 +100,8 @@ class WebIngester(BaseIngester):
             ValueError: URL 検証失敗または URL が危険な場合
         """
         validated_url = self.validate_identifier(identifier)
-        await self._check_safety(validated_url)
+        if not skip_safety_check:
+            await self._check_safety(validated_url)
 
         page = await self._web_crawler.crawl_page(validated_url)
         if page is None:
@@ -107,7 +112,7 @@ class WebIngester(BaseIngester):
             source_id=page.url,
             title=page.title,
             text=page.text,
-            ingested_at=page.crawled_at,
+            ingested_at=IngestedContent.now_iso(),
             source_type="web",
             metadata={
                 "crawled_at": page.crawled_at,
@@ -129,26 +134,30 @@ class WebIngester(BaseIngester):
             return []
 
         # Safe Browsing 一括チェック
-        safe_urls = await self._filter_safe_urls(identifiers)
+        safe_urls = await self.filter_safe_urls(identifiers)
         if not safe_urls:
             return []
 
-        # 並行クロール（WebCrawler.crawl_page を asyncio.as_completed で）
+        # 並行クロール（WebCrawler.crawl_page を asyncio.gather で）
         tasks = [
-            asyncio.create_task(self._web_crawler.crawl_page(url))
+            self._web_crawler.crawl_page(url)
             for url in safe_urls
         ]
 
+        pages = await asyncio.gather(*tasks, return_exceptions=True)
+
         results: list[IngestedContent] = []
-        for coro in asyncio.as_completed(tasks):
-            page = await coro
+        for page in pages:
+            if isinstance(page, Exception):
+                logger.warning("Failed to crawl page in batch: %s", page)
+                continue
             if page is not None:
                 results.append(
                     IngestedContent(
                         source_id=page.url,
                         title=page.title,
                         text=page.text,
-                        ingested_at=page.crawled_at,
+                        ingested_at=IngestedContent.now_iso(),
                         source_type="web",
                         metadata={
                             "crawled_at": page.crawled_at,
@@ -158,7 +167,7 @@ class WebIngester(BaseIngester):
 
         return results
 
-    async def _filter_safe_urls(self, urls: list[str]) -> list[str]:
+    async def filter_safe_urls(self, urls: list[str]) -> list[str]:
         """Safe Browsing で安全な URL のみをフィルタリングする.
 
         Args:

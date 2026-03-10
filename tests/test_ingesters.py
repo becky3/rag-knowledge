@@ -212,7 +212,8 @@ class TestWebIngesterFetchSingle:
         assert result.title == "Test Page"
         assert result.text == "Test content"
         assert result.source_type == "web"
-        assert result.ingested_at == "2024-01-01T00:00:00+00:00"
+        assert result.ingested_at  # 動的生成（now_iso）なので存在チェックのみ
+        assert result.metadata["crawled_at"] == "2024-01-01T00:00:00+00:00"
 
     async def test_fetch_single_crawl_failed(
         self,
@@ -342,7 +343,7 @@ class TestWebIngesterFetchBatch:
 
 
 class TestWebIngesterFilterSafeUrls:
-    """WebIngester._filter_safe_urls() のテスト."""
+    """WebIngester.filter_safe_urls() のテスト."""
 
     async def test_no_client_returns_all(
         self,
@@ -350,7 +351,7 @@ class TestWebIngesterFilterSafeUrls:
     ) -> None:
         """SafeBrowsingClient がない場合、全 URL を返すこと."""
         urls = ["https://a.com", "https://b.com"]
-        result = await web_ingester._filter_safe_urls(urls)
+        result = await web_ingester.filter_safe_urls(urls)
         assert result == urls
 
     async def test_filters_unsafe_urls(
@@ -378,7 +379,7 @@ class TestWebIngesterFilterSafeUrls:
             ),
         }
 
-        result = await web_ingester_with_safety._filter_safe_urls([
+        result = await web_ingester_with_safety.filter_safe_urls([
             "https://safe.com",
             "https://bad.com",
         ])
