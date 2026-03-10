@@ -145,6 +145,8 @@ async def rag_search(query: str, n_results: int | None = None) -> str:
         検索結果テキスト。ベクトル検索結果とBM25検索結果をセクション分けして返す。
         ヒットしたチャンクのページ全文を返却し、同一URLの重複は参照テキストで省略する。
         結果が0件の場合は「該当する情報が見つかりませんでした」を返す。
+        RAG_MAX_RESPONSE_CHARS 設定時、レスポンスが上限を超えた場合はトランケートされ
+        末尾にトランケート通知が付記される。未設定時は無制限。
     """
     service = await _get_rag_service()
     if n_results is None:
