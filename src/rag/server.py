@@ -369,8 +369,14 @@ async def rag_stats() -> str:
                 pages = group.get("pages", [])
                 if not isinstance(pages, list):
                     continue
+
+                if displayed >= max_sources:
+                    hit_limit = True
+                    break
+
                 page_count = len(pages)
-                parts.append(f"\n[{domain}] ({page_count}ページ)")
+                parts.append("")
+                parts.append(f"[{domain}] ({page_count}ページ)")
 
                 shown_in_domain = 0
                 for page in pages:
@@ -392,8 +398,9 @@ async def rag_stats() -> str:
                     break
 
             if hit_limit:
+                parts.append("")
                 parts.append(
-                    f"\n(表示上限 {max_sources} 件に達したため省略されたソースがあります)"
+                    f"(表示上限 {max_sources} 件に達したため省略されたソースがあります)"
                 )
 
         return "\n".join(parts)

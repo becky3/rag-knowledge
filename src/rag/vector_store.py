@@ -350,10 +350,7 @@ class VectorStore:
         # ドメイン別にグルーピング
         domain_groups: dict[str, list[dict[str, str | int]]] = {}
         for url, detail in source_details.items():
-            try:
-                domain = urlparse(url).netloc or "unknown"
-            except Exception:
-                domain = "unknown"
+            domain = urlparse(url).netloc or "unknown"
             if domain not in domain_groups:
                 domain_groups[domain] = []
             domain_groups[domain].append({
