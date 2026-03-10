@@ -35,6 +35,7 @@ with contextlib.redirect_stdout(io.StringIO()):
     from .bm25_index import BM25Index
     from .config import get_settings
     from .embedding.factory import get_embedding_provider
+    from .ingesters.web import WebIngester
     from .rag_knowledge import RAGKnowledgeService
     from .safe_browsing import create_safe_browsing_client
     from .vector_store import VectorStore
@@ -112,6 +113,11 @@ def _build_rag_service() -> RAGKnowledgeService:
             persist_dir=settings.bm25_persist_dir,
         )
 
+    web_ingester = WebIngester(
+        web_crawler=web_crawler,
+        safe_browsing_client=safe_browsing_client,
+    )
+
     return RAGKnowledgeService(
         vector_store=vector_store,
         web_crawler=web_crawler,
@@ -124,6 +130,7 @@ def _build_rag_service() -> RAGKnowledgeService:
         vector_weight=settings.rag_vector_weight,
         min_combined_score=settings.rag_min_combined_score,
         debug_log_enabled=settings.rag_debug_log_enabled,
+        web_ingester=web_ingester,
     )
 
 
