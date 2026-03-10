@@ -243,6 +243,12 @@ class WebCrawler:
             if respect_robots_txt
             else None
         )
+        self._md_converter = _RagMarkdownConverter(
+            heading_style="ATX",
+            table_infer_header=True,
+            escape_underscores=False,
+            escape_asterisks=False,
+        )
 
     def validate_url(self, url: str) -> str:
         """URL検証・正規化. 問題なければ正規化済みURLを返す.
@@ -367,7 +373,7 @@ class WebCrawler:
         """HTMLから本文をMarkdown形式で抽出する.
 
         抽出ロジック:
-        1. <script>, <style>, <nav>, <header>, <footer> タグを除去
+        1. <script>, <style>, <nav>, <header>, <footer>, <aside>, <noscript> タグを除去
         2. <article> → <main> → <body> の優先順で本文領域を特定
         3. markdownify でHTML→Markdown変換
         4. クリーンアップ（連続空行・行末空白の正規化）
@@ -401,13 +407,7 @@ class WebCrawler:
             content_element = soup
 
         # HTML→Markdown変換
-        converter = _RagMarkdownConverter(
-            heading_style="ATX",
-            table_infer_header=True,
-            escape_underscores=False,
-            escape_asterisks=False,
-        )
-        markdown_text = converter.convert_soup(content_element)
+        markdown_text = self._md_converter.convert_soup(content_element)
 
         # クリーンアップ
         # 行末空白を除去（空白のみの行も空行に正規化）
