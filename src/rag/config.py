@@ -86,6 +86,9 @@ class RAGSettings(BaseSettings):
     rag_http_port: int = Field(default=8081, ge=1, le=65535)
     rag_dns_rebinding_protection: bool = True
 
+    # レスポンスサイズ制限
+    rag_max_response_chars: int | None = Field(default=None, ge=1)
+
     # デバッグ
     rag_debug_log_enabled: bool = False
 

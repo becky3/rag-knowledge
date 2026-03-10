@@ -203,7 +203,18 @@ async def rag_search(query: str, n_results: int | None = None) -> str:
                 )
             parts.append("")
 
-    return "\n".join(parts).rstrip()
+    response = "\n".join(parts).rstrip()
+
+    # レスポンスサイズ上限ガード
+    max_chars = get_settings().rag_max_response_chars
+    if max_chars is not None and len(response) > max_chars:
+        truncated = response[:max_chars]
+        truncated += "\n\n…（レスポンスが上限の{:,}文字を超えたため切り詰めました）".format(
+            max_chars
+        )
+        return truncated
+
+    return response
 
 
 @mcp.tool()
