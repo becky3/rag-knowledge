@@ -521,6 +521,146 @@ class TestRagSearchResponseTruncation:
         marker_pos = result.index(truncation_marker)
         assert marker_pos == 50
 
+    async def test_early_termination_skips_later_page_fetches(self) -> None:
+        """上限到達後は後続Resultのページ全文取得が呼ばれないこと（#56）."""
+        mod = import_module("rag.server")
+
+        # 3つの結果を用意し、上限を小さく設定
+        self.mock_service.retrieve_raw_results = AsyncMock(
+            return_value=RawSearchResults(
+                vector_results=[
+                    VectorSearchItem(
+                        text="テキスト1",
+                        source_url="https://example.com/page1",
+                        distance=0.1,
+                        chunk_index=0,
+                    ),
+                    VectorSearchItem(
+                        text="テキスト2",
+                        source_url="https://example.com/page2",
+                        distance=0.2,
+                        chunk_index=0,
+                    ),
+                    VectorSearchItem(
+                        text="テキスト3",
+                        source_url="https://example.com/page3",
+                        distance=0.3,
+                        chunk_index=0,
+                    ),
+                ],
+                bm25_results=[],
+            )
+        )
+        call_log: list[str] = []
+
+        async def _mock_get_full_page_text(url: str) -> str:
+            call_log.append(url)
+            return "あ" * 500
+
+        self.mock_service.get_full_page_text = _mock_get_full_page_text
+        # 最初の Result のヘッダー + ページ全文で超過する程度の上限
+        self.mock_settings.rag_max_response_chars = 100
+
+        with (
+            patch.object(mod, "_get_rag_service", return_value=self.mock_service),
+            patch.object(mod, "get_settings", return_value=self.mock_settings),
+        ):
+            result = await mod.rag_search("テスト")
+
+        # page1 の全文は取得されるが、page2, page3 は取得されない
+        assert "https://example.com/page1" in call_log
+        assert "https://example.com/page2" not in call_log
+        assert "https://example.com/page3" not in call_log
+        assert "切り詰めました" in result
+
+    async def test_early_termination_skips_bm25_when_vector_exhausts_budget(
+        self,
+    ) -> None:
+        """ベクトル検索結果で上限到達時、BM25のページ全文取得が呼ばれないこと（#56）."""
+        mod = import_module("rag.server")
+
+        self.mock_service.retrieve_raw_results = AsyncMock(
+            return_value=RawSearchResults(
+                vector_results=[
+                    VectorSearchItem(
+                        text="テキスト",
+                        source_url="https://example.com/vec1",
+                        distance=0.1,
+                        chunk_index=0,
+                    ),
+                ],
+                bm25_results=[
+                    BM25SearchItem(
+                        text="テキスト",
+                        source_url="https://example.com/bm25_1",
+                        score=5.0,
+                        doc_id="doc1",
+                    ),
+                ],
+            )
+        )
+        call_log: list[str] = []
+
+        async def _mock_get_full_page_text(url: str) -> str:
+            call_log.append(url)
+            return "あ" * 500
+
+        self.mock_service.get_full_page_text = _mock_get_full_page_text
+        self.mock_settings.rag_max_response_chars = 100
+
+        with (
+            patch.object(mod, "_get_rag_service", return_value=self.mock_service),
+            patch.object(mod, "get_settings", return_value=self.mock_settings),
+        ):
+            result = await mod.rag_search("テスト")
+
+        # BM25側のページ全文は取得されない
+        assert "https://example.com/bm25_1" not in call_log
+        assert "切り詰めました" in result
+
+    async def test_no_early_termination_when_limit_is_none(self) -> None:
+        """上限未設定時は全Resultのページ全文が取得されること（#56）."""
+        mod = import_module("rag.server")
+
+        self.mock_service.retrieve_raw_results = AsyncMock(
+            return_value=RawSearchResults(
+                vector_results=[
+                    VectorSearchItem(
+                        text="テキスト1",
+                        source_url="https://example.com/page1",
+                        distance=0.1,
+                        chunk_index=0,
+                    ),
+                    VectorSearchItem(
+                        text="テキスト2",
+                        source_url="https://example.com/page2",
+                        distance=0.2,
+                        chunk_index=0,
+                    ),
+                ],
+                bm25_results=[],
+            )
+        )
+        call_log: list[str] = []
+
+        async def _mock_get_full_page_text(url: str) -> str:
+            call_log.append(url)
+            return "あ" * 500
+
+        self.mock_service.get_full_page_text = _mock_get_full_page_text
+        self.mock_settings.rag_max_response_chars = None
+
+        with (
+            patch.object(mod, "_get_rag_service", return_value=self.mock_service),
+            patch.object(mod, "get_settings", return_value=self.mock_settings),
+        ):
+            result = await mod.rag_search("テスト")
+
+        # 全てのページ全文が取得される
+        assert "https://example.com/page1" in call_log
+        assert "https://example.com/page2" in call_log
+        assert "切り詰めました" not in result
+
     async def test_empty_results_not_affected_by_limit(self) -> None:
         """0件結果は上限設定に影響されないこと（#26）."""
         mod = import_module("rag.server")
