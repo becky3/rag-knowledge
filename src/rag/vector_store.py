@@ -11,7 +11,7 @@ from dataclasses import dataclass
 from typing import cast
 
 import chromadb
-from chromadb.api.types import Embeddings, IncludeEnum
+from chromadb.api.types import Embeddings
 from chromadb.config import Settings as ChromaSettings
 
 from .embedding.base import EmbeddingProvider
@@ -171,7 +171,7 @@ class VectorStore:
             self._collection.query,
             query_embeddings=query_embeddings,
             n_results=fetch_count,
-            include=[IncludeEnum.documents, IncludeEnum.metadatas, IncludeEnum.distances],
+            include=["documents", "metadatas", "distances"],
         )
 
         # 結果を変換
@@ -221,7 +221,7 @@ class VectorStore:
         results = await asyncio.to_thread(
             self._collection.get,
             where={"source_url": source_url},
-            include=[IncludeEnum.documents, IncludeEnum.metadatas],
+            include=["documents", "metadatas"],
         )
 
         if not results["ids"]:
@@ -257,7 +257,7 @@ class VectorStore:
         results = await asyncio.to_thread(
             self._collection.get,
             where={"source_url": source_url},
-            include=[IncludeEnum.metadatas],
+            include=["metadatas"],
         )
 
         if not results["ids"]:
@@ -291,7 +291,7 @@ class VectorStore:
         results = await asyncio.to_thread(
             self._collection.get,
             where={"source_url": source_url},
-            include=[IncludeEnum.metadatas],
+            include=["metadatas"],
         )
 
         if not results["ids"]:
@@ -327,7 +327,7 @@ class VectorStore:
         count = self._collection.count()
 
         # ユニークなソースURL数を取得
-        all_docs = self._collection.get(include=[IncludeEnum.metadatas])
+        all_docs = self._collection.get(include=["metadatas"])
         source_urls: set[str] = set()
         if all_docs["metadatas"]:
             for meta in all_docs["metadatas"]:
