@@ -674,7 +674,6 @@ class TestClassifyFailureTags:
             retrieved_sources=["https://a.com", "https://b.com"],
             expected_sources=["https://a.com", "https://b.com"],
             ndcg=1.0,
-            mrr=1.0,
         )
         assert tags == []
 
@@ -689,7 +688,6 @@ class TestClassifyFailureTags:
             retrieved_sources=["https://a.com"],
             expected_sources=["https://a.com", "https://b.com"],
             ndcg=1.0,
-            mrr=1.0,
         )
         assert FailureTag.RETRIEVAL_MISS in tags
 
@@ -704,7 +702,6 @@ class TestClassifyFailureTags:
             retrieved_sources=["https://a.com", "https://x.com"],
             expected_sources=["https://a.com"],
             ndcg=1.0,
-            mrr=1.0,
         )
         assert FailureTag.RETRIEVAL_NOISE in tags
 
@@ -719,7 +716,6 @@ class TestClassifyFailureTags:
             retrieved_sources=["https://a.com", "https://x.com"],
             expected_sources=["https://a.com", "https://b.com"],
             ndcg=0.3,
-            mrr=0.5,
         )
         assert FailureTag.CHUNK_FRAGMENTATION in tags
 
@@ -734,7 +730,6 @@ class TestClassifyFailureTags:
             retrieved_sources=["https://a.com", "https://x.com"],
             expected_sources=["https://a.com", "https://b.com"],
             ndcg=0.8,
-            mrr=1.0,
         )
         assert FailureTag.CHUNK_FRAGMENTATION not in tags
 
@@ -749,7 +744,6 @@ class TestClassifyFailureTags:
             retrieved_sources=["https://x.com", "https://y.com"],
             expected_sources=["https://a.com"],
             ndcg=0.0,
-            mrr=0.0,
         )
         assert FailureTag.QUERY_MISMATCH in tags
 
@@ -764,7 +758,6 @@ class TestClassifyFailureTags:
             retrieved_sources=[],
             expected_sources=["https://a.com"],
             ndcg=0.0,
-            mrr=0.0,
         )
         assert FailureTag.QUERY_MISMATCH in tags
         assert FailureTag.RETRIEVAL_MISS in tags
@@ -780,7 +773,6 @@ class TestClassifyFailureTags:
             retrieved_sources=["https://x.com", "https://y.com", "https://z.com"],
             expected_sources=["https://a.com", "https://b.com"],
             ndcg=0.0,
-            mrr=0.0,
         )
         assert FailureTag.RETRIEVAL_MISS in tags
         assert FailureTag.RETRIEVAL_NOISE in tags
@@ -797,7 +789,6 @@ class TestClassifyFailureTags:
             retrieved_sources=[],
             expected_sources=[],
             ndcg=1.0,
-            mrr=1.0,
         )
         assert tags == []
 

@@ -191,7 +191,6 @@ def classify_failure_tags(
     retrieved_sources: list[str],
     expected_sources: list[str],
     ndcg: float,
-    mrr: float,
 ) -> list[FailureTag]:
     """検索結果のメトリクスから失敗タグを分類する.
 
@@ -200,7 +199,6 @@ def classify_failure_tags(
         retrieved_sources: RAG検索で取得されたソースURLリスト
         expected_sources: 期待されるソースURLリスト（正解データ）
         ndcg: NDCGスコア
-        mrr: MRRスコア
 
     Returns:
         該当する失敗タグのリスト（完璧な検索の場合は空リスト）
@@ -404,7 +402,6 @@ async def evaluate_retrieval(
             retrieved_sources=retrieved_sources,
             expected_sources=dataset_query.expected_sources,
             ndcg=ndcg,
-            mrr=mrr,
         )
 
         # 結果を記録
