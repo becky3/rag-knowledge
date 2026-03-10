@@ -80,6 +80,12 @@ class RAGSettings(BaseSettings):
     rag_url_safety_fail_open: bool = True
     rag_url_safety_timeout: float = Field(default=5.0, gt=0)
 
+    # トランスポート
+    rag_transport: Literal["stdio", "http"] = "stdio"
+    rag_http_host: str = "127.0.0.1"
+    rag_http_port: int = Field(default=8081, ge=1, le=65535)
+    rag_dns_rebinding_protection: bool = True
+
     # デバッグ
     rag_debug_log_enabled: bool = False
 
