@@ -26,7 +26,7 @@ class LMStudioEmbedding(EmbeddingProvider):
     def __init__(
         self,
         base_url: str = DEFAULT_LMSTUDIO_BASE_URL,
-        model: str = "ruri-v3-310m",
+        model: str = "nomic-embed-text",
         prefix_enabled: bool = False,
     ) -> None:
         normalized = base_url.rstrip("/")
