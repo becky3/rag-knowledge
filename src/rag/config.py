@@ -95,15 +95,6 @@ class RAGSettings(BaseSettings):
     # rag_stats ソース一覧の最大表示件数
     rag_stats_max_sources: int = Field(default=100, ge=1)
 
-    # Zenn インジェスター
-    zenn_request_delay_sec: float = Field(default=1.0, ge=0)
-    zenn_request_timeout_sec: float = Field(default=30.0, gt=0)
-    zenn_max_pagination_pages: int = Field(default=100, ge=1)
-    zenn_max_retries: int = Field(default=3, ge=0)
-
-    # LocalFileIngester
-    rag_local_file_allowed_dirs: str = ""
-
     # デバッグ
     rag_debug_log_enabled: bool = False
 
