@@ -37,6 +37,7 @@ with contextlib.redirect_stdout(io.StringIO()):
     from .bm25_index import BM25Index
     from .config import get_settings
     from .embedding.factory import get_embedding_provider
+    from .ingesters.local_file import LocalFileIngester
     from .ingesters.web import WebIngester
     from .ingesters.zenn import ZennIngester
     from .rag_knowledge import RAGKnowledgeService
@@ -143,9 +144,19 @@ def _build_rag_service() -> RAGKnowledgeService:
         web_ingester=web_ingester,
     )
 
+    # LocalFileIngester: 許可ディレクトリをカンマ区切りで分割
+    allowed_dirs_str = settings.rag_local_file_allowed_dirs
+    allowed_dirs: list[str] | None = None
+    if allowed_dirs_str:
+        allowed_dirs = [
+            d.strip() for d in allowed_dirs_str.split(",") if d.strip()
+        ]
+    local_file_ingester = LocalFileIngester(allowed_dirs=allowed_dirs)
+
     # ソースタイプ → インジェスターの登録
     service.register_ingester("web", web_ingester)
     service.register_ingester("zenn", zenn_ingester)
+    service.register_ingester("local_file", local_file_ingester)
 
     return service
 
