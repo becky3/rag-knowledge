@@ -817,6 +817,7 @@ async def _create_ingest_service() -> "RAGKnowledgeService":
     """
     from .config import get_settings
     from .embedding.factory import get_embedding_provider
+    from .ingesters.local_file import LocalFileIngester
     from .ingesters.web import WebIngester
     from .rag_knowledge import RAGKnowledgeService
     from .safe_browsing import create_safe_browsing_client
@@ -864,7 +865,17 @@ async def _create_ingest_service() -> "RAGKnowledgeService":
         web_ingester=web_ingester,
     )
 
+    # LocalFileIngester: 許可ディレクトリをカンマ区切りで分割
+    allowed_dirs_str = settings.rag_local_file_allowed_dirs
+    allowed_dirs: list[str] | None = None
+    if allowed_dirs_str:
+        allowed_dirs = [
+            d.strip() for d in allowed_dirs_str.split(",") if d.strip()
+        ]
+    local_file_ingester = LocalFileIngester(allowed_dirs=allowed_dirs)
+
     service.register_ingester("web", web_ingester)
+    service.register_ingester("local_file", local_file_ingester)
 
     return service
 
