@@ -36,7 +36,7 @@ class RAGSettings(BaseSettings):
 
     # Embedding設定
     embedding_provider: Literal["local", "online"] = "local"
-    embedding_model_local: str = "ruri-v3-310m"
+    embedding_model_local: str = "nomic-embed-text"
     embedding_model_online: str = "text-embedding-3-small"
     embedding_prefix_enabled: bool = True
     lmstudio_base_url: str = DEFAULT_LMSTUDIO_BASE_URL
