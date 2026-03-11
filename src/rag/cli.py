@@ -7,9 +7,7 @@ from __future__ import annotations
 
 import argparse
 import asyncio
-import contextlib
 import hashlib
-import io
 import json
 import logging
 import math
@@ -233,33 +231,6 @@ def main() -> None:
         help="BM25 bパラメータ（例: 0.75）",
     )
 
-    # ingest サブコマンド
-    ingest_parser = subparsers.add_parser("ingest", help="マルチソース取り込み")
-    ingest_parser.add_argument(
-        "--source-type",
-        required=True,
-        help="データソース種別（web, zenn, local_file 等）",
-    )
-    ingest_parser.add_argument(
-        "--identifier",
-        help="ソース識別子（URL、ファイルパス等）。単一取り込み時に使用",
-    )
-    ingest_parser.add_argument(
-        "--batch",
-        action="store_true",
-        help="一括取り込みモード。--source と組み合わせて使用",
-    )
-    ingest_parser.add_argument(
-        "--source",
-        help="発見元（ユーザー名、ディレクトリパス等）。一括取り込み時に使用",
-    )
-    ingest_parser.add_argument(
-        "--option",
-        action="append",
-        default=[],
-        help="ソースタイプ固有のオプション（key=value 形式、複数指定可）",
-    )
-
     # crawl-preview サブコマンド
     preview_parser = subparsers.add_parser("crawl-preview", help="クロール対象ページをプレビュー")
     preview_parser.add_argument(
@@ -285,8 +256,6 @@ def main() -> None:
         asyncio.run(run_evaluation(args))
     elif args.command == "init-test-db":
         asyncio.run(init_test_db(args))
-    elif args.command == "ingest":
-        asyncio.run(run_ingest(args))
     elif args.command == "crawl-preview":
         asyncio.run(run_crawl_preview(args))
 
@@ -783,159 +752,6 @@ async def init_test_db(args: argparse.Namespace) -> None:
         "BM25 index persisted at %s (%d documents)",
         args.bm25_persist_dir, bm25_index.get_document_count(),
     )
-
-
-def _parse_options(option_list: list[str]) -> dict[str, object]:
-    """--option key=value リストを辞書に変換する.
-
-    Args:
-        option_list: key=value 形式の文字列リスト
-
-    Returns:
-        パースされたオプション辞書
-
-    Raises:
-        SystemExit: key=value 形式でない場合
-    """
-    options: dict[str, object] = {}
-    for item in option_list:
-        if "=" not in item:
-            logger.error("--option は key=value 形式で指定してください: %s", item)
-            sys.exit(1)
-        key, _, value = item.partition("=")
-        options[key.strip()] = value.strip()
-    return options
-
-
-async def _create_ingest_service() -> "RAGKnowledgeService":
-    """取り込み用の RAGKnowledgeService を生成する.
-
-    WebIngester を web ソースタイプとして登録済みのサービスを返す。
-
-    Returns:
-        RAGKnowledgeServiceインスタンス
-    """
-    from .config import get_settings
-    from .embedding.factory import get_embedding_provider
-    from .ingesters.local_file import LocalFileIngester
-    from .ingesters.web import WebIngester
-    from .rag_knowledge import RAGKnowledgeService
-    from .safe_browsing import create_safe_browsing_client
-    from .vector_store import VectorStore
-    from .web_crawler import WebCrawler
-
-    settings = get_settings()
-    embedding_provider = get_embedding_provider(settings, settings.embedding_provider)
-
-    with contextlib.redirect_stdout(io.StringIO()):
-        vector_store = VectorStore(
-            embedding_provider=embedding_provider,
-            persist_directory=settings.chromadb_persist_dir,
-        )
-        web_crawler = WebCrawler(
-            max_pages=settings.rag_max_crawl_pages,
-            crawl_delay=settings.rag_crawl_delay_sec,
-            respect_robots_txt=settings.rag_respect_robots_txt,
-            robots_txt_cache_ttl=settings.rag_robots_txt_cache_ttl,
-        )
-    safe_browsing_client = create_safe_browsing_client(settings)
-
-    web_ingester = WebIngester(
-        web_crawler=web_crawler,
-        safe_browsing_client=safe_browsing_client,
-    )
-
-    from .bm25_index import BM25Index
-
-    with contextlib.redirect_stdout(io.StringIO()):
-        bm25_index = BM25Index(
-            k1=settings.rag_bm25_k1,
-            b=settings.rag_bm25_b,
-            persist_dir=settings.bm25_persist_dir,
-        )
-
-    service = RAGKnowledgeService(
-        vector_store=vector_store,
-        web_crawler=web_crawler,
-        chunk_size=settings.rag_chunk_size,
-        chunk_overlap=settings.rag_chunk_overlap,
-        similarity_threshold=settings.rag_similarity_threshold,
-        safe_browsing_client=safe_browsing_client,
-        bm25_index=bm25_index,
-        web_ingester=web_ingester,
-    )
-
-    # LocalFileIngester: 許可ディレクトリをカンマ区切りで分割
-    allowed_dirs_str = settings.rag_local_file_allowed_dirs
-    allowed_dirs: list[str] | None = None
-    if allowed_dirs_str:
-        allowed_dirs = [
-            d.strip() for d in allowed_dirs_str.split(",") if d.strip()
-        ]
-    local_file_ingester = LocalFileIngester(allowed_dirs=allowed_dirs)
-
-    service.register_ingester("web", web_ingester)
-    service.register_ingester("local_file", local_file_ingester)
-
-    return service
-
-
-async def run_ingest(args: argparse.Namespace) -> None:
-    """マルチソース取り込みを実行する.
-
-    Args:
-        args: コマンドライン引数
-    """
-    source_type: str = args.source_type
-    is_batch: bool = args.batch
-    options = _parse_options(args.option) if args.option else None
-
-    if is_batch:
-        # 一括取り込みモード
-        if not args.source:
-            logger.error("一括取り込みモードでは --source が必要です")
-            sys.exit(1)
-
-        logger.info(
-            "Starting batch ingest: source_type=%s, source=%s",
-            source_type,
-            args.source,
-        )
-
-        service = await _create_ingest_service()
-        try:
-            result = await service.ingest_batch(
-                source_type, args.source, options
-            )
-            ingested = result["ingested"]
-            chunks = result["chunks_stored"]
-            errors = result["errors"]
-            print(f"完了: {ingested}件取り込み / {chunks}チャンク / エラー: {errors}件")
-        except ValueError as e:
-            logger.error("取り込みエラー: %s", e)
-            sys.exit(1)
-    else:
-        # 単一取り込みモード
-        if not args.identifier:
-            logger.error("単一取り込みモードでは --identifier が必要です")
-            sys.exit(1)
-
-        logger.info(
-            "Starting single ingest: source_type=%s, identifier=%s",
-            source_type,
-            args.identifier,
-        )
-
-        service = await _create_ingest_service()
-        try:
-            chunks = await service.ingest(source_type, args.identifier, options)
-            if chunks <= 0:
-                print(f"エラー: コンテンツの取り込みに失敗しました。identifier={args.identifier}")
-                sys.exit(1)
-            print(f"取り込み完了: {args.identifier} ({chunks}チャンク)")
-        except ValueError as e:
-            logger.error("取り込みエラー: %s", e)
-            sys.exit(1)
 
 
 async def run_crawl_preview(args: argparse.Namespace) -> None:
