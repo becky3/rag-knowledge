@@ -5,12 +5,10 @@ Issue: #62
 """
 
 from .base import BaseIngester, IngestedContent
-from .local_file import LocalFileIngester
 from .web import WebIngester
 
 __all__ = [
     "BaseIngester",
     "IngestedContent",
-    "LocalFileIngester",
     "WebIngester",
 ]
