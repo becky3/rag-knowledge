@@ -71,8 +71,6 @@ gh api graphql -f query="
 
 ## ステップ 4/8: テスト実行
 
-注: GA環境ではサブエージェント（test-runner等）が利用できないため、直接実行する。
-
 ```bash
 uv run pytest && uv run ruff check src/ tests/ && uv run mypy src/
 npx markdownlint-cli2@0.20.0
@@ -83,13 +81,10 @@ Markdown のみの変更の場合、pytest / ruff / mypy はスキップ可（ma
 
 ## ステップ 5/8: ドキュメント整合性チェック
 
-修正内容が以下のドキュメントの記述と矛盾しないか確認し、必要なら更新する:
+`doc-reviewer` エージェントを **フォアグラウンド**（`run_in_background: false`）で呼び出し、diff モードでドキュメントレビューを実行する。
 
-- `docs/specs/` — 仕様・受け入れ条件に影響する変更の場合
-- `CLAUDE.md` — 開発ルール・プロジェクト構造に影響する場合
-
-注: GA環境ではサブエージェント（doc-reviewer等）が利用できないため、
-`docs/` や `CLAUDE.md` に変更がある場合は自分で仕様書との整合性を確認すること。
+- ドキュメント変更がなく、対応する仕様書も存在しない場合はスキップ可
+- 対応する仕様書が存在する場合は、実装のみの変更でも整合性チェックを実施すること
 
 ## ステップ 6/8: PRに対応コメント投稿
 
