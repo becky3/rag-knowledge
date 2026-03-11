@@ -38,6 +38,7 @@ with contextlib.redirect_stdout(io.StringIO()):
     from .config import get_settings
     from .embedding.factory import get_embedding_provider
     from .ingesters.web import WebIngester
+    from .ingesters.zenn import ZennIngester
     from .rag_knowledge import RAGKnowledgeService
     from .safe_browsing import create_safe_browsing_client
     from .vector_store import VectorStore
@@ -120,6 +121,13 @@ def _build_rag_service() -> RAGKnowledgeService:
         safe_browsing_client=safe_browsing_client,
     )
 
+    zenn_ingester = ZennIngester(
+        request_delay_sec=settings.zenn_request_delay_sec,
+        request_timeout_sec=settings.zenn_request_timeout_sec,
+        max_pagination_pages=settings.zenn_max_pagination_pages,
+        max_retries=settings.zenn_max_retries,
+    )
+
     service = RAGKnowledgeService(
         vector_store=vector_store,
         web_crawler=web_crawler,
@@ -137,6 +145,7 @@ def _build_rag_service() -> RAGKnowledgeService:
 
     # ソースタイプ → インジェスターの登録
     service.register_ingester("web", web_ingester)
+    service.register_ingester("zenn", zenn_ingester)
 
     return service
 
