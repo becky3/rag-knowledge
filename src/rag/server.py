@@ -3,13 +3,15 @@
 仕様: docs/specs/rag-knowledge.md
 独立リポジトリとして動作する。
 
-FastMCP を使用して 6 つの RAG ツールを公開する:
+FastMCP を使用して 8 つの RAG ツールを公開する:
 - rag_search: ナレッジベースから関連情報を検索
 - rag_add: 単一ページをナレッジベースに取り込み
 - rag_crawl: リンク集ページからクロール＆一括取り込み
 - rag_crawl_preview: クロール対象ページのプレビュー（タイトル・URL一覧）
 - rag_delete: ソースURL指定でナレッジから削除
 - rag_stats: ナレッジベースの統計情報を表示
+- rag_ingest: マルチソース単一コンテンツ取り込み
+- rag_ingest_batch: マルチソース一括取り込み
 """
 
 from __future__ import annotations
@@ -17,6 +19,7 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import io
+import json
 import logging
 import os
 
@@ -36,6 +39,7 @@ with contextlib.redirect_stdout(io.StringIO()):
     from .config import get_settings
     from .embedding.factory import get_embedding_provider
     from .ingesters.web import WebIngester
+    from .ingesters.zenn import ZennIngester
     from .rag_knowledge import RAGKnowledgeService
     from .safe_browsing import create_safe_browsing_client
     from .vector_store import VectorStore
@@ -118,7 +122,14 @@ def _build_rag_service() -> RAGKnowledgeService:
         safe_browsing_client=safe_browsing_client,
     )
 
-    return RAGKnowledgeService(
+    zenn_ingester = ZennIngester(
+        request_delay_sec=settings.zenn_request_delay_sec,
+        request_timeout_sec=settings.zenn_request_timeout_sec,
+        max_pagination_pages=settings.zenn_max_pagination_pages,
+        max_retries=settings.zenn_max_retries,
+    )
+
+    service = RAGKnowledgeService(
         vector_store=vector_store,
         web_crawler=web_crawler,
         chunk_size=settings.rag_chunk_size,
@@ -132,6 +143,12 @@ def _build_rag_service() -> RAGKnowledgeService:
         debug_log_enabled=settings.rag_debug_log_enabled,
         web_ingester=web_ingester,
     )
+
+    # インジェスター登録
+    service.register_ingester("web", web_ingester)
+    service.register_ingester("zenn", zenn_ingester)
+
+    return service
 
 
 # --- MCP ツール定義 ---
@@ -453,6 +470,104 @@ async def rag_stats() -> str:
     except Exception:
         logger.exception("Failed to get stats")
         return "エラー: 統計情報の取得に失敗しました。"
+
+
+@mcp.tool()
+async def rag_ingest(
+    source_type: str,
+    identifier: str,
+) -> str:
+    """[rag-knowledge] RAG ingest - マルチソース単一コンテンツ取り込み.
+
+    knowledge base, ingest, multi-source, zenn, web.
+    指定されたソースタイプに対応するインジェスターで単一コンテンツを取り込む。
+
+    Args:
+        source_type: データソース種別（web, zenn）
+        identifier: ソース識別子（URL、記事スラッグ等）
+
+    Returns:
+        取り込み結果のメッセージ
+    """
+    service = await _get_rag_service()
+    try:
+        chunks = await service.ingest_single(source_type, identifier)
+        if chunks <= 0:
+            return (
+                f"コンテンツの取り込みに失敗しました: "
+                f"source_type={source_type}, identifier={identifier}"
+            )
+        return (
+            f"取り込み完了: source_type={source_type}, "
+            f"identifier={identifier} ({chunks}チャンク)"
+        )
+    except ValueError as e:
+        return f"エラー: {e}"
+    except Exception:
+        logger.exception(
+            "Failed to ingest: source_type=%s, identifier=%s",
+            source_type,
+            identifier,
+        )
+        return (
+            f"エラー: 取り込みに失敗しました。"
+            f"source_type={source_type}, identifier={identifier}"
+        )
+
+
+@mcp.tool()
+async def rag_ingest_batch(
+    source_type: str,
+    source: str,
+    options: str = "",
+) -> str:
+    """[rag-knowledge] RAG ingest batch - マルチソース一括取り込み.
+
+    knowledge base, bulk ingest, batch, multi-source, zenn, web.
+    指定されたソースタイプに対応するインジェスターで一括取り込みを行う。
+    discover で対象を発見し、バッチで取り込む。
+
+    Args:
+        source_type: データソース種別（web, zenn）
+        source: 発見元（Zennユーザー名、リンク集URL等）
+        options: ソースタイプ固有のオプション（JSON文字列、任意）
+
+    Returns:
+        取り込み結果のサマリー
+    """
+    service = await _get_rag_service()
+
+    # options を辞書にパース
+    opts: dict[str, object] = {}
+    if options and options.strip():
+        try:
+            parsed = json.loads(options)
+            if isinstance(parsed, dict):
+                opts = parsed
+        except json.JSONDecodeError:
+            return f"エラー: options のJSON形式が不正です: {options}"
+
+    try:
+        result = await service.ingest_batch(source_type, source, **opts)
+        ingested = result["ingested"]
+        chunks = result["chunks_stored"]
+        errors = result["errors"]
+        return (
+            f"一括取り込み完了: source_type={source_type}, source={source}\n"
+            f"取り込み: {ingested}件 / {chunks}チャンク / エラー: {errors}件"
+        )
+    except ValueError as e:
+        return f"エラー: {e}"
+    except Exception:
+        logger.exception(
+            "Failed to batch ingest: source_type=%s, source=%s",
+            source_type,
+            source,
+        )
+        return (
+            f"エラー: 一括取り込みに失敗しました。"
+            f"source_type={source_type}, source={source}"
+        )
 
 
 def _configure_and_run() -> None:
