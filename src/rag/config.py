@@ -18,6 +18,9 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 # LM Studio のデフォルトベースURL
 DEFAULT_LMSTUDIO_BASE_URL = "http://localhost:1234"
 
+# デフォルトEmbeddingモデル名
+DEFAULT_EMBEDDING_MODEL_LOCAL = "nomic-embed-text"
+
 # プロジェクトルートの .env を参照
 _ENV_FILE = Path(__file__).parent.parent.parent / ".env"
 
@@ -36,7 +39,7 @@ class RAGSettings(BaseSettings):
 
     # Embedding設定
     embedding_provider: Literal["local", "online"] = "local"
-    embedding_model_local: str = "nomic-embed-text"
+    embedding_model_local: str = DEFAULT_EMBEDDING_MODEL_LOCAL
     embedding_model_online: str = "text-embedding-3-small"
     embedding_prefix_enabled: bool = True
     lmstudio_base_url: str = DEFAULT_LMSTUDIO_BASE_URL
