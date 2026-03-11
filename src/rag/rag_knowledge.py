@@ -23,6 +23,7 @@ from .vector_store import DocumentChunk, VectorStore
 if TYPE_CHECKING:
     from .bm25_index import BM25Index
     from .hybrid_search import HybridSearchEngine
+    from .ingesters.base import BaseIngester
     from .ingesters.web import WebIngester
     from .safe_browsing import SafeBrowsingClient
     from .web_crawler import CrawlPreviewPage, CrawledPage, WebCrawler
@@ -190,6 +191,9 @@ class RAGKnowledgeService:
         self._web_ingester = web_ingester
         self._hybrid_search_engine: HybridSearchEngine | None = None
 
+        # インジェスターレジストリ
+        self._ingesters: dict[str, BaseIngester] = {}
+
         # ハイブリッド検索エンジンの初期化
         if hybrid_search_enabled and bm25_index is not None:
             from .hybrid_search import HybridSearchEngine
@@ -200,6 +204,124 @@ class RAGKnowledgeService:
                 vector_weight=vector_weight,
             )
             logger.info("Hybrid search engine initialized")
+
+    def register_ingester(self, source_type: str, ingester: BaseIngester) -> None:
+        """インジェスターを登録する.
+
+        Args:
+            source_type: ソースタイプ名
+            ingester: インジェスターインスタンス
+        """
+        self._ingesters[source_type] = ingester
+        logger.info("Registered ingester for source type: %s", source_type)
+
+    def _get_ingester(self, source_type: str) -> BaseIngester:
+        """ソースタイプに対応するインジェスターを取得する.
+
+        Args:
+            source_type: ソースタイプ名
+
+        Returns:
+            対応するインジェスター
+
+        Raises:
+            ValueError: 未登録のソースタイプの場合
+        """
+        ingester = self._ingesters.get(source_type)
+        if ingester is None:
+            available = ", ".join(sorted(self._ingesters.keys())) or "(なし)"
+            raise ValueError(
+                f"未登録のソースタイプです: {source_type} "
+                f"(利用可能: {available})"
+            )
+        return ingester
+
+    async def ingest(
+        self,
+        source_type: str,
+        identifier: str,
+        options: dict[str, object] | None = None,
+    ) -> int:
+        """汎用単一コンテンツ取り込み.
+
+        Args:
+            source_type: データソース種別
+            identifier: ソース固有の識別子
+            options: ソースタイプ固有の追加パラメータ
+
+        Returns:
+            保存されたチャンク数
+
+        Raises:
+            ValueError: ソースタイプ未登録、または識別子が不正な場合
+        """
+        ingester = self._get_ingester(source_type)
+        content = await ingester.fetch_single(identifier)
+        if content is None:
+            return 0
+        return await self._ingest_content(content)
+
+    async def ingest_batch(
+        self,
+        source_type: str,
+        source: str,
+        options: dict[str, object] | None = None,
+    ) -> dict[str, int]:
+        """汎用一括取り込み.
+
+        discover で対象を発見し、バッチで取り込む。
+
+        Args:
+            source_type: データソース種別
+            source: 発見元（ディレクトリパス、ユーザー名等）
+            options: ソースタイプ固有の追加パラメータ
+
+        Returns:
+            {"ingested": N, "chunks_stored": M, "errors": E}
+        """
+        ingester = self._get_ingester(source_type)
+
+        # discover で取り込み対象の識別子リストを取得
+        kwargs: dict[str, object] = {}
+        if options:
+            kwargs.update(options)
+
+        identifiers = await ingester.discover(source, **kwargs)
+        if not identifiers:
+            logger.info("No items discovered for source_type=%s source=%s", source_type, source)
+            return {"ingested": 0, "chunks_stored": 0, "errors": 0}
+
+        # 各コンテンツを取得・取り込み
+        total_chunks = 0
+        ingested_count = 0
+        error_count = 0
+
+        for identifier in identifiers:
+            try:
+                content = await ingester.fetch_single(identifier)
+                if content is None:
+                    error_count += 1
+                    continue
+                chunks = await self._ingest_content(content)
+                total_chunks += chunks
+                ingested_count += 1
+            except ValueError as e:
+                logger.warning("Validation error for %s (%s): %s", identifier, source_type, e)
+                error_count += 1
+            except Exception:
+                logger.exception("Failed to ingest %s: %s", source_type, identifier)
+                error_count += 1
+
+        logger.info(
+            "Batch ingest complete: source_type=%s ingested=%d chunks=%d errors=%d",
+            source_type, ingested_count, total_chunks, error_count,
+        )
+
+        return {
+            "ingested": ingested_count,
+            "chunks_stored": total_chunks,
+            "errors": error_count,
+        }
 
     async def crawl_preview(
         self,

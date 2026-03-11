@@ -3,13 +3,15 @@
 仕様: docs/specs/rag-knowledge.md
 独立リポジトリとして動作する。
 
-FastMCP を使用して 6 つの RAG ツールを公開する:
+FastMCP を使用して 8 つの RAG ツールを公開する:
 - rag_search: ナレッジベースから関連情報を検索
 - rag_add: 単一ページをナレッジベースに取り込み
 - rag_crawl: リンク集ページからクロール＆一括取り込み
 - rag_crawl_preview: クロール対象ページのプレビュー（タイトル・URL一覧）
 - rag_delete: ソースURL指定でナレッジから削除
 - rag_stats: ナレッジベースの統計情報を表示
+- rag_ingest: 汎用単一コンテンツ取り込み（マルチソース対応）
+- rag_ingest_batch: 汎用一括取り込み（マルチソース対応）
 """
 
 from __future__ import annotations
@@ -35,6 +37,7 @@ with contextlib.redirect_stdout(io.StringIO()):
     from .bm25_index import BM25Index
     from .config import get_settings
     from .embedding.factory import get_embedding_provider
+    from .ingesters.local_file import LocalFileIngester
     from .ingesters.web import WebIngester
     from .rag_knowledge import RAGKnowledgeService
     from .safe_browsing import create_safe_browsing_client
@@ -118,7 +121,16 @@ def _build_rag_service() -> RAGKnowledgeService:
         safe_browsing_client=safe_browsing_client,
     )
 
-    return RAGKnowledgeService(
+    # LocalFileIngester: 許可ディレクトリの設定
+    allowed_dirs_str = settings.rag_local_file_allowed_dirs
+    allowed_dirs: list[str] | None = None
+    if allowed_dirs_str:
+        allowed_dirs = [
+            d.strip() for d in allowed_dirs_str.split(",") if d.strip()
+        ]
+    local_file_ingester = LocalFileIngester(allowed_dirs=allowed_dirs)
+
+    service = RAGKnowledgeService(
         vector_store=vector_store,
         web_crawler=web_crawler,
         chunk_size=settings.rag_chunk_size,
@@ -132,6 +144,12 @@ def _build_rag_service() -> RAGKnowledgeService:
         debug_log_enabled=settings.rag_debug_log_enabled,
         web_ingester=web_ingester,
     )
+
+    # インジェスター登録
+    service.register_ingester("web", web_ingester)
+    service.register_ingester("local_file", local_file_ingester)
+
+    return service
 
 
 # --- MCP ツール定義 ---
@@ -453,6 +471,79 @@ async def rag_stats() -> str:
     except Exception:
         logger.exception("Failed to get stats")
         return "エラー: 統計情報の取得に失敗しました。"
+
+
+@mcp.tool()
+async def rag_ingest(
+    source_type: str,
+    identifier: str,
+    options: dict[str, object] | None = None,
+) -> str:
+    """[rag-knowledge] RAG ingest - 汎用単一コンテンツ取り込み.
+
+    knowledge base, ingest, local file, multi-source.
+    指定されたソースタイプに対応するインジェスターで単一コンテンツを取り込む。
+    同一識別子の再取り込み時は既存の知識を最新に置き換える。
+
+    Args:
+        source_type: データソース種別（web, local_file 等）
+        identifier: ソース固有の識別子（URL、ファイルパス等）
+        options: ソースタイプ固有の追加パラメータ
+
+    Returns:
+        取り込み結果のメッセージ
+    """
+    service = await _get_rag_service()
+    try:
+        chunks = await service.ingest(source_type, identifier, options)
+        if chunks <= 0:
+            return f"エラー: コンテンツの取り込みに失敗しました。source_type={source_type}, identifier={identifier}"
+        return f"取り込み完了: {identifier} ({chunks}チャンク)"
+    except ValueError as e:
+        return f"エラー: {e}"
+    except Exception:
+        logger.exception(
+            "Failed to ingest: source_type=%s identifier=%s", source_type, identifier
+        )
+        return f"エラー: コンテンツの取り込みに失敗しました。source_type={source_type}, identifier={identifier}"
+
+
+@mcp.tool()
+async def rag_ingest_batch(
+    source_type: str,
+    source: str,
+    options: dict[str, object] | None = None,
+) -> str:
+    """[rag-knowledge] RAG ingest batch - 汎用一括取り込み.
+
+    knowledge base, bulk ingest, batch, discover, local file, multi-source.
+    指定されたソースタイプに対応するインジェスターで一括取り込みを行う。
+    discover で対象を発見し、バッチで取り込む。
+
+    Args:
+        source_type: データソース種別（web, local_file 等）
+        source: 発見元（ディレクトリパス、ユーザー名、リンク集 URL 等）
+        options: ソースタイプ固有の追加パラメータ
+
+    Returns:
+        取り込み結果のサマリー
+    """
+    service = await _get_rag_service()
+    try:
+        result = await service.ingest_batch(source_type, source, options)
+        ingested = result["ingested"]
+        chunks = result["chunks_stored"]
+        errors = result["errors"]
+        if ingested == 0 and errors == 0:
+            return f"取り込み対象が見つかりませんでした。source_type={source_type}, source={source}"
+        return f"一括取り込み完了: {ingested}件 / {chunks}チャンク / エラー: {errors}件"
+    except ValueError as e:
+        return f"エラー: {e}"
+    except Exception:
+        logger.exception(
+            "Failed to batch ingest: source_type=%s source=%s", source_type, source
+        )
+        return f"エラー: 一括取り込みに失敗しました。source_type={source_type}, source={source}"
 
 
 def _configure_and_run() -> None:

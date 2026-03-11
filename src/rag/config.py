@@ -95,6 +95,9 @@ class RAGSettings(BaseSettings):
     # rag_stats ソース一覧の最大表示件数
     rag_stats_max_sources: int = Field(default=100, ge=1)
 
+    # ローカルファイル取り込み
+    rag_local_file_allowed_dirs: str = ""
+
     # デバッグ
     rag_debug_log_enabled: bool = False
 
