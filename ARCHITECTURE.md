@@ -28,7 +28,7 @@
 | ファイル | 責務 |
 |---|---|
 | `src/rag/server.py` | MCP サーバー（FastMCP）エントリーポイント・ツール定義 |
-| `src/rag/cli.py` | CLI エントリーポイント（評価・DB 初期化） |
+| `src/rag/cli.py` | CLI エントリーポイント（評価・DB 初期化・取り込み・クロールプレビュー） |
 | `src/rag/config.py` | pydantic-settings による環境変数・設定管理 |
 | `src/rag/rag_knowledge.py` | ナレッジサービス（取り込み・検索・削除のオーケストレーション） |
 | `src/rag/web_crawler.py` | Web クローラー（ページ取得・本文抽出・SSRF 対策・robots.txt 遵守） |
