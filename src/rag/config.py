@@ -101,6 +101,9 @@ class RAGSettings(BaseSettings):
     zenn_max_pagination_pages: int = Field(default=100, ge=1)
     zenn_max_retries: int = Field(default=3, ge=0)
 
+    # LocalFileIngester
+    rag_local_file_allowed_dirs: str = ""
+
     # デバッグ
     rag_debug_log_enabled: bool = False
 
