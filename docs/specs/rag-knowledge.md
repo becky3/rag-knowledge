@@ -85,6 +85,7 @@ flowchart TB
 
     subgraph Ingesters["インジェスター"]
         WING["WebIngester"]
+        ZING["ZennIngester"]
     end
 
     CRAWLER["Web クローラー"]
@@ -97,6 +98,7 @@ flowchart TB
     TOOLS --> Service
     Service --> Ingesters
     WING --> CRAWLER
+    ZING -->|リクエスト間隔 2秒以上| ZAPI["Zenn API（非公式）"]
     Service --> CHUNKER
     Service --> VECTOR
     Service --> BM25
@@ -153,6 +155,7 @@ flowchart LR
 | ナレッジサービス | 取り込み・検索・削除のオーケストレーション |
 | インジェスター基盤 | データソースの抽象化（BaseIngester / IngestedContent） |
 | WebIngester | Web ページ取り込み用インジェスター。WebCrawler に委譲し、Safe Browsing チェックを統合する |
+| ZennIngester | Zenn 記事取り込み用インジェスター。非公式 API 経由で記事を取得する。詳細は [Zenn インジェスター仕様](features/zenn-ingester.md) を参照 |
 | Web クローラー | ページの取得と本文テキスト抽出。SSRF 対策・robots.txt 遵守を含む |
 | コンテンツタイプ検出 | テキストの種類（通常・テーブル・見出し付きテキスト）を判定する |
 | テキストチャンカー | 段落・文・文字数の優先順で分割する。チャンク間にオーバーラップを適用する |
@@ -173,6 +176,7 @@ flowchart LR
 | LM Studio | ローカル Embedding 生成 | OpenAI 互換 API |
 | OpenAI Embeddings API | オンライン Embedding 生成 | REST API |
 | Google Safe Browsing API | URL 安全性チェック | REST API（オプション） |
+| Zenn API（非公式） | Zenn 記事の取得 | REST API（非公式） |
 | 対象 Web サイト | クロール対象 | HTTP/HTTPS |
 
 ## エッジケース
