@@ -24,7 +24,6 @@ if TYPE_CHECKING:
     from .bm25_index import BM25Index
     from .hybrid_search import HybridSearchEngine
     from .ingesters.web import WebIngester
-    from .ingesters.zenn import ZennIngester
     from .safe_browsing import SafeBrowsingClient
     from .web_crawler import CrawlPreviewPage, CrawledPage, WebCrawler
 
@@ -161,7 +160,6 @@ class RAGKnowledgeService:
         min_combined_score: float | None = None,
         debug_log_enabled: bool = False,
         web_ingester: WebIngester | None = None,
-        zenn_ingester: ZennIngester | None = None,
     ) -> None:
         """RAGKnowledgeServiceを初期化する.
 
@@ -178,7 +176,6 @@ class RAGKnowledgeService:
             min_combined_score: combined_scoreの下限閾値（None=フィルタなし）
             debug_log_enabled: RAGデバッグログの有効/無効
             web_ingester: WebIngester（オプション、指定時はingest_page/ingest_from_indexで使用）
-            zenn_ingester: ZennIngester（オプション、指定時はingest_zenn/add_zennで使用）
         """
         self._vector_store = vector_store
         self._web_crawler = web_crawler
@@ -191,7 +188,6 @@ class RAGKnowledgeService:
         self._min_combined_score = min_combined_score
         self._debug_log_enabled = debug_log_enabled
         self._web_ingester = web_ingester
-        self._zenn_ingester = zenn_ingester
         self._hybrid_search_engine: HybridSearchEngine | None = None
 
         # ハイブリッド検索エンジンの初期化
@@ -628,108 +624,6 @@ class RAGKnowledgeService:
 
         logger.info("Ingested content %s: %d chunks", normalized_url, count)
         return count
-
-    async def ingest_zenn(
-        self,
-        username: str,
-        *,
-        dry_run: bool = False,
-        no_limit: bool = False,
-    ) -> dict[str, object]:
-        """Zenn 記事一括取り込み.
-
-        仕様: docs/specs/features/zenn-ingester.md
-
-        Args:
-            username: Zenn ユーザー名
-            dry_run: True の場合は記事一覧のみ返し、取り込みは行わない
-            no_limit: True の場合はページネーション上限を解除
-
-        Returns:
-            {"articles_found": N, "articles_ingested": M, "chunks_stored": C,
-             "errors": E, "dry_run": bool, "limit_reached": bool,
-             "articles": [{"slug": ..., "title": ...}, ...]}
-        """
-        if self._zenn_ingester is None:
-            raise RuntimeError("ZennIngester が設定されていません")
-
-        # 記事一覧を取得
-        discover_result = await self._zenn_ingester.discover(
-            username, no_limit=no_limit,
-        )
-        slugs = discover_result.slugs
-        limit_reached = discover_result.limit_reached
-
-        if dry_run:
-            # dry_run: 個別記事の詳細を取得せず、slug のみ返す
-            articles_info: list[dict[str, str]] = [
-                {"slug": slug, "title": ""} for slug in slugs
-            ]
-            return {
-                "articles_found": len(slugs),
-                "articles_ingested": 0,
-                "chunks_stored": 0,
-                "errors": 0,
-                "dry_run": True,
-                "limit_reached": limit_reached,
-                "articles": articles_info,
-            }
-
-        # 各記事を取得してチャンキング・格納
-        contents = await self._zenn_ingester.fetch_batch(slugs)
-
-        total_chunks = 0
-        errors = len(slugs) - len(contents)
-        for content in contents:
-            try:
-                chunks_stored = await self._ingest_content(content)
-                total_chunks += chunks_stored
-            except Exception:
-                logger.exception("Failed to ingest Zenn article: %s", content.source_id)
-                errors += 1
-
-        logger.info(
-            "Zenn ingest complete: user=%s, found=%d, ingested=%d, chunks=%d, errors=%d",
-            username,
-            len(slugs),
-            len(contents),
-            total_chunks,
-            errors,
-        )
-
-        return {
-            "articles_found": len(slugs),
-            "articles_ingested": len(contents),
-            "chunks_stored": total_chunks,
-            "errors": errors,
-            "dry_run": False,
-            "limit_reached": limit_reached,
-            "articles": [],
-        }
-
-    async def add_zenn(self, slug: str) -> int:
-        """Zenn 記事単体取り込み.
-
-        仕様: docs/specs/features/zenn-ingester.md
-
-        Args:
-            slug: Zenn 記事の slug
-
-        Returns:
-            保存されたチャンク数
-
-        Raises:
-            RuntimeError: ZennIngester が未設定の場合
-            ValueError: slug が不正な場合
-        """
-        if self._zenn_ingester is None:
-            raise RuntimeError("ZennIngester が設定されていません")
-
-        content = await self._zenn_ingester.fetch_single(slug)
-        if content is None:
-            return 0
-
-        return await self._ingest_content(content)
 
     async def retrieve(self, query: str, n_results: int = 5) -> RAGRetrievalResult:
         """関連知識を検索し、結果を返す.

@@ -5,7 +5,7 @@
 外部 Web ページから収集した知識をベクトル DB に蓄積し、
 MCP クライアントからのクエリに対して関連情報を検索・提供する
 RAG（Retrieval-Augmented Generation）基盤。
-MCP サーバーとして独立動作し、8 つのツールを提供する。
+MCP サーバーとして独立動作し、6 つのツールを提供する。
 
 スコープ:
 
@@ -13,7 +13,6 @@ MCP サーバーとして独立動作し、8 つのツールを提供する。
 - 知識の検索（ベクトル検索・BM25 キーワード検索）
 - 知識の管理（統計表示・削除）
 - クロールプレビュー（対象ページの事前確認）
-- Zenn 記事の取り込み（API 経由での一括・単体取り込み）
 - 検索精度の評価（評価 CLI）
 
 ## 背景
@@ -34,7 +33,7 @@ MCP サーバーとして独立動作し、8 つのツールを提供する。
 
 ### MCP ツール
 
-MCP サーバーが公開する 8 つのツール。
+MCP サーバーが公開する 6 つのツール。
 
 | ツール | 入力 | 振る舞い |
 | --- | --- | --- |
@@ -44,8 +43,6 @@ MCP サーバーが公開する 8 つのツール。
 | rag_crawl_preview | URL、パターン | リンク集ページからクロール対象ページのタイトルと URL の一覧を返す。取り込みは行わない |
 | rag_delete | URL | ソース URL 指定でナレッジを削除する |
 | rag_stats | なし | 統計情報（総チャンク数、ソース URL 数）と蓄積データ概要（ドメイン別ソース URL 一覧・タイトル）を返す。表示件数上限は `RAG_STATS_MAX_SOURCES` で制御する |
-| rag_ingest_zenn | ユーザー名、dry_run、no_limit | Zenn ユーザーの記事を一括取り込みする。dry_run 時は記事一覧のみ返す。詳細は [zenn-ingester.md](features/zenn-ingester.md) を参照 |
-| rag_add_zenn | slug | Zenn 記事を slug 指定で単体取り込みする。詳細は [zenn-ingester.md](features/zenn-ingester.md) を参照 |
 
 ### 検索結果の設計
 
@@ -67,8 +64,6 @@ rag_search はベクトル検索と BM25 検索の生結果を個別に返す。
 | evaluate | 評価データセットで検索精度を計測しレポートを出力する。ベースライン比較でリグレッションを検出できる |
 | init-test-db | テスト用のベクトル DB と BM25 インデックスを初期化する |
 | crawl-preview | 指定 URL からクロール対象ページのタイトルと URL の一覧を表示する。`--format json` で JSON 出力に対応 |
-| ingest-zenn | Zenn ユーザーの記事を一括取り込みする。`--dry-run` で記事一覧のみ表示。`--no-limit` でページネーション上限を解除 |
-| add-zenn | Zenn 記事を slug 指定で単体取り込みする |
 
 評価指標: Precision、Recall、F1、NDCG@K、MRR
 
@@ -90,7 +85,6 @@ flowchart TB
 
     subgraph Ingesters["インジェスター"]
         WING["WebIngester"]
-        ZING["ZennIngester"]
     end
 
     CRAWLER["Web クローラー"]
@@ -159,7 +153,6 @@ flowchart LR
 | ナレッジサービス | 取り込み・検索・削除のオーケストレーション |
 | インジェスター基盤 | データソースの抽象化（BaseIngester / IngestedContent） |
 | WebIngester | Web ページ取り込み用インジェスター。WebCrawler に委譲し、Safe Browsing チェックを統合する |
-| ZennIngester | Zenn API 経由での記事取り込み用インジェスター。詳細は [zenn-ingester.md](features/zenn-ingester.md) を参照 |
 | Web クローラー | ページの取得と本文テキスト抽出。SSRF 対策・robots.txt 遵守を含む |
 | コンテンツタイプ検出 | テキストの種類（通常・テーブル・見出し付きテキスト）を判定する |
 | テキストチャンカー | 段落・文・文字数の優先順で分割する。チャンク間にオーバーラップを適用する |

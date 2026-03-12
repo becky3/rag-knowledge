@@ -21,7 +21,7 @@
 | ディレクトリ | 責務 |
 |---|---|
 | `src/rag/embedding/` | Embedding プロバイダー抽象化（ローカル / OpenAI）とファクトリ |
-| `src/rag/ingesters/` | インジェスタープラグイン（BaseIngester 抽象基底・IngestedContent 共通モデル・WebIngester・ZennIngester） |
+| `src/rag/ingesters/` | インジェスタープラグイン（BaseIngester 抽象基底・IngestedContent 共通モデル・WebIngester） |
 
 ### ルートレベルファイル
 
@@ -47,7 +47,6 @@
 | 仕様書 | 実装モジュール |
 |---|---|
 | `rag-knowledge.md` | `src/rag/` 全体 |
-| `features/zenn-ingester.md` | `src/rag/ingesters/zenn.py`, `src/rag/rag_knowledge.py`, `src/rag/server.py`, `src/rag/cli.py` |
 
 ### agentic/
 
