@@ -1,6 +1,8 @@
-"""RAG評価CLIモジュール
+"""RAG CLIモジュール
 
-仕様: docs/specs/rag-knowledge.md
+仕様: docs/specs/rag-knowledge.md, docs/specs/features/zenn-ingester.md
+
+サブコマンド: evaluate, init-test-db, crawl-preview, ingest-zenn, add-zenn
 """
 
 from __future__ import annotations
@@ -250,6 +252,36 @@ def main() -> None:
         help="出力フォーマット（text/json）",
     )
 
+    # ingest-zenn サブコマンド
+    ingest_zenn_parser = subparsers.add_parser(
+        "ingest-zenn", help="Zenn 記事を一括取り込み",
+    )
+    ingest_zenn_parser.add_argument(
+        "--username",
+        required=True,
+        help="Zenn ユーザー名",
+    )
+    ingest_zenn_parser.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="記事一覧を表示するのみで取り込みを行わない",
+    )
+    ingest_zenn_parser.add_argument(
+        "--no-limit",
+        action="store_true",
+        help="ページネーション上限（デフォルト10ページ）を解除する",
+    )
+
+    # add-zenn サブコマンド
+    add_zenn_parser = subparsers.add_parser(
+        "add-zenn", help="Zenn 記事を単体取り込み",
+    )
+    add_zenn_parser.add_argument(
+        "--slug",
+        required=True,
+        help="Zenn 記事の slug",
+    )
+
     args = parser.parse_args()
 
     if args.command == "evaluate":
@@ -258,6 +290,10 @@ def main() -> None:
         asyncio.run(init_test_db(args))
     elif args.command == "crawl-preview":
         asyncio.run(run_crawl_preview(args))
+    elif args.command == "ingest-zenn":
+        asyncio.run(run_ingest_zenn(args))
+    elif args.command == "add-zenn":
+        asyncio.run(run_add_zenn(args))
 
 
 async def create_rag_service(
@@ -786,6 +822,96 @@ async def run_crawl_preview(args: argparse.Namespace) -> None:
             title = page.title or "(タイトル取得不可)"
             print(f"{i}. {title}")
             print(f"   {page.url}")
+
+
+async def _create_zenn_service() -> "RAGKnowledgeService":
+    """Zenn 取り込み用の RAGKnowledgeService を生成する.
+
+    Returns:
+        ZennIngester が設定された RAGKnowledgeService インスタンス
+    """
+    from .config import get_settings
+    from .embedding.factory import get_embedding_provider
+    from .ingesters.zenn import ZennIngester
+    from .rag_knowledge import RAGKnowledgeService
+    from .vector_store import VectorStore
+    from .web_crawler import WebCrawler
+
+    settings = get_settings()
+    embedding_provider = get_embedding_provider(settings, settings.embedding_provider)
+    vector_store = VectorStore(
+        embedding_provider=embedding_provider,
+        persist_directory=settings.chromadb_persist_dir,
+    )
+    web_crawler = WebCrawler()
+    zenn_ingester = ZennIngester()
+
+    return RAGKnowledgeService(
+        vector_store=vector_store,
+        web_crawler=web_crawler,
+        chunk_size=settings.rag_chunk_size,
+        chunk_overlap=settings.rag_chunk_overlap,
+        similarity_threshold=settings.rag_similarity_threshold,
+        zenn_ingester=zenn_ingester,
+    )
+
+
+async def run_ingest_zenn(args: argparse.Namespace) -> None:
+    """Zenn 記事の一括取り込みを実行する.
+
+    Args:
+        args: コマンドライン引数
+    """
+    logger.info("Starting Zenn ingest for user: %s", args.username)
+
+    service = await _create_zenn_service()
+
+    result = await service.ingest_zenn(
+        args.username,
+        dry_run=args.dry_run,
+        no_limit=args.no_limit,
+    )
+
+    if result["dry_run"]:
+        articles = result.get("articles", [])
+        found = result["articles_found"]
+        print(f"[dry-run] Zenn 記事一覧 ({args.username}): {found}件")
+        if isinstance(articles, list):
+            for i, article in enumerate(articles, start=1):
+                if isinstance(article, dict):
+                    slug = article.get("slug", "")
+                    print(f"  {i}. {slug}")
+    else:
+        found = result["articles_found"]
+        ingested = result["articles_ingested"]
+        chunks = result["chunks_stored"]
+        errors = result["errors"]
+        print(
+            f"Zenn 記事取り込み完了 ({args.username}): "
+            f"発見={found}件, 取り込み={ingested}件, "
+            f"チャンク={chunks}, エラー={errors}件"
+        )
+
+
+async def run_add_zenn(args: argparse.Namespace) -> None:
+    """Zenn 記事の単体取り込みを実行する.
+
+    Args:
+        args: コマンドライン引数
+    """
+    logger.info("Adding Zenn article: %s", args.slug)
+
+    service = await _create_zenn_service()
+
+    try:
+        chunks = await service.add_zenn(args.slug)
+        if chunks <= 0:
+            print(f"エラー: Zenn 記事の取り込みに失敗しました。slug: {args.slug}")
+            sys.exit(1)
+        print(f"Zenn 記事を取り込みました: {args.slug} ({chunks}チャンク)")
+    except ValueError as e:
+        print(f"エラー: {e}")
+        sys.exit(1)
 
 
 if __name__ == "__main__":
