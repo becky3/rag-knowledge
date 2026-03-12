@@ -9,6 +9,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import re
+from dataclasses import dataclass, field
 from typing import Any
 
 import aiohttp
@@ -28,6 +29,54 @@ BACKOFF_BASE = 1  # 指数バックオフ: 1s, 2s, 4s
 
 # slug / username の形式: 英数字・ハイフン・アンダースコア
 _IDENTIFIER_PATTERN = re.compile(r"^[a-zA-Z0-9_-]+$")
+
+
+@dataclass
+class DiscoverResult:
+    """discover() の戻り値.
+
+    slug のリストと、ページネーション上限到達フラグを保持する。
+    """
+
+    slugs: list[str] = field(default_factory=list)
+    limit_reached: bool = False
+
+
+def format_zenn_ingest_result(
+    result: dict[str, object],
+    username: str,
+) -> str:
+    """Zenn 一括取り込み結果をフォーマットする.
+
+    server.py（MCP ツール）と cli.py（CLI コマンド）で共用する。
+
+    Args:
+        result: ingest_zenn() の戻り値
+        username: Zenn ユーザー名
+
+    Returns:
+        フォーマット済み文字列
+    """
+    if result["dry_run"]:
+        articles = result.get("articles", [])
+        found = result["articles_found"]
+        lines: list[str] = [f"[dry-run] Zenn 記事一覧 ({username}): {found}件"]
+        if isinstance(articles, list):
+            for i, article in enumerate(articles, start=1):
+                if isinstance(article, dict):
+                    slug = article.get("slug", "")
+                    lines.append(f"  {i}. {slug}")
+        return "\n".join(lines)
+
+    found = result["articles_found"]
+    ingested = result["articles_ingested"]
+    chunks = result["chunks_stored"]
+    errors = result["errors"]
+    return (
+        f"Zenn 記事取り込み完了 ({username}): "
+        f"発見={found}件, 取り込み={ingested}件, "
+        f"チャンク={chunks}, エラー={errors}件"
+    )
 
 
 class _ZennMarkdownConverter(MarkdownConverter):  # type: ignore[misc]
@@ -62,7 +111,6 @@ class ZennIngester(BaseIngester):
             max_pages: ページネーション上限（0 で無制限）
         """
         self._max_pages = max_pages
-        self._last_limit_reached = False
         self._timeout = aiohttp.ClientTimeout(total=REQUEST_TIMEOUT)
         self._md_converter = _ZennMarkdownConverter(
             heading_style="ATX",
@@ -240,8 +288,8 @@ class ZennIngester(BaseIngester):
 
         return results
 
-    async def discover(self, source: str, **kwargs: object) -> list[str]:
-        """ユーザーの記事一覧を取得し、slug のリストを返す.
+    async def discover(self, source: str, **kwargs: object) -> DiscoverResult:  # type: ignore[override]
+        """ユーザーの記事一覧を取得し、DiscoverResult を返す.
 
         Args:
             source: Zenn ユーザー名
@@ -250,16 +298,16 @@ class ZennIngester(BaseIngester):
                 no_limit (bool): ページネーション上限を解除
 
         Returns:
-            発見された slug のリスト
+            DiscoverResult（slugs と limit_reached を含む）
         """
         username = source
 
         # username のバリデーション
         if not username or not _IDENTIFIER_PATTERN.match(username):
             logger.error("Invalid Zenn username: %r", username)
-            return []
+            return DiscoverResult()
 
-        self._last_limit_reached = False
+        limit_reached = False
 
         # max_pages の決定
         no_limit = bool(kwargs.get("no_limit", False))
@@ -287,7 +335,7 @@ class ZennIngester(BaseIngester):
                         max_pages,
                         username,
                     )
-                    self._last_limit_reached = True
+                    limit_reached = True
                     break
 
                 url = (
@@ -335,7 +383,7 @@ class ZennIngester(BaseIngester):
                             "Article missing 'slug' field (API schema may have changed). "
                             "Stopping.",
                         )
-                        return slugs
+                        return DiscoverResult(slugs=slugs, limit_reached=limit_reached)
                     slugs.append(slug)
 
                 # next_page の検証
@@ -355,4 +403,4 @@ class ZennIngester(BaseIngester):
                 # リクエスト間隔
                 await asyncio.sleep(REQUEST_INTERVAL)
 
-        return slugs
+        return DiscoverResult(slugs=slugs, limit_reached=limit_reached)

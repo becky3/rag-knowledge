@@ -866,31 +866,15 @@ async def run_ingest_zenn(args: argparse.Namespace) -> None:
 
     service = await _create_zenn_service()
 
+    from .ingesters.zenn import format_zenn_ingest_result
+
     result = await service.ingest_zenn(
         args.username,
         dry_run=args.dry_run,
         no_limit=args.no_limit,
     )
 
-    if result["dry_run"]:
-        articles = result.get("articles", [])
-        found = result["articles_found"]
-        print(f"[dry-run] Zenn 記事一覧 ({args.username}): {found}件")
-        if isinstance(articles, list):
-            for i, article in enumerate(articles, start=1):
-                if isinstance(article, dict):
-                    slug = article.get("slug", "")
-                    print(f"  {i}. {slug}")
-    else:
-        found = result["articles_found"]
-        ingested = result["articles_ingested"]
-        chunks = result["chunks_stored"]
-        errors = result["errors"]
-        print(
-            f"Zenn 記事取り込み完了 ({args.username}): "
-            f"発見={found}件, 取り込み={ingested}件, "
-            f"チャンク={chunks}, エラー={errors}件"
-        )
+    print(format_zenn_ingest_result(result, args.username))
 
 
 async def run_add_zenn(args: argparse.Namespace) -> None:

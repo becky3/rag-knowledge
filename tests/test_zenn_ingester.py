@@ -26,6 +26,7 @@ import pytest
 
 from rag.ingesters.zenn import (
     DEFAULT_MAX_PAGES,
+    DiscoverResult,
     ZennIngester,
 )
 
@@ -365,9 +366,11 @@ class TestZennIngesterDiscover:
         ):
             mock_request.return_value = mock_response
 
-            slugs = await ingester.discover("testuser")
+            result = await ingester.discover("testuser")
 
-        assert slugs == ["article-1", "article-2"]
+        assert isinstance(result, DiscoverResult)
+        assert result.slugs == ["article-1", "article-2"]
+        assert result.limit_reached is False
 
     async def test_discover_pagination(self) -> None:
         """ページネーションが正しく動作すること."""
@@ -387,9 +390,10 @@ class TestZennIngesterDiscover:
         ):
             mock_request.side_effect = responses
 
-            slugs = await ingester.discover("testuser")
+            result = await ingester.discover("testuser")
 
-        assert slugs == ["a1", "a2", "a3"]
+        assert result.slugs == ["a1", "a2", "a3"]
+        assert result.limit_reached is False
         assert mock_request.call_count == 3
 
     async def test_discover_pagination_limit(self) -> None:
@@ -410,10 +414,11 @@ class TestZennIngesterDiscover:
         ):
             mock_request.side_effect = responses
 
-            slugs = await ingester.discover("testuser")
+            result = await ingester.discover("testuser")
 
         # 上限 2 ページで停止: a1, a2 のみ
-        assert slugs == ["a1", "a2"]
+        assert result.slugs == ["a1", "a2"]
+        assert result.limit_reached is True
         assert mock_request.call_count == 2
 
     async def test_discover_default_pagination_limit(self) -> None:
@@ -440,10 +445,11 @@ class TestZennIngesterDiscover:
         ):
             mock_request.side_effect = responses
 
-            slugs = await ingester.discover("testuser", no_limit=True)
+            result = await ingester.discover("testuser", no_limit=True)
 
         # no_limit なので 3 ページ全て取得
-        assert slugs == ["a1", "a2", "a3"]
+        assert result.slugs == ["a1", "a2", "a3"]
+        assert result.limit_reached is False
         assert mock_request.call_count == 3
 
     async def test_discover_empty_user(self) -> None:
@@ -463,9 +469,9 @@ class TestZennIngesterDiscover:
         ):
             mock_request.return_value = mock_response
 
-            slugs = await ingester.discover("nonexistent-user")
+            result = await ingester.discover("nonexistent-user")
 
-        assert slugs == []
+        assert result.slugs == []
 
     async def test_discover_missing_articles_field(self) -> None:
         """API レスポンスに articles フィールドがない場合にエラー停止すること."""
@@ -483,9 +489,9 @@ class TestZennIngesterDiscover:
         ):
             mock_request.return_value = mock_response
 
-            slugs = await ingester.discover("testuser")
+            result = await ingester.discover("testuser")
 
-        assert slugs == []
+        assert result.slugs == []
 
     async def test_discover_missing_slug_in_article(self) -> None:
         """記事に slug フィールドがない場合にエラー停止すること."""
@@ -506,9 +512,9 @@ class TestZennIngesterDiscover:
         ):
             mock_request.return_value = mock_response
 
-            slugs = await ingester.discover("testuser")
+            result = await ingester.discover("testuser")
 
-        assert slugs == []
+        assert result.slugs == []
 
     async def test_discover_unexpected_next_page(self) -> None:
         """next_page が予期しない値の場合にページネーションが停止すること."""
@@ -527,9 +533,9 @@ class TestZennIngesterDiscover:
         ):
             mock_request.return_value = mock_response
 
-            slugs = await ingester.discover("testuser")
+            result = await ingester.discover("testuser")
 
-        assert slugs == ["a1"]
+        assert result.slugs == ["a1"]
         # 1 回のリクエストのみ（next_page が不正で停止）
         assert mock_request.call_count == 1
 
@@ -550,9 +556,9 @@ class TestZennIngesterDiscover:
         ):
             mock_request.return_value = mock_response
 
-            slugs = await ingester.discover("testuser")
+            result = await ingester.discover("testuser")
 
-        assert slugs == ["a1"]
+        assert result.slugs == ["a1"]
 
     async def test_discover_request_interval(self) -> None:
         """ページ間のリクエスト間隔（1 秒以上）が守られていること."""
@@ -595,9 +601,9 @@ class TestZennIngesterDiscover:
         ):
             mock_request.side_effect = aiohttp.ClientError("network error")
 
-            slugs = await ingester.discover("testuser")
+            result = await ingester.discover("testuser")
 
-        assert slugs == []
+        assert result.slugs == []
 
 
 # --- RAGKnowledgeService 統合テスト ---
@@ -617,7 +623,9 @@ class TestRAGServiceZennIntegration:
         mock_web_crawler = MagicMock()
         mock_zenn_ingester = MagicMock()
         mock_zenn_ingester.discover = AsyncMock(
-            return_value=["slug-1", "slug-2", "slug-3"]
+            return_value=DiscoverResult(
+                slugs=["slug-1", "slug-2", "slug-3"],
+            )
         )
         mock_zenn_ingester.fetch_batch = AsyncMock(return_value=[])
 
@@ -653,7 +661,7 @@ class TestRAGServiceZennIntegration:
         mock_web_crawler = MagicMock()
         mock_zenn_ingester = MagicMock()
         mock_zenn_ingester.discover = AsyncMock(
-            return_value=["slug-1", "slug-2"]
+            return_value=DiscoverResult(slugs=["slug-1", "slug-2"])
         )
         mock_zenn_ingester.fetch_batch = AsyncMock(
             return_value=[

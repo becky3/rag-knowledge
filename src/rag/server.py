@@ -38,7 +38,7 @@ with contextlib.redirect_stdout(io.StringIO()):
     from .config import get_settings
     from .embedding.factory import get_embedding_provider
     from .ingesters.web import WebIngester
-    from .ingesters.zenn import ZennIngester
+    from .ingesters.zenn import ZennIngester, format_zenn_ingest_result
     from .rag_knowledge import RAGKnowledgeService
     from .safe_browsing import create_safe_browsing_client
     from .vector_store import VectorStore
@@ -486,27 +486,7 @@ async def rag_ingest_zenn(
         result = await service.ingest_zenn(
             username, dry_run=dry_run, no_limit=no_limit,
         )
-
-        if result["dry_run"]:
-            articles = result.get("articles", [])
-            found = result["articles_found"]
-            lines: list[str] = [f"[dry-run] Zenn 記事一覧 ({username}): {found}件"]
-            if isinstance(articles, list):
-                for i, article in enumerate(articles, start=1):
-                    if isinstance(article, dict):
-                        slug = article.get("slug", "")
-                        lines.append(f"  {i}. {slug}")
-            return "\n".join(lines)
-
-        found = result["articles_found"]
-        ingested = result["articles_ingested"]
-        chunks = result["chunks_stored"]
-        errors = result["errors"]
-        return (
-            f"Zenn 記事取り込み完了 ({username}): "
-            f"発見={found}件, 取り込み={ingested}件, "
-            f"チャンク={chunks}, エラー={errors}件"
-        )
+        return format_zenn_ingest_result(result, username)
     except RuntimeError as e:
         return f"エラー: {e}"
     except Exception:
