@@ -16,7 +16,7 @@ RAG Knowledge は、外部 Web ページから収集した知識をベクトル 
 | 6 | 評価 CLI | 検索精度の評価パイプライン | [rag-knowledge.md](rag-knowledge.md) |
 | 7 | URL 安全性チェック | Google Safe Browsing API による URL 検証 | [rag-knowledge.md](rag-knowledge.md) |
 | 8 | クロールプレビュー | クロール対象ページのタイトル・URL 一覧を事前確認 | [rag-knowledge.md](rag-knowledge.md) |
-| 9 | Zenn インジェスター | Zenn API 経由での記事取り込み | [zenn-ingester.md](features/zenn-ingester.md) |
+| 9 | Zenn インジェスター | Zenn API 経由での記事取り込み | [features/zenn-ingester.md](features/zenn-ingester.md) |
 
 ## 3. 技術スタック
 
