@@ -9,7 +9,7 @@ Zenn の記事を非公式 API 経由で取得し、RAG ナレッジに取り込
 スコープ:
 
 - Zenn 記事の一覧取得（ユーザー名指定、ページネーション付き）
-- Zenn 記事の個別取得（slug または URL 指定）
+- Zenn 記事の個別取得（URL または `{username}/{slug}` 形式で指定）
 - MCP ツールまたは CLI サブコマンドでの取り込みインターフェース
 
 スコープ外:
@@ -125,6 +125,7 @@ Zenn API は非公式であり、以下の特性を前提とする:
 - バッチサイズ: 0、負数、上限（10）超過
 - リクエスト間隔: 最小間隔（2 秒）未満
 - ユーザー名: 空文字列、None
+- 記事識別子: 空文字列、None、slug 単体（`{username}/{slug}` 形式でない文字列）
 
 ### 上限到達時の振る舞い
 
@@ -157,7 +158,7 @@ Zenn API は非公式であり、以下の特性を前提とする:
 | 操作 | 概要 | トリガー |
 |------|------|---------|
 | 記事一覧取得 | 指定ユーザーの Zenn 記事一覧を取得する | MCP ツール / CLI サブコマンド |
-| 単一記事取得 | slug または URL で指定した記事を取得・取り込む | MCP ツール / CLI サブコマンド |
+| 単一記事取得 | URL または `{username}/{slug}` で指定した記事を取得・取り込む | MCP ツール / CLI サブコマンド |
 | 一括取り込み | discover で発見した記事を一括取得・取り込む | MCP ツール / CLI サブコマンド |
 
 ## 各操作の仕様
@@ -178,13 +179,21 @@ Zenn API は非公式であり、以下の特性を前提とする:
 
 ### 単一記事取得（fetch_single）
 
-**トリガー**: slug または Zenn 記事 URL を指定して実行する。
+**トリガー**: 記事識別子（URL または `{username}/{slug}` 形式）を指定して実行する。
+
+**受け付ける識別子形式**:
+
+- URL 形式: `https://zenn.dev/{username}/articles/{slug}`
+- パス形式: `{username}/{slug}`（username と slug の組み合わせ）
+
+slug 単体（username なし）は受け付けない。`validate_identifier` でバリデーションエラーとする。
 
 **振る舞い**:
 
 1. 識別子のバリデーションと正規化（`validate_identifier`）
-   - URL 形式（`https://zenn.dev/{username}/articles/{slug}`）の場合、slug を抽出する
-   - slug 形式の場合、`{username}/{slug}` として扱う
+   - URL 形式の場合、username と slug を抽出する
+   - パス形式（`{username}/{slug}`）の場合、そのまま使用する
+   - slug 単体（`/` を含まない文字列）はバリデーションエラーとして拒否する
 2. Zenn API またはページクロールで記事本文を取得する
 3. 取得したコンテンツを `IngestedContent` に変換して返す
 
@@ -194,7 +203,7 @@ Zenn API は非公式であり、以下の特性を前提とする:
 |-----------|-----|
 | `source_id` | `https://zenn.dev/{username}/articles/{slug}` |
 | `title` | 記事タイトル |
-| `text` | 記事本文（Markdown） |
+| `text` | 記事本文（Markdown から変換した抽出済みテキスト） |
 | `ingested_at` | 取得時刻（ISO 8601） |
 | `source_type` | `"zenn"` |
 | `metadata` | Zenn API が返す記事メタデータを保持: `slug`, `username`, `published_at`, `article_type`, `emoji` |
@@ -226,7 +235,7 @@ Zenn API は非公式であり、以下の特性を前提とする:
 | ネットワークタイムアウト | リトライ上限まで再試行し、失敗時はエラーを報告する |
 | 記事本文が空 | `text` を空文字列として `IngestedContent` を返す。チャンキング段階で空チャンクは生成しない |
 | 同一記事の再取り込み | 同一 `source_id` の既存データを上書きする |
-| discover 中のページネーションエラー | 取得済みデータを返し、エラーをログに記録する |
+| discover 中のページネーションエラー | リトライ上限まで再試行し、失敗時はエラーを報告して停止する（部分成功としては返さない） |
 
 ## コンポーネント構成
 
