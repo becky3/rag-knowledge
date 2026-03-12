@@ -654,10 +654,11 @@ class RAGKnowledgeService:
             raise RuntimeError("ZennIngester が設定されていません")
 
         # 記事一覧を取得
-        slugs = await self._zenn_ingester.discover(
+        discover_result = await self._zenn_ingester.discover(
             username, no_limit=no_limit,
         )
-        limit_reached = self._zenn_ingester._last_limit_reached
+        slugs = discover_result.slugs
+        limit_reached = discover_result.limit_reached
 
         if dry_run:
             # dry_run: 個別記事の詳細を取得せず、slug のみ返す
