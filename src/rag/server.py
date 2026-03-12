@@ -3,13 +3,15 @@
 仕様: docs/specs/rag-knowledge.md
 独立リポジトリとして動作する。
 
-FastMCP を使用して 6 つの RAG ツールを公開する:
+FastMCP を使用して 8 つの RAG ツールを公開する:
 - rag_search: ナレッジベースから関連情報を検索
 - rag_add: 単一ページをナレッジベースに取り込み
 - rag_crawl: リンク集ページからクロール＆一括取り込み
 - rag_crawl_preview: クロール対象ページのプレビュー（タイトル・URL一覧）
 - rag_delete: ソースURL指定でナレッジから削除
 - rag_stats: ナレッジベースの統計情報を表示
+- rag_ingest_zenn: Zenn ユーザーの記事を一括取り込み
+- rag_add_zenn: Zenn 記事を slug 指定で単体取り込み
 """
 
 from __future__ import annotations
@@ -36,6 +38,7 @@ with contextlib.redirect_stdout(io.StringIO()):
     from .config import get_settings
     from .embedding.factory import get_embedding_provider
     from .ingesters.web import WebIngester
+    from .ingesters.zenn import ZennIngester
     from .rag_knowledge import RAGKnowledgeService
     from .safe_browsing import create_safe_browsing_client
     from .vector_store import VectorStore
@@ -118,6 +121,8 @@ def _build_rag_service() -> RAGKnowledgeService:
         safe_browsing_client=safe_browsing_client,
     )
 
+    zenn_ingester = ZennIngester()
+
     return RAGKnowledgeService(
         vector_store=vector_store,
         web_crawler=web_crawler,
@@ -131,6 +136,7 @@ def _build_rag_service() -> RAGKnowledgeService:
         min_combined_score=settings.rag_min_combined_score,
         debug_log_enabled=settings.rag_debug_log_enabled,
         web_ingester=web_ingester,
+        zenn_ingester=zenn_ingester,
     )
 
 
@@ -453,6 +459,87 @@ async def rag_stats() -> str:
     except Exception:
         logger.exception("Failed to get stats")
         return "エラー: 統計情報の取得に失敗しました。"
+
+
+@mcp.tool()
+async def rag_ingest_zenn(
+    username: str,
+    dry_run: bool = False,
+    no_limit: bool = False,
+) -> str:
+    """[rag-knowledge] RAG ingest Zenn - Zenn ユーザーの記事を一括取り込み.
+
+    knowledge base, ingest, Zenn, articles, bulk import.
+    Zenn API 経由で指定ユーザーの記事を取得し、ナレッジベースに取り込む。
+    --dry-run で取り込み対象の記事一覧をプレビューできる。
+
+    Args:
+        username: Zenn ユーザー名
+        dry_run: True の場合は記事一覧のみ表示し、取り込みを行わない
+        no_limit: True の場合はページネーション上限（デフォルト10ページ）を解除する
+
+    Returns:
+        取り込み結果のサマリー
+    """
+    service = await _get_rag_service()
+    try:
+        result = await service.ingest_zenn(
+            username, dry_run=dry_run, no_limit=no_limit,
+        )
+
+        if result["dry_run"]:
+            articles = result.get("articles", [])
+            found = result["articles_found"]
+            lines: list[str] = [f"[dry-run] Zenn 記事一覧 ({username}): {found}件"]
+            if isinstance(articles, list):
+                for i, article in enumerate(articles, start=1):
+                    if isinstance(article, dict):
+                        slug = article.get("slug", "")
+                        lines.append(f"  {i}. {slug}")
+            return "\n".join(lines)
+
+        found = result["articles_found"]
+        ingested = result["articles_ingested"]
+        chunks = result["chunks_stored"]
+        errors = result["errors"]
+        return (
+            f"Zenn 記事取り込み完了 ({username}): "
+            f"発見={found}件, 取り込み={ingested}件, "
+            f"チャンク={chunks}, エラー={errors}件"
+        )
+    except RuntimeError as e:
+        return f"エラー: {e}"
+    except Exception:
+        logger.exception("Failed to ingest Zenn articles: %s", username)
+        return f"エラー: Zenn 記事の取り込みに失敗しました。ユーザー: {username}"
+
+
+@mcp.tool()
+async def rag_add_zenn(slug: str) -> str:
+    """[rag-knowledge] RAG add Zenn - Zenn 記事を単体取り込み.
+
+    knowledge base, ingest, Zenn, single article.
+    slug 指定で Zenn の単一記事を取得し、ナレッジベースに取り込む。
+
+    Args:
+        slug: Zenn 記事の slug（記事固有の識別子）
+
+    Returns:
+        取り込み結果のメッセージ
+    """
+    service = await _get_rag_service()
+    try:
+        chunks = await service.add_zenn(slug)
+        if chunks <= 0:
+            return f"エラー: Zenn 記事の取り込みに失敗しました。slug: {slug}"
+        return f"Zenn 記事を取り込みました: {slug} ({chunks}チャンク)"
+    except ValueError as e:
+        return f"エラー: {e}"
+    except RuntimeError as e:
+        return f"エラー: {e}"
+    except Exception:
+        logger.exception("Failed to add Zenn article: %s", slug)
+        return f"エラー: Zenn 記事の取り込みに失敗しました。slug: {slug}"
 
 
 def _configure_and_run() -> None:
