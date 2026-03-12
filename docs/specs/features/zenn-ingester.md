@@ -106,7 +106,9 @@ Zenn の記事ページは動的に生成されるため、Web クローラー�
 1. `https://zenn.dev/api/articles?username={username}&order=latest&page={page}` に GET リクエストを送信する
 2. レスポンスの `articles` 配列から記事 slug の一覧を取得する
 3. `next_page` が `null` またはページネーション上限に到達するまでページを進める
-4. 各記事の本文を `https://zenn.dev/api/articles/{slug}` から取得する。レスポンスの `body_html` フィールドを本文として使用する
+4. 各記事の本文を `https://zenn.dev/api/articles/{slug}` から取得する
+   - レスポンスの `body_html` フィールドから HTML タグを除去し、プレーンテキスト（または Markdown）に変換したものを `IngestedContent.text` に格納する
+   - 生の `body_html` が必要な場合は `IngestedContent.metadata.raw_html` などのメタデータとして保持する
 5. 取得した記事を IngestedContent に変換し、ナレッジサービスに渡す
 6. 同一 slug の記事が既存の場合、既存チャンクを最新に置き換える
 
