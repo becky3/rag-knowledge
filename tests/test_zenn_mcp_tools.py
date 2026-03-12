@@ -58,7 +58,7 @@ class TestRagIngestZennTool:
         assert "article-2" in result
         assert "article-3" in result
         mock_service.ingest_zenn.assert_called_once_with(
-            "testuser", dry_run=True, no_limit=False,
+            "testuser", dry_run=True,
         )
 
     async def test_ingest_zenn_full(self) -> None:
@@ -104,30 +104,6 @@ class TestRagIngestZennTool:
             result = await rag_ingest_zenn(username="testuser")
 
         assert "エラー=2件" in result
-
-    async def test_ingest_zenn_no_limit(self) -> None:
-        """no_limit パラメータが正しくサービスに渡されること."""
-        mock_service = MagicMock()
-        mock_service.ingest_zenn = AsyncMock(
-            return_value={
-                "articles_found": 100,
-                "articles_ingested": 100,
-                "chunks_stored": 500,
-                "errors": 0,
-                "dry_run": False,
-                "limit_reached": False,
-                "articles": [],
-            }
-        )
-
-        with patch("rag.server._get_rag_service", return_value=mock_service):
-            await rag_ingest_zenn(
-                username="testuser", no_limit=True,
-            )
-
-        mock_service.ingest_zenn.assert_called_once_with(
-            "testuser", dry_run=False, no_limit=True,
-        )
 
     async def test_ingest_zenn_runtime_error(self) -> None:
         """RuntimeError 時にエラーメッセージが返されること."""

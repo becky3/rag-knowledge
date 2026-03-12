@@ -605,6 +605,74 @@ class TestZennIngesterDiscover:
 
         assert result.slugs == []
 
+    async def test_discover_article_count_limit(self) -> None:
+        """記事数上限（max_articles）で停止すること."""
+        ingester = ZennIngester(max_pages=10, max_articles=3)
+
+        # 1ページに5件の記事がある場合、3件で停止する
+        mock_response = {
+            "articles": [
+                {"slug": "a1"},
+                {"slug": "a2"},
+                {"slug": "a3"},
+                {"slug": "a4"},
+                {"slug": "a5"},
+            ],
+            "next_page": 2,
+        }
+
+        with (
+            patch.object(
+                ingester, "_request_with_retry", new_callable=AsyncMock
+            ) as mock_request,
+            patch("rag.ingesters.zenn.asyncio.sleep", new_callable=AsyncMock),
+        ):
+            mock_request.return_value = mock_response
+
+            result = await ingester.discover("testuser")
+
+        assert result.slugs == ["a1", "a2", "a3"]
+        assert result.limit_reached is True
+        # 1ページ目で記事数上限に達するので、2ページ目はリクエストしない
+        assert mock_request.call_count == 1
+
+    async def test_discover_default_article_count_limit(self) -> None:
+        """デフォルトの記事数上限が 100 であること."""
+        from rag.ingesters.zenn import DEFAULT_MAX_ARTICLES
+
+        ingester = ZennIngester()
+        assert ingester._max_articles == DEFAULT_MAX_ARTICLES
+        assert DEFAULT_MAX_ARTICLES == 100
+
+    async def test_discover_no_limit_disables_article_limit(self) -> None:
+        """no_limit=True で記事数上限も解除されること."""
+        ingester = ZennIngester(max_pages=10, max_articles=3)
+
+        # 5件の記事がある場合、no_limit=True なら全件取得
+        mock_response = {
+            "articles": [
+                {"slug": "a1"},
+                {"slug": "a2"},
+                {"slug": "a3"},
+                {"slug": "a4"},
+                {"slug": "a5"},
+            ],
+            "next_page": None,
+        }
+
+        with (
+            patch.object(
+                ingester, "_request_with_retry", new_callable=AsyncMock
+            ) as mock_request,
+            patch("rag.ingesters.zenn.asyncio.sleep", new_callable=AsyncMock),
+        ):
+            mock_request.return_value = mock_response
+
+            result = await ingester.discover("testuser", no_limit=True)
+
+        assert result.slugs == ["a1", "a2", "a3", "a4", "a5"]
+        assert result.limit_reached is False
+
 
 # --- RAGKnowledgeService 統合テスト ---
 

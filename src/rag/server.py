@@ -465,18 +465,18 @@ async def rag_stats() -> str:
 async def rag_ingest_zenn(
     username: str,
     dry_run: bool = False,
-    no_limit: bool = False,
 ) -> str:
     """[rag-knowledge] RAG ingest Zenn - Zenn ユーザーの記事を一括取り込み.
 
     knowledge base, ingest, Zenn, articles, bulk import.
     Zenn API 経由で指定ユーザーの記事を取得し、ナレッジベースに取り込む。
     --dry-run で取り込み対象の記事一覧をプレビューできる。
+    ページネーション上限（10ページ）・記事数上限（100件）が適用される。
+    上限解除は CLI のみ可能。
 
     Args:
         username: Zenn ユーザー名
         dry_run: True の場合は記事一覧のみ表示し、取り込みを行わない
-        no_limit: True の場合はページネーション上限（デフォルト10ページ）を解除する
 
     Returns:
         取り込み結果のサマリー
@@ -484,7 +484,7 @@ async def rag_ingest_zenn(
     service = await _get_rag_service()
     try:
         result = await service.ingest_zenn(
-            username, dry_run=dry_run, no_limit=no_limit,
+            username, dry_run=dry_run,
         )
         return format_zenn_ingest_result(result, username)
     except RuntimeError as e:

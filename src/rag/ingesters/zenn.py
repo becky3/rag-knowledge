@@ -22,6 +22,7 @@ logger = logging.getLogger(__name__)
 ZENN_API_BASE = "https://zenn.dev/api"
 USER_AGENT = "RAG-Knowledge/1.0"
 DEFAULT_MAX_PAGES = 10
+DEFAULT_MAX_ARTICLES = 100
 REQUEST_INTERVAL = 1.0
 REQUEST_TIMEOUT = 30
 MAX_RETRIES = 3
@@ -104,13 +105,20 @@ class ZennIngester(BaseIngester):
     安全制約を実装する。
     """
 
-    def __init__(self, *, max_pages: int = DEFAULT_MAX_PAGES) -> None:
+    def __init__(
+        self,
+        *,
+        max_pages: int = DEFAULT_MAX_PAGES,
+        max_articles: int = DEFAULT_MAX_ARTICLES,
+    ) -> None:
         """ZennIngester を初期化する.
 
         Args:
             max_pages: ページネーション上限（0 で無制限）
+            max_articles: 一括取り込み時の記事数上限（0 で無制限）
         """
         self._max_pages = max_pages
+        self._max_articles = max_articles
         self._timeout = aiohttp.ClientTimeout(total=REQUEST_TIMEOUT)
         self._md_converter = _ZennMarkdownConverter(
             heading_style="ATX",
@@ -309,16 +317,18 @@ class ZennIngester(BaseIngester):
 
         limit_reached = False
 
-        # max_pages の決定
+        # max_pages / max_articles の決定
         no_limit = bool(kwargs.get("no_limit", False))
         if no_limit:
             max_pages = 0  # 無制限
+            max_articles = 0  # 無制限
         else:
             max_pages_override = kwargs.get("max_pages")
             if max_pages_override is not None:
                 max_pages = int(str(max_pages_override))
             else:
                 max_pages = self._max_pages
+            max_articles = self._max_articles
 
         slugs: list[str] = []
         page = 1
@@ -377,6 +387,16 @@ class ZennIngester(BaseIngester):
                     break
 
                 for article in articles:
+                    # 記事数上限チェック
+                    if max_articles > 0 and len(slugs) >= max_articles:
+                        logger.warning(
+                            "Article count limit reached (%d articles) for user: %s",
+                            max_articles,
+                            username,
+                        )
+                        limit_reached = True
+                        return DiscoverResult(slugs=slugs, limit_reached=limit_reached)
+
                     slug = article.get("slug")
                     if slug is None:
                         logger.error(

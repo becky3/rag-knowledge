@@ -44,7 +44,7 @@ MCP サーバーが公開する 8 つのツール。
 | rag_crawl_preview | URL、パターン | リンク集ページからクロール対象ページのタイトルと URL の一覧を返す。取り込みは行わない |
 | rag_delete | URL | ソース URL 指定でナレッジを削除する |
 | rag_stats | なし | 統計情報（総チャンク数、ソース URL 数）と蓄積データ概要（ドメイン別ソース URL 一覧・タイトル）を返す。表示件数上限は `RAG_STATS_MAX_SOURCES` で制御する |
-| rag_ingest_zenn | ユーザー名、dry_run、no_limit | Zenn ユーザーの記事を一括取り込みする。dry_run 時は記事一覧のみ返す。詳細は [zenn-ingester.md](features/zenn-ingester.md) を参照 |
+| rag_ingest_zenn | ユーザー名、dry_run | Zenn ユーザーの記事を一括取り込みする。dry_run 時は記事一覧のみ返す。上限解除は CLI のみ。詳細は [zenn-ingester.md](features/zenn-ingester.md) を参照 |
 | rag_add_zenn | slug | Zenn 記事を slug 指定で単体取り込みする。詳細は [zenn-ingester.md](features/zenn-ingester.md) を参照 |
 
 ### 検索結果の設計
@@ -94,6 +94,7 @@ flowchart TB
     end
 
     CRAWLER["Web クローラー"]
+    ZAPI["Zenn API"]
     CHUNKER["チャンカー"]
     VECTOR["ベクトルストア"]
     BM25["BM25 インデックス"]
@@ -103,6 +104,7 @@ flowchart TB
     TOOLS --> Service
     Service --> Ingesters
     WING --> CRAWLER
+    ZING --> ZAPI
     Service --> CHUNKER
     Service --> VECTOR
     Service --> BM25
