@@ -16,6 +16,8 @@
 
 from __future__ import annotations
 
+import logging
+
 import pytest
 from hypothesis import given, settings, strategies as st
 
@@ -36,6 +38,14 @@ from rag.safety.constrained_client import (
     _clamp_request_interval,
     _clamp_request_timeout,
 )
+
+
+@pytest.fixture(autouse=True)
+def _suppress_clamp_warnings() -> None:
+    """プロパティテスト中はクランプ警告ログを抑制する."""
+    logging.getLogger("rag.safety").setLevel(logging.ERROR)
+    yield  # type: ignore[misc]
+    logging.getLogger("rag.safety").setLevel(logging.NOTSET)
 
 
 # ---------------------------------------------------------------------------
