@@ -13,6 +13,8 @@ import pytest
 
 from rag.web_crawler import CrawlPreviewPage, CrawledPage, RobotsChecker, WebCrawler
 
+# モック用: バジェット残量のデフォルト値（十分大きい値）
+DEFAULT_MOCK_BUDGET_REMAINING = 999
 
 # テスト用HTMLサンプル
 SAMPLE_HTML_WITH_ARTICLE = """
@@ -127,7 +129,7 @@ class MockConstrainedClient:
         self._raw_bytes = raw_bytes
         self._url_responses = url_responses or {}
         self.budget = MagicMock()
-        self.budget.remaining = 999  # デフォルト: 十分大きい値
+        self.budget.remaining = DEFAULT_MOCK_BUDGET_REMAINING  # デフォルト: 十分大きい値
         self.circuit_breaker = MagicMock()
 
     async def __aenter__(self) -> "MockConstrainedClient":
@@ -1037,7 +1039,7 @@ class MockRobotsConstrainedClient:
         self._page_html = page_html
         self._page_status = page_status
         self.budget = MagicMock()
-        self.budget.remaining = 999
+        self.budget.remaining = DEFAULT_MOCK_BUDGET_REMAINING
         self.circuit_breaker = MagicMock()
 
     async def __aenter__(self) -> "MockRobotsConstrainedClient":
@@ -1399,7 +1401,7 @@ class TestWebCrawlerCrawlPreview:
 
             def __init__(self) -> None:
                 self.budget = MagicMock()
-                self.budget.remaining = 999
+                self.budget.remaining = DEFAULT_MOCK_BUDGET_REMAINING
                 self.circuit_breaker = MagicMock()
 
             async def __aenter__(self) -> "MockConstrainedClientForPreview":
@@ -1460,7 +1462,7 @@ class TestWebCrawlerCrawlPreview:
 
             def __init__(self) -> None:
                 self.budget = MagicMock()
-                self.budget.remaining = 999
+                self.budget.remaining = DEFAULT_MOCK_BUDGET_REMAINING
                 self.circuit_breaker = MagicMock()
 
             async def __aenter__(self) -> "MockConstrainedClientForPattern":
@@ -1496,7 +1498,7 @@ class TestWebCrawlerCrawlPreview:
 
             def __init__(self) -> None:
                 self.budget = MagicMock()
-                self.budget.remaining = 999
+                self.budget.remaining = DEFAULT_MOCK_BUDGET_REMAINING
                 self.circuit_breaker = MagicMock()
 
             async def __aenter__(self) -> "MockConstrainedClientWithTitleError":
