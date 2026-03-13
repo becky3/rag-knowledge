@@ -127,6 +127,7 @@ class MockConstrainedClient:
         self._raw_bytes = raw_bytes
         self._url_responses = url_responses or {}
         self.budget = MagicMock()
+        self.budget.remaining = 999  # デフォルト: 十分大きい値
         self.circuit_breaker = MagicMock()
 
     async def __aenter__(self) -> "MockConstrainedClient":
@@ -620,6 +621,24 @@ class TestWebCrawlerCrawlIndexPage:
 
         assert len(urls) <= 2
 
+    @pytest.mark.asyncio
+    async def test_crawl_index_page_limits_by_budget_remaining(self) -> None:
+        """バジェット残量に基づいて URL 数を制限すること."""
+        # SAMPLE_INDEX_HTML には同一ドメインリンクが 5 件あるが、
+        # バジェット残量 2 に制限される
+        crawler = WebCrawler(max_pages=500, respect_robots_txt=False)
+
+        mock_client = MockConstrainedClient(200, SAMPLE_INDEX_HTML)
+        mock_client.budget.remaining = 2
+
+        with patch.object(
+            crawler, "create_client",
+            return_value=mock_client,
+        ):
+            urls = await crawler.crawl_index_page("https://example.com/articles")
+
+        assert len(urls) == 2
+
 
 class TestWebCrawlerCrawlPage:
     """WebCrawler.crawl_page のテスト."""
@@ -1018,6 +1037,7 @@ class MockRobotsConstrainedClient:
         self._page_html = page_html
         self._page_status = page_status
         self.budget = MagicMock()
+        self.budget.remaining = 999
         self.circuit_breaker = MagicMock()
 
     async def __aenter__(self) -> "MockRobotsConstrainedClient":
@@ -1379,6 +1399,7 @@ class TestWebCrawlerCrawlPreview:
 
             def __init__(self) -> None:
                 self.budget = MagicMock()
+                self.budget.remaining = 999
                 self.circuit_breaker = MagicMock()
 
             async def __aenter__(self) -> "MockConstrainedClientForPreview":
@@ -1439,6 +1460,7 @@ class TestWebCrawlerCrawlPreview:
 
             def __init__(self) -> None:
                 self.budget = MagicMock()
+                self.budget.remaining = 999
                 self.circuit_breaker = MagicMock()
 
             async def __aenter__(self) -> "MockConstrainedClientForPattern":
@@ -1474,6 +1496,7 @@ class TestWebCrawlerCrawlPreview:
 
             def __init__(self) -> None:
                 self.budget = MagicMock()
+                self.budget.remaining = 999
                 self.circuit_breaker = MagicMock()
 
             async def __aenter__(self) -> "MockConstrainedClientWithTitleError":
