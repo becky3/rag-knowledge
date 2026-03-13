@@ -10,7 +10,6 @@
 | `docs/specs/` | 機能仕様書・エージェント定義（実装の根拠） |
 | `tests/` | pytest テストコード |
 | `tests/fixtures/` | テスト用フィクスチャ（評価データセット・テスト文書） |
-| `tests/property/` | プロパティベーステスト（Hypothesis による不変条件検証） |
 | `scripts/` | 評価データ収集・パラメータスイープ・分析・CI チェックスクリプト |
 | `.claude/` | Claude Code プロジェクト設定（エージェント・スキル） |
 | `.github/` | GitHub Actions ワークフロー |
@@ -23,7 +22,6 @@
 |---|---|
 | `src/rag/embedding/` | Embedding プロバイダー抽象化（ローカル / OpenAI）とファクトリ |
 | `src/rag/ingesters/` | インジェスタープラグイン（BaseIngester 抽象基底・IngestedContent 共通モデル・WebIngester） |
-| `src/rag/safety/` | 制約付き HTTP クライアント（ConstrainedClient・BudgetTracker・CircuitBreaker） |
 
 ### ルートレベルファイル
 

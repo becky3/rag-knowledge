@@ -311,7 +311,7 @@ class SafeBrowsingClient:
 
     async def _call_api(self, urls: list[str]) -> dict[str, SafeBrowsingResult]:
         """Safe Browsing API を呼び出す."""
-        from .safety.constrained_client import ConstrainedClient
+        from py_common_lib.httpx import ConstrainedClient
 
         request_body = self._build_request_body(urls)
 
