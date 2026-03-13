@@ -8,8 +8,10 @@
 対象の不変条件:
 1. リクエスト総数上限: effective 値が HARD_LIMIT_MAX_TOTAL_REQUESTS を超えない
 2. リクエスト間隔下限: effective 値が HARD_LIMIT_MIN_REQUEST_INTERVAL を下回らない
-3. 操作タイムアウト: effective 値が HARD_LIMIT_OPERATION_TIMEOUT を超えない
+3. 操作タイムアウト・リクエストタイムアウト: effective 値がハードリミットを超えない
 4. バジェット消費の単調性: consume() のたびに remaining は単調減少する
+5. サーキットブレーカー: effective threshold が [1, HARD_LIMIT] 範囲内
+6. ConstrainedClient 統合: いかなるパラメータ組み合わせでも全制約がハードリミット内
 """
 
 from __future__ import annotations
@@ -117,12 +119,16 @@ class TestBudgetTrackerInvariants:
     ) -> None:
         """used + remaining は常に limit と等しい."""
         tracker = BudgetTracker(max_requests=max_requests)
+        # 初期状態でも保存則が成立することを検証
+        assert tracker.used + tracker.remaining == tracker.limit
         for _ in range(n_consumes):
             try:
                 tracker.consume()
             except BudgetExhaustedError:
                 break
             assert tracker.used + tracker.remaining == tracker.limit
+        # ループ終了後も検証（exhaust 後を含む）
+        assert tracker.used + tracker.remaining == tracker.limit
 
     @given(max_requests=any_int)
     @settings(max_examples=200)
@@ -173,7 +179,24 @@ class TestRequestIntervalInvariants:
 
 
 # ---------------------------------------------------------------------------
-# 不変条件 3: 操作タイムアウト
+# 不変条件 3a: リクエストタイムアウト
+# ---------------------------------------------------------------------------
+
+
+class TestRequestTimeoutInvariants:
+    """リクエストタイムアウトの不変条件."""
+
+    @given(timeout=any_float)
+    @settings(max_examples=200)
+    def test_request_timeout_within_bounds(self, timeout: float) -> None:
+        """いかなる request_timeout でもクランプ後は [1, 120] 範囲内."""
+        clamped = _clamp_request_timeout(timeout)
+        # 範囲 [1.0, 120.0] は _clamp_request_timeout 内のハードコーディング値
+        assert 1.0 <= clamped <= 120.0
+
+
+# ---------------------------------------------------------------------------
+# 不変条件 3b: 操作タイムアウト
 # ---------------------------------------------------------------------------
 
 
@@ -188,14 +211,6 @@ class TestOperationTimeoutInvariants:
         """いかなる operation_timeout でもクランプ後は HARD_LIMIT 以下."""
         client = ConstrainedClient(operation_timeout=timeout)
         assert client._operation_timeout <= HARD_LIMIT_OPERATION_TIMEOUT
-
-    @given(timeout=any_float)
-    @settings(max_examples=200)
-    def test_request_timeout_within_bounds(self, timeout: float) -> None:
-        """いかなる request_timeout でもクランプ後は [1, 120] 範囲内."""
-        clamped = _clamp_request_timeout(timeout)
-        # 範囲 [1.0, 120.0] は _clamp_request_timeout 内のハードコーディング値
-        assert 1.0 <= clamped <= 120.0
 
 
 # ---------------------------------------------------------------------------
@@ -254,6 +269,11 @@ class TestCircuitBreakerInvariants:
         cb = CircuitBreaker(threshold=threshold)
         effective = cb.threshold
 
+        # 成功を複数回記録してもカウンタは 0 のまま
+        for _ in range(successes_before):
+            cb.record_success()
+        assert cb.consecutive_failures == 0
+
         # 閾値の直前まで失敗させる
         for _ in range(effective - 1):
             try:
@@ -299,13 +319,13 @@ class TestConstrainedClientInvariants:
             circuit_breaker_threshold=circuit_breaker_threshold,
             operation_timeout=operation_timeout,
         )
-        # リクエストタイムアウト: [1, 120]（_clamp_request_timeout のハードコーディング値）
-        assert 1.0 <= client._request_timeout <= 120.0
-        # リクエスト間隔: [HARD_LIMIT, 60]（60.0 は _clamp_request_interval のハードコーディング値）
-        assert HARD_LIMIT_MIN_REQUEST_INTERVAL <= client._request_interval <= 60.0
-        # 操作タイムアウト: ≤ 600
+        # バジェット: [1, 500]（公開プロパティ経由）
+        assert 1 <= client.budget.limit <= HARD_LIMIT_MAX_TOTAL_REQUESTS
+        # サーキットブレーカー: [1, 5]（公開プロパティ経由）
+        assert 1 <= client.circuit_breaker.threshold <= HARD_LIMIT_CONSECUTIVE_FAILURES
+        # 操作タイムアウト: ≤ 600（公開プロパティなし、private アクセス）
         assert client._operation_timeout <= HARD_LIMIT_OPERATION_TIMEOUT
-        # バジェット: [1, 500]
-        assert 1 <= client._budget.limit <= HARD_LIMIT_MAX_TOTAL_REQUESTS
-        # サーキットブレーカー: [1, 5]
-        assert 1 <= client._circuit_breaker.threshold <= HARD_LIMIT_CONSECUTIVE_FAILURES
+        # リクエストタイムアウト: [1, 120]（公開プロパティなし、private アクセス）
+        assert 1.0 <= client._request_timeout <= 120.0
+        # リクエスト間隔: [HARD_LIMIT, 60]（公開プロパティなし、private アクセス）
+        assert HARD_LIMIT_MIN_REQUEST_INTERVAL <= client._request_interval <= 60.0
