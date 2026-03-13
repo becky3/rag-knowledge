@@ -123,15 +123,18 @@ class TestIngestFromIndex:
         assert result["pages_crawled"] == 2
         assert result["chunks_stored"] >= 2
         assert result["errors"] == 0
-        # crawl_index_page は client= パラメータ付きで呼ばれる
+        # create_client() が呼ばれ、async context manager として使用されたこと
+        mock_web_crawler.create_client.assert_called_once()
+        mock_client = mock_web_crawler.create_client.return_value
+        # crawl_index_page に create_client() の同一インスタンスが渡されたこと
         mock_web_crawler.crawl_index_page.assert_called_once()
         call_args = mock_web_crawler.crawl_index_page.call_args
         assert call_args[0] == ("https://example.com/index", r"page\d")
-        assert "client" in call_args[1]  # client= kwarg が渡されている
-        # crawl_page が各URLに対して client= 付きで呼ばれたことを確認
+        assert call_args.kwargs["client"] is mock_client
+        # crawl_page が各URLに対して同一 client で呼ばれたことを確認
         assert mock_web_crawler.crawl_page.call_count == 2
         for call in mock_web_crawler.crawl_page.call_args_list:
-            assert "client" in call[1]
+            assert call.kwargs["client"] is mock_client
 
     async def test_ingest_from_index_with_errors(
         self,
