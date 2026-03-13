@@ -336,7 +336,7 @@ class TestConstrainedClient:
         assert cc._operation_timeout == HARD_LIMIT_OPERATION_TIMEOUT
 
     @pytest.mark.asyncio
-    async def test_allow_redirects_default_false(self) -> None:
+    async def test_follow_redirects_default_false(self) -> None:
         """デフォルトでリダイレクト追従が無効（SSRF対策）."""
         cc = ConstrainedClient(request_timeout=5.0, request_interval=0.5)
         mock_resp = MagicMock(spec=httpx.Response)
