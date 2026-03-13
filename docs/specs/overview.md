@@ -25,6 +25,7 @@ RAG Knowledge は、外部 Web ページから収集した知識をベクトル 
 | パッケージ管理 | uv |
 | MCP SDK | FastMCP |
 | HTTP クライアント | httpx |
+| 制約付き HTTP クライアント | py-common-lib (ConstrainedClient) |
 | ベクトル DB | ChromaDB |
 | キーワード検索 | BM25s |
 | Embedding | OpenAI SDK / LM Studio (OpenAI 互換 API) |
