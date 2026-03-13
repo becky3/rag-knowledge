@@ -334,7 +334,7 @@ class SafeBrowsingClient:
                 finally:
                     resp.release()
         else:
-            async with aiohttp.ClientSession(timeout=self._timeout) as session:
+            async with aiohttp.ClientSession(timeout=self._timeout) as session:  # safety:allowed
                 async with session.post(
                     self.API_URL, params={"key": self._api_key}, json=request_body
                 ) as resp:
