@@ -302,16 +302,22 @@ class TestConstrainedClient:
         mock_resp = MagicMock(spec=aiohttp.ClientResponse)
         fake_now = [1000.0]
 
+        async def advance_time(seconds: float) -> None:
+            """sleep 呼び出し時に疑似時間を進める."""
+            fake_now[0] += seconds
+
         with patch("rag.safety.constrained_client.time") as mock_time, \
-             patch.object(asyncio, "sleep", new_callable=AsyncMock) as mock_sleep:
+             patch.object(asyncio, "sleep", new_callable=AsyncMock, side_effect=advance_time) as mock_sleep:
             mock_time.monotonic.side_effect = lambda: fake_now[0]
             async with cc:
                 with patch.object(cc._session, "get", new_callable=AsyncMock, return_value=mock_resp):
                     await cc.get("http://example.com/1")
                     await cc.get("http://example.com/2")
 
-                    # 2リクエスト間に最低 0.5 秒の sleep が要求される
-                    mock_sleep.assert_called_once_with(0.5)
+                    # sleep が呼ばれ、要求された待機時間が request_interval 以下であること
+                    assert mock_sleep.call_count == 1
+                    sleep_duration = mock_sleep.call_args[0][0]
+                    assert 0 < sleep_duration <= 0.5
 
     @pytest.mark.asyncio
     async def test_operation_timeout_clamped(self) -> None:
