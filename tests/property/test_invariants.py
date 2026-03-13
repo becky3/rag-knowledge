@@ -35,6 +35,7 @@ from rag.safety.constrained_client import (
     ConstrainedClient,
     HARD_LIMIT_MIN_REQUEST_INTERVAL,
     HARD_LIMIT_OPERATION_TIMEOUT,
+    _clamp_operation_timeout,
     _clamp_request_interval,
     _clamp_request_timeout,
 )
@@ -219,8 +220,23 @@ class TestOperationTimeoutInvariants:
         self, timeout: float
     ) -> None:
         """いかなる operation_timeout でもクランプ後は HARD_LIMIT 以下."""
-        client = ConstrainedClient(operation_timeout=timeout)
-        assert client._operation_timeout <= HARD_LIMIT_OPERATION_TIMEOUT
+        clamped = _clamp_operation_timeout(timeout)
+        assert clamped <= HARD_LIMIT_OPERATION_TIMEOUT
+
+    @given(timeout=any_float)
+    @settings(max_examples=200)
+    def test_effective_timeout_at_least_one(self, timeout: float) -> None:
+        """いかなる operation_timeout でもクランプ後は 1.0 以上."""
+        clamped = _clamp_operation_timeout(timeout)
+        # 下限 1.0 は _clamp_operation_timeout 内のハードコーディング値
+        assert clamped >= 1.0
+
+    @given(timeout=st.floats(min_value=1.0, max_value=600.0))
+    @settings(max_examples=200)
+    def test_valid_range_preserved(self, timeout: float) -> None:
+        """許容範囲内の値はそのまま保持される."""
+        clamped = _clamp_operation_timeout(timeout)
+        assert clamped == timeout
 
 
 # ---------------------------------------------------------------------------
@@ -333,8 +349,8 @@ class TestConstrainedClientInvariants:
         assert 1 <= client.budget.limit <= HARD_LIMIT_MAX_TOTAL_REQUESTS
         # サーキットブレーカー: [1, 5]（公開プロパティ経由）
         assert 1 <= client.circuit_breaker.threshold <= HARD_LIMIT_CONSECUTIVE_FAILURES
-        # 操作タイムアウト: ≤ 600（公開プロパティなし、private アクセス）
-        assert client._operation_timeout <= HARD_LIMIT_OPERATION_TIMEOUT
+        # 操作タイムアウト: [1, 600]（公開プロパティなし、private アクセス）
+        assert 1.0 <= client._operation_timeout <= HARD_LIMIT_OPERATION_TIMEOUT
         # リクエストタイムアウト: [1, 120]（公開プロパティなし、private アクセス）
         assert 1.0 <= client._request_timeout <= 120.0
         # リクエスト間隔: [HARD_LIMIT, 60]（公開プロパティなし、private アクセス）
