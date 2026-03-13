@@ -17,7 +17,7 @@ from urllib.parse import urldefrag, urljoin, urlparse
 from typing import Any
 from urllib.robotparser import RobotFileParser
 
-import aiohttp
+import httpx
 from bs4 import BeautifulSoup
 from charset_normalizer import from_bytes
 from markdownify import MarkdownConverter
@@ -134,24 +134,21 @@ class RobotsChecker:
 
         try:
             resp = await client.get(robots_url)
-            try:
-                if resp.status == 200:
-                    text = await resp.text()
-                    lines = text.splitlines()
-                    parser.parse(lines)
-                    crawl_delay = parser.crawl_delay(USER_AGENT)  # type: ignore[assignment]
-                    logger.debug("Fetched robots.txt from %s", robots_url)
-                else:
-                    # 404等: robots.txt が存在しない → 全て許可
-                    parser.parse([])
-                    logger.debug(
-                        "robots.txt not found at %s (status=%d), allowing all",
-                        robots_url,
-                        resp.status,
-                    )
-            finally:
-                resp.release()
-        except (aiohttp.ClientError, asyncio.TimeoutError):
+            if resp.status_code == 200:
+                text = resp.text
+                lines = text.splitlines()
+                parser.parse(lines)
+                crawl_delay = parser.crawl_delay(USER_AGENT)  # type: ignore[assignment]
+                logger.debug("Fetched robots.txt from %s", robots_url)
+            else:
+                # 404等: robots.txt が存在しない → 全て許可
+                parser.parse([])
+                logger.debug(
+                    "robots.txt not found at %s (status=%d), allowing all",
+                    robots_url,
+                    resp.status_code,
+                )
+        except (httpx.HTTPError, asyncio.TimeoutError):
             # 取得失敗 → フェイルオープン
             parser.parse([])
             logger.warning(
@@ -341,19 +338,19 @@ class WebCrawler:
 
         return defragmented_url
 
-    async def _decode_response(self, resp: aiohttp.ClientResponse) -> str:
+    def _decode_response(self, resp: httpx.Response) -> str:
         """レスポンスボディをエンコーディング自動検出でデコードする.
 
         charset_normalizerを使用してエンコーディングを自動検出し、
         日本語サイトのShift_JIS/EUC-JP等にも対応する。
 
         Args:
-            resp: aiohttpのレスポンスオブジェクト
+            resp: httpxのレスポンスオブジェクト
 
         Returns:
             デコードされたHTML文字列
         """
-        raw_bytes = await resp.read()
+        raw_bytes = resp.content
         detected = from_bytes(raw_bytes).best()
         if detected:
             return str(detected)
@@ -530,21 +527,18 @@ class WebCrawler:
 
         # ページ取得（SSRF対策: リダイレクト追従を無効化）
         resp = await client.get(validated_url)
-        try:
-            # リダイレクト応答の場合はログを出して空リストを返す
-            if resp.status in (301, 302, 303, 307, 308):
-                logger.warning(
-                    "Redirect detected (SSRF protection): %s -> %s",
-                    index_url,
-                    resp.headers.get("Location", "unknown"),
-                )
-                return []
-            if resp.status != 200:
-                logger.warning("Failed to fetch index page: %s (status=%d)", index_url, resp.status)
-                return []
-            html = await self._decode_response(resp)
-        finally:
-            resp.release()
+        # リダイレクト応答の場合はログを出して空リストを返す
+        if resp.status_code in (301, 302, 303, 307, 308):
+            logger.warning(
+                "Redirect detected (SSRF protection): %s -> %s",
+                index_url,
+                resp.headers.get("location", "unknown"),
+            )
+            return []
+        if resp.status_code != 200:
+            logger.warning("Failed to fetch index page: %s (status=%d)", index_url, resp.status_code)
+            return []
+        html = self._decode_response(resp)
 
         # リンク抽出
         soup = BeautifulSoup(html, "html.parser")
@@ -683,23 +677,20 @@ class WebCrawler:
         try:
             async with self._semaphore:
                 resp = await client.get(url)
-                try:
-                    if resp.status in (301, 302, 303, 307, 308):
-                        logger.debug(
-                            "Redirect detected during title fetch: %s", url
-                        )
-                        return ""
-                    if resp.status != 200:
-                        logger.debug(
-                            "Failed to fetch title: %s (status=%d)", url, resp.status
-                        )
-                        return ""
-                    html = await self._decode_response(resp)
-                finally:
-                    resp.release()
+                if resp.status_code in (301, 302, 303, 307, 308):
+                    logger.debug(
+                        "Redirect detected during title fetch: %s", url
+                    )
+                    return ""
+                if resp.status_code != 200:
+                    logger.debug(
+                        "Failed to fetch title: %s (status=%d)", url, resp.status_code
+                    )
+                    return ""
+                html = self._decode_response(resp)
 
             return self._extract_title(html)
-        except (asyncio.TimeoutError, aiohttp.ClientError):
+        except (asyncio.TimeoutError, httpx.HTTPError):
             logger.debug("Error fetching title for %s", url)
             return ""
         except Exception:
@@ -749,21 +740,18 @@ class WebCrawler:
             async with self._semaphore:
                 # SSRF対策: リダイレクト追従を無効化
                 resp = await client.get(validated_url)
-                try:
-                    # リダイレクト応答の場合はログを出して None を返す
-                    if resp.status in (301, 302, 303, 307, 308):
-                        logger.warning(
-                            "Redirect detected (SSRF protection): %s -> %s",
-                            url,
-                            resp.headers.get("Location", "unknown"),
-                        )
-                        return None
-                    if resp.status != 200:
-                        logger.warning("Failed to fetch page: %s (status=%d)", url, resp.status)
-                        return None
-                    html = await self._decode_response(resp)
-                finally:
-                    resp.release()
+                # リダイレクト応答の場合はログを出して None を返す
+                if resp.status_code in (301, 302, 303, 307, 308):
+                    logger.warning(
+                        "Redirect detected (SSRF protection): %s -> %s",
+                        url,
+                        resp.headers.get("location", "unknown"),
+                    )
+                    return None
+                if resp.status_code != 200:
+                    logger.warning("Failed to fetch page: %s (status=%d)", url, resp.status_code)
+                    return None
+                html = self._decode_response(resp)
 
             title, text = self._extract_text(html)
             crawled_at = datetime.now(tz=timezone.utc).isoformat()
@@ -777,7 +765,7 @@ class WebCrawler:
         except asyncio.TimeoutError:
             logger.warning("Timeout while fetching page: %s", url)
             return None
-        except aiohttp.ClientError as e:
+        except httpx.HTTPError as e:
             logger.warning("HTTP error while fetching page: %s - %s", url, e)
             return None
         except Exception:

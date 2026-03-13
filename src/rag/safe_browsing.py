@@ -13,7 +13,7 @@ from dataclasses import dataclass, field
 from enum import Enum
 from typing import TYPE_CHECKING, Any
 
-import aiohttp
+import httpx
 
 if TYPE_CHECKING:
     from .config import RAGSettings
@@ -132,7 +132,7 @@ class SafeBrowsingClient:
                 指定時は API 呼び出しごとに ConstrainedClient を都度生成する。
         """
         self._api_key = api_key
-        self._timeout = aiohttp.ClientTimeout(total=timeout)
+        self._timeout = httpx.Timeout(timeout)
         self._cache_ttl = cache_ttl
         self._fail_open = fail_open
         self._client_id = client_id
@@ -324,26 +324,21 @@ class SafeBrowsingClient:
                     params={"key": self._api_key},
                     json=request_body,
                 )
-                try:
-                    if resp.status != 200:
-                        error_text = await resp.text()
-                        raise RuntimeError(
-                            f"Safe Browsing API error: {resp.status} - {error_text}"
-                        )
-                    response_data = await resp.json()
-                finally:
-                    resp.release()
+                if resp.status_code != 200:
+                    raise RuntimeError(
+                        f"Safe Browsing API error: {resp.status_code} - {resp.text}"
+                    )
+                response_data = resp.json()
         else:
-            async with aiohttp.ClientSession(timeout=self._timeout) as session:  # safety:allowed
-                async with session.post(
+            async with httpx.AsyncClient(timeout=self._timeout) as session:  # safety:allowed
+                resp = await session.post(
                     self.API_URL, params={"key": self._api_key}, json=request_body
-                ) as resp:
-                    if resp.status != 200:
-                        error_text = await resp.text()
-                        raise RuntimeError(
-                            f"Safe Browsing API error: {resp.status} - {error_text}"
-                        )
-                    response_data = await resp.json()
+                )
+                if resp.status_code != 200:
+                    raise RuntimeError(
+                        f"Safe Browsing API error: {resp.status_code} - {resp.text}"
+                    )
+                response_data = resp.json()
 
         return self._parse_response(response_data, urls)
 

@@ -11,7 +11,7 @@ from __future__ import annotations
 import asyncio
 from unittest.mock import AsyncMock, MagicMock, patch
 
-import aiohttp
+import httpx
 import pytest
 
 from rag.safety.budget_tracker import (
@@ -210,7 +210,7 @@ class TestConstrainedClient:
             request_interval=0.5,
             request_timeout=5.0,
         )
-        mock_resp = MagicMock(spec=aiohttp.ClientResponse)
+        mock_resp = MagicMock(spec=httpx.Response)
 
         async with cc:
             with patch.object(cc._session, "get", new_callable=AsyncMock, return_value=mock_resp):
@@ -234,10 +234,10 @@ class TestConstrainedClient:
                 cc._session,
                 "get",
                 new_callable=AsyncMock,
-                side_effect=aiohttp.ClientError("connection failed"),
+                side_effect=httpx.HTTPError("connection failed"),
             ):
                 # 1回目: 失敗 → record_failure (1)
-                with pytest.raises(aiohttp.ClientError):
+                with pytest.raises(httpx.HTTPError):
                     await cc.get("http://example.com/1")
 
                 # 2回目: 失敗 → record_failure (2) → CircuitBreakerOpenError
@@ -253,7 +253,7 @@ class TestConstrainedClient:
             request_timeout=5.0,
             max_requests=100,
         )
-        mock_resp = MagicMock(spec=aiohttp.ClientResponse)
+        mock_resp = MagicMock(spec=httpx.Response)
 
         async with cc:
             # 2回失敗
@@ -261,11 +261,11 @@ class TestConstrainedClient:
                 cc._session,
                 "get",
                 new_callable=AsyncMock,
-                side_effect=aiohttp.ClientError("fail"),
+                side_effect=httpx.HTTPError("fail"),
             ):
-                with pytest.raises(aiohttp.ClientError):
+                with pytest.raises(httpx.HTTPError):
                     await cc.get("http://example.com/1")
-                with pytest.raises(aiohttp.ClientError):
+                with pytest.raises(httpx.HTTPError):
                     await cc.get("http://example.com/2")
 
             assert cc.circuit_breaker.consecutive_failures == 2
@@ -285,7 +285,7 @@ class TestConstrainedClient:
             request_timeout=5.0,
             max_requests=100,
         )
-        mock_resp = MagicMock(spec=aiohttp.ClientResponse)
+        mock_resp = MagicMock(spec=httpx.Response)
         fake_now = [1000.0]
 
         with patch("rag.safety.constrained_client.time") as mock_time:
@@ -309,7 +309,7 @@ class TestConstrainedClient:
             max_requests=100,
             operation_timeout=10.0,
         )
-        mock_resp = MagicMock(spec=aiohttp.ClientResponse)
+        mock_resp = MagicMock(spec=httpx.Response)
         fake_now = [1000.0]
 
         async def advance_time(seconds: float) -> None:
@@ -339,13 +339,13 @@ class TestConstrainedClient:
     async def test_allow_redirects_default_false(self) -> None:
         """デフォルトでリダイレクト追従が無効（SSRF対策）."""
         cc = ConstrainedClient(request_timeout=5.0, request_interval=0.5)
-        mock_resp = MagicMock(spec=aiohttp.ClientResponse)
+        mock_resp = MagicMock(spec=httpx.Response)
 
         async with cc:
             with patch.object(cc._session, "get", new_callable=AsyncMock, return_value=mock_resp) as mock_get:
                 await cc.get("http://example.com")
                 mock_get.assert_called_once_with(
-                    "http://example.com", allow_redirects=False
+                    "http://example.com", follow_redirects=False
                 )
 
     @pytest.mark.asyncio
@@ -356,7 +356,7 @@ class TestConstrainedClient:
             request_interval=0.5,
             request_timeout=5.0,
         )
-        mock_resp = MagicMock(spec=aiohttp.ClientResponse)
+        mock_resp = MagicMock(spec=httpx.Response)
 
         async with cc:
             with patch.object(cc._session, "post", new_callable=AsyncMock, return_value=mock_resp) as mock_post:
@@ -365,7 +365,7 @@ class TestConstrainedClient:
                     "http://example.com/api",
                     json={"key": "value"},
                     params={"q": "test"},
-                    allow_redirects=False,
+                    follow_redirects=False,
                 )
                 assert cc.budget.used == 1
 
@@ -395,9 +395,9 @@ class TestConstrainedClient:
                 cc._session,
                 "post",
                 new_callable=AsyncMock,
-                side_effect=aiohttp.ClientError("connection failed"),
+                side_effect=httpx.HTTPError("connection failed"),
             ):
-                with pytest.raises(aiohttp.ClientError):
+                with pytest.raises(httpx.HTTPError):
                     await cc.post("http://example.com/1")
 
                 with pytest.raises(CircuitBreakerOpenError):

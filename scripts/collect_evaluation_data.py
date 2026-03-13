@@ -18,7 +18,7 @@ import logging
 import sys
 from pathlib import Path
 
-import aiohttp
+import httpx
 
 WIKI_API_JA = "https://ja.wikipedia.org/w/api.php"
 WIKI_API_EN = "https://en.wikipedia.org/w/api.php"
@@ -35,7 +35,7 @@ logger = logging.getLogger(__name__)
 
 
 async def fetch_wikipedia_page(
-    session: aiohttp.ClientSession,
+    client: httpx.AsyncClient,
     title: str,
     lang: str,
     max_length: int,
@@ -43,7 +43,7 @@ async def fetch_wikipedia_page(
     """Wikipedia APIでページ本文を取得する.
 
     Args:
-        session: aiohttp セッション
+        client: httpx クライアント
         title: Wikipedia ページタイトル
         lang: 言語コード ("ja" or "en")
         max_length: テキストの最大文字数
@@ -64,45 +64,45 @@ async def fetch_wikipedia_page(
     }
 
     try:
-        async with session.get(api_url, params=params) as resp:
-            if resp.status != 200:
-                logger.warning("HTTP %d for %s (%s)", resp.status, title, lang)
+        resp = await client.get(api_url, params=params)
+        if resp.status_code != 200:
+            logger.warning("HTTP %d for %s (%s)", resp.status_code, title, lang)
+            return None
+
+        data = resp.json()
+        pages = data.get("query", {}).get("pages", {})
+
+        for page_id, page_data in pages.items():
+            if page_id == "-1":
+                logger.warning("Page not found: %s (%s)", title, lang)
                 return None
 
-            data = await resp.json()
-            pages = data.get("query", {}).get("pages", {})
+            extract = page_data.get("extract", "")
+            if not extract or len(extract.strip()) < 100:
+                logger.warning("Content too short: %s (%s)", title, lang)
+                return None
 
-            for page_id, page_data in pages.items():
-                if page_id == "-1":
-                    logger.warning("Page not found: %s (%s)", title, lang)
-                    return None
+            # テキストを max_length 文字に制限
+            content = extract[:max_length].strip()
 
-                extract = page_data.get("extract", "")
-                if not extract or len(extract.strip()) < 100:
-                    logger.warning("Content too short: %s (%s)", title, lang)
-                    return None
+            # 最後の文が途中で切れていたら、最後の句点で切る
+            if len(extract) > max_length:
+                for sep in ["。", ".\n", ". ", "\n\n"]:
+                    last_sep = content.rfind(sep)
+                    if last_sep > max_length * 0.6:
+                        content = content[: last_sep + len(sep)].strip()
+                        break
 
-                # テキストを max_length 文字に制限
-                content = extract[:max_length].strip()
+            resolved_title = page_data.get("title", title)
+            source_url = page_base + resolved_title.replace(" ", "_")
 
-                # 最後の文が途中で切れていたら、最後の句点で切る
-                if len(extract) > max_length:
-                    for sep in ["。", ".\n", ". ", "\n\n"]:
-                        last_sep = content.rfind(sep)
-                        if last_sep > max_length * 0.6:
-                            content = content[: last_sep + len(sep)].strip()
-                            break
+            return {
+                "source_url": source_url,
+                "title": resolved_title,
+                "content": content,
+            }
 
-                resolved_title = page_data.get("title", title)
-                source_url = page_base + resolved_title.replace(" ", "_")
-
-                return {
-                    "source_url": source_url,
-                    "title": resolved_title,
-                    "content": content,
-                }
-
-    except (aiohttp.ClientError, TimeoutError) as e:
+    except (httpx.HTTPError, TimeoutError) as e:
         logger.warning("Request failed for %s (%s): %s", title, lang, e)
         return None
 
@@ -136,11 +136,11 @@ async def collect_documents(
 
     documents: list[dict[str, str]] = []
 
-    async with aiohttp.ClientSession() as session:
+    async with httpx.AsyncClient() as client:
         for i, (cluster, title, lang) in enumerate(requests, 1):
             logger.info("[%d/%d] Fetching: %s (%s) [%s]", i, total, title, lang, cluster)
 
-            doc = await fetch_wikipedia_page(session, title, lang, max_length)
+            doc = await fetch_wikipedia_page(client, title, lang, max_length)
             if doc:
                 doc["cluster"] = cluster
                 doc["lang"] = lang
