@@ -25,7 +25,7 @@ if TYPE_CHECKING:
     from .hybrid_search import HybridSearchEngine
     from .ingesters.web import WebIngester
     from .safe_browsing import SafeBrowsingClient
-    from .safety import ConstrainedClient
+    from py_common_lib.httpx import ConstrainedClient
     from .web_crawler import CrawlPreviewPage, CrawledPage, WebCrawler
 
 logger = logging.getLogger(__name__)

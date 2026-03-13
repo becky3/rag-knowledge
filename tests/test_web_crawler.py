@@ -11,8 +11,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import httpx
 import pytest
 
-from rag.safety.budget_tracker import BudgetExhaustedError
-from rag.safety.circuit_breaker import CircuitBreakerOpenError
+from py_common_lib.core import BudgetExhaustedError, CircuitBreakerOpenError
 from rag.web_crawler import CrawlPreviewPage, CrawledPage, RobotsChecker, WebCrawler
 
 # モック用: バジェット残量のデフォルト値（十分大きい値）

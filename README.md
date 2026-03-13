@@ -14,7 +14,7 @@
 | **評価 CLI** | 検索精度の評価パイプライン |
 | **URL 安全性チェック** | Google Safe Browsing API による URL 検証 |
 | **クロールプレビュー** | クロール対象ページのタイトル・URL 一覧を事前確認 |
-| **制約付き HTTP クライアント** | バジェット・サーキットブレーカー・レート制限を統合した安全な HTTP アクセス |
+| **制約付き HTTP クライアント** | バジェット・サーキットブレーカー・レート制限を統合した安全な HTTP アクセス（py-common-lib 提供） |
 
 ## 動作環境
 
@@ -30,6 +30,7 @@
 | パッケージ管理 | uv |
 | MCP SDK | FastMCP |
 | HTTP クライアント | httpx |
+| 制約付き HTTP クライアント | py-common-lib (ConstrainedClient) |
 | ベクトル DB | ChromaDB |
 | キーワード検索 | BM25s |
 | Embedding | OpenAI SDK / LM Studio (OpenAI 互換 API) |

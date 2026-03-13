@@ -23,12 +23,11 @@ MCP サーバーとして独立動作し、6 つのツールを提供する。
 
 ## 制約
 
-- 外部アプリケーションのモジュールを import しない。必要なモジュールはすべて本リポジトリ内に配置する
 - プロジェクトルートの `.env` で設定を管理する
 - Embedding モデルを変更した場合、既存データとの類似度計算が不正確になるため、コレクション再構築が必要
 - 呼び出し元が MCP クライアントとして本サーバーに接続することで RAG 機能を利用できる
 - トランスポートは stdio（デフォルト）と http（Streamable HTTP）を切替可能。環境変数でトランスポート種別・ホスト・ポート・DNS リバインディング保護を設定する。HTTP モードはローカル／信頼済みネットワーク向けを想定しており、デフォルトではループバックアドレスにバインドする。外部ネットワークへ公開する場合は、ファイアウォールやリバースプロキシでの認証付与などによりアクセス制御を行うこと
-- `src/` 配下の外部 HTTP リクエストは ConstrainedClient（制約付き中間ライブラリ）経由で実行する。`httpx.AsyncClient`/`httpx.Client`・`aiohttp.ClientSession`・`requests`・`urllib.request` の直接利用は禁止。CI（`check-raw-http` ワークフロー）で自動検出し、違反があればマージをブロックする。許可例外: `constrained_client.py`（中間ライブラリ自身）および `# safety:allowed` コメントが付与された行
+- `src/` 配下の外部 HTTP リクエストは ConstrainedClient（py-common-lib パッケージで提供）経由で実行する。`httpx.AsyncClient`/`httpx.Client`・`aiohttp.ClientSession`・`requests`・`urllib.request` の直接利用は禁止。CI（`check-raw-http` ワークフロー）で自動検出し、違反があればマージをブロックする。ConstrainedClient は `src/` 外のパッケージのため検出対象外。許可例外: `# safety:allowed` コメントが付与された行
 - ハードリミット（コード内定数。設定・引数・環境変数で引き上げ不可。引き下げは可能）:
   - 操作あたりリクエスト総数上限: 500
   - 最低リクエスト間隔: 0.5 秒
@@ -73,7 +72,7 @@ MCP サーバーとして独立動作し、6 つのツールを提供する。
 | クロール対象ページ数上限 | 設定値 | 許容範囲 1〜500、デフォルト 50 | 範囲内で変更可 |
 | クロール遅延 | 設定値 | 許容範囲 0.5〜60 秒、デフォルト 1.0 秒 | 範囲内で変更可 |
 | リクエストタイムアウト | 設定値 | 許容範囲 1〜120 秒、デフォルト 30 秒 | 範囲内で変更可 |
-| 生 HTTP クライアント利用禁止 | CI チェック | `src/` 全体を grep で走査（httpx / aiohttp / requests / urllib.request）。`constrained_client.py` と `# safety:allowed` 行を除外 | 許可例外の追加は `# safety:allowed` コメントで可 |
+| 生 HTTP クライアント利用禁止 | CI チェック | `src/` 全体を grep で走査（httpx / aiohttp / requests / urllib.request）。`# safety:allowed` 行を除外。ConstrainedClient は py-common-lib パッケージで提供（`src/` 外のため検出対象外） | 許可例外の追加は `# safety:allowed` コメントで可 |
 
 ## インターフェース
 
@@ -135,7 +134,7 @@ flowchart TB
 
     CRAWLER["Web クローラー"]
 
-    subgraph Safety["制約付き中間ライブラリ"]
+    subgraph Safety["制約付き中間ライブラリ (py-common-lib)"]
         CC["ConstrainedClient"]
         BT["BudgetTracker"]
         CB["CircuitBreaker"]
@@ -219,9 +218,9 @@ flowchart LR
 | ハイブリッド検索エンジン | ベクトル検索と BM25 のスコアを正規化・統合する。設定で有効化できる |
 | Embedding プロバイダー | テキストをベクトルに変換する。ローカルとオンラインを切替可能 |
 | URL 安全性チェック | 外部 API によるマルウェア・フィッシングサイト判定 |
-| ConstrainedClient | 全外部 HTTP リクエストのゲートウェイ。ハードリミット・バジェット・サーキットブレーカーを統合し、httpx.AsyncClient をラップする |
-| BudgetTracker | 操作あたりのリクエスト総数を追跡し、上限到達で BudgetExhaustedError を送出する |
-| CircuitBreaker | 連続失敗回数を監視し、閾値超過で CircuitBreakerOpenError を送出する |
+| ConstrainedClient (py-common-lib) | 全外部 HTTP リクエストのゲートウェイ。ハードリミット・バジェット・サーキットブレーカーを統合し、httpx.AsyncClient をラップする |
+| BudgetTracker (py-common-lib) | 操作あたりのリクエスト総数を追跡し、上限到達で BudgetExhaustedError を送出する |
+| CircuitBreaker (py-common-lib) | 連続失敗回数を監視し、閾値超過で CircuitBreakerOpenError を送出する |
 | 評価ツール | Precision、Recall、F1、NDCG、MRR の計算とベースライン比較 |
 
 ## 外部連携

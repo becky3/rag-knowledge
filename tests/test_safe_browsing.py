@@ -19,7 +19,7 @@ from rag.safe_browsing import (
     ThreatType,
     create_safe_browsing_client,
 )
-from rag.safety.constrained_client import ConstrainedClient
+from py_common_lib.httpx import ConstrainedClient
 
 
 class MockResponse:
