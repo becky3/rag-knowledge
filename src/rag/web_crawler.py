@@ -832,55 +832,49 @@ class WebCrawler:
         urls: list[str],
         client: ConstrainedClient,
     ) -> list[CrawledPage]:
-        """crawl_pages の実装."""
-        # ホストごとの最終リクエスト時刻を管理するロック付き辞書
-        last_request_time: dict[str, float] = {}
-        time_lock = asyncio.Lock()
+        """crawl_pages の実装.
+
+        per-host 遅延の責務分担:
+        - ConstrainedClient: グローバル最低間隔（ハードリミット）
+        - この関数: robots.txt Crawl-delay が設定値より大きい場合の
+          ホスト単位の追加遅延
+        """
+        # ホストごとの最後にスケジュールされたリクエスト時刻
+        last_scheduled_at: dict[str, float] = {}
+        schedule_lock = asyncio.Lock()
 
         # ホストごとの実効遅延をキャッシュ
         effective_delays: dict[str, float] = {}
 
         async def crawl_with_delay(url: str) -> CrawledPage | None:
-            """同一ドメインへの遅延を挿入してクロールする."""
+            """ホスト単位の遅延を挿入してクロールする."""
             hostname = urlparse(url).hostname
 
             if hostname:
                 # 実効遅延を取得（ホスト単位でキャッシュ）
-                delay: float
-                async with time_lock:
-                    if hostname in effective_delays:
-                        delay = effective_delays[hostname]
-                    else:
-                        pass
-
-                # ロック外で遅延を取得（初回のみ）
                 if hostname not in effective_delays:
                     delay_value = await self._get_effective_crawl_delay(url, client)
-                    async with time_lock:
-                        if hostname not in effective_delays:
-                            effective_delays[hostname] = delay_value
-                        delay = effective_delays[hostname]
-                else:
-                    delay = effective_delays[hostname]
+                    effective_delays.setdefault(hostname, delay_value)
+                delay = effective_delays[hostname]
 
                 if delay > 0:
-                    async with time_lock:
-                        previous = last_request_time.get(hostname)
-                        if previous is not None:
-                            now = asyncio.get_running_loop().time()
-                            elapsed = now - previous
-                            if elapsed < delay:
-                                await asyncio.sleep(delay - elapsed)
-                        last_request_time[hostname] = asyncio.get_running_loop().time()
+                    # ロック内: スケジュール計算のみ（sleep しない）
+                    # NOTE: per-host delay >= ConstrainedClient.request_interval が常に
+                    # 成り立つため、per-host sleep 後に client.get() の _wait_interval()
+                    # が追加待機することはない（二重制限にならない）
+                    sleep_duration = 0.0
+                    async with schedule_lock:
+                        now = asyncio.get_running_loop().time()
+                        scheduled = last_scheduled_at.get(hostname, 0.0)
+                        target_time = max(now, scheduled + delay)
+                        last_scheduled_at[hostname] = target_time
+                        sleep_duration = target_time - now
 
-            page = await self._crawl_page_impl(url, client)
+                    # ロック外: 実際の待機
+                    if sleep_duration > 0:
+                        await asyncio.sleep(sleep_duration)
 
-            # リクエスト後に実際の完了時刻を更新
-            if hostname:
-                async with time_lock:
-                    last_request_time[hostname] = asyncio.get_running_loop().time()
-
-            return page
+            return await self._crawl_page_impl(url, client)
 
         # 並行実行（Semaphore は _crawl_page_impl 内で適用される）
         tasks = [crawl_with_delay(url) for url in urls]
