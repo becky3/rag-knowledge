@@ -23,46 +23,34 @@ from rag.safety.constrained_client import ConstrainedClient
 
 
 class MockResponse:
-    """モックHTTPレスポンス."""
+    """モックHTTPレスポンス（httpx.Response 互換）."""
 
     def __init__(self, status: int = 200, json_data: dict[str, object] | None = None) -> None:
-        self.status = status
+        self.status_code = status
         self._json_data: dict[str, object] = json_data or {}
 
-    async def json(self) -> dict[str, object]:
+    def json(self) -> dict[str, object]:
         return self._json_data
 
-    async def text(self) -> str:
+    @property
+    def text(self) -> str:
         return str(self._json_data)
 
 
-class MockClientSession:
-    """モックaiohttpクライアントセッション."""
+class MockAsyncClient:
+    """モック httpx.AsyncClient."""
 
     def __init__(self, response: MockResponse) -> None:
         self._response = response
 
-    async def __aenter__(self) -> "MockClientSession":
+    async def __aenter__(self) -> "MockAsyncClient":
         return self
 
     async def __aexit__(self, *args: object) -> None:
         pass
 
-    def post(self, url: str, **kwargs: object) -> "MockContextManager":
-        return MockContextManager(self._response)
-
-
-class MockContextManager:
-    """モックコンテキストマネージャ."""
-
-    def __init__(self, response: MockResponse) -> None:
-        self._response = response
-
-    async def __aenter__(self) -> MockResponse:
+    async def post(self, url: str, **kwargs: object) -> MockResponse:
         return self._response
-
-    async def __aexit__(self, *args: object) -> None:
-        pass
 
 
 class TestSafeBrowsingClient:
@@ -149,8 +137,8 @@ class TestSafeBrowsingClientAsync:
         mock_response = MockResponse(200, {})  # 空 = 脅威なし
 
         with patch(
-            "rag.safe_browsing.aiohttp.ClientSession",
-            return_value=MockClientSession(mock_response),
+            "rag.safe_browsing.httpx.AsyncClient",
+            return_value=MockAsyncClient(mock_response),
         ):
             result = await client.check_url("https://safe-site.com")
 
@@ -176,8 +164,8 @@ class TestSafeBrowsingClientAsync:
         )
 
         with patch(
-            "rag.safe_browsing.aiohttp.ClientSession",
-            return_value=MockClientSession(mock_response),
+            "rag.safe_browsing.httpx.AsyncClient",
+            return_value=MockAsyncClient(mock_response),
         ):
             result = await client.check_url("https://phishing-site.com")
 
@@ -203,8 +191,8 @@ class TestSafeBrowsingClientAsync:
         )
 
         with patch(
-            "rag.safe_browsing.aiohttp.ClientSession",
-            return_value=MockClientSession(mock_response),
+            "rag.safe_browsing.httpx.AsyncClient",
+            return_value=MockAsyncClient(mock_response),
         ):
             urls = ["https://safe.com", "https://malware.com", "https://another-safe.com"]
             results = await client.check_urls(urls)
@@ -228,8 +216,8 @@ class TestSafeBrowsingClientAsync:
         mock_response = MockResponse(200, {})
 
         with patch(
-            "rag.safe_browsing.aiohttp.ClientSession",
-            return_value=MockClientSession(mock_response),
+            "rag.safe_browsing.httpx.AsyncClient",
+            return_value=MockAsyncClient(mock_response),
         ):
             is_safe = await client.is_url_safe("https://safe-site.com")
 
@@ -247,16 +235,16 @@ class TestSafeBrowsingCache:
         # 最初のリクエスト
         mock_response = MockResponse(200, {})
         with patch(
-            "rag.safe_browsing.aiohttp.ClientSession",
-            return_value=MockClientSession(mock_response),
+            "rag.safe_browsing.httpx.AsyncClient",
+            return_value=MockAsyncClient(mock_response),
         ) as mock_session:
             await client.check_url("https://example.com")
             first_call_count = mock_session.call_count
 
         # 2回目のリクエスト（キャッシュヒット）
         with patch(
-            "rag.safe_browsing.aiohttp.ClientSession",
-            return_value=MockClientSession(mock_response),
+            "rag.safe_browsing.httpx.AsyncClient",
+            return_value=MockAsyncClient(mock_response),
         ) as mock_session:
             result = await client.check_url("https://example.com")
             second_call_count = mock_session.call_count
@@ -274,8 +262,8 @@ class TestSafeBrowsingCache:
 
         # 最初のリクエスト
         with patch(
-            "rag.safe_browsing.aiohttp.ClientSession",
-            return_value=MockClientSession(mock_response),
+            "rag.safe_browsing.httpx.AsyncClient",
+            return_value=MockAsyncClient(mock_response),
         ):
             await client.check_url("https://example.com")
 
@@ -284,8 +272,8 @@ class TestSafeBrowsingCache:
 
         # 2回目のリクエスト（キャッシュミス）
         with patch(
-            "rag.safe_browsing.aiohttp.ClientSession",
-            return_value=MockClientSession(mock_response),
+            "rag.safe_browsing.httpx.AsyncClient",
+            return_value=MockAsyncClient(mock_response),
         ) as mock_session:
             result = await client.check_url("https://example.com")
 
@@ -301,8 +289,8 @@ class TestSafeBrowsingCache:
 
         # キャッシュにエントリを追加
         with patch(
-            "rag.safe_browsing.aiohttp.ClientSession",
-            return_value=MockClientSession(mock_response),
+            "rag.safe_browsing.httpx.AsyncClient",
+            return_value=MockAsyncClient(mock_response),
         ):
             await client.check_url("https://example1.com")
             await client.check_url("https://example2.com")
@@ -343,8 +331,8 @@ class TestSafeBrowsingErrorHandling:
         mock_response = MockResponse(500, {"error": "Internal Server Error"})
 
         with patch(
-            "rag.safe_browsing.aiohttp.ClientSession",
-            return_value=MockClientSession(mock_response),
+            "rag.safe_browsing.httpx.AsyncClient",
+            return_value=MockAsyncClient(mock_response),
         ):
             result = await client.check_url("https://unknown-site.com")
 
@@ -359,7 +347,7 @@ class TestSafeBrowsingErrorHandling:
         client = SafeBrowsingClient(api_key="test-key", fail_open=True)
 
         with patch(
-            "rag.safe_browsing.aiohttp.ClientSession",
+            "rag.safe_browsing.httpx.AsyncClient",
             side_effect=Exception("Network error"),
         ):
             result = await client.check_url("https://unknown-site.com")
@@ -374,8 +362,8 @@ class TestSafeBrowsingErrorHandling:
         mock_response = MockResponse(500, {"error": "Internal Server Error"})
 
         with patch(
-            "rag.safe_browsing.aiohttp.ClientSession",
-            return_value=MockClientSession(mock_response),
+            "rag.safe_browsing.httpx.AsyncClient",
+            return_value=MockAsyncClient(mock_response),
         ):
             with pytest.raises(SafetyCheckError, match="API障害"):
                 await client.check_url("https://unknown-site.com")
@@ -386,7 +374,7 @@ class TestSafeBrowsingErrorHandling:
         client = SafeBrowsingClient(api_key="test-key", fail_open=False)
 
         with patch(
-            "rag.safe_browsing.aiohttp.ClientSession",
+            "rag.safe_browsing.httpx.AsyncClient",
             side_effect=Exception("Network error"),
         ):
             with pytest.raises(SafetyCheckError, match="API障害"):
@@ -439,8 +427,8 @@ class TestThreatTypes:
         )
 
         with patch(
-            "rag.safe_browsing.aiohttp.ClientSession",
-            return_value=MockClientSession(mock_response),
+            "rag.safe_browsing.httpx.AsyncClient",
+            return_value=MockAsyncClient(mock_response),
         ):
             result = await client.check_url("https://bad-site.com")
 
@@ -554,10 +542,9 @@ class TestSafeBrowsingWithConstrainedClient:
         )
 
         mock_resp = MagicMock()
-        mock_resp.status = 200
-        mock_resp.json = AsyncMock(return_value={})
-        mock_resp.text = AsyncMock(return_value="")
-        mock_resp.release = MagicMock()
+        mock_resp.status_code = 200
+        mock_resp.json.return_value = {}
+        mock_resp.text = ""
 
         with patch.object(
             ConstrainedClient,
@@ -571,7 +558,6 @@ class TestSafeBrowsingWithConstrainedClient:
             assert call_kwargs.kwargs["params"] == {"key": "test-key"}
 
         assert result.is_safe is True
-        mock_resp.release.assert_called_once()
 
     @pytest.mark.asyncio
     async def test_call_api_via_constrained_client_error(self) -> None:
@@ -586,10 +572,9 @@ class TestSafeBrowsingWithConstrainedClient:
         )
 
         mock_resp = MagicMock()
-        mock_resp.status = 500
-        mock_resp.json = AsyncMock(return_value={"error": "Server Error"})
-        mock_resp.text = AsyncMock(return_value="Server Error")
-        mock_resp.release = MagicMock()
+        mock_resp.status_code = 500
+        mock_resp.json.return_value = {"error": "Server Error"}
+        mock_resp.text = "Server Error"
 
         with patch.object(
             ConstrainedClient,
@@ -601,5 +586,3 @@ class TestSafeBrowsingWithConstrainedClient:
 
         assert result.is_safe is True
         assert result.error is not None
-        # エラー時でも release が呼ばれること
-        mock_resp.release.assert_called_once()
