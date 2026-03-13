@@ -839,8 +839,8 @@ class WebCrawler:
         - この関数: robots.txt Crawl-delay が設定値より大きい場合の
           ホスト単位の追加遅延
         """
-        # ホストごとの次回リクエスト予定時刻
-        next_request_at: dict[str, float] = {}
+        # ホストごとの最後にスケジュールされたリクエスト時刻
+        last_scheduled_at: dict[str, float] = {}
         schedule_lock = asyncio.Lock()
 
         # ホストごとの実効遅延をキャッシュ
@@ -859,12 +859,15 @@ class WebCrawler:
 
                 if delay > 0:
                     # ロック内: スケジュール計算のみ（sleep しない）
+                    # NOTE: per-host delay >= ConstrainedClient.request_interval が常に
+                    # 成り立つため、per-host sleep 後に client.get() の _wait_interval()
+                    # が追加待機することはない（二重制限にならない）
                     sleep_duration = 0.0
                     async with schedule_lock:
                         now = asyncio.get_running_loop().time()
-                        scheduled = next_request_at.get(hostname, 0.0)
+                        scheduled = last_scheduled_at.get(hostname, 0.0)
                         target_time = max(now, scheduled + delay)
-                        next_request_at[hostname] = target_time
+                        last_scheduled_at[hostname] = target_time
                         sleep_duration = target_time - now
 
                     # ロック外: 実際の待機
