@@ -8,7 +8,7 @@ on:
       - "scripts/check_raw_http.sh"
       - ".github/workflows/check-raw-http.yml"
   push:
-    branches: [develop]
+    branches: [develop, main]
     paths:
       - "src/**/*.py"
       - "scripts/check_raw_http.sh"

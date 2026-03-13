@@ -20,11 +20,16 @@ if [ ! -d "$SRC_DIR" ]; then
 fi
 
 # 検出パターン (拡張正規表現)
+# モジュール修飾形と from-import 形の両方を検出する
 PATTERNS=(
   'aiohttp\.ClientSession'
+  'from\s+aiohttp\s+import\s+.*ClientSession'
   'httpx\.(Client|AsyncClient)'
+  'from\s+httpx\s+import\s+.*(Client|AsyncClient)'
   'requests\.(get|post|put|delete|patch|head|options|session|Session)'
+  'from\s+requests\s+import'
   'urllib\.request'
+  'from\s+urllib\.request\s+import'
 )
 
 # パターンを | で結合
@@ -41,8 +46,8 @@ done
 violations=$(
   grep -rn -E "$COMBINED_PATTERN" "$SRC_DIR" \
     --include="*.py" \
-    | grep -v "constrained_client\.py" \
-    | grep -v "# safety:allowed" \
+    | grep -v "src/rag/safety/constrained_client\.py" \
+    | grep -v "#\s*safety:allowed\b" \
   || true
 )
 
