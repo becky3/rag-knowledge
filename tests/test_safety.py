@@ -9,7 +9,6 @@
 from __future__ import annotations
 
 import asyncio
-import time
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import aiohttp
@@ -277,16 +276,19 @@ class TestConstrainedClient:
             max_requests=100,
         )
         mock_resp = MagicMock(spec=aiohttp.ClientResponse)
+        fake_now = [1000.0]
 
-        async with cc:
-            with patch.object(cc._session, "get", new_callable=AsyncMock, return_value=mock_resp):
-                await cc.get("http://example.com/1")
+        with patch("rag.safety.constrained_client.time") as mock_time:
+            mock_time.monotonic.side_effect = lambda: fake_now[0]
+            async with cc:
+                with patch.object(cc._session, "get", new_callable=AsyncMock, return_value=mock_resp):
+                    await cc.get("http://example.com/1")
 
-            # タイムアウトを超過させる
-            await asyncio.sleep(0.15)
+                    # 疑似的にタイムアウトを超過させる
+                    fake_now[0] += 0.15
 
-            with pytest.raises(TimeoutError, match="操作全体タイムアウト"):
-                await cc.get("http://example.com/2")
+                    with pytest.raises(TimeoutError, match="操作全体タイムアウト"):
+                        await cc.get("http://example.com/2")
 
     @pytest.mark.asyncio
     async def test_rate_limiting(self) -> None:
@@ -298,16 +300,18 @@ class TestConstrainedClient:
             operation_timeout=10.0,
         )
         mock_resp = MagicMock(spec=aiohttp.ClientResponse)
+        fake_now = [1000.0]
 
-        async with cc:
-            with patch.object(cc._session, "get", new_callable=AsyncMock, return_value=mock_resp):
-                start = time.monotonic()
-                await cc.get("http://example.com/1")
-                await cc.get("http://example.com/2")
-                elapsed = time.monotonic() - start
+        with patch("rag.safety.constrained_client.time") as mock_time, \
+             patch.object(asyncio, "sleep", new_callable=AsyncMock) as mock_sleep:
+            mock_time.monotonic.side_effect = lambda: fake_now[0]
+            async with cc:
+                with patch.object(cc._session, "get", new_callable=AsyncMock, return_value=mock_resp):
+                    await cc.get("http://example.com/1")
+                    await cc.get("http://example.com/2")
 
-                # 2リクエスト間に最低 0.5 秒の間隔
-                assert elapsed >= 0.4  # 少しマージンを持たせる
+                    # 2リクエスト間に最低 0.5 秒の sleep が要求される
+                    mock_sleep.assert_called_once_with(0.5)
 
     @pytest.mark.asyncio
     async def test_operation_timeout_clamped(self) -> None:
