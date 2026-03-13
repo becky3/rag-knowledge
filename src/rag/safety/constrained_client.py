@@ -167,12 +167,15 @@ class ConstrainedClient:
         複数コルーチンからの同時呼び出しに対してレート制限は
         ロックにより直列化される。
 
+        呼び出し側はレスポンスの読み取り後に resp.release() を
+        呼び出して接続を解放する責務を持つ。
+
         Args:
             url: リクエスト先 URL
             allow_redirects: リダイレクト追従の有無（デフォルト: False、SSRF 対策）
 
         Returns:
-            aiohttp.ClientResponse
+            aiohttp.ClientResponse（使用後に release() で解放すること）
 
         Raises:
             BudgetExhaustedError: バジェット上限到達
@@ -195,13 +198,16 @@ class ConstrainedClient:
                 self._circuit_breaker.threshold,
             )
 
-        # バジェット消費（上限なら例外）
-        self._budget.consume()
-
         # レート制限待機（ロックで直列化）
         async with self._rate_lock:
             await self._wait_interval()
             self._last_request_time = time.monotonic()
+
+        # レート制限待機後に操作タイムアウトを再チェック
+        self._check_operation_timeout()
+
+        # バジェット消費（実リクエスト直前で消費）
+        self._budget.consume()
 
         try:
             resp = await self._session.get(url, allow_redirects=allow_redirects)
