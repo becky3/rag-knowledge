@@ -102,6 +102,9 @@ class MockResponse:
             return self._raw_bytes
         return self._text.encode("utf-8")
 
+    def release(self) -> None:
+        """接続を解放する（モック）."""
+
 
 class MockConstrainedClient:
     """モック ConstrainedClient（ConstrainedClient の代替）.

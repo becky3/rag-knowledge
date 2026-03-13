@@ -24,7 +24,7 @@ from markdownify import MarkdownConverter
 
 from rag.safety.constrained_client import (
     ConstrainedClient,
-    HARD_LIMIT_MIN_REQUEST_INTERVAL,
+    _clamp_request_interval,
     _clamp_request_timeout,
 )
 
@@ -134,20 +134,23 @@ class RobotsChecker:
 
         try:
             resp = await client.get(robots_url)
-            if resp.status == 200:
-                text = await resp.text()
-                lines = text.splitlines()
-                parser.parse(lines)
-                crawl_delay = parser.crawl_delay(USER_AGENT)  # type: ignore[assignment]
-                logger.debug("Fetched robots.txt from %s", robots_url)
-            else:
-                # 404等: robots.txt が存在しない → 全て許可
-                parser.parse([])
-                logger.debug(
-                    "robots.txt not found at %s (status=%d), allowing all",
-                    robots_url,
-                    resp.status,
-                )
+            try:
+                if resp.status == 200:
+                    text = await resp.text()
+                    lines = text.splitlines()
+                    parser.parse(lines)
+                    crawl_delay = parser.crawl_delay(USER_AGENT)  # type: ignore[assignment]
+                    logger.debug("Fetched robots.txt from %s", robots_url)
+                else:
+                    # 404等: robots.txt が存在しない → 全て許可
+                    parser.parse([])
+                    logger.debug(
+                        "robots.txt not found at %s (status=%d), allowing all",
+                        robots_url,
+                        resp.status,
+                    )
+            finally:
+                resp.release()
         except (aiohttp.ClientError, asyncio.TimeoutError):
             # 取得失敗 → フェイルオープン
             parser.parse([])
@@ -267,14 +270,8 @@ class WebCrawler:
             )
             max_pages = _HARD_LIMIT_MAX_PAGES
         self._max_pages = max(1, max_pages)
-        # crawl_delay をハードリミットにクランプ
-        self._crawl_delay = max(HARD_LIMIT_MIN_REQUEST_INTERVAL, crawl_delay)
-        if self._crawl_delay != crawl_delay:
-            logger.warning(
-                "crawl_delay=%.1f がハードリミット %.1f 未満。クランプします",
-                crawl_delay,
-                HARD_LIMIT_MIN_REQUEST_INTERVAL,
-            )
+        # crawl_delay をハードリミットにクランプ（上下限とも）
+        self._crawl_delay = _clamp_request_interval(crawl_delay)
         self._semaphore = asyncio.Semaphore(max_concurrent)
         self._respect_robots_txt = respect_robots_txt
         self._robots_checker: RobotsChecker | None = (
@@ -533,18 +530,21 @@ class WebCrawler:
 
         # ページ取得（SSRF対策: リダイレクト追従を無効化）
         resp = await client.get(validated_url)
-        # リダイレクト応答の場合はログを出して空リストを返す
-        if resp.status in (301, 302, 303, 307, 308):
-            logger.warning(
-                "Redirect detected (SSRF protection): %s -> %s",
-                index_url,
-                resp.headers.get("Location", "unknown"),
-            )
-            return []
-        if resp.status != 200:
-            logger.warning("Failed to fetch index page: %s (status=%d)", index_url, resp.status)
-            return []
-        html = await self._decode_response(resp)
+        try:
+            # リダイレクト応答の場合はログを出して空リストを返す
+            if resp.status in (301, 302, 303, 307, 308):
+                logger.warning(
+                    "Redirect detected (SSRF protection): %s -> %s",
+                    index_url,
+                    resp.headers.get("Location", "unknown"),
+                )
+                return []
+            if resp.status != 200:
+                logger.warning("Failed to fetch index page: %s (status=%d)", index_url, resp.status)
+                return []
+            html = await self._decode_response(resp)
+        finally:
+            resp.release()
 
         # リンク抽出
         soup = BeautifulSoup(html, "html.parser")
@@ -670,17 +670,20 @@ class WebCrawler:
         try:
             async with self._semaphore:
                 resp = await client.get(url)
-                if resp.status in (301, 302, 303, 307, 308):
-                    logger.debug(
-                        "Redirect detected during title fetch: %s", url
-                    )
-                    return ""
-                if resp.status != 200:
-                    logger.debug(
-                        "Failed to fetch title: %s (status=%d)", url, resp.status
-                    )
-                    return ""
-                html = await self._decode_response(resp)
+                try:
+                    if resp.status in (301, 302, 303, 307, 308):
+                        logger.debug(
+                            "Redirect detected during title fetch: %s", url
+                        )
+                        return ""
+                    if resp.status != 200:
+                        logger.debug(
+                            "Failed to fetch title: %s (status=%d)", url, resp.status
+                        )
+                        return ""
+                    html = await self._decode_response(resp)
+                finally:
+                    resp.release()
 
             return self._extract_title(html)
         except (asyncio.TimeoutError, aiohttp.ClientError):
@@ -733,18 +736,21 @@ class WebCrawler:
             async with self._semaphore:
                 # SSRF対策: リダイレクト追従を無効化
                 resp = await client.get(validated_url)
-                # リダイレクト応答の場合はログを出して None を返す
-                if resp.status in (301, 302, 303, 307, 308):
-                    logger.warning(
-                        "Redirect detected (SSRF protection): %s -> %s",
-                        url,
-                        resp.headers.get("Location", "unknown"),
-                    )
-                    return None
-                if resp.status != 200:
-                    logger.warning("Failed to fetch page: %s (status=%d)", url, resp.status)
-                    return None
-                html = await self._decode_response(resp)
+                try:
+                    # リダイレクト応答の場合はログを出して None を返す
+                    if resp.status in (301, 302, 303, 307, 308):
+                        logger.warning(
+                            "Redirect detected (SSRF protection): %s -> %s",
+                            url,
+                            resp.headers.get("Location", "unknown"),
+                        )
+                        return None
+                    if resp.status != 200:
+                        logger.warning("Failed to fetch page: %s (status=%d)", url, resp.status)
+                        return None
+                    html = await self._decode_response(resp)
+                finally:
+                    resp.release()
 
             title, text = self._extract_text(html)
             crawled_at = datetime.now(tz=timezone.utc).isoformat()
@@ -781,13 +787,15 @@ class WebCrawler:
         if self._robots_checker:
             robots_delay = await self._robots_checker.get_crawl_delay(url, client)
             if robots_delay is not None and robots_delay > delay:
+                # robots.txt 由来の値も許容範囲にクランプ
+                clamped_robots_delay = _clamp_request_interval(robots_delay)
                 logger.debug(
                     "Using robots.txt Crawl-delay=%.1f (> configured %.1f) for %s",
-                    robots_delay,
+                    clamped_robots_delay,
                     delay,
                     urlparse(url).hostname,
                 )
-                delay = robots_delay
+                delay = clamped_robots_delay
         return delay
 
     async def crawl_pages(
