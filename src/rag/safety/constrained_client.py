@@ -113,7 +113,14 @@ class ConstrainedClient:
         return self._circuit_breaker
 
     async def __aenter__(self) -> ConstrainedClient:
-        """操作を開始する."""
+        """操作を開始する.
+
+        操作単位の状態（バジェット・サーキットブレーカー・レート制限）を
+        リセットし、新しい操作として開始する。
+        """
+        self._budget.reset()
+        self._circuit_breaker.reset()
+        self._last_request_time = 0.0
         self._session = aiohttp.ClientSession(
             timeout=aiohttp.ClientTimeout(total=self._request_timeout),
             headers=self._headers,

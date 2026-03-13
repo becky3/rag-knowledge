@@ -68,9 +68,9 @@ class RAGSettings(BaseSettings):
         default=0.75, ge=0.0, le=1.0
     )
 
-    # クロール（許容範囲は WebCrawler / ConstrainedClient でクランプされる）
-    rag_max_crawl_pages: int = Field(default=50, ge=1, le=500)
-    rag_crawl_delay_sec: float = Field(default=1.0, ge=0.5, le=60.0)
+    # クロール（範囲外の値は WebCrawler / ConstrainedClient が警告付きでクランプする）
+    rag_max_crawl_pages: int = Field(default=50, ge=1)
+    rag_crawl_delay_sec: float = Field(default=1.0, ge=0)
 
     # robots.txt
     rag_respect_robots_txt: bool = True
