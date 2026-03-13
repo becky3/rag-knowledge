@@ -213,7 +213,7 @@ class ConstrainedClient:
         self,
         url: str,
         *,
-        allow_redirects: bool = False,
+        follow_redirects: bool = False,
     ) -> httpx.Response:
         """GET リクエストを実行する.
 
@@ -224,7 +224,7 @@ class ConstrainedClient:
 
         Args:
             url: リクエスト先 URL
-            allow_redirects: リダイレクト追従の有無（デフォルト: False、SSRF 対策）
+            follow_redirects: リダイレクト追従の有無（デフォルト: False、SSRF 対策）
 
         Returns:
             httpx.Response
@@ -239,7 +239,7 @@ class ConstrainedClient:
         await self._apply_constraints()
 
         try:
-            resp = await session.get(url, follow_redirects=allow_redirects)
+            resp = await session.get(url, follow_redirects=follow_redirects)
             # 成功 = HTTP レスポンスを受信できた（ステータスコードによらず）
             self._circuit_breaker.record_success()
             return resp
@@ -253,7 +253,7 @@ class ConstrainedClient:
         *,
         json: object = None,
         params: dict[str, str] | None = None,
-        allow_redirects: bool = False,
+        follow_redirects: bool = False,
     ) -> httpx.Response:
         """POST リクエストを実行する.
 
@@ -264,7 +264,7 @@ class ConstrainedClient:
             url: リクエスト先 URL
             json: JSON ボディ
             params: クエリパラメータ
-            allow_redirects: リダイレクト追従の有無（デフォルト: False、SSRF 対策）
+            follow_redirects: リダイレクト追従の有無（デフォルト: False、SSRF 対策）
 
         Returns:
             httpx.Response
@@ -283,7 +283,7 @@ class ConstrainedClient:
                 url,
                 json=json,
                 params=params,
-                follow_redirects=allow_redirects,
+                follow_redirects=follow_redirects,
             )
             self._circuit_breaker.record_success()
             return resp
