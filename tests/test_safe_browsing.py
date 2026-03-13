@@ -11,6 +11,8 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
+from unittest.mock import AsyncMock
+
 from rag.safe_browsing import (
     CacheEntry,
     SafeBrowsingClient,
@@ -19,6 +21,7 @@ from rag.safe_browsing import (
     ThreatType,
     create_safe_browsing_client,
 )
+from rag.safety.constrained_client import ConstrainedClient
 
 
 class MockResponse:
@@ -521,3 +524,74 @@ class TestCreateSafeBrowsingClient:
         client = create_safe_browsing_client(mock_settings)
         assert client is not None
         assert client._fail_open is False
+
+    def test_create_client_has_constrained_client(self) -> None:
+        """ファクトリ関数で ConstrainedClient が設定されること."""
+        mock_settings = MagicMock()
+        mock_settings.rag_url_safety_check = True
+        mock_settings.google_safe_browsing_api_key = "test-api-key"
+        mock_settings.rag_url_safety_cache_ttl = 300
+        mock_settings.rag_url_safety_fail_open = True
+        mock_settings.rag_url_safety_timeout = 5.0
+
+        client = create_safe_browsing_client(mock_settings)
+        assert client is not None
+        assert client._constrained_client is not None
+        assert isinstance(client._constrained_client, ConstrainedClient)
+
+
+class TestSafeBrowsingWithConstrainedClient:
+    """ConstrainedClient 経由での SafeBrowsingClient テスト."""
+
+    @pytest.mark.asyncio
+    async def test_call_api_via_constrained_client(self) -> None:
+        """ConstrainedClient 経由で API が呼び出されること."""
+        cc = ConstrainedClient(request_timeout=5.0, request_interval=0.5)
+        client = SafeBrowsingClient(
+            api_key="test-key",
+            constrained_client=cc,
+        )
+
+        mock_resp = MagicMock()
+        mock_resp.status = 200
+        mock_resp.json = AsyncMock(return_value={})
+        mock_resp.text = AsyncMock(return_value="")
+
+        with patch.object(
+            ConstrainedClient,
+            "post",
+            new_callable=AsyncMock,
+            return_value=mock_resp,
+        ) as mock_post:
+            result = await client.check_url("https://safe-site.com")
+            mock_post.assert_called_once()
+            call_kwargs = mock_post.call_args
+            assert call_kwargs.kwargs["params"] == {"key": "test-key"}
+
+        assert result.is_safe is True
+
+    @pytest.mark.asyncio
+    async def test_call_api_via_constrained_client_error(self) -> None:
+        """ConstrainedClient 経由でのエラーが fail-open で処理されること."""
+        cc = ConstrainedClient(request_timeout=5.0, request_interval=0.5)
+        client = SafeBrowsingClient(
+            api_key="test-key",
+            constrained_client=cc,
+            fail_open=True,
+        )
+
+        mock_resp = MagicMock()
+        mock_resp.status = 500
+        mock_resp.json = AsyncMock(return_value={"error": "Server Error"})
+        mock_resp.text = AsyncMock(return_value="Server Error")
+
+        with patch.object(
+            ConstrainedClient,
+            "post",
+            new_callable=AsyncMock,
+            return_value=mock_resp,
+        ):
+            result = await client.check_url("https://test-site.com")
+
+        assert result.is_safe is True
+        assert result.error is not None
