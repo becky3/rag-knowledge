@@ -610,6 +610,17 @@ class WebCrawler:
                 )
             urls = allowed_urls
 
+        # バジェット残量に基づいて URL 数を制限
+        # 後続の crawl_pages / crawl_preview が各 URL に 1 リクエスト使うため
+        budget_remaining = client.budget.remaining
+        if len(urls) > budget_remaining:
+            logger.info(
+                "バジェット残量に合わせて URL 数を制限: %d → %d",
+                len(urls),
+                budget_remaining,
+            )
+            urls = urls[:budget_remaining]
+
         return urls
 
     async def crawl_preview(
