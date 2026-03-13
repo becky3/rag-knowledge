@@ -57,6 +57,11 @@ def mock_web_crawler() -> MagicMock:
     mock.validate_url = MagicMock(side_effect=lambda url: url)
     # クロール間隔（進捗フィードバック機能で使用）
     mock._crawl_delay = 0.0  # テスト時は遅延なし
+    # create_client() が async context manager を返すようにモック
+    mock_client = MagicMock()
+    mock_client.__aenter__ = AsyncMock(return_value=mock_client)
+    mock_client.__aexit__ = AsyncMock(return_value=None)
+    mock.create_client.return_value = mock_client
     return mock
 
 
@@ -118,12 +123,18 @@ class TestIngestFromIndex:
         assert result["pages_crawled"] == 2
         assert result["chunks_stored"] >= 2
         assert result["errors"] == 0
-        # crawl_index_page は client= パラメータ付きで呼ばれる
+        # create_client() が呼ばれ、async context manager として使用されたこと
+        mock_web_crawler.create_client.assert_called_once()
+        mock_client = mock_web_crawler.create_client.return_value
+        # crawl_index_page に create_client() の同一インスタンスが渡されたこと
         mock_web_crawler.crawl_index_page.assert_called_once()
         call_args = mock_web_crawler.crawl_index_page.call_args
         assert call_args[0] == ("https://example.com/index", r"page\d")
-        # crawl_page が各URLに対して呼ばれたことを確認
+        assert call_args.kwargs["client"] is mock_client
+        # crawl_page が各URLに対して同一 client で呼ばれたことを確認
         assert mock_web_crawler.crawl_page.call_count == 2
+        for call in mock_web_crawler.crawl_page.call_args_list:
+            assert call.kwargs["client"] is mock_client
 
     async def test_ingest_from_index_with_errors(
         self,
