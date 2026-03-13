@@ -10,6 +10,7 @@
 | `docs/specs/` | 機能仕様書・エージェント定義（実装の根拠） |
 | `tests/` | pytest テストコード |
 | `tests/fixtures/` | テスト用フィクスチャ（評価データセット・テスト文書） |
+| `tests/property/` | プロパティベーステスト（Hypothesis による不変条件検証） |
 | `scripts/` | 評価データ収集・パラメータスイープ・分析スクリプト |
 | `.claude/` | Claude Code プロジェクト設定（エージェント・スキル） |
 | `.github/` | GitHub Actions ワークフロー |
