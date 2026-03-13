@@ -3,8 +3,9 @@
 #
 # src/ 配下で ConstrainedClient を経由しない直接 HTTP クライアント利用を検出する。
 # 許可リスト:
-#   - src/rag/safety/constrained_client.py (中間ライブラリ自身)
 #   - "# safety:allowed" コメントが付与された行
+#
+# ConstrainedClient は py-common-lib パッケージで提供（src/ 外のため検出対象外）
 #
 # 終了コード: 0 = 違反なし, 1 = 違反あり
 
@@ -46,7 +47,6 @@ done
 violations=$(
   grep -rn -E "$COMBINED_PATTERN" "$SRC_DIR" \
     --include="*.py" \
-    | grep -v "src/rag/safety/constrained_client\.py" \
     | grep -v "#\s*safety:allowed\b" \
   || true
 )
@@ -58,7 +58,7 @@ if [ -n "$violations" ]; then
   echo "$violations" >&2
   echo "" >&2
   echo "To fix:" >&2
-  echo "  1. Use ConstrainedClient from src/rag/safety/constrained_client.py" >&2
+  echo "  1. Use ConstrainedClient from py-common-lib (py_common_lib.httpx)" >&2
   echo "  2. Or add '# safety:allowed' comment if explicitly permitted" >&2
   exit 1
 fi
