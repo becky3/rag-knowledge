@@ -1,0 +1,26 @@
+name: Raw HTTP Check
+
+on:
+  pull_request:
+    branches: [develop, main]
+    paths:
+      - "src/**/*.py"
+      - "scripts/check_raw_http.sh"
+      - ".github/workflows/check-raw-http.yml"
+  push:
+    branches: [develop]
+    paths:
+      - "src/**/*.py"
+      - "scripts/check_raw_http.sh"
+      - ".github/workflows/check-raw-http.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  raw-http-check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Check for raw HTTP client usage
+        run: bash scripts/check_raw_http.sh
