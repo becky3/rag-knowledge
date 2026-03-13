@@ -11,6 +11,8 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import aiohttp
 import pytest
 
+from rag.safety.budget_tracker import BudgetExhaustedError
+from rag.safety.circuit_breaker import CircuitBreakerOpenError
 from rag.web_crawler import CrawlPreviewPage, CrawledPage, RobotsChecker, WebCrawler
 
 
@@ -690,6 +692,62 @@ class TestWebCrawlerCrawlPage:
 
         assert page is None
 
+    @pytest.mark.asyncio
+    async def test_crawl_page_returns_none_on_budget_exhausted(self) -> None:
+        """BudgetExhaustedError 時に None を返すこと（エラー隔離）."""
+        crawler = WebCrawler(respect_robots_txt=False)
+
+        class MockClientBudgetExhausted:
+            """バジェット枯渇をシミュレートするモック."""
+
+            budget = MagicMock()
+            circuit_breaker = MagicMock()
+
+            async def __aenter__(self) -> "MockClientBudgetExhausted":
+                return self
+
+            async def __aexit__(self, *args: object) -> None:
+                pass
+
+            async def get(self, url: str, **kwargs: object) -> MockResponse:  # noqa: ARG002
+                raise BudgetExhaustedError(500, 500)
+
+        with patch.object(
+            crawler, "create_client",
+            return_value=MockClientBudgetExhausted(),
+        ):
+            page = await crawler.crawl_page("https://example.com/article/1")
+
+        assert page is None
+
+    @pytest.mark.asyncio
+    async def test_crawl_page_returns_none_on_circuit_breaker_open(self) -> None:
+        """CircuitBreakerOpenError 時に None を返すこと（エラー隔離）."""
+        crawler = WebCrawler(respect_robots_txt=False)
+
+        class MockClientCircuitBreakerOpen:
+            """サーキットブレーカー発動をシミュレートするモック."""
+
+            budget = MagicMock()
+            circuit_breaker = MagicMock()
+
+            async def __aenter__(self) -> "MockClientCircuitBreakerOpen":
+                return self
+
+            async def __aexit__(self, *args: object) -> None:
+                pass
+
+            async def get(self, url: str, **kwargs: object) -> MockResponse:  # noqa: ARG002
+                raise CircuitBreakerOpenError(5, 5)
+
+        with patch.object(
+            crawler, "create_client",
+            return_value=MockClientCircuitBreakerOpen(),
+        ):
+            page = await crawler.crawl_page("https://example.com/article/1")
+
+        assert page is None
+
 
 class TestWebCrawlerCrawlIndexPageRedirect:
     """WebCrawler.crawl_index_page のリダイレクト対策テスト."""
@@ -787,6 +845,46 @@ class TestWebCrawlerCrawlPages:
         crawler = WebCrawler(respect_robots_txt=False)
         pages = await crawler.crawl_pages([])
         assert pages == []
+
+    @pytest.mark.asyncio
+    async def test_crawl_pages_returns_partial_on_budget_exhausted(self) -> None:
+        """バジェット枯渇時に取得済みデータを部分的に返すこと."""
+        crawler = WebCrawler(crawl_delay=0.5, respect_robots_txt=False)
+
+        class MockClientPartialBudget:
+            """最初のページのみ成功し、以降はバジェット枯渇をシミュレート."""
+
+            budget = MagicMock()
+            circuit_breaker = MagicMock()
+
+            async def __aenter__(self) -> "MockClientPartialBudget":
+                return self
+
+            async def __aexit__(self, *args: object) -> None:
+                pass
+
+            async def get(self, url: str, **kwargs: object) -> MockResponse:  # noqa: ARG002
+                if "article/1" in url:
+                    return MockResponse(200, SAMPLE_HTML_WITH_ARTICLE)
+                raise BudgetExhaustedError(1, 1)
+
+        with patch.object(
+            crawler, "create_client",
+            return_value=MockClientPartialBudget(),
+        ):
+            with patch(
+                "rag.web_crawler.asyncio.sleep", new_callable=AsyncMock
+            ):
+                urls = [
+                    "https://example.com/article/1",
+                    "https://example.com/article/2",
+                    "https://example.com/article/3",
+                ]
+                pages = await crawler.crawl_pages(urls)
+
+        # article/1 のみ成功、残りはバジェット枯渇でスキップ
+        assert len(pages) == 1
+        assert pages[0].url == "https://example.com/article/1"
 
 
 class TestWebCrawlerConcurrency:
