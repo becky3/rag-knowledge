@@ -118,9 +118,10 @@ class TestIngestFromIndex:
         assert result["pages_crawled"] == 2
         assert result["chunks_stored"] >= 2
         assert result["errors"] == 0
-        mock_web_crawler.crawl_index_page.assert_called_once_with(
-            "https://example.com/index", r"page\d"
-        )
+        # crawl_index_page は client= パラメータ付きで呼ばれる
+        mock_web_crawler.crawl_index_page.assert_called_once()
+        call_args = mock_web_crawler.crawl_index_page.call_args
+        assert call_args[0] == ("https://example.com/index", r"page\d")
         # crawl_page が各URLに対して呼ばれたことを確認
         assert mock_web_crawler.crawl_page.call_count == 2
 
