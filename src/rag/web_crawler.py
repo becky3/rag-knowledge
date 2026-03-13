@@ -611,7 +611,9 @@ class WebCrawler:
             urls = allowed_urls
 
         # バジェット残量に基づいて URL 数を制限
-        # 後続の crawl_pages / crawl_preview が各 URL に 1 リクエスト使うため
+        # 共有 client が渡された場合、インデックスページ取得分を含む先行消費により
+        # budget.remaining < max_pages となりうる（例: max_requests=500 で
+        # インデックス取得後は remaining=499）
         budget_remaining = client.budget.remaining
         if len(urls) > budget_remaining:
             logger.info(
