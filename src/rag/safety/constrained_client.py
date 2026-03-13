@@ -2,7 +2,7 @@
 
 仕様: docs/specs/rag-knowledge.md
 
-aiohttp.ClientSession をラップし、ハードリミット・バジェット・
+httpx.AsyncClient をラップし、ハードリミット・バジェット・
 サーキットブレーカー・レート制限を統合する。
 """
 
@@ -13,7 +13,7 @@ import logging
 import time
 from types import TracebackType
 
-import aiohttp
+import httpx
 
 from rag.safety.budget_tracker import BudgetTracker, HARD_LIMIT_MAX_TOTAL_REQUESTS
 from rag.safety.circuit_breaker import (
@@ -104,7 +104,7 @@ class ConstrainedClient:
         self._headers = headers or {}
         self._budget = BudgetTracker(max_requests=max_requests)
         self._circuit_breaker = CircuitBreaker(threshold=circuit_breaker_threshold)
-        self._session: aiohttp.ClientSession | None = None
+        self._session: httpx.AsyncClient | None = None
         self._last_request_time: float = 0.0
         self._rate_lock = asyncio.Lock()
         self._operation_start: float | None = None
@@ -128,8 +128,8 @@ class ConstrainedClient:
         self._budget.reset()
         self._circuit_breaker.reset()
         self._last_request_time = 0.0
-        self._session = aiohttp.ClientSession(
-            timeout=aiohttp.ClientTimeout(total=self._request_timeout),
+        self._session = httpx.AsyncClient(
+            timeout=httpx.Timeout(self._request_timeout),
             headers=self._headers,
         )
         self._operation_start = time.monotonic()
@@ -143,7 +143,7 @@ class ConstrainedClient:
     ) -> None:
         """操作を終了し、セッションをクローズする."""
         if self._session:
-            await self._session.close()
+            await self._session.aclose()
             self._session = None
 
     def _check_operation_timeout(self) -> None:
@@ -168,7 +168,7 @@ class ConstrainedClient:
             if elapsed < self._request_interval:
                 await asyncio.sleep(self._request_interval - elapsed)
 
-    def _ensure_session(self) -> aiohttp.ClientSession:
+    def _ensure_session(self) -> httpx.AsyncClient:
         """セッションの存在を確認し返す.
 
         Raises:
@@ -213,8 +213,8 @@ class ConstrainedClient:
         self,
         url: str,
         *,
-        allow_redirects: bool = False,
-    ) -> aiohttp.ClientResponse:
+        follow_redirects: bool = False,
+    ) -> httpx.Response:
         """GET リクエストを実行する.
 
         バジェット消費・サーキットブレーカー・レート制限・
@@ -222,15 +222,12 @@ class ConstrainedClient:
         複数コルーチンからの同時呼び出しに対してレート制限は
         ロックにより直列化される。
 
-        呼び出し側はレスポンスの読み取り後に resp.release() を
-        呼び出して接続を解放する責務を持つ。
-
         Args:
             url: リクエスト先 URL
-            allow_redirects: リダイレクト追従の有無（デフォルト: False、SSRF 対策）
+            follow_redirects: リダイレクト追従の有無（デフォルト: False、SSRF 対策）
 
         Returns:
-            aiohttp.ClientResponse（使用後に release() で解放すること）
+            httpx.Response
 
         Raises:
             BudgetExhaustedError: バジェット上限到達
@@ -242,7 +239,7 @@ class ConstrainedClient:
         await self._apply_constraints()
 
         try:
-            resp = await session.get(url, allow_redirects=allow_redirects)
+            resp = await session.get(url, follow_redirects=follow_redirects)
             # 成功 = HTTP レスポンスを受信できた（ステータスコードによらず）
             self._circuit_breaker.record_success()
             return resp
@@ -256,8 +253,8 @@ class ConstrainedClient:
         *,
         json: object = None,
         params: dict[str, str] | None = None,
-        allow_redirects: bool = False,
-    ) -> aiohttp.ClientResponse:
+        follow_redirects: bool = False,
+    ) -> httpx.Response:
         """POST リクエストを実行する.
 
         GET と同じ制約（バジェット・サーキットブレーカー・レート制限・
@@ -267,10 +264,10 @@ class ConstrainedClient:
             url: リクエスト先 URL
             json: JSON ボディ
             params: クエリパラメータ
-            allow_redirects: リダイレクト追従の有無（デフォルト: False、SSRF 対策）
+            follow_redirects: リダイレクト追従の有無（デフォルト: False、SSRF 対策）
 
         Returns:
-            aiohttp.ClientResponse（使用後に release() で解放すること）
+            httpx.Response
 
         Raises:
             BudgetExhaustedError: バジェット上限到達
@@ -286,7 +283,7 @@ class ConstrainedClient:
                 url,
                 json=json,
                 params=params,
-                allow_redirects=allow_redirects,
+                follow_redirects=follow_redirects,
             )
             self._circuit_breaker.record_success()
             return resp
