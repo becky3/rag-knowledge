@@ -28,6 +28,7 @@ from rag.safety.constrained_client import (
     ConstrainedClient,
     HARD_LIMIT_MIN_REQUEST_INTERVAL,
     HARD_LIMIT_OPERATION_TIMEOUT,
+    _clamp_operation_timeout,
     _clamp_request_interval,
     _clamp_request_timeout,
 )
@@ -173,6 +174,15 @@ class TestClampFunctions:
     def test_clamp_request_interval_too_high(self) -> None:
         assert _clamp_request_interval(100.0) == 60.0
 
+    def test_clamp_operation_timeout_normal(self) -> None:
+        assert _clamp_operation_timeout(300.0) == 300.0
+
+    def test_clamp_operation_timeout_too_low(self) -> None:
+        assert _clamp_operation_timeout(-10.0) == 1.0
+
+    def test_clamp_operation_timeout_too_high(self) -> None:
+        assert _clamp_operation_timeout(9999.0) == HARD_LIMIT_OPERATION_TIMEOUT
+
 
 class TestConstrainedClient:
     """ConstrainedClient のテスト."""
@@ -270,7 +280,7 @@ class TestConstrainedClient:
     async def test_operation_timeout(self) -> None:
         """操作全体タイムアウトで TimeoutError."""
         cc = ConstrainedClient(
-            operation_timeout=0.1,
+            operation_timeout=1.0,  # 許容範囲の下限
             request_interval=0.5,
             request_timeout=5.0,
             max_requests=100,
@@ -284,8 +294,8 @@ class TestConstrainedClient:
                 with patch.object(cc._session, "get", new_callable=AsyncMock, return_value=mock_resp):
                     await cc.get("http://example.com/1")
 
-                    # 疑似的にタイムアウトを超過させる
-                    fake_now[0] += 0.15
+                    # 疑似的にタイムアウトを超過させる（1.0秒超過）
+                    fake_now[0] += 1.5
 
                     with pytest.raises(TimeoutError, match="操作全体タイムアウト"):
                         await cc.get("http://example.com/2")
