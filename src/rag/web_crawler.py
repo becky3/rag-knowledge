@@ -22,10 +22,10 @@ from bs4 import BeautifulSoup
 from charset_normalizer import from_bytes
 from markdownify import MarkdownConverter
 
-from rag.safety.constrained_client import (
+from py_common_lib.httpx import (
     ConstrainedClient,
-    _clamp_request_interval,
-    _clamp_request_timeout,
+    clamp_request_interval,
+    clamp_request_timeout,
 )
 
 logger = logging.getLogger(__name__)
@@ -257,7 +257,7 @@ class WebCrawler:
             respect_robots_txt: robots.txt を遵守するかどうか
             robots_txt_cache_ttl: robots.txt キャッシュの有効期間（秒）
         """
-        self._request_timeout = _clamp_request_timeout(timeout)
+        self._request_timeout = clamp_request_timeout(timeout)
         # max_pages をハードリミットにクランプ
         if max_pages > _HARD_LIMIT_MAX_PAGES:
             logger.warning(
@@ -268,7 +268,7 @@ class WebCrawler:
             max_pages = _HARD_LIMIT_MAX_PAGES
         self._max_pages = max(1, max_pages)
         # crawl_delay をハードリミットにクランプ（上下限とも）
-        self._crawl_delay = _clamp_request_interval(crawl_delay)
+        self._crawl_delay = clamp_request_interval(crawl_delay)
         self._semaphore = asyncio.Semaphore(max_concurrent)
         self._respect_robots_txt = respect_robots_txt
         self._robots_checker: RobotsChecker | None = (
@@ -789,7 +789,7 @@ class WebCrawler:
             robots_delay = await self._robots_checker.get_crawl_delay(url, client)
             if robots_delay is not None and robots_delay > delay:
                 # robots.txt 由来の値も許容範囲にクランプ
-                clamped_robots_delay = _clamp_request_interval(robots_delay)
+                clamped_robots_delay = clamp_request_interval(robots_delay)
                 logger.debug(
                     "Using robots.txt Crawl-delay=%.1f (> configured %.1f) for %s",
                     clamped_robots_delay,
