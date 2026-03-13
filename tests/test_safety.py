@@ -327,3 +327,58 @@ class TestConstrainedClient:
                 mock_get.assert_called_once_with(
                     "http://example.com", allow_redirects=False
                 )
+
+    @pytest.mark.asyncio
+    async def test_post_applies_constraints(self) -> None:
+        """POST でもバジェット・サーキットブレーカー等の制約が適用される."""
+        cc = ConstrainedClient(
+            max_requests=2,
+            request_interval=0.5,
+            request_timeout=5.0,
+        )
+        mock_resp = MagicMock(spec=aiohttp.ClientResponse)
+
+        async with cc:
+            with patch.object(cc._session, "post", new_callable=AsyncMock, return_value=mock_resp) as mock_post:
+                await cc.post("http://example.com/api", json={"key": "value"}, params={"q": "test"})
+                mock_post.assert_called_once_with(
+                    "http://example.com/api",
+                    json={"key": "value"},
+                    params={"q": "test"},
+                    allow_redirects=False,
+                )
+                assert cc.budget.used == 1
+
+                await cc.post("http://example.com/api2")
+                with pytest.raises(BudgetExhaustedError):
+                    await cc.post("http://example.com/api3")
+
+    @pytest.mark.asyncio
+    async def test_post_without_context_manager_raises(self) -> None:
+        """context manager 外での POST 呼び出しで RuntimeError."""
+        cc = ConstrainedClient()
+        with pytest.raises(RuntimeError, match="context manager"):
+            await cc.post("http://example.com")
+
+    @pytest.mark.asyncio
+    async def test_post_circuit_breaker(self) -> None:
+        """POST でもサーキットブレーカーが機能する."""
+        cc = ConstrainedClient(
+            circuit_breaker_threshold=2,
+            request_interval=0.5,
+            request_timeout=5.0,
+            max_requests=100,
+        )
+
+        async with cc:
+            with patch.object(
+                cc._session,
+                "post",
+                new_callable=AsyncMock,
+                side_effect=aiohttp.ClientError("connection failed"),
+            ):
+                with pytest.raises(aiohttp.ClientError):
+                    await cc.post("http://example.com/1")
+
+                with pytest.raises(CircuitBreakerOpenError):
+                    await cc.post("http://example.com/2")

@@ -161,6 +161,47 @@ class ConstrainedClient:
             if elapsed < self._request_interval:
                 await asyncio.sleep(self._request_interval - elapsed)
 
+    def _ensure_session(self) -> aiohttp.ClientSession:
+        """セッションの存在を確認し返す.
+
+        Raises:
+            RuntimeError: context manager 外での呼び出し
+        """
+        if self._session is None:
+            raise RuntimeError(
+                "ConstrainedClient は async context manager として使用してください"
+            )
+        return self._session
+
+    async def _apply_constraints(self) -> None:
+        """全制約チェック（タイムアウト・サーキットブレーカー・レート制限・バジェット）を適用する.
+
+        Raises:
+            BudgetExhaustedError: バジェット上限到達
+            CircuitBreakerOpenError: サーキットブレーカー発動中
+            TimeoutError: 操作全体タイムアウト
+        """
+        # 操作全体タイムアウトチェック
+        self._check_operation_timeout()
+
+        # サーキットブレーカーチェック（発動中なら例外）
+        if self._circuit_breaker.is_open:
+            raise CircuitBreakerOpenError(
+                self._circuit_breaker.consecutive_failures,
+                self._circuit_breaker.threshold,
+            )
+
+        # レート制限待機（ロックで直列化）
+        async with self._rate_lock:
+            await self._wait_interval()
+            self._last_request_time = time.monotonic()
+
+        # レート制限待機後に操作タイムアウトを再チェック
+        self._check_operation_timeout()
+
+        # バジェット消費（実リクエスト直前で消費）
+        self._budget.consume()
+
     async def get(
         self,
         url: str,
@@ -190,35 +231,56 @@ class ConstrainedClient:
             TimeoutError: 操作全体タイムアウト
             RuntimeError: context manager 外での呼び出し
         """
-        if self._session is None:
-            raise RuntimeError(
-                "ConstrainedClient は async context manager として使用してください"
-            )
-
-        # 操作全体タイムアウトチェック
-        self._check_operation_timeout()
-
-        # サーキットブレーカーチェック（発動中なら例外）
-        if self._circuit_breaker.is_open:
-            raise CircuitBreakerOpenError(
-                self._circuit_breaker.consecutive_failures,
-                self._circuit_breaker.threshold,
-            )
-
-        # レート制限待機（ロックで直列化）
-        async with self._rate_lock:
-            await self._wait_interval()
-            self._last_request_time = time.monotonic()
-
-        # レート制限待機後に操作タイムアウトを再チェック
-        self._check_operation_timeout()
-
-        # バジェット消費（実リクエスト直前で消費）
-        self._budget.consume()
+        session = self._ensure_session()
+        await self._apply_constraints()
 
         try:
-            resp = await self._session.get(url, allow_redirects=allow_redirects)
+            resp = await session.get(url, allow_redirects=allow_redirects)
             # 成功 = HTTP レスポンスを受信できた（ステータスコードによらず）
+            self._circuit_breaker.record_success()
+            return resp
+        except Exception:
+            self._circuit_breaker.record_failure()
+            raise
+
+    async def post(
+        self,
+        url: str,
+        *,
+        json: object = None,
+        params: dict[str, str] | None = None,
+        allow_redirects: bool = False,
+    ) -> aiohttp.ClientResponse:
+        """POST リクエストを実行する.
+
+        GET と同じ制約（バジェット・サーキットブレーカー・レート制限・
+        操作タイムアウト）を適用する。
+
+        Args:
+            url: リクエスト先 URL
+            json: JSON ボディ
+            params: クエリパラメータ
+            allow_redirects: リダイレクト追従の有無（デフォルト: False、SSRF 対策）
+
+        Returns:
+            aiohttp.ClientResponse（使用後に release() で解放すること）
+
+        Raises:
+            BudgetExhaustedError: バジェット上限到達
+            CircuitBreakerOpenError: サーキットブレーカー発動中
+            TimeoutError: 操作全体タイムアウト
+            RuntimeError: context manager 外での呼び出し
+        """
+        session = self._ensure_session()
+        await self._apply_constraints()
+
+        try:
+            resp = await session.post(
+                url,
+                json=json,
+                params=params,
+                allow_redirects=allow_redirects,
+            )
             self._circuit_breaker.record_success()
             return resp
         except Exception:

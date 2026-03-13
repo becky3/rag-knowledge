@@ -17,6 +17,7 @@ import aiohttp
 
 if TYPE_CHECKING:
     from .config import RAGSettings
+    from .safety.constrained_client import ConstrainedClient
 
 logger = logging.getLogger(__name__)
 
@@ -116,6 +117,7 @@ class SafeBrowsingClient:
         client_id: str = "rag-knowledge",
         client_version: str = "1.0.0",
         max_cache_size: int | None = None,
+        constrained_client: ConstrainedClient | None = None,
     ) -> None:
         """SafeBrowsingClient を初期化する.
 
@@ -127,6 +129,7 @@ class SafeBrowsingClient:
             client_id: クライアント識別子
             client_version: クライアントバージョン
             max_cache_size: キャッシュの最大エントリ数（None の場合はデフォルト値を使用）
+            constrained_client: 制約付き HTTP クライアント（指定時は aiohttp 直接利用の代わりに使用）
         """
         self._api_key = api_key
         self._timeout = aiohttp.ClientTimeout(total=timeout)
@@ -137,6 +140,7 @@ class SafeBrowsingClient:
         self._max_cache_size = max_cache_size if max_cache_size is not None else self.MAX_CACHE_SIZE
         self._cache: dict[str, CacheEntry] = {}
         self._cache_lock = asyncio.Lock()
+        self._constrained_client = constrained_client
 
     def _get_cache_key(self, url: str) -> str:
         """URLからキャッシュキーを生成する."""
@@ -309,16 +313,30 @@ class SafeBrowsingClient:
         """Safe Browsing API を呼び出す."""
         request_body = self._build_request_body(urls)
 
-        async with aiohttp.ClientSession(timeout=self._timeout) as session:
-            async with session.post(
-                self.API_URL, params={"key": self._api_key}, json=request_body
-            ) as resp:
+        if self._constrained_client is not None:
+            async with self._constrained_client as client:
+                resp = await client.post(
+                    self.API_URL,
+                    params={"key": self._api_key},
+                    json=request_body,
+                )
                 if resp.status != 200:
                     error_text = await resp.text()
                     raise RuntimeError(
                         f"Safe Browsing API error: {resp.status} - {error_text}"
                     )
                 response_data = await resp.json()
+        else:
+            async with aiohttp.ClientSession(timeout=self._timeout) as session:
+                async with session.post(
+                    self.API_URL, params={"key": self._api_key}, json=request_body
+                ) as resp:
+                    if resp.status != 200:
+                        error_text = await resp.text()
+                        raise RuntimeError(
+                            f"Safe Browsing API error: {resp.status} - {error_text}"
+                        )
+                    response_data = await resp.json()
 
         return self._parse_response(response_data, urls)
 
@@ -372,6 +390,8 @@ def create_safe_browsing_client(settings: RAGSettings) -> SafeBrowsingClient | N
     Returns:
         SafeBrowsingClient または None（無効時）
     """
+    from .safety.constrained_client import ConstrainedClient
+
     if not settings.rag_url_safety_check:
         logger.debug("URL safety check is disabled")
         return None
@@ -387,9 +407,16 @@ def create_safe_browsing_client(settings: RAGSettings) -> SafeBrowsingClient | N
     if settings.rag_url_safety_cache_ttl > 0:
         cache_ttl = float(settings.rag_url_safety_cache_ttl)
 
+    constrained_client = ConstrainedClient(
+        request_timeout=settings.rag_url_safety_timeout,
+        max_requests=10,
+        circuit_breaker_threshold=3,
+    )
+
     return SafeBrowsingClient(
         api_key=settings.google_safe_browsing_api_key,
         timeout=settings.rag_url_safety_timeout,
         cache_ttl=cache_ttl,
         fail_open=settings.rag_url_safety_fail_open,
+        constrained_client=constrained_client,
     )
