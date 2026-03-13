@@ -8,7 +8,7 @@ from __future__ import annotations
 import asyncio
 from unittest.mock import AsyncMock, MagicMock, patch
 
-import aiohttp
+import httpx
 import pytest
 
 from rag.safety.budget_tracker import BudgetExhaustedError
@@ -83,7 +83,7 @@ SAMPLE_INDEX_HTML = """
 
 
 class MockResponse:
-    """モックHTTPレスポンス."""
+    """モックHTTPレスポンス（httpx.Response 互換）."""
 
     def __init__(
         self,
@@ -92,22 +92,21 @@ class MockResponse:
         headers: dict[str, str] | None = None,
         raw_bytes: bytes | None = None,
     ) -> None:
-        self.status = status
+        self.status_code = status
         self._text = text
         self.headers: dict[str, str] = headers or {}
         self._raw_bytes = raw_bytes
 
-    async def text(self, errors: str = "strict") -> str:  # noqa: ARG002
+    @property
+    def text(self) -> str:
         return self._text
 
-    async def read(self) -> bytes:
+    @property
+    def content(self) -> bytes:
         """レスポンスボディをバイト列として返す."""
         if self._raw_bytes is not None:
             return self._raw_bytes
         return self._text.encode("utf-8")
-
-    def release(self) -> None:
-        """接続を解放する（モック）."""
 
 
 class MockConstrainedClient:
@@ -1217,7 +1216,7 @@ class TestRobotsChecker:
             circuit_breaker = MagicMock()
 
             async def get(self, url: str, **kwargs: object) -> MockResponse:  # noqa: ARG002
-                raise aiohttp.ClientError("Connection refused")
+                raise httpx.HTTPError("Connection refused")
 
         client = MockClientRaisingError()
         result = await checker.can_fetch("https://example.com/private/data", client)
