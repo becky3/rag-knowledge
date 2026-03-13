@@ -6,7 +6,7 @@
 from __future__ import annotations
 
 import asyncio
-from unittest.mock import AsyncMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import aiohttp
 import pytest
@@ -102,47 +102,44 @@ class MockResponse:
             return self._raw_bytes
         return self._text.encode("utf-8")
 
+    def release(self) -> None:
+        """接続を解放する（モック）."""
 
-class MockClientSession:
-    """モックaiohttpクライアントセッション."""
+
+class MockConstrainedClient:
+    """モック ConstrainedClient（ConstrainedClient の代替）.
+
+    ConstrainedClient と同じインターフェースを持つ:
+    - async context manager (__aenter__ / __aexit__)
+    - async get(url, **kwargs) が MockResponse を直接返す（コンテキストマネージャではない）
+    - budget / circuit_breaker プロパティ
+    """
 
     def __init__(
-        self, status: int = 200, text: str = "", raw_bytes: bytes | None = None
+        self,
+        status: int = 200,
+        text: str = "",
+        raw_bytes: bytes | None = None,
+        url_responses: dict[str, MockResponse] | None = None,
     ) -> None:
         self._status = status
         self._text = text
         self._raw_bytes = raw_bytes
+        self._url_responses = url_responses or {}
+        self.budget = MagicMock()
+        self.circuit_breaker = MagicMock()
 
-    async def __aenter__(self) -> "MockClientSession":
+    async def __aenter__(self) -> "MockConstrainedClient":
         return self
 
     async def __aexit__(self, *args: object) -> None:
         pass
 
-    def get(self, url: str, **kwargs: object) -> "MockContextManager":  # noqa: ARG002
-        return MockContextManager(self._status, self._text, raw_bytes=self._raw_bytes)
-
-
-class MockContextManager:
-    """モックコンテキストマネージャ（session.get()の戻り値）."""
-
-    def __init__(
-        self,
-        status: int,
-        text: str,
-        headers: dict[str, str] | None = None,
-        raw_bytes: bytes | None = None,
-    ) -> None:
-        self._status = status
-        self._text = text
-        self._headers = headers
-        self._raw_bytes = raw_bytes
-
-    async def __aenter__(self) -> MockResponse:
-        return MockResponse(self._status, self._text, self._headers, self._raw_bytes)
-
-    async def __aexit__(self, *args: object) -> None:
-        pass
+    async def get(self, url: str, **kwargs: object) -> MockResponse:  # noqa: ARG002
+        """URL に対応する MockResponse を返す."""
+        if url in self._url_responses:
+            return self._url_responses[url]
+        return MockResponse(self._status, self._text, raw_bytes=self._raw_bytes)
 
 
 class TestCrawledPage:
@@ -510,9 +507,9 @@ class TestWebCrawlerCrawlIndexPage:
         """AC12: リンク集ページからURLリストを抽出できること."""
         crawler = WebCrawler(respect_robots_txt=False)
 
-        with patch(
-            "rag.web_crawler.aiohttp.ClientSession",
-            return_value=MockClientSession(200, SAMPLE_INDEX_HTML),
+        with patch.object(
+            crawler, "create_client",
+            return_value=MockConstrainedClient(200, SAMPLE_INDEX_HTML),
         ):
             urls = await crawler.crawl_index_page("https://example.com/articles")
 
@@ -534,9 +531,9 @@ class TestWebCrawlerCrawlIndexPage:
         """AC13: URLパターン（正規表現）によるフィルタリングが機能すること."""
         crawler = WebCrawler(respect_robots_txt=False)
 
-        with patch(
-            "rag.web_crawler.aiohttp.ClientSession",
-            return_value=MockClientSession(200, SAMPLE_INDEX_HTML),
+        with patch.object(
+            crawler, "create_client",
+            return_value=MockConstrainedClient(200, SAMPLE_INDEX_HTML),
         ):
             # .html で終わるURLのみ抽出
             urls = await crawler.crawl_index_page(
@@ -567,9 +564,9 @@ class TestWebCrawlerCrawlIndexPage:
         </html>
         """
 
-        with patch(
-            "rag.web_crawler.aiohttp.ClientSession",
-            return_value=MockClientSession(200, html_with_external_links),
+        with patch.object(
+            crawler, "create_client",
+            return_value=MockConstrainedClient(200, html_with_external_links),
         ):
             urls = await crawler.crawl_index_page("https://example.com/links")
 
@@ -599,9 +596,9 @@ class TestWebCrawlerCrawlIndexPage:
         </html>
         """
 
-        with patch(
-            "rag.web_crawler.aiohttp.ClientSession",
-            return_value=MockClientSession(200, html_with_fragments),
+        with patch.object(
+            crawler, "create_client",
+            return_value=MockConstrainedClient(200, html_with_fragments),
         ):
             urls = await crawler.crawl_index_page("https://example.com/index")
 
@@ -615,9 +612,9 @@ class TestWebCrawlerCrawlIndexPage:
         """AC34: 1回のクロールで取得するページ数が max_pages で制限されること."""
         crawler = WebCrawler(max_pages=2, respect_robots_txt=False)
 
-        with patch(
-            "rag.web_crawler.aiohttp.ClientSession",
-            return_value=MockClientSession(200, SAMPLE_INDEX_HTML),
+        with patch.object(
+            crawler, "create_client",
+            return_value=MockConstrainedClient(200, SAMPLE_INDEX_HTML),
         ):
             urls = await crawler.crawl_index_page("https://example.com/articles")
 
@@ -632,9 +629,9 @@ class TestWebCrawlerCrawlPage:
         """AC14: 単一ページの本文テキストを取得できること."""
         crawler = WebCrawler(respect_robots_txt=False)
 
-        with patch(
-            "rag.web_crawler.aiohttp.ClientSession",
-            return_value=MockClientSession(200, SAMPLE_HTML_WITH_ARTICLE),
+        with patch.object(
+            crawler, "create_client",
+            return_value=MockConstrainedClient(200, SAMPLE_HTML_WITH_ARTICLE),
         ):
             page = await crawler.crawl_page("https://example.com/article/1")
 
@@ -649,9 +646,9 @@ class TestWebCrawlerCrawlPage:
         """HTTPエラー時に None を返すこと."""
         crawler = WebCrawler(respect_robots_txt=False)
 
-        with patch(
-            "rag.web_crawler.aiohttp.ClientSession",
-            return_value=MockClientSession(404, "Not Found"),
+        with patch.object(
+            crawler, "create_client",
+            return_value=MockConstrainedClient(404, "Not Found"),
         ):
             page = await crawler.crawl_page("https://example.com/not-found")
 
@@ -671,9 +668,9 @@ class TestWebCrawlerCrawlPage:
         """crawl_page() がフラグメント除去済みURLをCrawledPage.urlに格納すること."""
         crawler = WebCrawler(respect_robots_txt=False)
 
-        with patch(
-            "rag.web_crawler.aiohttp.ClientSession",
-            return_value=MockClientSession(200, SAMPLE_HTML_WITH_ARTICLE),
+        with patch.object(
+            crawler, "create_client",
+            return_value=MockConstrainedClient(200, SAMPLE_HTML_WITH_ARTICLE),
         ):
             page = await crawler.crawl_page("https://example.com/article/1#section")
 
@@ -685,9 +682,9 @@ class TestWebCrawlerCrawlPage:
         """SSRF対策: リダイレクト応答を拒否すること."""
         crawler = WebCrawler(respect_robots_txt=False)
 
-        with patch(
-            "rag.web_crawler.aiohttp.ClientSession",
-            return_value=MockClientSession(302, ""),
+        with patch.object(
+            crawler, "create_client",
+            return_value=MockConstrainedClient(302, ""),
         ):
             page = await crawler.crawl_page("https://example.com/redirect")
 
@@ -702,9 +699,9 @@ class TestWebCrawlerCrawlIndexPageRedirect:
         """SSRF対策: インデックスページのリダイレクト応答を拒否すること."""
         crawler = WebCrawler(respect_robots_txt=False)
 
-        with patch(
-            "rag.web_crawler.aiohttp.ClientSession",
-            return_value=MockClientSession(301, ""),
+        with patch.object(
+            crawler, "create_client",
+            return_value=MockConstrainedClient(301, ""),
         ):
             urls = await crawler.crawl_index_page("https://example.com/articles")
 
@@ -717,42 +714,33 @@ class TestWebCrawlerCrawlPages:
     @pytest.mark.asyncio
     async def test_crawl_pages_isolates_errors(self) -> None:
         """AC15: 複数ページを並行クロールし、ページ単位のエラーを隔離すること."""
-        crawler = WebCrawler(crawl_delay=0, respect_robots_txt=False)
+        crawler = WebCrawler(crawl_delay=0.5, respect_robots_txt=False)
 
         # 特定のURLを失敗させる（並行実行でも順序非依存）
         fail_url = "https://example.com/article/2"
 
-        class MockClientSessionWithErrors:
-            """エラーをシミュレートするモックセッション."""
+        class MockConstrainedClientWithErrors:
+            """エラーをシミュレートするモック ConstrainedClient."""
 
-            async def __aenter__(self) -> "MockClientSessionWithErrors":
+            def __init__(self) -> None:
+                self.budget = MagicMock()
+                self.circuit_breaker = MagicMock()
+
+            async def __aenter__(self) -> "MockConstrainedClientWithErrors":
                 return self
 
             async def __aexit__(self, *args: object) -> None:
                 pass
 
-            def get(self, url: str, **kwargs: object) -> "MockContextManagerWithErrors":  # noqa: ARG002
+            async def get(self, url: str, **kwargs: object) -> MockResponse:  # noqa: ARG002
                 # URLに応じて成功/失敗を決定（順序非依存）
                 if url == fail_url:
-                    return MockContextManagerWithErrors(500, "Server Error")
-                return MockContextManagerWithErrors(200, SAMPLE_HTML_WITH_ARTICLE)
+                    return MockResponse(500, "Server Error")
+                return MockResponse(200, SAMPLE_HTML_WITH_ARTICLE)
 
-        class MockContextManagerWithErrors:
-            """エラーをシミュレートするモックコンテキストマネージャ."""
-
-            def __init__(self, status: int, text: str) -> None:
-                self._status = status
-                self._text = text
-
-            async def __aenter__(self) -> MockResponse:
-                return MockResponse(self._status, self._text)
-
-            async def __aexit__(self, *args: object) -> None:
-                pass
-
-        with patch(
-            "rag.web_crawler.aiohttp.ClientSession",
-            return_value=MockClientSessionWithErrors(),
+        with patch.object(
+            crawler, "create_client",
+            return_value=MockConstrainedClientWithErrors(),
         ):
             urls = [
                 "https://example.com/article/1",
@@ -771,11 +759,12 @@ class TestWebCrawlerCrawlPages:
     @pytest.mark.asyncio
     async def test_crawl_delay_between_requests(self) -> None:
         """AC35: 同一ドメインへの連続リクエスト間に crawl_delay の待機が挿入されること."""
-        crawler = WebCrawler(crawl_delay=0.1, respect_robots_txt=False)
+        # crawl_delay の最低値は HARD_LIMIT_MIN_REQUEST_INTERVAL (0.5)
+        crawler = WebCrawler(crawl_delay=0.5, respect_robots_txt=False)
 
-        with patch(
-            "rag.web_crawler.aiohttp.ClientSession",
-            return_value=MockClientSession(200, SAMPLE_HTML_WITH_ARTICLE),
+        with patch.object(
+            crawler, "create_client",
+            return_value=MockConstrainedClient(200, SAMPLE_HTML_WITH_ARTICLE),
         ):
             with patch(
                 "rag.web_crawler.asyncio.sleep", new_callable=AsyncMock
@@ -809,7 +798,7 @@ class TestWebCrawlerConcurrency:
         max_concurrent = 2
         crawler = WebCrawler(
             max_concurrent=max_concurrent,
-            crawl_delay=0,
+            crawl_delay=0.5,
             respect_robots_txt=False,
         )
 
@@ -818,38 +807,35 @@ class TestWebCrawlerConcurrency:
         max_observed_concurrent = 0
         lock = asyncio.Lock()
 
-        class MockClientSessionWithConcurrencyTracking:
-            """同時実行数を追跡するモックセッション."""
+        class MockConstrainedClientWithDelay:
+            """同時実行数を追跡するモック ConstrainedClient."""
 
-            async def __aenter__(self) -> "MockClientSessionWithConcurrencyTracking":
+            def __init__(self) -> None:
+                self.budget = MagicMock()
+                self.circuit_breaker = MagicMock()
+
+            async def __aenter__(self) -> "MockConstrainedClientWithDelay":
                 return self
 
             async def __aexit__(self, *args: object) -> None:
                 pass
 
-            def get(self, url: str, **kwargs: object) -> "MockContextManagerWithDelay":  # noqa: ARG002
-                return MockContextManagerWithDelay()
-
-        class MockContextManagerWithDelay:
-            """遅延を入れて同時実行をシミュレートするコンテキストマネージャ."""
-
-            async def __aenter__(self) -> MockResponse:
+            async def get(self, url: str, **kwargs: object) -> MockResponse:  # noqa: ARG002
                 nonlocal current_concurrent, max_observed_concurrent
                 async with lock:
                     current_concurrent += 1
                     max_observed_concurrent = max(max_observed_concurrent, current_concurrent)
                 # 少し待機して同時実行をシミュレート
                 await asyncio.sleep(0.05)
-                return MockResponse(200, SAMPLE_HTML_WITH_ARTICLE)
+                try:
+                    return MockResponse(200, SAMPLE_HTML_WITH_ARTICLE)
+                finally:
+                    async with lock:
+                        current_concurrent -= 1
 
-            async def __aexit__(self, *args: object) -> None:
-                nonlocal current_concurrent
-                async with lock:
-                    current_concurrent -= 1
-
-        with patch(
-            "rag.web_crawler.aiohttp.ClientSession",
-            return_value=MockClientSessionWithConcurrencyTracking(),
+        with patch.object(
+            crawler, "create_client",
+            return_value=MockConstrainedClientWithDelay(),
         ):
             urls = [f"https://example.com/article/{i}" for i in range(5)]
             await crawler.crawl_pages(urls)
@@ -903,9 +889,9 @@ class TestWebCrawlerEncodingDetection:
         # Shift_JISでエンコードされたバイト列を作成
         shift_jis_bytes = SAMPLE_HTML_SHIFT_JIS.encode("shift_jis")
 
-        with patch(
-            "rag.web_crawler.aiohttp.ClientSession",
-            return_value=MockClientSession(200, raw_bytes=shift_jis_bytes),
+        with patch.object(
+            crawler, "create_client",
+            return_value=MockConstrainedClient(200, raw_bytes=shift_jis_bytes),
         ):
             page = await crawler.crawl_page("https://example.com/shift_jis_page")
 
@@ -922,9 +908,9 @@ class TestWebCrawlerEncodingDetection:
         # UTF-8でエンコードされたバイト列を作成
         utf8_bytes = SAMPLE_HTML_WITH_ARTICLE.encode("utf-8")
 
-        with patch(
-            "rag.web_crawler.aiohttp.ClientSession",
-            return_value=MockClientSession(200, raw_bytes=utf8_bytes),
+        with patch.object(
+            crawler, "create_client",
+            return_value=MockConstrainedClient(200, raw_bytes=utf8_bytes),
         ):
             page = await crawler.crawl_page("https://example.com/utf8_page")
 
@@ -940,9 +926,9 @@ class TestWebCrawlerEncodingDetection:
         # EUC-JPでエンコードされたバイト列を作成
         euc_jp_bytes = SAMPLE_HTML_EUC_JP.encode("euc_jp")
 
-        with patch(
-            "rag.web_crawler.aiohttp.ClientSession",
-            return_value=MockClientSession(200, raw_bytes=euc_jp_bytes),
+        with patch.object(
+            crawler, "create_client",
+            return_value=MockConstrainedClient(200, raw_bytes=euc_jp_bytes),
         ):
             page = await crawler.crawl_page("https://example.com/euc_jp_page")
 
@@ -960,9 +946,9 @@ class TestWebCrawlerEncodingDetection:
         # 0x80-0xFFの単独バイトはUTF-8として不正
         invalid_bytes = b"<html><body>Test content with invalid byte: \x80\xff</body></html>"
 
-        with patch(
-            "rag.web_crawler.aiohttp.ClientSession",
-            return_value=MockClientSession(200, raw_bytes=invalid_bytes),
+        with patch.object(
+            crawler, "create_client",
+            return_value=MockConstrainedClient(200, raw_bytes=invalid_bytes),
         ):
             page = await crawler.crawl_page("https://example.com/invalid_encoding")
 
@@ -988,9 +974,9 @@ class TestWebCrawlerEncodingDetection:
 """
         shift_jis_bytes = shift_jis_index.encode("shift_jis")
 
-        with patch(
-            "rag.web_crawler.aiohttp.ClientSession",
-            return_value=MockClientSession(200, raw_bytes=shift_jis_bytes),
+        with patch.object(
+            crawler, "create_client",
+            return_value=MockConstrainedClient(200, raw_bytes=shift_jis_bytes),
         ):
             urls = await crawler.crawl_index_page("https://example.com/index")
 
@@ -1017,8 +1003,8 @@ Disallow: /blocked/
 """
 
 
-class MockRobotsSession:
-    """robots.txt リクエストとページリクエストの両方を処理するモックセッション."""
+class MockRobotsConstrainedClient:
+    """robots.txt リクエストとページリクエストの両方を処理するモック ConstrainedClient."""
 
     def __init__(
         self,
@@ -1031,31 +1017,19 @@ class MockRobotsSession:
         self._robots_status = robots_status
         self._page_html = page_html
         self._page_status = page_status
+        self.budget = MagicMock()
+        self.circuit_breaker = MagicMock()
 
-    async def __aenter__(self) -> "MockRobotsSession":
+    async def __aenter__(self) -> "MockRobotsConstrainedClient":
         return self
 
     async def __aexit__(self, *args: object) -> None:
         pass
 
-    def get(self, url: str, **kwargs: object) -> "MockRobotsContextManager":  # noqa: ARG002
+    async def get(self, url: str, **kwargs: object) -> MockResponse:  # noqa: ARG002
         if url.endswith("/robots.txt"):
-            return MockRobotsContextManager(self._robots_status, self._robots_txt)
-        return MockRobotsContextManager(self._page_status, self._page_html)
-
-
-class MockRobotsContextManager:
-    """robots.txt 対応モックコンテキストマネージャ."""
-
-    def __init__(self, status: int, text: str) -> None:
-        self._status = status
-        self._text = text
-
-    async def __aenter__(self) -> MockResponse:
-        return MockResponse(self._status, self._text)
-
-    async def __aexit__(self, *args: object) -> None:
-        pass
+            return MockResponse(self._robots_status, self._robots_txt)
+        return MockResponse(self._page_status, self._page_html)
 
 
 class TestRobotsChecker:
@@ -1065,13 +1039,9 @@ class TestRobotsChecker:
     async def test_can_fetch_allowed_url(self) -> None:
         """許可されたURLに対して True を返すこと."""
         checker = RobotsChecker()
-        timeout = aiohttp.ClientTimeout(total=10)
+        client = MockRobotsConstrainedClient(robots_txt=SAMPLE_ROBOTS_TXT)
 
-        with patch(
-            "rag.web_crawler.aiohttp.ClientSession",
-            return_value=MockRobotsSession(robots_txt=SAMPLE_ROBOTS_TXT),
-        ):
-            result = await checker.can_fetch("https://example.com/public/page", timeout)
+        result = await checker.can_fetch("https://example.com/public/page", client)
 
         assert result is True
 
@@ -1079,13 +1049,9 @@ class TestRobotsChecker:
     async def test_can_fetch_disallowed_url(self) -> None:
         """Disallow 指定されたURLに対して False を返すこと."""
         checker = RobotsChecker()
-        timeout = aiohttp.ClientTimeout(total=10)
+        client = MockRobotsConstrainedClient(robots_txt=SAMPLE_ROBOTS_TXT)
 
-        with patch(
-            "rag.web_crawler.aiohttp.ClientSession",
-            return_value=MockRobotsSession(robots_txt=SAMPLE_ROBOTS_TXT),
-        ):
-            result = await checker.can_fetch("https://example.com/private/data", timeout)
+        result = await checker.can_fetch("https://example.com/private/data", client)
 
         assert result is False
 
@@ -1093,13 +1059,9 @@ class TestRobotsChecker:
     async def test_can_fetch_wildcard_disallow(self) -> None:
         """ワイルドカード User-agent の Disallow が適用されること."""
         checker = RobotsChecker()
-        timeout = aiohttp.ClientTimeout(total=10)
+        client = MockRobotsConstrainedClient(robots_txt=SAMPLE_ROBOTS_TXT_WILDCARD_ONLY)
 
-        with patch(
-            "rag.web_crawler.aiohttp.ClientSession",
-            return_value=MockRobotsSession(robots_txt=SAMPLE_ROBOTS_TXT_WILDCARD_ONLY),
-        ):
-            result = await checker.can_fetch("https://example.com/blocked/page", timeout)
+        result = await checker.can_fetch("https://example.com/blocked/page", client)
 
         assert result is False
 
@@ -1107,13 +1069,9 @@ class TestRobotsChecker:
     async def test_crawl_delay_parsed(self) -> None:
         """Crawl-delay が正しくパースされること."""
         checker = RobotsChecker()
-        timeout = aiohttp.ClientTimeout(total=10)
+        client = MockRobotsConstrainedClient(robots_txt=SAMPLE_ROBOTS_TXT)
 
-        with patch(
-            "rag.web_crawler.aiohttp.ClientSession",
-            return_value=MockRobotsSession(robots_txt=SAMPLE_ROBOTS_TXT),
-        ):
-            delay = await checker.get_crawl_delay("https://example.com/page", timeout)
+        delay = await checker.get_crawl_delay("https://example.com/page", client)
 
         assert delay == 5
 
@@ -1121,13 +1079,9 @@ class TestRobotsChecker:
     async def test_crawl_delay_none_when_not_specified(self) -> None:
         """Crawl-delay 未指定時は None を返すこと."""
         checker = RobotsChecker()
-        timeout = aiohttp.ClientTimeout(total=10)
+        client = MockRobotsConstrainedClient(robots_txt=SAMPLE_ROBOTS_TXT_WILDCARD_ONLY)
 
-        with patch(
-            "rag.web_crawler.aiohttp.ClientSession",
-            return_value=MockRobotsSession(robots_txt=SAMPLE_ROBOTS_TXT_WILDCARD_ONLY),
-        ):
-            delay = await checker.get_crawl_delay("https://example.com/page", timeout)
+        delay = await checker.get_crawl_delay("https://example.com/page", client)
 
         assert delay is None
 
@@ -1135,13 +1089,18 @@ class TestRobotsChecker:
     async def test_fail_open_on_fetch_error(self) -> None:
         """AC74: robots.txt の取得に失敗した場合、フェイルオープンでクロールを許可すること."""
         checker = RobotsChecker()
-        timeout = aiohttp.ClientTimeout(total=10)
 
-        with patch(
-            "rag.web_crawler.aiohttp.ClientSession",
-            side_effect=aiohttp.ClientError("Connection refused"),
-        ):
-            result = await checker.can_fetch("https://example.com/private/data", timeout)
+        class MockClientRaisingError:
+            """get() で例外を発生させるモック ConstrainedClient."""
+
+            budget = MagicMock()
+            circuit_breaker = MagicMock()
+
+            async def get(self, url: str, **kwargs: object) -> MockResponse:  # noqa: ARG002
+                raise aiohttp.ClientError("Connection refused")
+
+        client = MockClientRaisingError()
+        result = await checker.can_fetch("https://example.com/private/data", client)
 
         # 取得失敗 → 全て許可（フェイルオープン）
         assert result is True
@@ -1150,13 +1109,9 @@ class TestRobotsChecker:
     async def test_fail_open_on_404(self) -> None:
         """AC74: robots.txt が 404 の場合、全てのクロールを許可すること."""
         checker = RobotsChecker()
-        timeout = aiohttp.ClientTimeout(total=10)
+        client = MockRobotsConstrainedClient(robots_status=404)
 
-        with patch(
-            "rag.web_crawler.aiohttp.ClientSession",
-            return_value=MockRobotsSession(robots_status=404),
-        ):
-            result = await checker.can_fetch("https://example.com/any/path", timeout)
+        result = await checker.can_fetch("https://example.com/any/path", client)
 
         assert result is True
 
@@ -1164,42 +1119,60 @@ class TestRobotsChecker:
     async def test_cache_hit(self) -> None:
         """AC75: robots.txt がキャッシュされ、TTL 内は再取得されないこと."""
         checker = RobotsChecker(cache_ttl=3600)
-        timeout = aiohttp.ClientTimeout(total=10)
 
-        mock_session = MockRobotsSession(robots_txt=SAMPLE_ROBOTS_TXT)
+        get_call_count = 0
 
-        with patch(
-            "rag.web_crawler.aiohttp.ClientSession",
-            return_value=mock_session,
-        ) as mock_cls:
-            # 1回目: 取得される
-            await checker.can_fetch("https://example.com/page1", timeout)
-            first_call_count = mock_cls.call_count
+        class MockClientWithCounter:
+            """get() の呼び出し回数を追跡するモック ConstrainedClient."""
 
-            # 2回目: キャッシュヒット（再取得されない）
-            await checker.can_fetch("https://example.com/page2", timeout)
-            second_call_count = mock_cls.call_count
+            budget = MagicMock()
+            circuit_breaker = MagicMock()
 
-        # 同じドメインなのでキャッシュヒット → セッション作成回数が増えない
+            async def get(self, url: str, **kwargs: object) -> MockResponse:  # noqa: ARG002
+                nonlocal get_call_count
+                get_call_count += 1
+                return MockResponse(200, SAMPLE_ROBOTS_TXT)
+
+        client = MockClientWithCounter()
+
+        # 1回目: 取得される
+        await checker.can_fetch("https://example.com/page1", client)
+        first_call_count = get_call_count
+
+        # 2回目: キャッシュヒット（再取得されない）
+        await checker.can_fetch("https://example.com/page2", client)
+        second_call_count = get_call_count
+
+        # 同じドメインなのでキャッシュヒット → get() 呼び出し回数が増えない
         assert second_call_count == first_call_count
 
     @pytest.mark.asyncio
     async def test_cache_expiry(self) -> None:
         """AC75: キャッシュ TTL 超過後は再取得されること."""
         checker = RobotsChecker(cache_ttl=0)  # TTL=0 で即時期限切れ
-        timeout = aiohttp.ClientTimeout(total=10)
 
-        with patch(
-            "rag.web_crawler.aiohttp.ClientSession",
-            return_value=MockRobotsSession(robots_txt=SAMPLE_ROBOTS_TXT),
-        ) as mock_cls:
-            # 1回目
-            await checker.can_fetch("https://example.com/page1", timeout)
-            first_call_count = mock_cls.call_count
+        get_call_count = 0
 
-            # 2回目: TTL=0 なのでキャッシュ期限切れ → 再取得
-            await checker.can_fetch("https://example.com/page2", timeout)
-            second_call_count = mock_cls.call_count
+        class MockClientWithCounter:
+            """get() の呼び出し回数を追跡するモック ConstrainedClient."""
+
+            budget = MagicMock()
+            circuit_breaker = MagicMock()
+
+            async def get(self, url: str, **kwargs: object) -> MockResponse:  # noqa: ARG002
+                nonlocal get_call_count
+                get_call_count += 1
+                return MockResponse(200, SAMPLE_ROBOTS_TXT)
+
+        client = MockClientWithCounter()
+
+        # 1回目
+        await checker.can_fetch("https://example.com/page1", client)
+        first_call_count = get_call_count
+
+        # 2回目: TTL=0 なのでキャッシュ期限切れ → 再取得
+        await checker.can_fetch("https://example.com/page2", client)
+        second_call_count = get_call_count
 
         assert second_call_count > first_call_count
 
@@ -1234,9 +1207,9 @@ class TestWebCrawlerRobotsTxt:
         """AC71: robots.txt で Disallow されたパスのクロールがスキップされること."""
         crawler = WebCrawler(respect_robots_txt=True)
 
-        with patch(
-            "rag.web_crawler.aiohttp.ClientSession",
-            return_value=MockRobotsSession(
+        with patch.object(
+            crawler, "create_client",
+            return_value=MockRobotsConstrainedClient(
                 robots_txt=SAMPLE_ROBOTS_TXT,
                 page_html=SAMPLE_HTML_WITH_ARTICLE,
             ),
@@ -1251,9 +1224,9 @@ class TestWebCrawlerRobotsTxt:
         """AC71: robots.txt で許可されたパスはクロールされること."""
         crawler = WebCrawler(respect_robots_txt=True)
 
-        with patch(
-            "rag.web_crawler.aiohttp.ClientSession",
-            return_value=MockRobotsSession(
+        with patch.object(
+            crawler, "create_client",
+            return_value=MockRobotsConstrainedClient(
                 robots_txt=SAMPLE_ROBOTS_TXT,
                 page_html=SAMPLE_HTML_WITH_ARTICLE,
             ),
@@ -1268,9 +1241,9 @@ class TestWebCrawlerRobotsTxt:
         """AC72: respect_robots_txt=False の場合、robots.txt を無視してクロールすること."""
         crawler = WebCrawler(respect_robots_txt=False)
 
-        with patch(
-            "rag.web_crawler.aiohttp.ClientSession",
-            return_value=MockClientSession(200, SAMPLE_HTML_WITH_ARTICLE),
+        with patch.object(
+            crawler, "create_client",
+            return_value=MockConstrainedClient(200, SAMPLE_HTML_WITH_ARTICLE),
         ):
             # Disallow されたパスでもクロールされる
             page = await crawler.crawl_page("https://example.com/private/data")
@@ -1296,9 +1269,9 @@ class TestWebCrawlerRobotsTxt:
         </html>
         """
 
-        with patch(
-            "rag.web_crawler.aiohttp.ClientSession",
-            return_value=MockRobotsSession(
+        with patch.object(
+            crawler, "create_client",
+            return_value=MockRobotsConstrainedClient(
                 robots_txt=SAMPLE_ROBOTS_TXT,
                 page_html=html_with_mixed_links,
             ),
@@ -1321,11 +1294,8 @@ class TestWebCrawlerRobotsTxt:
             respect_robots_txt=True,
         )
 
-        with patch(
-            "rag.web_crawler.aiohttp.ClientSession",
-            return_value=MockRobotsSession(robots_txt=SAMPLE_ROBOTS_TXT),
-        ):
-            delay = await crawler._get_effective_crawl_delay("https://example.com/page")
+        client = MockRobotsConstrainedClient(robots_txt=SAMPLE_ROBOTS_TXT)
+        delay = await crawler._get_effective_crawl_delay("https://example.com/page", client)
 
         # robots.txt の 5 秒が採用される
         assert delay == 5
@@ -1338,11 +1308,8 @@ class TestWebCrawlerRobotsTxt:
             respect_robots_txt=True,
         )
 
-        with patch(
-            "rag.web_crawler.aiohttp.ClientSession",
-            return_value=MockRobotsSession(robots_txt=SAMPLE_ROBOTS_TXT),
-        ):
-            delay = await crawler._get_effective_crawl_delay("https://example.com/page")
+        client = MockRobotsConstrainedClient(robots_txt=SAMPLE_ROBOTS_TXT)
+        delay = await crawler._get_effective_crawl_delay("https://example.com/page", client)
 
         # 設定値の 10 秒が採用される
         assert delay == 10.0
@@ -1407,27 +1374,31 @@ class TestWebCrawlerCrawlPreview:
         """クロール対象ページのタイトルとURLの一覧を返すこと."""
         crawler = WebCrawler(respect_robots_txt=False)
 
-        class MockSessionForPreview:
-            """crawl_preview テスト用のモックセッション."""
+        class MockConstrainedClientForPreview:
+            """crawl_preview テスト用のモック ConstrainedClient."""
 
-            async def __aenter__(self) -> "MockSessionForPreview":
+            def __init__(self) -> None:
+                self.budget = MagicMock()
+                self.circuit_breaker = MagicMock()
+
+            async def __aenter__(self) -> "MockConstrainedClientForPreview":
                 return self
 
             async def __aexit__(self, *args: object) -> None:
                 pass
 
-            def get(self, url: str, **kwargs: object) -> MockContextManager:  # noqa: ARG002
+            async def get(self, url: str, **kwargs: object) -> MockResponse:  # noqa: ARG002
                 if url == "https://example.com/articles":
-                    return MockContextManager(200, SAMPLE_INDEX_HTML)
+                    return MockResponse(200, SAMPLE_INDEX_HTML)
                 elif url == "https://example.com/article/1":
-                    return MockContextManager(200, SAMPLE_PAGE_HTML_TITLE_A)
+                    return MockResponse(200, SAMPLE_PAGE_HTML_TITLE_A)
                 elif url == "https://example.com/article/2":
-                    return MockContextManager(200, SAMPLE_PAGE_HTML_TITLE_B)
-                return MockContextManager(200, SAMPLE_HTML_WITH_ARTICLE)
+                    return MockResponse(200, SAMPLE_PAGE_HTML_TITLE_B)
+                return MockResponse(200, SAMPLE_HTML_WITH_ARTICLE)
 
-        with patch(
-            "rag.web_crawler.aiohttp.ClientSession",
-            return_value=MockSessionForPreview(),
+        with patch.object(
+            crawler, "create_client",
+            return_value=MockConstrainedClientForPreview(),
         ):
             pages = await crawler.crawl_preview("https://example.com/articles")
 
@@ -1450,9 +1421,9 @@ class TestWebCrawlerCrawlPreview:
         </html>
         """
 
-        with patch(
-            "rag.web_crawler.aiohttp.ClientSession",
-            return_value=MockClientSession(200, empty_html),
+        with patch.object(
+            crawler, "create_client",
+            return_value=MockConstrainedClient(200, empty_html),
         ):
             pages = await crawler.crawl_preview("https://example.com/empty")
 
@@ -1463,23 +1434,27 @@ class TestWebCrawlerCrawlPreview:
         """URLパターンフィルタリングが機能すること."""
         crawler = WebCrawler(respect_robots_txt=False)
 
-        class MockSessionForPattern:
-            """パターンフィルタリングテスト用のモックセッション."""
+        class MockConstrainedClientForPattern:
+            """パターンフィルタリングテスト用のモック ConstrainedClient."""
 
-            async def __aenter__(self) -> "MockSessionForPattern":
+            def __init__(self) -> None:
+                self.budget = MagicMock()
+                self.circuit_breaker = MagicMock()
+
+            async def __aenter__(self) -> "MockConstrainedClientForPattern":
                 return self
 
             async def __aexit__(self, *args: object) -> None:
                 pass
 
-            def get(self, url: str, **kwargs: object) -> MockContextManager:  # noqa: ARG002
+            async def get(self, url: str, **kwargs: object) -> MockResponse:  # noqa: ARG002
                 if url == "https://example.com/articles":
-                    return MockContextManager(200, SAMPLE_INDEX_HTML)
-                return MockContextManager(200, SAMPLE_HTML_WITH_ARTICLE)
+                    return MockResponse(200, SAMPLE_INDEX_HTML)
+                return MockResponse(200, SAMPLE_HTML_WITH_ARTICLE)
 
-        with patch(
-            "rag.web_crawler.aiohttp.ClientSession",
-            return_value=MockSessionForPattern(),
+        with patch.object(
+            crawler, "create_client",
+            return_value=MockConstrainedClientForPattern(),
         ):
             pages = await crawler.crawl_preview(
                 "https://example.com/articles",
@@ -1494,24 +1469,28 @@ class TestWebCrawlerCrawlPreview:
         """タイトル取得に失敗した場合、タイトルが空文字列になること."""
         crawler = WebCrawler(respect_robots_txt=False)
 
-        class MockSessionWithTitleError:
-            """タイトル取得失敗テスト用のモックセッション."""
+        class MockConstrainedClientWithTitleError:
+            """タイトル取得失敗テスト用のモック ConstrainedClient."""
 
-            async def __aenter__(self) -> "MockSessionWithTitleError":
+            def __init__(self) -> None:
+                self.budget = MagicMock()
+                self.circuit_breaker = MagicMock()
+
+            async def __aenter__(self) -> "MockConstrainedClientWithTitleError":
                 return self
 
             async def __aexit__(self, *args: object) -> None:
                 pass
 
-            def get(self, url: str, **kwargs: object) -> MockContextManager:  # noqa: ARG002
+            async def get(self, url: str, **kwargs: object) -> MockResponse:  # noqa: ARG002
                 if url == "https://example.com/articles":
-                    return MockContextManager(200, SAMPLE_INDEX_HTML)
+                    return MockResponse(200, SAMPLE_INDEX_HTML)
                 # 子ページのタイトル取得は全て404
-                return MockContextManager(404, "Not Found")
+                return MockResponse(404, "Not Found")
 
-        with patch(
-            "rag.web_crawler.aiohttp.ClientSession",
-            return_value=MockSessionWithTitleError(),
+        with patch.object(
+            crawler, "create_client",
+            return_value=MockConstrainedClientWithTitleError(),
         ):
             pages = await crawler.crawl_preview("https://example.com/articles")
 
@@ -1524,9 +1503,9 @@ class TestWebCrawlerCrawlPreview:
         """crawl_preview は取り込み処理を行わない（副作用なし）ことの確認."""
         crawler = WebCrawler(respect_robots_txt=False)
 
-        with patch(
-            "rag.web_crawler.aiohttp.ClientSession",
-            return_value=MockClientSession(200, SAMPLE_INDEX_HTML),
+        with patch.object(
+            crawler, "create_client",
+            return_value=MockConstrainedClient(200, SAMPLE_INDEX_HTML),
         ):
             pages = await crawler.crawl_preview("https://example.com/articles")
 

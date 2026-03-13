@@ -25,6 +25,7 @@ if TYPE_CHECKING:
     from .hybrid_search import HybridSearchEngine
     from .ingesters.web import WebIngester
     from .safe_browsing import SafeBrowsingClient
+    from .safety import ConstrainedClient
     from .web_crawler import CrawlPreviewPage, CrawledPage, WebCrawler
 
 logger = logging.getLogger(__name__)
@@ -362,8 +363,24 @@ class RAGKnowledgeService:
         Returns:
             {"pages_crawled": N, "chunks_stored": M, "errors": E, "unsafe_urls": U}
         """
+        # 共有 ConstrainedClient で操作全体のバジェットを管理
+        async with self._web_crawler.create_client() as client:
+            return await self._ingest_from_index_legacy_with_client(
+                index_url, url_pattern, progress_callback, client
+            )
+
+    async def _ingest_from_index_legacy_with_client(
+        self,
+        index_url: str,
+        url_pattern: str,
+        progress_callback: Callable[[int, int], Awaitable[None]] | None,
+        client: ConstrainedClient,
+    ) -> dict[str, int]:
+        """レガシーパス実装（ConstrainedClient 共有）."""
         # リンク集ページからURLリストを抽出
-        urls = await self._web_crawler.crawl_index_page(index_url, url_pattern)
+        urls = await self._web_crawler.crawl_index_page(
+            index_url, url_pattern, client=client
+        )
         if not urls:
             logger.warning("No URLs found in index page: %s", index_url)
             return {"pages_crawled": 0, "chunks_stored": 0, "errors": 0, "unsafe_urls": 0}
@@ -399,7 +416,9 @@ class RAGKnowledgeService:
         # WebCrawler.crawl_page() は内部でセマフォ制御と遅延を行う
         total_urls = len(safe_urls)
         tasks = [
-            asyncio.create_task(self._web_crawler.crawl_page(url))
+            asyncio.create_task(
+                self._web_crawler.crawl_page(url, client=client)
+            )
             for url in safe_urls
         ]
 
