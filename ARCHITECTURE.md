@@ -22,6 +22,7 @@
 |---|---|
 | `src/rag/embedding/` | Embedding プロバイダー抽象化（ローカル / OpenAI）とファクトリ |
 | `src/rag/ingesters/` | インジェスタープラグイン（BaseIngester 抽象基底・IngestedContent 共通モデル・WebIngester） |
+| `src/rag/safety/` | 制約付き HTTP クライアント（ConstrainedClient・BudgetTracker・CircuitBreaker） |
 
 ### ルートレベルファイル
 
