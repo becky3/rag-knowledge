@@ -134,7 +134,7 @@ flowchart TB
 
     CRAWLER["Web クローラー"]
 
-    subgraph Safety["制約付き中間ライブラリ"]
+    subgraph Safety["制約付き中間ライブラリ (py-common-lib)"]
         CC["ConstrainedClient"]
         BT["BudgetTracker"]
         CB["CircuitBreaker"]
@@ -218,9 +218,9 @@ flowchart LR
 | ハイブリッド検索エンジン | ベクトル検索と BM25 のスコアを正規化・統合する。設定で有効化できる |
 | Embedding プロバイダー | テキストをベクトルに変換する。ローカルとオンラインを切替可能 |
 | URL 安全性チェック | 外部 API によるマルウェア・フィッシングサイト判定 |
-| ConstrainedClient | 全外部 HTTP リクエストのゲートウェイ。ハードリミット・バジェット・サーキットブレーカーを統合し、httpx.AsyncClient をラップする |
-| BudgetTracker | 操作あたりのリクエスト総数を追跡し、上限到達で BudgetExhaustedError を送出する |
-| CircuitBreaker | 連続失敗回数を監視し、閾値超過で CircuitBreakerOpenError を送出する |
+| ConstrainedClient (py-common-lib) | 全外部 HTTP リクエストのゲートウェイ。ハードリミット・バジェット・サーキットブレーカーを統合し、httpx.AsyncClient をラップする |
+| BudgetTracker (py-common-lib) | 操作あたりのリクエスト総数を追跡し、上限到達で BudgetExhaustedError を送出する |
+| CircuitBreaker (py-common-lib) | 連続失敗回数を監視し、閾値超過で CircuitBreakerOpenError を送出する |
 | 評価ツール | Precision、Recall、F1、NDCG、MRR の計算とベースライン比較 |
 
 ## 外部連携
