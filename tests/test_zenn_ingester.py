@@ -498,6 +498,45 @@ class TestZennIngesterFetchSingle:
         assert "| --- | --- |" in result.text
         assert "| A | 1 |" in result.text
 
+    async def test_fetch_single_markdown_link_url_removal(
+        self, ingester: ZennIngester, mock_client: MagicMock
+    ) -> None:
+        """リンク URL が除去され、テキストのみ保持されること."""
+        mock_client.get.return_value = _make_article_detail_response(
+            body_html=(
+                "<p>See <a href=\"https://example.com/page\">this link</a> for details.</p>"
+                "<p>Visit <a href=\"https://example.com/other\">example site</a>.</p>"
+            ),
+        )
+
+        result = await ingester.fetch_single("test-article")
+
+        assert result is not None
+        assert "this link" in result.text
+        assert "example site" in result.text
+        assert "https://example.com/page" not in result.text
+        assert "https://example.com/other" not in result.text
+
+    async def test_fetch_single_markdown_image_url_removal(
+        self, ingester: ZennIngester, mock_client: MagicMock
+    ) -> None:
+        """画像 URL が除去され、alt テキストのみ保持されること."""
+        mock_client.get.return_value = _make_article_detail_response(
+            body_html=(
+                "<p>Here is an image:</p>"
+                '<img src="https://example.com/image.png" alt="example image">'
+                "<p>And another:</p>"
+                '<img src="https://example.com/photo.jpg" alt="">'
+            ),
+        )
+
+        result = await ingester.fetch_single("test-article")
+
+        assert result is not None
+        assert "example image" in result.text
+        assert "https://example.com/image.png" not in result.text
+        assert "https://example.com/photo.jpg" not in result.text
+
     async def test_fetch_single_topics_parsing(
         self, ingester: ZennIngester, mock_client: MagicMock
     ) -> None:
