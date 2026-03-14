@@ -1032,8 +1032,13 @@ class TestRagCrawlZennTool:
         """空のユーザー名でエラーメッセージを返すこと."""
         mod = import_module("rag.server")
         mock_service = AsyncMock()
+        mock_settings = MagicMock()
+        mock_settings.rag_zenn_max_articles = 50
 
-        with patch.object(mod, "_get_rag_service", return_value=mock_service):
+        with (
+            patch.object(mod, "_get_rag_service", return_value=mock_service),
+            patch.object(mod, "get_settings", return_value=mock_settings),
+        ):
             result = await mod.rag_crawl_zenn("")
 
         assert "エラー" in result
