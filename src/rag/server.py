@@ -3,11 +3,12 @@
 仕様: docs/specs/rag-knowledge.md
 独立リポジトリとして動作する。
 
-FastMCP を使用して 6 つの RAG ツールを公開する:
+FastMCP を使用して 7 つの RAG ツールを公開する:
 - rag_search: ナレッジベースから関連情報を検索
 - rag_add: 単一ページをナレッジベースに取り込み
 - rag_crawl: リンク集ページからクロール＆一括取り込み
 - rag_crawl_preview: クロール対象ページのプレビュー（タイトル・URL一覧）
+- rag_crawl_zenn: Zenn 記事の一括取り込み
 - rag_delete: ソースURL指定でナレッジから削除
 - rag_stats: ナレッジベースの統計情報を表示
 """
@@ -36,10 +37,13 @@ with contextlib.redirect_stdout(io.StringIO()):
     from .config import get_settings
     from .embedding.factory import get_embedding_provider
     from .ingesters.web import WebIngester
+    from .ingesters.zenn import ZennIngester
     from .rag_knowledge import RAGKnowledgeService
     from .safe_browsing import create_safe_browsing_client
     from .vector_store import VectorStore
     from .web_crawler import WebCrawler
+
+from py_common_lib.httpx import ConstrainedClient  # safety:allowed
 
 from mcp.server.fastmcp import FastMCP
 
@@ -351,6 +355,87 @@ async def rag_crawl_preview(url: str, pattern: str = "") -> str:
     except Exception:
         logger.exception("Failed to preview crawl: %s", url)
         return f"エラー: プレビューに失敗しました。URL: {url}"
+
+
+@mcp.tool()
+async def rag_crawl_zenn(username: str, max_articles: int | None = None) -> str:
+    """[rag-knowledge] RAG crawl Zenn - Zenn 記事を API 経由で取得し一括取り込み.
+
+    knowledge base, Zenn, ingest, articles, API.
+    指定ユーザーの Zenn 記事を API 経由で取得し、ナレッジベースに取り込む。
+    同一記事の再取り込み時は既存の知識を最新に置き換える。
+
+    Args:
+        username: Zenn ユーザー名
+        max_articles: 取得する最大記事数（未指定時は設定値を使用、許容範囲: 1〜100）
+
+    Returns:
+        取り込み結果のサマリーテキスト（取得記事数、チャンク数、エラー数）
+    """
+    service = await _get_rag_service()
+    settings = get_settings()
+
+    # max_articles のデフォルト解決: 未指定時は設定値を使用
+    if max_articles is None:
+        max_articles = settings.rag_zenn_max_articles
+
+    # max_articles のバリデーション（MCP ツール入力として）
+    if not isinstance(max_articles, int) or isinstance(max_articles, bool):
+        return f"エラー: max_articles は整数で指定してください（入力値: {max_articles!r}）"
+    if max_articles <= 0:
+        return f"エラー: max_articles は正の整数で指定してください（入力値: {max_articles}）"
+
+    if not username or not username.strip():
+        return "エラー: username を指定してください"
+
+    try:
+        async with ConstrainedClient(
+            request_timeout=settings.rag_zenn_request_timeout,
+        ) as client:
+            ingester = ZennIngester(
+                client=client,
+                max_articles=max_articles,
+            )
+
+            # 記事一覧を走査
+            slugs = await ingester.discover(username.strip())
+            if not slugs:
+                return f"記事が見つかりませんでした（ユーザー: {username}）"
+
+            # 各記事を取得してナレッジベースに取り込む
+            total_chunks = 0
+            errors = 0
+            skipped = 0
+            ingested_count = 0
+
+            for slug in slugs:
+                try:
+                    content = await ingester.fetch_single(slug)
+                    if content is None:
+                        skipped += 1
+                        continue
+                    chunks = await service._ingest_content(content)
+                    total_chunks += chunks
+                    ingested_count += 1
+                except Exception:
+                    logger.exception("Failed to ingest Zenn article: %s", slug)
+                    errors += 1
+
+            parts = [
+                f"完了: {ingested_count}記事 / {total_chunks}チャンク",
+            ]
+            if skipped > 0:
+                parts.append(f"スキップ: {skipped}件")
+            if errors > 0:
+                parts.append(f"エラー: {errors}件")
+            parts.append(f"（ユーザー: {username}）")
+
+            return " / ".join(parts)
+    except (ValueError, TypeError) as e:
+        return f"エラー: {e}"
+    except Exception:
+        logger.exception("Failed to crawl Zenn articles for user: %s", username)
+        return f"エラー: Zenn 記事の取り込みに失敗しました（ユーザー: {username}）"
 
 
 @mcp.tool()
