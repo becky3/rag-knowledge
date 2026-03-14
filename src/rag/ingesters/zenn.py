@@ -13,6 +13,7 @@ from urllib.parse import urlencode
 
 from bs4 import BeautifulSoup
 
+from ..web_crawler import _RagMarkdownConverter
 from .base import BaseIngester, IngestedContent
 
 if TYPE_CHECKING:
@@ -100,6 +101,12 @@ class ZennIngester(BaseIngester):
         """
         self._client = client
         self._max_articles = _validate_max_articles(max_articles)
+        self._md_converter = _RagMarkdownConverter(
+            heading_style="ATX",
+            table_infer_header=True,
+            escape_underscores=False,
+            escape_asterisks=False,
+        )
 
     def validate_identifier(self, identifier: str) -> str:
         """slug を検証し、正規化済みの slug を返す.
@@ -283,7 +290,7 @@ class ZennIngester(BaseIngester):
             logger.warning("Empty body_html for article: %s", slug)
             return None
 
-        # HTML からテキストを抽出
+        # HTML から Markdown 形式のテキストを抽出
         text = self._extract_text_from_html(body_html)
         if not text.strip():
             logger.warning("No text extracted from article: %s", slug)
@@ -342,15 +349,17 @@ class ZennIngester(BaseIngester):
             metadata=metadata,
         )
 
-    @staticmethod
-    def _extract_text_from_html(html: str) -> str:
-        """HTML からテキストを抽出する.
+    def _extract_text_from_html(self, html: str) -> str:
+        """HTML から Markdown 形式のテキストを抽出する.
+
+        markdownify を使用して HTML→Markdown 変換を行い、
+        見出し・テーブル等の構造情報を保持する。
 
         Args:
             html: HTML 文字列
 
         Returns:
-            抽出されたテキスト
+            Markdown 形式のテキスト
         """
         soup = BeautifulSoup(html, "html.parser")
 
@@ -359,8 +368,12 @@ class ZennIngester(BaseIngester):
             for tag in soup.find_all(tag_name):
                 tag.decompose()
 
-        text = soup.get_text(separator="\n")
+        # HTML→Markdown変換
+        markdown_text = self._md_converter.convert_soup(soup)
 
-        # 連続する空白行を整理
+        # クリーンアップ
+        # 行末空白を除去（空白のみの行も空行に正規化）
+        text = re.sub(r"[ \t]+\n", "\n", markdown_text)
+        # 連続する空白行を1つにまとめる
         text = re.sub(r"\n{3,}", "\n\n", text)
         return text.strip()
