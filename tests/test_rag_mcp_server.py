@@ -986,3 +986,76 @@ class TestRagStatsOutput:
             result = await mod.rag_stats()
 
         assert "(タイトル取得不可)" in result
+
+
+class TestRagCrawlZennTool:
+    """rag_crawl_zenn ツールのテスト（#168）."""
+
+    @pytest.mark.asyncio
+    async def test_constrained_client_receives_settings(self) -> None:
+        """ConstrainedClient に設定値が正しく渡されること."""
+        mod = import_module("rag.server")
+        mock_service = AsyncMock()
+        mock_service.ingest_content = AsyncMock(return_value=5)
+        mock_settings = MagicMock()
+        mock_settings.rag_zenn_max_articles = 50
+        mock_settings.rag_zenn_request_timeout = 15
+        mock_settings.rag_zenn_request_interval = 0.3
+
+        mock_client_instance = AsyncMock()
+        mock_client_instance.get = AsyncMock(
+            return_value=MagicMock(
+                status_code=200,
+                json=MagicMock(return_value={"articles": [], "next_page": None}),
+            )
+        )
+        mock_client_cls = MagicMock()
+        mock_client_cls.return_value.__aenter__ = AsyncMock(
+            return_value=mock_client_instance
+        )
+        mock_client_cls.return_value.__aexit__ = AsyncMock(return_value=False)
+
+        with (
+            patch.object(mod, "_get_rag_service", return_value=mock_service),
+            patch.object(mod, "get_settings", return_value=mock_settings),
+            patch.object(mod, "ConstrainedClient", mock_client_cls),
+        ):
+            await mod.rag_crawl_zenn("testuser")
+
+        mock_client_cls.assert_called_once_with(
+            request_timeout=15,
+            request_interval=0.3,
+        )
+
+    @pytest.mark.asyncio
+    async def test_empty_username_returns_error(self) -> None:
+        """空のユーザー名でエラーメッセージを返すこと."""
+        mod = import_module("rag.server")
+        mock_service = AsyncMock()
+        mock_settings = MagicMock()
+        mock_settings.rag_zenn_max_articles = 50
+
+        with (
+            patch.object(mod, "_get_rag_service", return_value=mock_service),
+            patch.object(mod, "get_settings", return_value=mock_settings),
+        ):
+            result = await mod.rag_crawl_zenn("")
+
+        assert "エラー" in result
+        assert "username" in result
+
+    @pytest.mark.asyncio
+    async def test_invalid_max_articles_returns_error(self) -> None:
+        """不正な max_articles でエラーメッセージを返すこと."""
+        mod = import_module("rag.server")
+        mock_service = AsyncMock()
+        mock_settings = MagicMock()
+        mock_settings.rag_zenn_max_articles = 50
+
+        with (
+            patch.object(mod, "_get_rag_service", return_value=mock_service),
+            patch.object(mod, "get_settings", return_value=mock_settings),
+        ):
+            result = await mod.rag_crawl_zenn("testuser", max_articles=-1)
+
+        assert "エラー" in result
