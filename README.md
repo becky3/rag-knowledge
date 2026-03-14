@@ -114,6 +114,6 @@ git-flow ベースのブランチ戦略を採用。詳細は `~/.claude/docs/spe
 
 ### Claude Code 拡張（agentic）
 
-**プロジェクト固有エージェント:**
+**プロジェクト固有スキル:**
 
-- [Test Runner エージェント](docs/specs/agentic/agents/test-runner-agent.md)
+- `/test-run` — テスト実行・コード品質チェック（`.claude/skills/test-run/SKILL.md`）
