@@ -42,11 +42,11 @@
 
 ### ステップ 1/4: テスト実行
 
-```bash
-uv run pytest && uv run ruff check src/ tests/ && uv run mypy src/ && npx markdownlint-cli2@0.20.0
-```
+`test-runner` エージェントを **フォアグラウンド**（`run_in_background: false`）で呼び出し、diff モードでテスト・品質チェックを実行する。
 
-- Markdown のみの変更の場合、pytest / ruff / mypy はスキップ可（markdownlint のみ実行）
+- テストが存在しないプロジェクト・ディレクトリの場合はスキップ可
+- エージェントが「スキル未配置」を報告した場合は、リポジトリの構成から適切なテスト・lint コマンドを判断して直接実行する
+- Markdown のみの変更の場合、コードのテスト・lint はスキップ可（markdownlint のみ実行）
 - 失敗があれば修正して再実行。全て通過してから次へ進む
 
 ### ステップ 2/4: コードレビュー
