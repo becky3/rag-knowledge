@@ -252,7 +252,7 @@ class WebCrawler:
         Args:
             timeout: HTTPリクエストのタイムアウト秒数（許容範囲: 1〜120）
             max_pages: 1回のクロールで取得する最大ページ数（許容範囲: 1〜500）
-            crawl_delay: 同一ドメインへの連続リクエスト間の待機秒数（許容範囲: 0.5〜60）
+            crawl_delay: 同一ドメインへの連続リクエスト間の待機秒数（許容範囲: 0.1〜60）
             max_concurrent: 同時接続数の上限
             respect_robots_txt: robots.txt を遵守するかどうか
             robots_txt_cache_ttl: robots.txt キャッシュの有効期間（秒）
