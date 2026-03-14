@@ -547,7 +547,7 @@ class TestRAGServiceWithWebIngester:
         mock_vector_store: MagicMock,
         mock_web_crawler_for_service: MagicMock,
     ) -> None:
-        """_ingest_content() がチャンキング・保存を行うこと."""
+        """ingest_content() がチャンキング・保存を行うこと."""
         mock_vector_store.add_documents.return_value = 1
 
         service = RAGKnowledgeService(
@@ -566,7 +566,7 @@ class TestRAGServiceWithWebIngester:
             source_type="web",
         )
 
-        result = await service._ingest_content(content)
+        result = await service.ingest_content(content)
 
         assert result == 1
         mock_vector_store.add_documents.assert_called_once()
@@ -594,7 +594,7 @@ class TestRAGServiceWithWebIngester:
             source_type="web",
         )
 
-        result = await service._ingest_content(content)
+        result = await service.ingest_content(content)
         assert result == 0
         mock_vector_store.add_documents.assert_not_called()
 
@@ -603,7 +603,7 @@ class TestRAGServiceWithWebIngester:
         mock_vector_store: MagicMock,
         mock_web_crawler_for_service: MagicMock,
     ) -> None:
-        """_ingest_content() がフラグメント付き URL を正規化すること."""
+        """ingest_content() がフラグメント付き URL を正規化すること."""
         import hashlib
 
         mock_vector_store.add_documents.return_value = 1
@@ -624,7 +624,7 @@ class TestRAGServiceWithWebIngester:
             source_type="web",
         )
 
-        await service._ingest_content(content)
+        await service.ingest_content(content)
 
         # add_documents に渡されたチャンクを検証
         call_args = mock_vector_store.add_documents.call_args[0][0]
