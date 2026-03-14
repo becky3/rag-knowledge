@@ -207,7 +207,7 @@ flowchart TD
     CHECK_NEXT{"next_page が null?"}
     CHECK_LIMIT{"走査上限 or 記事数上限?"}
     FETCH["各記事の詳細を取得"]
-    CONVERT["HTML → テキスト変換"]
+    CONVERT["HTML → Markdown 変換"]
     INGEST["チャンキング・ベクトル保存"]
     RESULT["結果サマリーを返却"]
 
@@ -242,7 +242,7 @@ flowchart TD
 
 1. 記事詳細 API（`/api/articles/{slug}`）にリクエストを送信する
 2. レスポンスから `body_html` を取得する
-3. HTML からテキストを抽出する（HTML タグの除去）
+3. HTML から Markdown 形式のテキストを抽出する（markdownify による HTML→Markdown 変換。Web クローラーと共通のカスタム Markdown コンバーターを使用し、リンク URL・画像 URL を除去してテキスト情報のみを保持する）
 4. IngestedContent を構築して返す:
    - `source_id`: `https://zenn.dev{path}`（記事の公開 URL。`path` は `/username/articles/slug` 形式で先頭 `/` を含むため、ホスト名の末尾に `/` を付けない）
    - `title`: 記事タイトル
