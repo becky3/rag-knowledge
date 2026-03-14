@@ -9,6 +9,9 @@
     "MD029": false,
     "MD036": false,
     "MD040": false,
+    "MD033": {
+      "allowed_elements": ["code"]
+    },
     "MD041": false,
     "MD060": false
   },
