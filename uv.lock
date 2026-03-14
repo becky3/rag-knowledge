@@ -1617,7 +1617,7 @@ wheels = [
 [[package]]
 name = "py-common-lib"
 version = "0.1.0"
-source = { git = "https://github.com/becky3/py-common-lib#1d25ab149ba73f85d1c0a8e4740193df4e0e442d" }
+source = { git = "https://github.com/becky3/py-common-lib#63244851adea812ec9c38cdb1b36bfd85acc4bc7" }
 dependencies = [
     { name = "httpx" },
 ]
