@@ -28,7 +28,7 @@ MCP サーバーとして独立動作し、6 つのツールを提供する。
 - 呼び出し元が MCP クライアントとして本サーバーに接続することで RAG 機能を利用できる
 - トランスポートは stdio（デフォルト）と http（Streamable HTTP）を切替可能。環境変数でトランスポート種別・ホスト・ポート・DNS リバインディング保護を設定する。HTTP モードはローカル／信頼済みネットワーク向けを想定しており、デフォルトではループバックアドレスにバインドする。外部ネットワークへ公開する場合は、ファイアウォールやリバースプロキシでの認証付与などによりアクセス制御を行うこと
 - `src/` 配下の外部 HTTP リクエストは ConstrainedClient（py-common-lib パッケージで提供）経由で実行する。`httpx.AsyncClient`/`httpx.Client`・`aiohttp.ClientSession`・`requests`・`urllib.request` の直接利用は禁止
-- CI（`check-raw-http` ワークフロー）で ConstrainedClient 未使用を自動検出し、違反があればマージをブロックする。ConstrainedClient は `src/` 外のパッケージのため検出対象外。許可例外: `# safety:allowed` コメントが付与された行
+- CI（`check-raw-http` ワークフロー）で ConstrainedClient を経由しない直接 HTTP クライアント利用を検出し、違反があればマージをブロックする。ConstrainedClient は `src/` 外のパッケージのため検出対象外。許可例外: `# safety:allowed` コメントが付与された行
 - ハードリミット（コード内定数。設定・引数・環境変数で緩和不可。厳格化は可能）:
   - 操作あたりリクエスト総数上限: 500
   - 最低リクエスト間隔: 0.5 秒
