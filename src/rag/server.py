@@ -391,6 +391,7 @@ async def rag_crawl_zenn(username: str, max_articles: int | None = None) -> str:
     try:
         async with ConstrainedClient(
             request_timeout=settings.rag_zenn_request_timeout,
+            request_interval=settings.rag_zenn_request_interval,
         ) as client:
             ingester = ZennIngester(
                 client=client,
