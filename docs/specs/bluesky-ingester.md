@@ -43,17 +43,21 @@ BlueSky（AT Protocol）の投稿を API 経由で取得し、ナレッジベー
 
 ### AT Protocol API
 
-AT Protocol は公開リポジトリに対して認証なしでアクセス可能な API を提供する。
+AT Protocol は分散型プロトコルであり、ユーザーのデータは各 PDS（Personal Data Server）にホストされる。XRPC エンドポイントはユーザーが所属する PDS に対してリクエストを送信する必要がある。
+
+本インジェスターでは PDS のベース URL を設定可能とし、デフォルトは `https://bsky.social`（BlueSky 公式 PDS）とする。セルフホスト PDS や他の PDS を利用するユーザーの投稿を取得する場合は、環境変数 `RAG_BLUESKY_PDS_URL` で対象 PDS の URL を指定する。
+
+> **Note**: handle から PDS エンドポイントを自動解決する仕組み（DID Document の `#atproto_pds` サービスエンドポイント参照）は、初期リリースのスコープ外とする。必要に応じて後続フェーズで対応する。
 
 | 連携先 | 用途 | 接続方式 |
 |--------|------|---------|
-| AT Protocol (bsky.social) | 投稿の取得 | REST API（ConstrainedClient 経由） |
+| AT Protocol PDS（デフォルト: bsky.social） | 投稿の取得 | REST API（ConstrainedClient 経由） |
 
 #### listRecords エンドポイント（投稿取得）
 
 | 項目 | 内容 |
 |------|------|
-| URL | `https://bsky.social/xrpc/com.atproto.repo.listRecords` |
+| URL | `{PDS_URL}/xrpc/com.atproto.repo.listRecords`（デフォルト: `https://bsky.social/xrpc/com.atproto.repo.listRecords`） |
 | メソッド | GET |
 | 認証 | 不要（公開リポジトリ） |
 | ページサイズ | `limit` パラメータで指定（最大 100） |
@@ -93,9 +97,54 @@ AT Protocol は公開リポジトリに対して認証なしでアクセス可�
 | `embed` | オブジェクト | 添付コンテンツ（画像・動画・リンクカード・引用等） |
 | `reply` | オブジェクト | リプライ先情報（リプライの場合） |
 
+#### getRecord エンドポイント（個別レコード取得）
+
+リポスト元投稿の取得に使用する。
+
+| 項目 | 内容 |
+|------|------|
+| URL | `{PDS_URL}/xrpc/com.atproto.repo.getRecord`（デフォルト: `https://bsky.social/xrpc/com.atproto.repo.getRecord`） |
+| メソッド | GET |
+| 認証 | 不要（公開リポジトリ） |
+
+クエリパラメータ:
+
+| パラメータ | 型 | 必須 | 説明 |
+|-----------|-----|------|------|
+| `repo` | 文字列 | はい | DID またはハンドル（レコード所有者） |
+| `collection` | 文字列 | はい | レコードコレクション（例: `app.bsky.feed.post`） |
+| `rkey` | 文字列 | はい | レコードキー（AT URI の末尾パス） |
+| `cid` | 文字列 | いいえ | 特定バージョンの CID（省略時は最新） |
+
+レスポンス構造:
+
+| フィールド | 型 | 説明 |
+|-----------|-----|------|
+| `uri` | 文字列 | AT URI |
+| `cid` | 文字列 | コンテンツ ID |
+| `value` | オブジェクト | レコード本体（投稿レコードと同じ構造） |
+
+エラーレスポンス:
+
+| HTTP ステータス | 意味 | 対応 |
+|----------------|------|------|
+| 400 | パラメータ不正 | 該当リポストをスキップ、エラーログ出力 |
+| 404（`RecordNotFound`） | レコードが存在しない（削除済み等） | 該当リポストをスキップ、警告ログ出力 |
+| 502 / 503 / 504 | サーバーエラー | 該当リポストをスキップ、サーキットブレーカーに計上 |
+
 #### リポスト取得
 
-リポストは `collection=app.bsky.feed.repost` で別途取得する。リポストレコードは元投稿への参照（`subject.uri` / `subject.cid`）のみを含み、テキストは含まれない。元投稿のテキストを取得するには `com.atproto.repo.getRecord` での追加リクエストが必要。
+リポストは `collection=app.bsky.feed.repost` で別途取得する。リポストレコードは元投稿への参照（`subject.uri` / `subject.cid`）のみを含み、テキストは含まれない。元投稿のテキストを取得するには上記 `com.atproto.repo.getRecord` での追加リクエストが必要。
+
+リポストレコード（`value`）の主要フィールド:
+
+| フィールド | 型 | 説明 |
+|-----------|-----|------|
+| `subject.uri` | 文字列 | 元投稿の AT URI（例: `at://did:plc:xxx/app.bsky.feed.post/rkey`） |
+| `subject.cid` | 文字列 | 元投稿のコンテンツ ID |
+| `createdAt` | 文字列 | リポスト日時（ISO 8601） |
+
+元投稿の取得時には、`subject.uri` を解析して `repo`（DID）、`collection`、`rkey` を抽出し、`getRecord` エンドポイントに渡す。
 
 #### API 選定理由
 
@@ -167,6 +216,7 @@ AT Protocol は公開リポジトリに対して認証なしでアクセス可�
 
 | 環境変数 | 型 | デフォルト | 許容範囲 | 説明 |
 |---------|-----|-----------|---------|------|
+| `RAG_BLUESKY_PDS_URL` | 文字列 | `https://bsky.social` | 有効な HTTPS URL | PDS のベース URL。セルフホスト PDS 等を利用する場合に変更する |
 | `RAG_BLUESKY_MAX_POSTS` | 整数 | 200 | 1〜1000 | 取得する最大投稿数 |
 | `RAG_BLUESKY_REQUEST_TIMEOUT` | 整数 | 30 | 1〜120 | リクエストタイムアウト（秒） |
 | `RAG_BLUESKY_REQUEST_INTERVAL` | 小数 | 1.0 | 0.1〜60 | リクエスト間の最低間隔（秒） |
@@ -232,6 +282,7 @@ flowchart TD
     REPOST_CHECK{"include_reposts?"}
     REPOST_DISCOVER["リポスト一覧 API を走査"]
     REPOST_FETCH["リポスト元投稿を取得"]
+    EACH_POST{"未処理の投稿がある?"}
     EXTRACT["テキスト抽出"]
     SKIP_CHECK{"既存 source_id?"}
     INGEST["チャンキング・ベクトル保存"]
@@ -246,13 +297,15 @@ flowchart TD
     CHECK_LIMIT -->|"はい（上限到達）"| REPOST_CHECK
     CHECK_LIMIT -->|"いいえ"| PAGE
     REPOST_CHECK -->|"はい"| REPOST_DISCOVER
-    REPOST_CHECK -->|"いいえ"| EXTRACT
+    REPOST_CHECK -->|"いいえ"| EACH_POST
     REPOST_DISCOVER --> REPOST_FETCH
-    REPOST_FETCH --> EXTRACT
+    REPOST_FETCH --> EACH_POST
+    EACH_POST -->|"はい"| EXTRACT
+    EACH_POST -->|"いいえ（全件処理済み）"| RESULT
     EXTRACT --> SKIP_CHECK
-    SKIP_CHECK -->|"はい（スキップ）"| RESULT
+    SKIP_CHECK -->|"はい（スキップ）"| EACH_POST
     SKIP_CHECK -->|"いいえ（新規）"| INGEST
-    INGEST --> RESULT
+    INGEST --> EACH_POST
 ```
 
 ### 投稿一覧走査の処理手順
@@ -305,10 +358,17 @@ flowchart TD
 
 ### source_id
 
-HTTPS URL 形式を使用する: `https://bsky.app/profile/{handle}/post/{rkey}`
+AT URI 形式を使用する: `at://{did}/app.bsky.feed.post/{rkey}`
 
-- `handle`: 入力パラメータのハンドル
+- `did`: レコードの `uri` フィールドから抽出した DID（例: `did:plc:xxx`）
 - `rkey`: `uri` の末尾パス（`at://did:plc:xxx/app.bsky.feed.post/{rkey}` の `{rkey}` 部分）
+
+AT URI を `source_id` に採用する理由:
+
+- DID はハンドル変更の影響を受けない安定した識別子であり、再取り込み時の重複検出が確実に機能する
+- ハンドルは変更可能なため、HTTPS URL 形式（`https://bsky.app/profile/{handle}/post/{rkey}`）では同一投稿に対して異なる `source_id` が生成されるリスクがある
+
+HTTPS URL（`https://bsky.app/profile/{handle}/post/{rkey}`）は `metadata` の `url` フィールドに格納し、ユーザー向けのリンクとして利用する。
 
 ### 再取り込み時の挙動
 
@@ -320,11 +380,11 @@ BlueSky は投稿の編集が不可能なため、既存の `source_id` と一�
 
 | フィールド | 値 |
 |-----------|-----|
-| `source_id` | `https://bsky.app/profile/{handle}/post/{rkey}` |
+| `source_id` | `at://{did}/app.bsky.feed.post/{rkey}`（AT URI） |
 | `title` | 投稿テキストの先頭 50 文字（50 文字を超える場合は末尾に `...` を付加） |
 | `text` | 抽出済みプレーンテキスト |
 | `source_type` | `"bluesky"` |
-| `metadata` | `handle`、`rkey`、`createdAt`、`has_images`、`has_video`、`has_external_link`、`is_reply`、`is_repost` |
+| `metadata` | `handle`、`did`、`rkey`、`url`（`https://bsky.app/profile/{handle}/post/{rkey}`）、`createdAt`、`has_images`、`has_video`、`has_external_link`、`is_reply`、`is_repost` |
 
 ## エッジケース
 
