@@ -15,6 +15,19 @@ from pydantic import ValidationError
 
 from rag.config import RAGSettings
 
+_ZENN_ENV_VARS = [
+    "RAG_ZENN_MAX_ARTICLES",
+    "RAG_ZENN_REQUEST_TIMEOUT",
+    "RAG_ZENN_REQUEST_INTERVAL",
+]
+
+
+@pytest.fixture(autouse=True)
+def _clear_zenn_env(monkeypatch: pytest.MonkeyPatch) -> None:
+    """テスト間で Zenn 関連の環境変数をクリアする."""
+    for var in _ZENN_ENV_VARS:
+        monkeypatch.delenv(var, raising=False)
+
 
 def _make_settings(**overrides: object) -> RAGSettings:
     """テスト用 RAGSettings を生成する（.env を読み込まない）."""
@@ -85,6 +98,12 @@ class TestZennRequestTimeout:
         """上限超過でバリデーションエラーになること."""
         with pytest.raises(ValidationError):
             _make_settings(rag_zenn_request_timeout=121)
+
+    def test_from_env(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """環境変数から読み込めること."""
+        monkeypatch.setenv("RAG_ZENN_REQUEST_TIMEOUT", "60")
+        settings = _make_settings()
+        assert settings.rag_zenn_request_timeout == 60
 
 
 # --- Zenn インジェスター: rag_zenn_request_interval ---
