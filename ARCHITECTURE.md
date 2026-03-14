@@ -50,9 +50,7 @@
 
 ### agentic/
 
-| 仕様書 | 対象 |
-|---|---|
-| `agentic/agents/test-runner-agent.md` | テスト実行・品質チェックエージェント |
+テストランナーエージェント（test-runner）は dotfiles（`~/.claude/agents/test-runner.md`）で汎用定義されており、プロジェクト固有の `/test-run` スキル（`.claude/skills/test-run/SKILL.md`）に委譲して実行する。
 
 ## 関連ドキュメント
 
