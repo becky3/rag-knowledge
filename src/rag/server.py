@@ -414,7 +414,7 @@ async def rag_crawl_zenn(username: str, max_articles: int | None = None) -> str:
                     if content is None:
                         skipped += 1
                         continue
-                    chunks = await service._ingest_content(content)
+                    chunks = await service.ingest_content(content)
                     total_chunks += chunks
                     ingested_count += 1
                 except Exception:

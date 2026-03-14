@@ -326,7 +326,7 @@ class RAGKnowledgeService:
 
         for content in contents:
             try:
-                chunks_stored = await self._ingest_content(content)
+                chunks_stored = await self.ingest_content(content)
                 total_chunks += chunks_stored
             except Exception:
                 logger.exception("Failed to ingest content: %s", content.source_id)
@@ -487,7 +487,7 @@ class RAGKnowledgeService:
             content = await self._web_ingester.fetch_single(url)
             if content is None:
                 return 0
-            return await self._ingest_content(content)
+            return await self.ingest_content(content)
 
         # レガシーパス（WebIngester 未設定時）
         # URL検証を先に行い、失敗時は例外を投げる（ユーザーにエラー理由を伝えるため）
@@ -584,7 +584,7 @@ class RAGKnowledgeService:
         logger.info("Ingested page %s: %d chunks", normalized_url, count)
         return count
 
-    async def _ingest_content(self, content: IngestedContent) -> int:
+    async def ingest_content(self, content: IngestedContent) -> int:
         """IngestedContent をチャンキングして保存する.
 
         Args:
