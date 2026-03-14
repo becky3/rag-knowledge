@@ -9,6 +9,7 @@ from __future__ import annotations
 import logging
 import re
 from typing import TYPE_CHECKING, Any
+from urllib.parse import urlencode
 
 from bs4 import BeautifulSoup
 
@@ -152,10 +153,12 @@ class ZennIngester(BaseIngester):
         page = 1
 
         while page <= MAX_PAGINATION_PAGES and len(slugs) < max_articles:
-            url = (
-                f"{ZENN_API_BASE}/articles"
-                f"?username={username}&order=latest&page={page}"
-            )
+            query = urlencode({
+                "username": username,
+                "order": "latest",
+                "page": page,
+            })
+            url = f"{ZENN_API_BASE}/articles?{query}"
             try:
                 resp = await self._client.get(url)
             except Exception:
@@ -201,7 +204,7 @@ class ZennIngester(BaseIngester):
                 if len(slugs) >= max_articles:
                     break
                 slug = article.get("slug")
-                if slug:
+                if isinstance(slug, str) and slug:
                     slugs.append(slug)
 
             next_page = data.get("next_page")
@@ -267,6 +270,13 @@ class ZennIngester(BaseIngester):
 
         # article キーでラップされている場合の対応
         article_data = data.get("article", data)
+        if not isinstance(article_data, dict):
+            logger.warning(
+                "Unexpected article data format for article: %s (type: %s)",
+                slug,
+                type(article_data).__name__,
+            )
+            return None
 
         body_html = article_data.get("body_html", "")
         if not body_html:
