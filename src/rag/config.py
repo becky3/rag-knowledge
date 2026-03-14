@@ -95,6 +95,10 @@ class RAGSettings(BaseSettings):
     # rag_stats ソース一覧の最大表示件数
     rag_stats_max_sources: int = Field(default=100, ge=1)
 
+    # Zenn インジェスター
+    rag_zenn_max_articles: int = Field(default=50, ge=1, le=100)
+    rag_zenn_request_timeout: int = Field(default=30, ge=1, le=120)
+
     # デバッグ
     rag_debug_log_enabled: bool = False
 
