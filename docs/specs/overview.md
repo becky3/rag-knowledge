@@ -51,7 +51,7 @@ RAG Knowledge は、外部 Web ページから収集した知識をベクトル 
 
 ### 仕様書テンプレート
 
-共通テンプレートは dotfiles（`~/.claude/docs/templates/`）で管理。一覧は `~/.claude/docs/overview.md` を参照。
+共通テンプレートは agent-commons（`~/.claude/docs/templates/`）で管理。一覧は `~/.claude/docs/overview.md` を参照。
 
 ### Git 運用（git-flow）
 
