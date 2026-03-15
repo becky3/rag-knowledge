@@ -822,10 +822,10 @@ class TestBlueskyIngesterCrawl:
         assert repost_content.metadata["handle"] == "other.bsky.social"
         assert repost_content.metadata["url"] == "https://bsky.app/profile/other.bsky.social/post/reposted1"
 
-    async def test_crawl_repost_filtered_by_default(
+    async def test_crawl_repost_filtered_when_excluded(
         self, ingester: BlueskyIngester, mock_client: MagicMock
     ) -> None:
-        """include_reposts=False（デフォルト）でリポストが除外されること."""
+        """include_reposts=False でリポストが除外されること."""
         mock_client.get.return_value = _make_feed_response(
             feed=[
                 _make_feed_item(rkey="post1", text="My post"),
@@ -839,7 +839,7 @@ class TestBlueskyIngesterCrawl:
             cursor=None,
         )
 
-        contents = await ingester.crawl("user.bsky.social")
+        contents = await ingester.crawl("user.bsky.social", include_reposts=False)
 
         assert len(contents) == 1
         assert contents[0].text == "My post"
