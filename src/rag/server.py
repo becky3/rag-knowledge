@@ -3,12 +3,13 @@
 仕様: docs/specs/rag-knowledge.md
 独立リポジトリとして動作する。
 
-FastMCP を使用して 9 つの RAG ツールを公開する:
+FastMCP を使用して 10 個の RAG ツールを公開する:
 - rag_search: ナレッジベースから関連情報を検索
 - rag_add: 単一ページをナレッジベースに取り込み
 - rag_crawl: リンク集ページからクロール＆一括取り込み
 - rag_crawl_preview: クロール対象ページのプレビュー（タイトル・URL一覧）
 - rag_crawl_zenn: Zenn 記事の一括取り込み
+- rag_crawl_bluesky: BlueSky 投稿の一括取り込み
 - rag_add_local: ローカルファイルをナレッジベースに取り込み
 - rag_crawl_local: ディレクトリ内ファイルを一括取り込み
 - rag_delete: ソースURL指定でナレッジから削除
@@ -38,6 +39,7 @@ with contextlib.redirect_stdout(io.StringIO()):
     from .bm25_index import BM25Index
     from .config import get_settings
     from .embedding.factory import get_embedding_provider
+    from .ingesters.bluesky import BlueskyIngester
     from .ingesters.local_file import LocalFileIngester
     from .ingesters.web import WebIngester
     from .ingesters.zenn import ZennIngester
@@ -440,6 +442,116 @@ async def rag_crawl_zenn(username: str, max_articles: int | None = None) -> str:
     except Exception:
         logger.exception("Failed to crawl Zenn articles for user: %s", username)
         return f"エラー: Zenn 記事の取り込みに失敗しました（ユーザー: {username}）"
+
+
+@mcp.tool()
+async def rag_crawl_bluesky(
+    handle: str,
+    max_posts: int | None = None,
+    include_reposts: bool | None = None,
+) -> str:
+    """[rag-knowledge] RAG crawl BlueSky - BlueSky 投稿を AT Protocol API 経由で取得し一括取り込み.
+
+    knowledge base, BlueSky, Bluesky, ingest, posts, AT Protocol.
+    指定ユーザーの BlueSky 投稿を AT Protocol API 経由で取得し、ナレッジベースに取り込む。
+    BlueSky は投稿編集不可のため、既存の投稿はスキップする（上書き不要）。
+
+    Args:
+        handle: BlueSky ハンドル（例: user.bsky.social）。DID 形式は不可
+        max_posts: 取得する最大オリジナル投稿数（未指定時は設定値を使用、許容範囲: 1〜1000）。
+            リポストには適用されない（リポストは独立して走査され、バジェット上限で制限される）
+        include_reposts: リポストを取得対象に含めるか（未指定時は設定値を使用）
+
+    Returns:
+        取り込み結果のサマリーテキスト（取得投稿数、スキップ数、チャンク数、エラー数）
+    """
+    service = await _get_rag_service()
+    settings = get_settings()
+
+    # max_posts のデフォルト解決: 未指定時は設定値を使用
+    if max_posts is None:
+        max_posts = settings.rag_bluesky_max_posts
+
+    # include_reposts のデフォルト解決
+    if include_reposts is None:
+        include_reposts = settings.rag_bluesky_include_reposts
+
+    # max_posts のバリデーション（MCP ツール入力として）
+    if not isinstance(max_posts, int) or isinstance(max_posts, bool):
+        return f"エラー: max_posts は整数で指定してください（入力値: {max_posts!r}）"
+    if max_posts <= 0:
+        return f"エラー: max_posts は正の整数で指定してください（入力値: {max_posts}）"
+
+    if not handle or not handle.strip():
+        return "エラー: handle を指定してください"
+
+    handle = handle.strip()
+    if handle.startswith("did:"):
+        return (
+            f"エラー: DID 形式は使用できません: {handle!r}。"
+            "ハンドル（例: user.bsky.social）を指定してください"
+        )
+
+    try:
+        async with ConstrainedClient(
+            request_timeout=settings.rag_bluesky_request_timeout,
+            request_interval=settings.rag_bluesky_request_interval,
+        ) as client:
+            ingester = BlueskyIngester(
+                client=client,
+                pds_url=settings.rag_bluesky_pds_url,
+                max_posts=max_posts,
+            )
+
+            # 投稿を一括取得
+            contents = await ingester.crawl(
+                handle,
+                include_reposts=include_reposts,
+            )
+
+            if not contents:
+                return f"投稿が見つかりませんでした（ハンドル: {handle}）"
+
+            # 各投稿をナレッジベースに取り込む
+            total_chunks = 0
+            errors = 0
+            skipped = 0
+            ingested_count = 0
+
+            for content in contents:
+                # 既存 source_id チェック（スキップ判定）
+                # BlueSky は投稿編集不可のため、既存投稿はスキップする
+                if await service.source_exists(content.source_id):
+                    skipped += 1
+                    continue
+
+                try:
+                    chunks = await service.ingest_content(content)
+                    total_chunks += chunks
+                    ingested_count += 1
+                except Exception:
+                    logger.exception(
+                        "Failed to ingest BlueSky post: %s", content.source_id
+                    )
+                    errors += 1
+
+            parts = [
+                f"完了: {ingested_count}投稿 / {total_chunks}チャンク",
+            ]
+            if skipped > 0:
+                parts.append(f"スキップ: {skipped}件")
+            if errors > 0:
+                parts.append(f"エラー: {errors}件")
+            parts.append(f"（ハンドル: {handle}）")
+
+            return " / ".join(parts)
+    except (ValueError, TypeError) as e:
+        return f"エラー: {e}"
+    except Exception:
+        logger.exception(
+            "Failed to crawl BlueSky posts for handle: %s", handle
+        )
+        return f"エラー: BlueSky 投稿の取り込みに失敗しました（ハンドル: {handle}）"
 
 
 def _create_local_ingester() -> LocalFileIngester:

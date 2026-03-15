@@ -196,8 +196,6 @@ AT Protocol は分散型プロトコルであり、ユーザーのデータは�
 
 既存の `rag_crawl`（URL ベースの Web クロール）および `rag_crawl_zenn`（Zenn 記事取り込み）とは独立した新規ツールとして追加する。BlueSky は AT Protocol API 経由でのデータ取得であり、Web クロールや Zenn API とは取得方式・制約が異なるため分離する。
 
-> **Note**: 本仕様書は設計先行（`docs(pre-impl)`）で作成している。後続の実装フェーズで `rag-knowledge.md` のツール数・ツール一覧も併せて更新する。
-
 | ツール | 入力 | 振る舞い |
 |--------|------|---------|
 | rag_crawl_bluesky | handle、max_posts（任意）、include_reposts（任意） | 指定ユーザーの BlueSky 投稿を AT Protocol API 経由で取得し、ナレッジベースに取り込む。BlueSky は投稿編集不可のため、既存 `source_id` と一致する投稿はスキップする（上書き不要） |
