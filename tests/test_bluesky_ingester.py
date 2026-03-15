@@ -1,12 +1,12 @@
 """BlueSky インジェスターのテスト
 
 仕様: docs/specs/bluesky-ingester.md
-Issue: #185
+Issue: #185, #194
 
 テスト方針:
 - 単体テスト: BlueskyIngester のメソッド（テキスト抽出、バリデーション、source_id 生成）
-- API レスポンスモック: listRecords・getRecord のレスポンスを fixture として定義
-- 正常系: 投稿取得・テキスト抽出・引用リポスト・リポスト走査・ページネーション
+- API レスポンスモック: getAuthorFeed・getRecord のレスポンスを fixture として定義
+- 正常系: 統一タイムライン取得・テキスト抽出・引用リポスト・リポストフィルタ・ページネーション
 - 異常系: 存在しないハンドル、空投稿、DID 形式の拒否、API エラー応答
 - バリデーション・クランプ: max_posts の 0/負数/上限超過
 - 既存 source_id スキップの動作確認
@@ -22,11 +22,12 @@ import pytest
 from rag.ingesters.bluesky import (
     MAX_POSTS_HARD_LIMIT,
     BlueskyIngester,
+    _extract_quote_text_from_view_embed,
     _extract_text_from_post,
     _make_title,
     _parse_at_uri,
+    _validate_appview_url,
     _validate_max_posts,
-    _validate_pds_url,
 )
 
 
@@ -42,14 +43,14 @@ def _make_mock_client() -> MagicMock:
     return mock
 
 
-def _make_list_records_response(
-    records: list[dict],
+def _make_feed_response(
+    feed: list[dict],
     cursor: str | None = None,
 ) -> MagicMock:
-    """listRecords API のモックレスポンスを作成する."""
+    """getAuthorFeed API のモックレスポンスを作成する."""
     resp = MagicMock()
     resp.status_code = 200
-    data: dict = {"records": records}
+    data: dict = {"feed": feed}
     if cursor is not None:
         data["cursor"] = cursor
     resp.json.return_value = data
@@ -73,46 +74,59 @@ def _make_get_record_response(
     return resp
 
 
-def _make_post_record(
+def _make_feed_item(
     did: str = "did:plc:test123",
+    handle: str = "user.bsky.social",
     rkey: str = "abc123",
     text: str = "Hello BlueSky!",
     embed: dict | None = None,
+    view_embed: dict | None = None,
     reply: dict | None = None,
     created_at: str = "2024-01-01T00:00:00Z",
+    reason: dict | None = None,
 ) -> dict:
-    """投稿レコードオブジェクトを作成する."""
-    value: dict = {
+    """フィードアイテムオブジェクトを作成する."""
+    record: dict = {
+        "$type": "app.bsky.feed.post",
         "text": text,
         "createdAt": created_at,
     }
     if embed is not None:
-        value["embed"] = embed
+        record["embed"] = embed
     if reply is not None:
-        value["reply"] = reply
-    return {
+        record["reply"] = reply
+
+    post: dict = {
         "uri": f"at://{did}/app.bsky.feed.post/{rkey}",
         "cid": "bafytest",
-        "value": value,
-    }
-
-
-def _make_repost_record(
-    subject_uri: str = "at://did:plc:other/app.bsky.feed.post/xyz789",
-    subject_cid: str = "bafyother",
-    created_at: str = "2024-01-02T00:00:00Z",
-) -> dict:
-    """リポストレコードオブジェクトを作成する."""
-    return {
-        "uri": "at://did:plc:test123/app.bsky.feed.repost/repost1",
-        "cid": "bafyrepost",
-        "value": {
-            "subject": {
-                "uri": subject_uri,
-                "cid": subject_cid,
-            },
-            "createdAt": created_at,
+        "author": {
+            "did": did,
+            "handle": handle,
         },
+        "record": record,
+    }
+    if view_embed is not None:
+        post["embed"] = view_embed
+
+    item: dict = {"post": post}
+    if reason is not None:
+        item["reason"] = reason
+
+    return item
+
+
+def _make_repost_reason(
+    by_did: str = "did:plc:reposter",
+    by_handle: str = "reposter.bsky.social",
+) -> dict:
+    """リポスト理由オブジェクトを作成する."""
+    return {
+        "$type": "app.bsky.feed.defs#reasonRepost",
+        "by": {
+            "did": by_did,
+            "handle": by_handle,
+        },
+        "indexedAt": "2024-01-02T00:00:00Z",
     }
 
 
@@ -208,7 +222,7 @@ class TestExtractTextFromPost:
         assert _extract_text_from_post(value) == ""
 
     def test_image_alt_text(self) -> None:
-        """画像 ALT テキストが [画像ALT] プレフィックス付きで抽出されること."""
+        """画像 ALT テキストが [Image ALT] プレフィックス付きで抽出されること."""
         value = {
             "text": "Photo post",
             "embed": {
@@ -221,7 +235,7 @@ class TestExtractTextFromPost:
         }
         result = _extract_text_from_post(value)
         assert result.startswith("Photo post")
-        assert "[画像ALT] " in result
+        assert "[Image ALT] " in result
         assert "A beautiful sunset" in result
         assert "Mountain view" in result
         # セクション間は空行区切り
@@ -240,7 +254,7 @@ class TestExtractTextFromPost:
         assert "Good alt" in result
 
     def test_video_alt_text(self) -> None:
-        """動画 ALT テキストが [動画ALT] プレフィックス付きで抽出されること."""
+        """動画 ALT テキストが [Video ALT] プレフィックス付きで抽出されること."""
         value = {
             "text": "Video post",
             "embed": {
@@ -250,10 +264,10 @@ class TestExtractTextFromPost:
         }
         result = _extract_text_from_post(value)
         assert result.startswith("Video post")
-        assert "[動画ALT] Video description" in result
+        assert "[Video ALT] Video description" in result
 
     def test_external_link(self) -> None:
-        """リンクカードが [リンクカード] セクション構造で抽出されること."""
+        """リンクカードが [Link Card] セクション構造で抽出されること."""
         value = {
             "text": "Check this out",
             "embed": {
@@ -267,13 +281,13 @@ class TestExtractTextFromPost:
         }
         result = _extract_text_from_post(value)
         assert result.startswith("Check this out")
-        assert "[リンクカード]" in result
-        assert "タイトル: Example Article" in result
+        assert "[Link Card]" in result
+        assert "Title: Example Article" in result
         assert "URL: https://example.com" in result
-        assert "説明: Article description" in result
+        assert "Description: Article description" in result
 
     def test_record_with_media_images(self) -> None:
-        """recordWithMedia 型の画像 ALT が [画像ALT] プレフィックス付きで抽出されること."""
+        """recordWithMedia 型の画像 ALT が [Image ALT] プレフィックス付きで抽出されること."""
         value = {
             "text": "Quote with images",
             "embed": {
@@ -292,10 +306,10 @@ class TestExtractTextFromPost:
         }
         result = _extract_text_from_post(value)
         assert result.startswith("Quote with images")
-        assert "[画像ALT] Media image alt" in result
+        assert "[Image ALT] Media image alt" in result
 
     def test_record_with_media_external(self) -> None:
-        """recordWithMedia 型の media.external が [リンクカード] セクションで抽出されること."""
+        """recordWithMedia 型の media.external が [Link Card] セクションで抽出されること."""
         value = {
             "text": "Quote with link",
             "embed": {
@@ -318,15 +332,95 @@ class TestExtractTextFromPost:
         }
         result = _extract_text_from_post(value)
         assert result.startswith("Quote with link")
-        assert "[リンクカード]" in result
-        assert "タイトル: Link Title" in result
+        assert "[Link Card]" in result
+        assert "Title: Link Title" in result
         assert "URL: https://example.com" in result
-        assert "説明: Link Desc" in result
+        assert "Description: Link Desc" in result
 
     def test_no_embed(self) -> None:
         """embed なしでテキストのみ返ること."""
         value = {"text": "Just text"}
         assert _extract_text_from_post(value) == "Just text"
+
+
+# --- _extract_quote_text_from_view_embed テスト ---
+
+
+class TestExtractQuoteTextFromViewEmbed:
+    """view embed からの引用元テキスト抽出テスト."""
+
+    def test_record_view_with_text(self) -> None:
+        """record#view から引用元テキストが取得できること."""
+        view_embed = {
+            "$type": "app.bsky.embed.record#view",
+            "record": {
+                "$type": "app.bsky.embed.record#viewRecord",
+                "uri": "at://did:plc:other/app.bsky.feed.post/xyz",
+                "value": {
+                    "text": "Original quoted post",
+                    "createdAt": "2024-01-01T00:00:00Z",
+                },
+            },
+        }
+        assert _extract_quote_text_from_view_embed(view_embed) == "Original quoted post"
+
+    def test_record_with_media_view_with_text(self) -> None:
+        """recordWithMedia#view から引用元テキストが取得できること."""
+        view_embed = {
+            "$type": "app.bsky.embed.recordWithMedia#view",
+            "record": {
+                "record": {
+                    "$type": "app.bsky.embed.record#viewRecord",
+                    "uri": "at://did:plc:other/app.bsky.feed.post/xyz",
+                    "value": {
+                        "text": "Quoted with media",
+                        "createdAt": "2024-01-01T00:00:00Z",
+                    },
+                },
+            },
+            "media": {
+                "$type": "app.bsky.embed.images#view",
+                "images": [],
+            },
+        }
+        assert _extract_quote_text_from_view_embed(view_embed) == "Quoted with media"
+
+    def test_non_post_quote_returns_none(self) -> None:
+        """投稿以外の引用（スターターパック等）で None が返ること."""
+        view_embed = {
+            "$type": "app.bsky.embed.record#view",
+            "record": {
+                "$type": "app.bsky.feed.defs#generatorView",
+                "uri": "at://did:plc:other/app.bsky.feed.generator/xyz",
+                "creator": {},
+            },
+        }
+        assert _extract_quote_text_from_view_embed(view_embed) is None
+
+    def test_no_embed_returns_none(self) -> None:
+        """embed なしで None が返ること."""
+        assert _extract_quote_text_from_view_embed(None) is None
+
+    def test_non_quote_embed_returns_none(self) -> None:
+        """引用以外の embed で None が返ること."""
+        view_embed = {
+            "$type": "app.bsky.embed.images#view",
+            "images": [],
+        }
+        assert _extract_quote_text_from_view_embed(view_embed) is None
+
+    def test_empty_quote_text_returns_none(self) -> None:
+        """引用元テキストが空で None が返ること."""
+        view_embed = {
+            "$type": "app.bsky.embed.record#view",
+            "record": {
+                "value": {
+                    "text": "",
+                    "createdAt": "2024-01-01T00:00:00Z",
+                },
+            },
+        }
+        assert _extract_quote_text_from_view_embed(view_embed) is None
 
 
 # --- _make_title テスト ---
@@ -525,10 +619,10 @@ class TestBlueskyIngesterCrawl:
         self, ingester: BlueskyIngester, mock_client: MagicMock
     ) -> None:
         """基本的な投稿取得が正常に動作すること."""
-        mock_client.get.return_value = _make_list_records_response(
-            records=[
-                _make_post_record(rkey="post1", text="First post"),
-                _make_post_record(rkey="post2", text="Second post"),
+        mock_client.get.return_value = _make_feed_response(
+            feed=[
+                _make_feed_item(rkey="post1", text="First post"),
+                _make_feed_item(rkey="post2", text="Second post"),
             ],
             cursor=None,
         )
@@ -544,11 +638,11 @@ class TestBlueskyIngesterCrawl:
     ) -> None:
         """max_posts を超える投稿が返らないこと."""
         ingester = BlueskyIngester(client=mock_client, max_posts=2)
-        mock_client.get.return_value = _make_list_records_response(
-            records=[
-                _make_post_record(rkey="post1", text="Post 1"),
-                _make_post_record(rkey="post2", text="Post 2"),
-                _make_post_record(rkey="post3", text="Post 3"),
+        mock_client.get.return_value = _make_feed_response(
+            feed=[
+                _make_feed_item(rkey="post1", text="Post 1"),
+                _make_feed_item(rkey="post2", text="Post 2"),
+                _make_feed_item(rkey="post3", text="Post 3"),
             ],
             cursor=None,
         )
@@ -562,16 +656,16 @@ class TestBlueskyIngesterCrawl:
     ) -> None:
         """ページネーションが正常に動作すること."""
         mock_client.get.side_effect = [
-            _make_list_records_response(
-                records=[
-                    _make_post_record(rkey="post1", text="Page 1 Post 1"),
-                    _make_post_record(rkey="post2", text="Page 1 Post 2"),
+            _make_feed_response(
+                feed=[
+                    _make_feed_item(rkey="post1", text="Page 1 Post 1"),
+                    _make_feed_item(rkey="post2", text="Page 1 Post 2"),
                 ],
                 cursor="cursor_2",
             ),
-            _make_list_records_response(
-                records=[
-                    _make_post_record(rkey="post3", text="Page 2 Post 1"),
+            _make_feed_response(
+                feed=[
+                    _make_feed_item(rkey="post3", text="Page 2 Post 1"),
                 ],
                 cursor=None,
             ),
@@ -586,8 +680,8 @@ class TestBlueskyIngesterCrawl:
         self, ingester: BlueskyIngester, mock_client: MagicMock
     ) -> None:
         """投稿が 0 件の場合、空リストを返すこと."""
-        mock_client.get.return_value = _make_list_records_response(
-            records=[], cursor=None
+        mock_client.get.return_value = _make_feed_response(
+            feed=[], cursor=None
         )
 
         contents = await ingester.crawl("user.bsky.social")
@@ -618,14 +712,13 @@ class TestBlueskyIngesterCrawl:
         with pytest.raises(ValueError, match="DID format is not accepted"):
             await ingester.crawl("did:plc:test123")
 
-    async def test_crawl_with_quote_repost(
+    async def test_crawl_with_quote_from_view_embed(
         self, ingester: BlueskyIngester, mock_client: MagicMock
     ) -> None:
-        """引用リポスト投稿の引用元テキストが取得されること."""
-        # 投稿一覧: 引用リポスト
-        list_response = _make_list_records_response(
-            records=[
-                _make_post_record(
+        """引用リポスト投稿の引用元テキストが view embed から取得されること."""
+        mock_client.get.return_value = _make_feed_response(
+            feed=[
+                _make_feed_item(
                     rkey="quote1",
                     text="My comment on this",
                     embed={
@@ -635,40 +728,15 @@ class TestBlueskyIngesterCrawl:
                             "cid": "bafyother",
                         },
                     },
-                ),
-            ],
-            cursor=None,
-        )
-
-        # 引用元投稿の getRecord レスポンス
-        quote_response = _make_get_record_response(
-            uri="at://did:plc:other/app.bsky.feed.post/original1",
-            value={"text": "Original post text", "createdAt": "2024-01-01T00:00:00Z"},
-        )
-
-        mock_client.get.side_effect = [list_response, quote_response]
-
-        contents = await ingester.crawl("user.bsky.social")
-
-        assert len(contents) == 1
-        assert "My comment on this" in contents[0].text
-        assert "[引用元]" in contents[0].text
-        assert "Original post text" in contents[0].text
-
-    async def test_crawl_quote_fetch_failure(
-        self, ingester: BlueskyIngester, mock_client: MagicMock
-    ) -> None:
-        """引用元取得失敗時、投稿本文のみで取り込まれること."""
-        list_response = _make_list_records_response(
-            records=[
-                _make_post_record(
-                    rkey="quote1",
-                    text="My comment",
-                    embed={
-                        "$type": "app.bsky.embed.record",
+                    view_embed={
+                        "$type": "app.bsky.embed.record#view",
                         "record": {
-                            "uri": "at://did:plc:other/app.bsky.feed.post/deleted",
-                            "cid": "bafydeleted",
+                            "$type": "app.bsky.embed.record#viewRecord",
+                            "uri": "at://did:plc:other/app.bsky.feed.post/original1",
+                            "value": {
+                                "text": "Original post text",
+                                "createdAt": "2024-01-01T00:00:00Z",
+                            },
                         },
                     },
                 ),
@@ -676,43 +744,67 @@ class TestBlueskyIngesterCrawl:
             cursor=None,
         )
 
-        mock_client.get.side_effect = [list_response, _make_error_response(404)]
-
         contents = await ingester.crawl("user.bsky.social")
 
         assert len(contents) == 1
-        assert contents[0].text == "My comment"
-        assert "[引用元]" not in contents[0].text
+        assert "My comment on this" in contents[0].text
+        assert "[Quote]" in contents[0].text
+        assert "Original post text" in contents[0].text
+        # getRecord は呼ばれない（view embed から取得）
+        assert mock_client.get.call_count == 1
 
-    async def test_crawl_with_reposts(
+    async def test_crawl_quote_non_post(
         self, ingester: BlueskyIngester, mock_client: MagicMock
     ) -> None:
-        """include_reposts=True でリポスト走査が行われること."""
-        # オリジナル投稿一覧
-        post_list = _make_list_records_response(
-            records=[
-                _make_post_record(rkey="post1", text="My post"),
-            ],
-            cursor=None,
-        )
-
-        # リポスト一覧
-        repost_list = _make_list_records_response(
-            records=[
-                _make_repost_record(
-                    subject_uri="at://did:plc:other/app.bsky.feed.post/reposted1",
+        """引用元が投稿以外の場合、引用元テキストなしで取り込まれること."""
+        mock_client.get.return_value = _make_feed_response(
+            feed=[
+                _make_feed_item(
+                    rkey="quote1",
+                    text="Check this feed",
+                    embed={
+                        "$type": "app.bsky.embed.record",
+                        "record": {
+                            "uri": "at://did:plc:other/app.bsky.feed.generator/xyz",
+                            "cid": "bafyother",
+                        },
+                    },
+                    view_embed={
+                        "$type": "app.bsky.embed.record#view",
+                        "record": {
+                            "$type": "app.bsky.feed.defs#generatorView",
+                            "uri": "at://did:plc:other/app.bsky.feed.generator/xyz",
+                            "creator": {},
+                        },
+                    },
                 ),
             ],
             cursor=None,
         )
 
-        # リポスト元投稿
-        original_post = _make_get_record_response(
-            uri="at://did:plc:other/app.bsky.feed.post/reposted1",
-            value={"text": "Reposted content", "createdAt": "2024-01-01T00:00:00Z"},
-        )
+        contents = await ingester.crawl("user.bsky.social")
 
-        mock_client.get.side_effect = [post_list, repost_list, original_post]
+        assert len(contents) == 1
+        assert contents[0].text == "Check this feed"
+        assert "[Quote]" not in contents[0].text
+
+    async def test_crawl_repost_included(
+        self, ingester: BlueskyIngester, mock_client: MagicMock
+    ) -> None:
+        """include_reposts=True でリポストが含まれること."""
+        mock_client.get.return_value = _make_feed_response(
+            feed=[
+                _make_feed_item(rkey="post1", text="My post"),
+                _make_feed_item(
+                    did="did:plc:other",
+                    handle="other.bsky.social",
+                    rkey="reposted1",
+                    text="Reposted content",
+                    reason=_make_repost_reason(),
+                ),
+            ],
+            cursor=None,
+        )
 
         contents = await ingester.crawl(
             "user.bsky.social", include_reposts=True
@@ -721,82 +813,62 @@ class TestBlueskyIngesterCrawl:
         assert len(contents) == 2
         texts = [c.text for c in contents]
         assert "My post" in texts
-        assert "Reposted content" in texts
+        # リポストの [Repost: @handle] ヘッダー
+        repost_content = next(c for c in contents if "Reposted content" in c.text)
+        assert repost_content.text.startswith("[Repost: @other.bsky.social]")
+        assert "Reposted content" in repost_content.text
+        assert repost_content.metadata["is_repost"] is True
 
-    async def test_crawl_repost_duplicate_skipped(
+    async def test_crawl_repost_filtered_by_default(
         self, ingester: BlueskyIngester, mock_client: MagicMock
     ) -> None:
-        """オリジナル投稿と重複するリポストがスキップされること."""
-        # オリジナル投稿: post1
-        post_list = _make_list_records_response(
-            records=[
-                _make_post_record(
-                    did="did:plc:test123", rkey="post1", text="My post"
+        """include_reposts=False（デフォルト）でリポストが除外されること."""
+        mock_client.get.return_value = _make_feed_response(
+            feed=[
+                _make_feed_item(rkey="post1", text="My post"),
+                _make_feed_item(
+                    did="did:plc:other",
+                    rkey="reposted1",
+                    text="Reposted content",
+                    reason=_make_repost_reason(),
                 ),
             ],
             cursor=None,
         )
 
-        # リポスト: 同じ投稿を参照
-        repost_list = _make_list_records_response(
-            records=[
-                _make_repost_record(
-                    subject_uri="at://did:plc:test123/app.bsky.feed.post/post1",
-                ),
-            ],
-            cursor=None,
-        )
-
-        mock_client.get.side_effect = [post_list, repost_list]
-
-        contents = await ingester.crawl(
-            "user.bsky.social", include_reposts=True
-        )
-
-        # 重複が除外されるため 1 件のみ
-        assert len(contents) == 1
-
-    async def test_crawl_repost_fetch_failure(
-        self, ingester: BlueskyIngester, mock_client: MagicMock
-    ) -> None:
-        """リポスト元取得失敗時、該当リポストがスキップされること."""
-        post_list = _make_list_records_response(
-            records=[
-                _make_post_record(rkey="post1", text="My post"),
-            ],
-            cursor=None,
-        )
-
-        repost_list = _make_list_records_response(
-            records=[
-                _make_repost_record(
-                    subject_uri="at://did:plc:other/app.bsky.feed.post/deleted",
-                ),
-            ],
-            cursor=None,
-        )
-
-        mock_client.get.side_effect = [
-            post_list,
-            repost_list,
-            _make_error_response(404),
-        ]
-
-        contents = await ingester.crawl(
-            "user.bsky.social", include_reposts=True
-        )
+        contents = await ingester.crawl("user.bsky.social")
 
         assert len(contents) == 1
         assert contents[0].text == "My post"
+
+    async def test_crawl_duplicate_source_id_skipped(
+        self, ingester: BlueskyIngester, mock_client: MagicMock
+    ) -> None:
+        """同一 source_id の重複がスキップされること."""
+        mock_client.get.return_value = _make_feed_response(
+            feed=[
+                _make_feed_item(
+                    did="did:plc:test123", rkey="post1", text="First"
+                ),
+                _make_feed_item(
+                    did="did:plc:test123", rkey="post1", text="Duplicate"
+                ),
+            ],
+            cursor=None,
+        )
+
+        contents = await ingester.crawl("user.bsky.social")
+
+        assert len(contents) == 1
 
     async def test_crawl_skips_empty_text_posts(
         self, ingester: BlueskyIngester, mock_client: MagicMock
     ) -> None:
         """テキストが空の投稿がスキップされること."""
-        mock_client.get.return_value = _make_list_records_response(
-            records=[
-                _make_post_record(rkey="post1", text=""),
-                _make_post_record(rkey="post2", text="Valid post"),
+        mock_client.get.return_value = _make_feed_response(
+            feed=[
+                _make_feed_item(rkey="post1", text=""),
+                _make_feed_item(rkey="post2", text="Valid post"),
             ],
             cursor=None,
         )
@@ -810,9 +882,9 @@ class TestBlueskyIngesterCrawl:
         self, ingester: BlueskyIngester, mock_client: MagicMock
     ) -> None:
         """メタデータフィールドが正しく設定されること."""
-        mock_client.get.return_value = _make_list_records_response(
-            records=[
-                _make_post_record(
+        mock_client.get.return_value = _make_feed_response(
+            feed=[
+                _make_feed_item(
                     rkey="post1",
                     text="Test metadata",
                     created_at="2024-06-15T12:00:00Z",
@@ -844,9 +916,9 @@ class TestBlueskyIngesterCrawl:
         self, ingester: BlueskyIngester, mock_client: MagicMock
     ) -> None:
         """source_id が AT URI 形式であること."""
-        mock_client.get.return_value = _make_list_records_response(
-            records=[
-                _make_post_record(
+        mock_client.get.return_value = _make_feed_response(
+            feed=[
+                _make_feed_item(
                     did="did:plc:abc123", rkey="post1", text="Test"
                 ),
             ],
@@ -900,77 +972,77 @@ class TestBlueskyIngesterInit:
         with pytest.raises(ValueError):
             BlueskyIngester(client=_make_mock_client(), max_posts=-5)
 
-    def test_custom_pds_url(self) -> None:
-        """カスタム PDS URL が設定できること."""
+    def test_custom_appview_url(self) -> None:
+        """カスタム AppView URL が設定できること."""
         ingester = BlueskyIngester(
             client=_make_mock_client(),
-            pds_url="https://custom.pds.example.com",
+            appview_url="https://custom.appview.example.com",
         )
-        assert ingester._pds_url == "https://custom.pds.example.com"
+        assert ingester._appview_url == "https://custom.appview.example.com"
 
-    def test_pds_url_trailing_slash_stripped(self) -> None:
-        """PDS URL の末尾スラッシュが除去されること."""
+    def test_appview_url_trailing_slash_stripped(self) -> None:
+        """AppView URL の末尾スラッシュが除去されること."""
         ingester = BlueskyIngester(
             client=_make_mock_client(),
-            pds_url="https://bsky.social/",
+            appview_url="https://public.api.bsky.app/",
         )
-        assert ingester._pds_url == "https://bsky.social"
+        assert ingester._appview_url == "https://public.api.bsky.app"
 
-    def test_pds_url_whitespace_stripped(self) -> None:
-        """PDS URL の前後空白がトリムされること."""
+    def test_appview_url_whitespace_stripped(self) -> None:
+        """AppView URL の前後空白がトリムされること."""
         ingester = BlueskyIngester(
             client=_make_mock_client(),
-            pds_url="  https://bsky.social  ",
+            appview_url="  https://public.api.bsky.app  ",
         )
-        assert ingester._pds_url == "https://bsky.social"
+        assert ingester._appview_url == "https://public.api.bsky.app"
 
-    def test_reject_empty_pds_url(self) -> None:
-        """空の PDS URL でバリデーションエラーになること."""
+    def test_reject_empty_appview_url(self) -> None:
+        """空の AppView URL でバリデーションエラーになること."""
         with pytest.raises(ValueError, match="must not be empty"):
-            BlueskyIngester(client=_make_mock_client(), pds_url="")
+            BlueskyIngester(client=_make_mock_client(), appview_url="")
         with pytest.raises(ValueError, match="must not be empty"):
-            BlueskyIngester(client=_make_mock_client(), pds_url="   ")
+            BlueskyIngester(client=_make_mock_client(), appview_url="   ")
 
-    def test_reject_non_https_pds_url(self) -> None:
-        """非 HTTPS の PDS URL でバリデーションエラーになること."""
+    def test_reject_non_https_appview_url(self) -> None:
+        """非 HTTPS の AppView URL でバリデーションエラーになること."""
         with pytest.raises(ValueError, match="HTTPS"):
-            BlueskyIngester(client=_make_mock_client(), pds_url="http://bsky.social")
+            BlueskyIngester(client=_make_mock_client(), appview_url="http://public.api.bsky.app")
 
 
-# --- _validate_pds_url テスト ---
+# --- _validate_appview_url テスト ---
 
 
-class TestValidatePdsUrl:
-    """PDS URL のバリデーションテスト."""
+class TestValidateAppviewUrl:
+    """AppView URL のバリデーションテスト."""
 
     def test_valid_https_url(self) -> None:
         """正しい HTTPS URL がそのまま返ること."""
-        assert _validate_pds_url("https://bsky.social") == "https://bsky.social"
+        assert _validate_appview_url("https://public.api.bsky.app") == "https://public.api.bsky.app"
 
     def test_trailing_slash_stripped(self) -> None:
         """末尾スラッシュが除去されること."""
-        assert _validate_pds_url("https://bsky.social/") == "https://bsky.social"
+        assert _validate_appview_url("https://public.api.bsky.app/") == "https://public.api.bsky.app"
 
     def test_whitespace_stripped(self) -> None:
         """前後の空白がトリムされること."""
-        assert _validate_pds_url("  https://bsky.social  ") == "https://bsky.social"
+        assert _validate_appview_url("  https://public.api.bsky.app  ") == "https://public.api.bsky.app"
 
     def test_reject_empty(self) -> None:
         """空文字列がバリデーションエラーになること."""
         with pytest.raises(ValueError, match="must not be empty"):
-            _validate_pds_url("")
+            _validate_appview_url("")
         with pytest.raises(ValueError, match="must not be empty"):
-            _validate_pds_url("   ")
+            _validate_appview_url("   ")
 
     def test_reject_http(self) -> None:
         """HTTP スキームがバリデーションエラーになること."""
         with pytest.raises(ValueError, match="HTTPS"):
-            _validate_pds_url("http://bsky.social")
+            _validate_appview_url("http://public.api.bsky.app")
 
     def test_reject_no_scheme(self) -> None:
         """スキームなしがバリデーションエラーになること."""
         with pytest.raises(ValueError, match="HTTPS"):
-            _validate_pds_url("bsky.social")
+            _validate_appview_url("public.api.bsky.app")
 
 
 # --- ハードリミット定数テスト ---

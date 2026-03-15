@@ -104,11 +104,11 @@ class RAGSettings(BaseSettings):
     rag_local_supported_extensions: str = ".md,.txt,.pdf,.adoc"
 
     # BlueSky インジェスター
-    rag_bluesky_pds_url: str = "https://bsky.social"
+    rag_bluesky_appview_url: str = "https://public.api.bsky.app"
     rag_bluesky_max_posts: int = Field(default=200, ge=1, le=1000)
     rag_bluesky_request_timeout: int = Field(default=30, ge=1, le=120)
     rag_bluesky_request_interval: float = Field(default=1.0, ge=0.1, le=60.0)
-    rag_bluesky_include_reposts: bool = False
+    rag_bluesky_include_reposts: bool = True
 
     # デバッグ
     rag_debug_log_enabled: bool = False
