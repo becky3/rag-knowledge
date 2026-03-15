@@ -11,7 +11,7 @@ import re
 from typing import TYPE_CHECKING, Any
 from urllib.parse import urlencode
 
-from .base import BaseIngester, IngestedContent
+from .base_ingester import BaseIngester, IngestedContent
 
 if TYPE_CHECKING:
     from py_common_lib.httpx import ConstrainedClient

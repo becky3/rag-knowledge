@@ -10,8 +10,8 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-from rag.ingesters.base import BaseIngester, IngestedContent
-from rag.ingesters.web import WebIngester
+from rag.ingesters.base_ingester import BaseIngester, IngestedContent
+from rag.ingesters.web_ingester import WebIngester
 from rag.rag_knowledge import RAGKnowledgeService
 from rag.vector_store import VectorStore
 from rag.web_crawler import CrawledPage, WebCrawler

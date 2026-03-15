@@ -10,8 +10,8 @@ FastMCP を使用して 10 個の RAG ツールを公開する:
 - rag_crawl_preview: クロール対象ページのプレビュー（タイトル・URL一覧）
 - rag_crawl_zenn: Zenn 記事の一括取り込み
 - rag_crawl_bluesky: BlueSky 投稿の一括取り込み
-- rag_add_local: ローカルファイルをナレッジベースに取り込み
-- rag_crawl_local: ディレクトリ内ファイルを一括取り込み
+- rag_add_document: ドキュメントファイルをナレッジベースに取り込み
+- rag_crawl_documents: ディレクトリ内ドキュメントを一括取り込み
 - rag_delete: ソースURL指定でナレッジから削除
 - rag_stats: ナレッジベースの統計情報を表示
 """
@@ -39,10 +39,10 @@ with contextlib.redirect_stdout(io.StringIO()):
     from .bm25_index import BM25Index
     from .config import get_settings
     from .embedding.factory import get_embedding_provider
-    from .ingesters.bluesky import BlueskyIngester
-    from .ingesters.local_file import LocalFileIngester
-    from .ingesters.web import WebIngester
-    from .ingesters.zenn import ZennIngester
+    from .ingesters.bluesky_ingester import BlueskyIngester
+    from .ingesters.document_ingester import DocumentIngester
+    from .ingesters.web_ingester import WebIngester
+    from .ingesters.zenn_ingester import ZennIngester
     from .rag_knowledge import RAGKnowledgeService
     from .safe_browsing import create_safe_browsing_client
     from .vector_store import VectorStore
@@ -145,7 +145,7 @@ def _build_rag_service() -> RAGKnowledgeService:
 
 # --- MCP ツール定義 ---
 
-_VALID_SOURCE_TYPES: frozenset[str] = frozenset({"web", "zenn", "bluesky", "local"})
+_VALID_SOURCE_TYPES: frozenset[str] = frozenset({"web", "zenn", "bluesky", "document"})
 
 
 @mcp.tool()
@@ -164,7 +164,7 @@ async def rag_search(
     Args:
         query: 検索クエリ（ユーザーの質問からキーワードを抽出して構成する）
         n_results: 各エンジンから取得する結果数（未指定時は設定値を使用）
-        source_type: ソース種別フィルタ（"web", "zenn", "bluesky", "local"）。
+        source_type: ソース種別フィルタ（"web", "zenn", "bluesky", "document"）。
             指定時はそのソース種別のチャンクのみを検索対象とする。未指定時は全種別を検索。
 
     Returns:
@@ -568,23 +568,23 @@ async def rag_crawl_bluesky(
         return f"エラー: BlueSky 投稿の取り込みに失敗しました（ハンドル: {handle}）"
 
 
-def _create_local_ingester() -> LocalFileIngester:
-    """設定に基づいて LocalFileIngester を生成する."""
+def _create_document_ingester() -> DocumentIngester:
+    """設定に基づいて DocumentIngester を生成する."""
     settings = get_settings()
     extensions = [
         ext.strip() if ext.strip().startswith(".") else f".{ext.strip()}"
-        for ext in settings.rag_local_supported_extensions.split(",")
+        for ext in settings.rag_document_supported_extensions.split(",")
         if ext.strip()
     ]
-    return LocalFileIngester(supported_extensions=extensions)
+    return DocumentIngester(supported_extensions=extensions)
 
 
 @mcp.tool()
-async def rag_add_local(file_path: str) -> str:
-    """[rag-knowledge] RAG add local - ローカルファイルをナレッジベースに取り込む.
+async def rag_add_document(file_path: str) -> str:
+    """[rag-knowledge] RAG add document - ドキュメントファイルをナレッジベースに取り込む.
 
-    knowledge base, ingest, local file, document.
-    ローカルファイル（Markdown、テキスト、PDF、AsciiDoc）を読み取り、
+    knowledge base, ingest, document, file, text.
+    ドキュメントファイル（Markdown、テキスト、PDF、AsciiDoc）を読み取り、
     ナレッジベースに取り込む。同一ファイルの再取り込み時は既存の知識を最新に置き換える。
     stdio モード専用。HTTP モードでは無効。
 
@@ -595,10 +595,10 @@ async def rag_add_local(file_path: str) -> str:
         取り込み結果のメッセージ（ファイル名、チャンク数）
     """
     if get_settings().rag_transport == "http":
-        return "エラー: rag_add_local は HTTP モードでは無効です（セキュリティ上の制約）"
+        return "エラー: rag_add_document は HTTP モードでは無効です（セキュリティ上の制約）"
 
     service = await _get_rag_service()
-    ingester = _create_local_ingester()
+    ingester = _create_document_ingester()
 
     try:
         content = await ingester.fetch_single(file_path)
@@ -611,16 +611,16 @@ async def rag_add_local(file_path: str) -> str:
     except ValueError as e:
         return f"エラー: {e}"
     except Exception:
-        logger.exception("Failed to add local file: %s", file_path)
+        logger.exception("Failed to add document file: %s", file_path)
         return f"エラー: ファイルの取り込みに失敗しました。パス: {file_path}"
 
 
 @mcp.tool()
-async def rag_crawl_local(dir_path: str, pattern: str = "**/*") -> str:
-    """[rag-knowledge] RAG crawl local - ディレクトリ内のファイルを一括取り込み.
+async def rag_crawl_documents(dir_path: str, pattern: str = "**/*") -> str:
+    """[rag-knowledge] RAG crawl documents - ディレクトリ内のドキュメントを一括取り込み.
 
-    knowledge base, ingest, local directory, bulk import, glob.
-    指定ディレクトリ内のファイルを glob パターンで検索し、
+    knowledge base, ingest, document directory, bulk import, glob.
+    指定ディレクトリ内のドキュメントファイルを glob パターンで検索し、
     一括でナレッジベースに取り込む。同一ファイルの再取り込み時は
     既存の知識を最新に置き換える。
     stdio モード専用。HTTP モードでは無効。
@@ -633,10 +633,10 @@ async def rag_crawl_local(dir_path: str, pattern: str = "**/*") -> str:
         取り込み結果のサマリーテキスト（処理ファイル数、総チャンク数、スキップ数、エラー数）
     """
     if get_settings().rag_transport == "http":
-        return "エラー: rag_crawl_local は HTTP モードでは無効です（セキュリティ上の制約）"
+        return "エラー: rag_crawl_documents は HTTP モードでは無効です（セキュリティ上の制約）"
 
     service = await _get_rag_service()
-    ingester = _create_local_ingester()
+    ingester = _create_document_ingester()
 
     try:
         files = ingester.collect_files(dir_path, pattern)
@@ -661,7 +661,7 @@ async def rag_crawl_local(dir_path: str, pattern: str = "**/*") -> str:
             total_chunks += chunks
             ingested_count += 1
         except Exception:
-            logger.exception("Failed to ingest local file: %s", file)
+            logger.exception("Failed to ingest document file: %s", file)
             errors += 1
 
     parts = [

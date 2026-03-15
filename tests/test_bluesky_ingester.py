@@ -19,7 +19,7 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-from rag.ingesters.bluesky import (
+from rag.ingesters.bluesky_ingester import (
     MAX_POSTS_HARD_LIMIT,
     BlueskyIngester,
     _extract_quote_text_from_view_embed,
