@@ -477,7 +477,7 @@ class TestEvaluateRetrieval:
                 },
                 {
                     "id": "q2",
-                    "query": "ゾーマ 攻略",
+                    "query": "闇の王 攻略",
                     "expected_sources": [
                         "https://example.com/dq3/boss/zoma.html",
                         "https://example.com/dq3/strategy/final.html",

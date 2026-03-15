@@ -26,7 +26,7 @@ class DocumentChunk:
 
     id: str  # ユニークID（URLハッシュ + chunk_index）
     text: str  # チャンク本文
-    metadata: dict[str, str | int]  # source_url, title, chunk_index, crawled_at
+    metadata: dict[str, str | int | float | bool]  # source_url, title, chunk_index, crawled_at, source_type, custom:*
 
 
 @dataclass
@@ -34,7 +34,7 @@ class RetrievalResult:
     """検索結果."""
 
     text: str
-    metadata: dict[str, str | int]
+    metadata: dict[str, str | int | float | bool]
     distance: float  # 小さいほど類似度が高い
 
 
@@ -137,6 +137,7 @@ class VectorStore:
         query: str,
         n_results: int = 5,
         similarity_threshold: float | None = None,
+        where: dict[str, str | int | float | bool] | None = None,
     ) -> list[RetrievalResult]:
         """クエリに類似するチャンクを検索する.
 
@@ -144,6 +145,7 @@ class VectorStore:
             query: 検索クエリ
             n_results: 返却する結果の最大数
             similarity_threshold: 類似度閾値（cosine距離）。指定時、この値より大きいdistanceの結果を除外
+            where: メタデータフィルタ（例: {"source_type": "bluesky"}）
 
         Returns:
             検索結果のリスト（類似度の高い順）
@@ -168,11 +170,17 @@ class VectorStore:
             return []
 
         # ChromaDBで検索（同期APIなのでto_threadでラップ）
+        query_kwargs: dict[str, object] = {
+            "query_embeddings": query_embeddings,
+            "n_results": fetch_count,
+            "include": ["documents", "metadatas", "distances"],
+        }
+        if where is not None:
+            query_kwargs["where"] = where
+
         results = await asyncio.to_thread(
             self._collection.query,
-            query_embeddings=query_embeddings,
-            n_results=fetch_count,
-            include=["documents", "metadatas", "distances"],
+            **query_kwargs,  # type: ignore[arg-type]
         )
 
         # 結果を変換

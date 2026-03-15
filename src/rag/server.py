@@ -145,9 +145,15 @@ def _build_rag_service() -> RAGKnowledgeService:
 
 # --- MCP ツール定義 ---
 
+_VALID_SOURCE_TYPES: frozenset[str] = frozenset({"web", "zenn", "bluesky", "local"})
+
 
 @mcp.tool()
-async def rag_search(query: str, n_results: int | None = None) -> str:
+async def rag_search(
+    query: str,
+    n_results: int | None = None,
+    source_type: str | None = None,
+) -> str:
     """[rag-knowledge] RAG search - ナレッジベース検索。挨拶・雑談以外の質問では必ずこのツールを最初に呼び出すこと。
 
     knowledge base, vector search, BM25, retrieval-augmented generation.
@@ -158,6 +164,8 @@ async def rag_search(query: str, n_results: int | None = None) -> str:
     Args:
         query: 検索クエリ（ユーザーの質問からキーワードを抽出して構成する）
         n_results: 各エンジンから取得する結果数（未指定時は設定値を使用）
+        source_type: ソース種別フィルタ（"web", "zenn", "bluesky", "local"）。
+            指定時はそのソース種別のチャンクのみを検索対象とする。未指定時は全種別を検索。
 
     Returns:
         検索結果テキスト。ベクトル検索結果とBM25検索結果をセクション分けして返す。
@@ -166,11 +174,17 @@ async def rag_search(query: str, n_results: int | None = None) -> str:
         RAG_MAX_RESPONSE_CHARS 設定時、累積文字数を追跡し上限到達後はページ全文取得を
         早期打ち切りする。末尾にトランケート通知が付記される。未設定時は無制限。
     """
+    if source_type is not None and source_type not in _VALID_SOURCE_TYPES:
+        valid = ", ".join(sorted(_VALID_SOURCE_TYPES))
+        return f"無効な source_type: {source_type!r}（有効値: {valid}）"
+
     service = await _get_rag_service()
     if n_results is None:
         n_results = get_settings().rag_retrieval_count
 
-    raw = await service.retrieve_raw_results(query, n_results=n_results)
+    raw = await service.retrieve_raw_results(
+        query, n_results=n_results, source_type=source_type,
+    )
 
     if not raw.vector_results and not raw.bm25_results:
         return "該当する情報が見つかりませんでした"

@@ -553,6 +553,7 @@ class RAGKnowledgeService:
                     "title": page.title,
                     "chunk_index": i,
                     "crawled_at": page.crawled_at,
+                    "source_type": "web",
                 },
             )
             for i, chunk in enumerate(chunks)
@@ -569,7 +570,7 @@ class RAGKnowledgeService:
         # 注: BM25は補助的機能のため、失敗してもVectorStoreの結果は維持する
         if self._bm25_index is not None:
             bm25_docs = [
-                (chunk.id, chunk.text, normalized_url)
+                (chunk.id, chunk.text, normalized_url, "web")
                 for chunk in document_chunks
             ]
             try:
@@ -611,16 +612,25 @@ class RAGKnowledgeService:
 
         # DocumentChunk に変換
         url_hash = hashlib.sha256(normalized_url.encode()).hexdigest()[:16]
+
+        # 共通メタデータ + source_type + カスタムメタデータ（custom: プレフィックス）
+        base_metadata: dict[str, str | int | float | bool] = {
+            "source_url": normalized_url,
+            "title": content.title,
+            "crawled_at": content.ingested_at,
+            "source_type": content.source_type,
+        }
+        for key, value in content.metadata.items():
+            if isinstance(value, (str, int, float, bool)):
+                base_metadata[f"custom:{key}"] = value
+            else:
+                base_metadata[f"custom:{key}"] = str(value)
+
         document_chunks = [
             DocumentChunk(
                 id=f"{url_hash}_{i}",
                 text=chunk,
-                metadata={
-                    "source_url": normalized_url,
-                    "title": content.title,
-                    "chunk_index": i,
-                    "crawled_at": content.ingested_at,
-                },
+                metadata={**base_metadata, "chunk_index": i},
             )
             for i, chunk in enumerate(chunks)
         ]
@@ -635,7 +645,7 @@ class RAGKnowledgeService:
         # BM25 インデックスにも追加
         if self._bm25_index is not None:
             bm25_docs = [
-                (chunk.id, chunk.text, normalized_url)
+                (chunk.id, chunk.text, normalized_url, content.source_type)
                 for chunk in document_chunks
             ]
             try:
@@ -790,7 +800,12 @@ class RAGKnowledgeService:
             sources=sources,
         )
 
-    async def retrieve_raw_results(self, query: str, n_results: int = 5) -> RawSearchResults:
+    async def retrieve_raw_results(
+        self,
+        query: str,
+        n_results: int = 5,
+        source_type: str | None = None,
+    ) -> RawSearchResults:
         """ベクトル検索・BM25検索の生結果を個別に返す（準Agentic Search用）.
 
         統合パイプラインを迂回し、各エンジンの生スコアをそのままLLMに渡す。
@@ -800,15 +815,20 @@ class RAGKnowledgeService:
         Args:
             query: 検索クエリ
             n_results: 各エンジンから返却する結果の最大数
+            source_type: ソース種別フィルタ（指定時はそのソース種別のみ検索対象）
 
         Returns:
             RawSearchResults: ベクトル検索とBM25検索の生結果
         """
         # ベクトル検索（閾値フィルタなし: LLMが判断する）
+        where: dict[str, str | int | float | bool] | None = (
+            {"source_type": source_type} if source_type is not None else None
+        )
         vector_results_raw = await self._vector_store.search(
             query,
             n_results=n_results,
             similarity_threshold=None,
+            where=where,
         )
         vector_items: list[VectorSearchItem] = []
         for result in vector_results_raw:
@@ -826,7 +846,9 @@ class RAGKnowledgeService:
         # BM25検索
         bm25_items: list[BM25SearchItem] = []
         if self._bm25_index is not None:
-            bm25_results_raw = self._bm25_index.search(query, n_results=n_results)
+            bm25_results_raw = self._bm25_index.search(
+                query, n_results=n_results, source_type=source_type,
+            )
             for bm25_result in bm25_results_raw:
                 source_url = self._bm25_index.get_source_url(bm25_result.doc_id) or ""
                 bm25_items.append(

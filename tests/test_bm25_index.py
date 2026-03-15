@@ -21,7 +21,7 @@ class TestTokenizeJapanese:
 
     def test_japanese_text_tokenized(self) -> None:
         """日本語テキストがトークン化される."""
-        tokens = tokenize_japanese("りゅうおうはボスモンスターです")
+        tokens = tokenize_japanese("魔王はボスモンスターです")
 
         # 何らかのトークンが生成される
         assert len(tokens) > 0
@@ -52,28 +52,28 @@ class TestBM25Index:
 
         # ドキュメントを追加
         docs = [
-            ("doc1", "りゅうおうはドラゴンクエストのボスです", "source1"),
-            ("doc2", "スライムは最弱のモンスターです", "source2"),
-            ("doc3", "ゾーマは強力な魔王です", "source3"),
+            ("doc1", "魔王は冒険ゲームのボスです", "source1", "web"),
+            ("doc2", "ゴブリンは最弱のモンスターです", "source2", "web"),
+            ("doc3", "闇の王は強力な敵です", "source3", "web"),
         ]
         added = index.add_documents(docs)
         assert added == 3
 
         # 検索
-        results = index.search("りゅうおう", n_results=3)
+        results = index.search("魔王", n_results=3)
 
-        # りゅうおうを含むドキュメントがヒット
+        # 魔王を含むドキュメントがヒット
         assert len(results) > 0
-        assert any("りゅうおう" in r.text for r in results)
+        assert any("魔王" in r.text for r in results)
 
     def test_delete_by_source(self) -> None:
         """ソースURL指定でドキュメントを削除できる."""
         index = BM25Index()
 
         docs = [
-            ("doc1", "テスト1", "source1"),
-            ("doc2", "テスト2", "source1"),
-            ("doc3", "テスト3", "source2"),
+            ("doc1", "テスト1", "source1", "web"),
+            ("doc2", "テスト2", "source1", "web"),
+            ("doc3", "テスト3", "source2", "zenn"),
         ]
         index.add_documents(docs)
 
@@ -93,7 +93,7 @@ class TestBM25Index:
     def test_search_with_no_matches_returns_empty_list(self) -> None:
         """AC6: マッチするドキュメントがない場合は空リストを返す."""
         index = BM25Index()
-        index.add_documents([("doc1", "りゅうおう", "source1")])
+        index.add_documents([("doc1", "魔王", "source1", "web")])
 
         # 全く関係ないクエリ
         results = index.search("プログラミング言語")
@@ -110,25 +110,53 @@ class TestBM25Index:
 
         # 3つ以上のドキュメントを追加（BM25のIDF計算にはN>=3が必要）
         index.add_documents([
-            ("doc1", "dragon quest adventure game", "source1"),
-            ("doc2", "pokemon battle monster", "source2"),
-            ("doc3", "zelda sword shield", "source3"),
+            ("doc1", "adventure quest rpg game", "source1", "web"),
+            ("doc2", "monster taming battle capture", "source2", "web"),
+            ("doc3", "hero legend sword shield", "source3", "web"),
         ])
         assert index.get_document_count() == 3
 
         # 同じIDで更新（addedは0だがドキュメントは更新される）
-        added = index.add_documents([("doc1", "final fantasy rpg game", "source1")])
+        added = index.add_documents([("doc1", "crystal saga rpg game", "source1", "web")])
         assert added == 0  # 新規追加ではない
         assert index.get_document_count() == 3
 
-        # 更新後のテキストで検索 - finalでヒットするはず
-        results = index.search("final fantasy")
+        # 更新後のテキストで検索 - crystalでヒットするはず
+        results = index.search("crystal saga")
         assert len(results) > 0, "更新後のドキュメントが検索でヒットしない"
-        assert "final" in results[0].text
+        assert "crystal" in results[0].text
 
         # 古いテキストのキーワードでは検索されない（テキストが置き換わっている）
-        old_results = index.search("dragon quest")
-        assert not any("dragon" in r.text for r in old_results)
+        old_results = index.search("adventure quest")
+        assert not any("adventure" in r.text for r in old_results)
+
+    def test_search_with_source_type_filter(self) -> None:
+        """source_type フィルタで指定種別のみ返す."""
+        index = BM25Index()
+        docs = [
+            ("doc1", "冒険の旅に出る勇者の物語", "source1", "web"),
+            ("doc2", "冒険と魔法の技術記事", "source2", "zenn"),
+            ("doc3", "冒険についての投稿メモ", "source3", "bluesky"),
+        ]
+        index.add_documents(docs)
+
+        # web のみ（「勇者」は web のドキュメントにのみ含まれる）
+        results = index.search("勇者", n_results=10, source_type="web")
+        assert len(results) > 0
+        assert all("勇者" in r.text for r in results)
+
+        # zenn のみ（「技術記事」は zenn のドキュメントにのみ含まれる）
+        results = index.search("冒険", n_results=10, source_type="zenn")
+        assert len(results) > 0
+        assert all("技術記事" in r.text for r in results)
+
+        # 存在しない source_type → 空
+        results = index.search("冒険", n_results=10, source_type="nonexistent")
+        assert results == []
+
+        # None（デフォルト）→ 全件対象
+        results = index.search("冒険", n_results=10, source_type=None)
+        assert len(results) > 0
 
     def test_bm25_parameters(self) -> None:
         """BM25パラメータのカスタマイズ."""
@@ -151,13 +179,13 @@ class TestBM25IndexPersistence:
         """テスト用永続化ディレクトリ."""
         return str(tmp_path / "bm25_test")
 
-    def _sample_docs(self) -> list[tuple[str, str, str]]:
+    def _sample_docs(self) -> list[tuple[str, str, str, str]]:
         """テスト用ドキュメント（BM25のIDF計算に3件以上必要）."""
         return [
-            ("doc1", "dragon quest adventure game rpg", "source1"),
-            ("doc2", "pokemon battle monster capture", "source2"),
-            ("doc3", "zelda sword shield adventure", "source3"),
-            ("doc4", "final fantasy crystal chronicles", "source4"),
+            ("doc1", "adventure quest rpg game journey", "source1", "web"),
+            ("doc2", "monster taming battle capture arena", "source2", "web"),
+            ("doc3", "hero legend sword shield quest", "source3", "zenn"),
+            ("doc4", "crystal saga magic chronicles story", "source4", "bluesky"),
         ]
 
     def test_save_and_load(self, persist_dir: str) -> None:
@@ -168,7 +196,7 @@ class TestBM25IndexPersistence:
         assert index.get_document_count() == 4
 
         # 検索結果を記録
-        results_before = index.search("dragon quest", n_results=3)
+        results_before = index.search("adventure quest", n_results=3)
         assert len(results_before) > 0
 
         # 2. 新しいインスタンスで復元
@@ -176,7 +204,7 @@ class TestBM25IndexPersistence:
         assert index2.get_document_count() == 4
 
         # 検索結果が同じ
-        results_after = index2.search("dragon quest", n_results=3)
+        results_after = index2.search("adventure quest", n_results=3)
         assert len(results_after) > 0
         assert results_after[0].doc_id == results_before[0].doc_id
 

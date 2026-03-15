@@ -18,38 +18,38 @@ class TestChunkTableData:
         """Markdownテーブルを行単位でチャンキングする."""
         text = """| 名前 | HP | MP |
 |------|-----|-----|
-| りゅうおう | 200 | 100 |
-| ゾーマ | 500 | 255 |
-| スライム | 8 | 0 |"""
+| 魔王 | 200 | 100 |
+| 闇の王 | 500 | 255 |
+| ゴブリン | 8 | 0 |"""
 
         chunks = chunk_table_data(text)
 
         assert len(chunks) == 3
-        assert chunks[0].entity_name == "りゅうおう"
+        assert chunks[0].entity_name == "魔王"
         assert "HP" in chunks[0].header
         assert "200" in chunks[0].formatted_text
 
-        assert chunks[1].entity_name == "ゾーマ"
+        assert chunks[1].entity_name == "闇の王"
         assert "500" in chunks[1].formatted_text
 
-        assert chunks[2].entity_name == "スライム"
+        assert chunks[2].entity_name == "ゴブリン"
         assert "8" in chunks[2].formatted_text
 
     def test_tab_separated_table_chunks_by_row(self) -> None:
         """タブ区切りテーブルを行単位でチャンキングする."""
-        text = "名前\tHP\tMP\nりゅうおう\t200\t100\nゾーマ\t500\t255"
+        text = "名前\tHP\tMP\n魔王\t200\t100\n闇の王\t500\t255"
 
         chunks = chunk_table_data(text)
 
         assert len(chunks) == 2
-        assert chunks[0].entity_name == "りゅうおう"
-        assert chunks[1].entity_name == "ゾーマ"
+        assert chunks[0].entity_name == "魔王"
+        assert chunks[1].entity_name == "闇の王"
 
     def test_header_included_in_each_chunk(self) -> None:
         """各チャンクにヘッダー情報が含まれる."""
         text = """| 名前 | HP | MP |
 |------|-----|-----|
-| りゅうおう | 200 | 100 |"""
+| 魔王 | 200 | 100 |"""
 
         chunks = chunk_table_data(text)
 
@@ -61,12 +61,12 @@ class TestChunkTableData:
         """フォーマット済みテキストにエンティティと属性が含まれる."""
         text = """| 名前 | HP | MP |
 |------|-----|-----|
-| りゅうおう | 200 | 100 |"""
+| 魔王 | 200 | 100 |"""
 
         chunks = chunk_table_data(text)
 
         formatted = chunks[0].formatted_text
-        assert "りゅうおう" in formatted
+        assert "魔王" in formatted
         assert "HP" in formatted
         assert "200" in formatted
 
@@ -90,9 +90,9 @@ class TestChunkTableData:
         """1行のみのテーブルも処理できる."""
         text = """| 名前 | HP |
 |------|-----|
-| りゅうおう | 200 |"""
+| 魔王 | 200 |"""
 
         chunks = chunk_table_data(text)
 
         assert len(chunks) == 1
-        assert chunks[0].entity_name == "りゅうおう"
+        assert chunks[0].entity_name == "魔王"
