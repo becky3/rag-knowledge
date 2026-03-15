@@ -95,7 +95,7 @@ def main() -> None:
     eval_parser = subparsers.add_parser("evaluate", help="RAG検索精度を評価")
     eval_parser.add_argument(
         "--dataset",
-        default="tests/fixtures/rag_evaluation_dataset.json",
+        required=True,
         help="評価データセットのパス",
     )
     eval_parser.add_argument(
@@ -155,7 +155,7 @@ def main() -> None:
     )
     eval_parser.add_argument(
         "--fixture",
-        default="tests/fixtures/rag_test_documents.json",
+        required=True,
         help="BM25インデックス構築用のテストドキュメントフィクスチャ",
     )
     eval_parser.add_argument(
@@ -198,7 +198,7 @@ def main() -> None:
     )
     init_parser.add_argument(
         "--fixture",
-        default="tests/fixtures/rag_test_documents.json",
+        required=True,
         help="テストドキュメントフィクスチャ",
     )
     init_parser.add_argument(
