@@ -225,7 +225,6 @@ flowchart LR
   - `|===` 直後の最初の行をヘッダー行として扱う
 - 各チャンクにヘッダー行を付加する方式は Markdown モードと同じ
 
-
 ### 検索フロー（準 Agentic Search）
 
 ```mermaid
