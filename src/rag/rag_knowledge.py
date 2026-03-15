@@ -821,7 +821,9 @@ class RAGKnowledgeService:
             RawSearchResults: ベクトル検索とBM25検索の生結果
         """
         # ベクトル検索（閾値フィルタなし: LLMが判断する）
-        where = {"source_type": source_type} if source_type is not None else None
+        where: dict[str, str | int | float | bool] | None = (
+            {"source_type": source_type} if source_type is not None else None
+        )
         vector_results_raw = await self._vector_store.search(
             query,
             n_results=n_results,

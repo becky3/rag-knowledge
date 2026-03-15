@@ -137,7 +137,7 @@ class VectorStore:
         query: str,
         n_results: int = 5,
         similarity_threshold: float | None = None,
-        where: dict[str, str] | None = None,
+        where: dict[str, str | int | float | bool] | None = None,
     ) -> list[RetrievalResult]:
         """クエリに類似するチャンクを検索する.
 
