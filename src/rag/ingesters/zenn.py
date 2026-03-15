@@ -13,7 +13,7 @@ from urllib.parse import urlencode
 
 from bs4 import BeautifulSoup
 
-from ..web_crawler import _RagMarkdownConverter
+from ..markdown import RagMarkdownConverter
 from .base import BaseIngester, IngestedContent
 
 if TYPE_CHECKING:
@@ -101,7 +101,7 @@ class ZennIngester(BaseIngester):
         """
         self._client = client
         self._max_articles = _validate_max_articles(max_articles)
-        self._md_converter = _RagMarkdownConverter(
+        self._md_converter = RagMarkdownConverter(
             heading_style="ATX",
             table_infer_header=True,
             escape_underscores=False,
