@@ -34,6 +34,7 @@ RAG Knowledge は、外部 Web ページから収集した知識をベクトル 
 | Embedding | OpenAI SDK / LM Studio (OpenAI 互換 API) |
 | HTML 解析 | BeautifulSoup4 |
 | HTML→Markdown 変換 | markdownify |
+| PDF テキスト抽出 | pymupdf4llm |
 | 設定管理 | pydantic-settings (.env) |
 
 ## 4. 開発方針

@@ -3,12 +3,14 @@
 仕様: docs/specs/rag-knowledge.md
 独立リポジトリとして動作する。
 
-FastMCP を使用して 7 つの RAG ツールを公開する:
+FastMCP を使用して 9 つの RAG ツールを公開する:
 - rag_search: ナレッジベースから関連情報を検索
 - rag_add: 単一ページをナレッジベースに取り込み
 - rag_crawl: リンク集ページからクロール＆一括取り込み
 - rag_crawl_preview: クロール対象ページのプレビュー（タイトル・URL一覧）
 - rag_crawl_zenn: Zenn 記事の一括取り込み
+- rag_add_local: ローカルファイルをナレッジベースに取り込み
+- rag_crawl_local: ディレクトリ内ファイルを一括取り込み
 - rag_delete: ソースURL指定でナレッジから削除
 - rag_stats: ナレッジベースの統計情報を表示
 """
@@ -36,6 +38,7 @@ with contextlib.redirect_stdout(io.StringIO()):
     from .bm25_index import BM25Index
     from .config import get_settings
     from .embedding.factory import get_embedding_provider
+    from .ingesters.local_file import LocalFileIngester
     from .ingesters.web import WebIngester
     from .ingesters.zenn import ZennIngester
     from .rag_knowledge import RAGKnowledgeService
@@ -437,6 +440,114 @@ async def rag_crawl_zenn(username: str, max_articles: int | None = None) -> str:
     except Exception:
         logger.exception("Failed to crawl Zenn articles for user: %s", username)
         return f"エラー: Zenn 記事の取り込みに失敗しました（ユーザー: {username}）"
+
+
+def _create_local_ingester() -> LocalFileIngester:
+    """設定に基づいて LocalFileIngester を生成する."""
+    settings = get_settings()
+    extensions = [
+        ext.strip()
+        for ext in settings.rag_local_supported_extensions.split(",")
+        if ext.strip()
+    ]
+    return LocalFileIngester(supported_extensions=extensions)
+
+
+@mcp.tool()
+async def rag_add_local(file_path: str) -> str:
+    """[rag-knowledge] RAG add local - ローカルファイルをナレッジベースに取り込む.
+
+    knowledge base, ingest, local file, document.
+    ローカルファイル（Markdown、テキスト、PDF、AsciiDoc）を読み取り、
+    ナレッジベースに取り込む。同一ファイルの再取り込み時は既存の知識を最新に置き換える。
+    stdio モード専用。HTTP モードでは無効。
+
+    Args:
+        file_path: 取り込み対象ファイルのパス（絶対パスまたは相対パス）
+
+    Returns:
+        取り込み結果のメッセージ（ファイル名、チャンク数）
+    """
+    if get_settings().rag_transport == "http":
+        return "エラー: rag_add_local は HTTP モードでは無効です（セキュリティ上の制約）"
+
+    service = await _get_rag_service()
+    ingester = _create_local_ingester()
+
+    try:
+        content = await ingester.fetch_single(file_path)
+        if content is None:
+            return f"エラー: ファイルの取り込みに失敗しました。パス: {file_path}"
+        chunks = await service.ingest_content(content)
+        if chunks <= 0:
+            return f"エラー: ファイルの取り込みに失敗しました。パス: {file_path}"
+        return f"ファイルを取り込みました: {file_path} ({chunks}チャンク)"
+    except ValueError as e:
+        return f"エラー: {e}"
+    except Exception:
+        logger.exception("Failed to add local file: %s", file_path)
+        return f"エラー: ファイルの取り込みに失敗しました。パス: {file_path}"
+
+
+@mcp.tool()
+async def rag_crawl_local(dir_path: str, pattern: str = "**/*") -> str:
+    """[rag-knowledge] RAG crawl local - ディレクトリ内のファイルを一括取り込み.
+
+    knowledge base, ingest, local directory, bulk import, glob.
+    指定ディレクトリ内のファイルを glob パターンで検索し、
+    一括でナレッジベースに取り込む。同一ファイルの再取り込み時は
+    既存の知識を最新に置き換える。
+    stdio モード専用。HTTP モードでは無効。
+
+    Args:
+        dir_path: 取り込み対象ディレクトリのパス（絶対パスまたは相対パス）
+        pattern: glob パターン（デフォルト: ``**/*`` で再帰的に全対応ファイルを検索）
+
+    Returns:
+        取り込み結果のサマリーテキスト（処理ファイル数、総チャンク数、スキップ数、エラー数）
+    """
+    if get_settings().rag_transport == "http":
+        return "エラー: rag_crawl_local は HTTP モードでは無効です（セキュリティ上の制約）"
+
+    service = await _get_rag_service()
+    ingester = _create_local_ingester()
+
+    try:
+        files = ingester.collect_files(dir_path, pattern)
+    except ValueError as e:
+        return f"エラー: {e}"
+
+    if not files:
+        return f"対象ファイルが見つかりませんでした（ディレクトリ: {dir_path}）"
+
+    total_chunks = 0
+    errors = 0
+    skipped = 0
+    ingested_count = 0
+
+    for file in files:
+        try:
+            content = await ingester.fetch_single(str(file))
+            if content is None:
+                skipped += 1
+                continue
+            chunks = await service.ingest_content(content)
+            total_chunks += chunks
+            ingested_count += 1
+        except Exception:
+            logger.exception("Failed to ingest local file: %s", file)
+            errors += 1
+
+    parts = [
+        f"完了: {ingested_count}ファイル / {total_chunks}チャンク",
+    ]
+    if skipped > 0:
+        parts.append(f"スキップ: {skipped}件")
+    if errors > 0:
+        parts.append(f"エラー: {errors}件")
+    parts.append(f"（ディレクトリ: {dir_path}）")
+
+    return " / ".join(parts)
 
 
 @mcp.tool()
