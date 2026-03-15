@@ -3,17 +3,18 @@
 ## 概要
 
 BlueSky（AT Protocol）の投稿を API 経由で取得し、ナレッジベースに取り込むインジェスター。
-`com.atproto.repo.listRecords` API を使用し、指定ユーザーの公開投稿を一括取得する。
+`app.bsky.feed.getAuthorFeed` API を使用し、指定ユーザーの統一タイムライン（投稿・リポスト・リプライ混在）を一括取得する。
 
 スコープ:
 
-- 指定ユーザーの公開投稿の取得（オリジナル投稿 + 引用リポスト）
-- リポストの取得（オプション）
+- 指定ユーザーの統一タイムラインの取得（投稿・引用リポスト・リポスト・リプライ）
+- リポストのフィルタリング（`include_reposts` パラメータによる除外制御）
+- AT URI 指定による個別投稿の取得
 - MCP ツールとしての投稿取り込みインターフェースの提供
 
 スコープ外:
 
-- 他ユーザーの投稿の取得（リポスト元の取得を除く）
+- 他ユーザーの投稿の個別取得（タイムラインに含まれるリポスト・引用を除く）
 - 投稿の作成・編集・削除（読み取り専用）
 - DM（ダイレクトメッセージ）の取得
 - フォロー・いいね等のソーシャルデータの取得
@@ -29,9 +30,9 @@ BlueSky（AT Protocol）の投稿を API 経由で取得し、ナレッジベー
 - 外部 HTTP リクエストは ConstrainedClient（py-common-lib）経由で実行する
 - ハードリミット（コード内定数。設定・引数・環境変数で緩和不可。厳格化は可能）:
   - 操作あたりリクエスト総数上限: 500（ConstrainedClient 共通）
-  - 最低リクエスト間隔: 0.1 秒（ConstrainedClient 共通。ページネーション走査中の各リクエスト間、リポスト元投稿取得間を含む全外部リクエスト間に適用）
+  - 最低リクエスト間隔: 0.1 秒（ConstrainedClient 共通。ページネーション走査中の各リクエスト間を含む全外部リクエスト間に適用）
   - 操作全体タイムアウト: 600 秒（許容範囲 1〜600 秒、ConstrainedClient 共通）
-  - 投稿取得上限: 1000 件（BlueSky インジェスター固有。オリジナル投稿の取得数に適用。リポストは独立走査のため本上限の対象外）
+  - 投稿取得上限: 1000 件（BlueSky インジェスター固有。タイムライン全体に適用。リポストを含む全アイテムが対象）
 - サーキットブレーカー: 5 回連続失敗で操作全体を中断する（ConstrainedClient 共通）
 - バリデーションとクランプの使い分け:
   - **バリデーションエラー（拒否）**: 型不正（非整数など）、0、負数。これらは明らかな誤入力であり、クランプで救済しない
@@ -43,23 +44,21 @@ BlueSky（AT Protocol）の投稿を API 経由で取得し、ナレッジベー
 
 ### AT Protocol API
 
-AT Protocol は分散型プロトコルであり、ユーザーのデータは各 PDS（Personal Data Server）にホストされる。XRPC エンドポイントはユーザーが所属する PDS に対してリクエストを送信する必要がある。
+本インジェスターでは AppView（公開 API ゲートウェイ）経由で BlueSky のデータを取得する。AppView はユーザーのデータを集約して提供する公開 API であり、認証不要でアクセスできる。
 
-本インジェスターでは PDS のベース URL を設定可能とし、デフォルトは `https://bsky.social`（BlueSky 公式 PDS）とする。セルフホスト PDS や他の PDS を利用するユーザーの投稿を取得する場合は、環境変数 `RAG_BLUESKY_PDS_URL` で対象 PDS の URL を指定する。
-
-> **Note**: handle から PDS エンドポイントを自動解決する仕組み（DID Document の `#atproto_pds` サービスエンドポイント参照）は、初期リリースのスコープ外とする。必要に応じて後続フェーズで対応する。
+AppView のベース URL を設定可能とし、デフォルトは `https://public.api.bsky.app`（BlueSky 公式 AppView）とする。環境変数 `RAG_BLUESKY_APPVIEW_URL` で変更可能。
 
 | 連携先 | 用途 | 接続方式 |
 |--------|------|---------|
-| AT Protocol PDS（デフォルト: bsky.social） | 投稿の取得 | REST API（ConstrainedClient 経由） |
+| AT Protocol AppView（デフォルト: public.api.bsky.app） | 投稿の取得 | REST API（ConstrainedClient 経由） |
 
-#### listRecords エンドポイント（投稿取得）
+#### getAuthorFeed エンドポイント（タイムライン取得）
 
 | 項目 | 内容 |
 |------|------|
-| URL | `{PDS_URL}/xrpc/com.atproto.repo.listRecords`（デフォルト: `https://bsky.social/xrpc/com.atproto.repo.listRecords`） |
+| URL | `{APPVIEW_URL}/xrpc/app.bsky.feed.getAuthorFeed`（デフォルト: `https://public.api.bsky.app/xrpc/app.bsky.feed.getAuthorFeed`） |
 | メソッド | GET |
-| 認証 | 不要（公開リポジトリ） |
+| 認証 | 不要（公開 API） |
 | ページサイズ | `limit` パラメータで指定（最大 100） |
 | ページネーション | レスポンスの `cursor` フィールド。存在しない場合は最終ページ |
 
@@ -67,45 +66,60 @@ AT Protocol は分散型プロトコルであり、ユーザーのデータは�
 
 | パラメータ | 型 | 必須 | 説明 |
 |-----------|-----|------|------|
-| `repo` | 文字列 | はい | DID またはハンドル（例: `user.bsky.social`） |
-| `collection` | 文字列 | はい | レコードコレクション。投稿: `app.bsky.feed.post`、リポスト: `app.bsky.feed.repost` |
+| `actor` | 文字列 | はい | ハンドルまたは DID（例: `user.bsky.social`） |
 | `limit` | 整数 | いいえ | 1 ページあたりの取得件数（最大 100） |
 | `cursor` | 文字列 | いいえ | ページネーションカーソル |
-| `reverse` | 真偽値 | いいえ | `true` で古い順に取得 |
 
 レスポンス構造:
 
 | フィールド | 型 | 説明 |
 |-----------|-----|------|
-| `records` | 配列 | レコードオブジェクトの配列 |
+| `feed` | 配列 | フィードアイテムの配列 |
 | `cursor` | 文字列 or 不在 | 次ページのカーソル。最終ページでは存在しない |
 
-レコードオブジェクトの主要フィールド:
+フィードアイテムの主要フィールド:
+
+| フィールド | 型 | 説明 |
+|-----------|-----|------|
+| `post` | オブジェクト | 投稿オブジェクト（投稿データ・投稿者情報を含む） |
+| `reason` | オブジェクト or 不在 | リポスト理由。リポストの場合のみ存在する |
+
+投稿オブジェクト（`post`）の主要フィールド:
 
 | フィールド | 型 | 説明 |
 |-----------|-----|------|
 | `uri` | 文字列 | AT URI（例: `at://did:plc:xxx/app.bsky.feed.post/rkey`） |
 | `cid` | 文字列 | コンテンツ ID |
-| `value` | オブジェクト | レコード本体 |
+| `author` | オブジェクト | 投稿者情報（`did`、`handle`、`displayName` 等） |
+| `record` | オブジェクト | 投稿レコード本体（raw record） |
+| `embed` | オブジェクト or 不在 | 展開済み embed（view 版。`$type` に `#view` サフィックスが付く） |
 
-投稿レコード（`value`）の主要フィールド:
+投稿レコード（`record`）の主要フィールド:
 
 | フィールド | 型 | 説明 |
 |-----------|-----|------|
 | `text` | 文字列 | 投稿テキスト（最大 300 grapheme） |
 | `createdAt` | 文字列 | 投稿日時（ISO 8601） |
-| `embed` | オブジェクト | 添付コンテンツ（画像・動画・リンクカード・引用等） |
+| `embed` | オブジェクト | 添付コンテンツ（raw 形式。`#view` サフィックスなし） |
 | `reply` | オブジェクト | リプライ先情報（リプライの場合） |
+
+リポスト理由（`reason`）:
+
+| フィールド | 型 | 説明 |
+|-----------|-----|------|
+| `$type` | 文字列 | `app.bsky.feed.defs#reasonRepost`（リポストの場合） |
+| `by` | オブジェクト | リポストしたユーザーの情報（`did`、`handle` 等） |
+| `indexedAt` | 文字列 | リポスト日時（ISO 8601） |
 
 #### getRecord エンドポイント（個別レコード取得）
 
-リポスト元投稿の取得に使用する。
+個別投稿取得（`fetch_single`）に使用する。タイムライン一括取得では使用しない。
 
 | 項目 | 内容 |
 |------|------|
-| URL | `{PDS_URL}/xrpc/com.atproto.repo.getRecord`（デフォルト: `https://bsky.social/xrpc/com.atproto.repo.getRecord`） |
+| URL | `{APPVIEW_URL}/xrpc/com.atproto.repo.getRecord`（デフォルト: `https://public.api.bsky.app/xrpc/com.atproto.repo.getRecord`） |
 | メソッド | GET |
-| 認証 | 不要（公開リポジトリ） |
+| 認証 | 不要（AppView がプロキシ） |
 
 クエリパラメータ:
 
@@ -128,51 +142,34 @@ AT Protocol は分散型プロトコルであり、ユーザーのデータは�
 
 | HTTP ステータス | 意味 | 対応 |
 |----------------|------|------|
-| 400 | パラメータ不正 | 該当リポストをスキップ、エラーログ出力 |
-| 404（`RecordNotFound`） | レコードが存在しない（削除済み等） | 該当リポストをスキップ、警告ログ出力 |
-| 502 / 503 / 504 | サーバーエラー | 該当リポストをスキップ、サーキットブレーカーに計上 |
-
-#### リポスト取得
-
-リポストは `collection=app.bsky.feed.repost` で別途取得する。リポストレコードは元投稿への参照（`subject.uri` / `subject.cid`）のみを含み、テキストは含まれない。元投稿のテキストを取得するには上記 `com.atproto.repo.getRecord` での追加リクエストが必要。
-
-リポストレコード（`value`）の主要フィールド:
-
-| フィールド | 型 | 説明 |
-|-----------|-----|------|
-| `subject.uri` | 文字列 | 元投稿の AT URI（例: `at://did:plc:xxx/app.bsky.feed.post/rkey`） |
-| `subject.cid` | 文字列 | 元投稿のコンテンツ ID |
-| `createdAt` | 文字列 | リポスト日時（ISO 8601） |
-
-元投稿の取得時には、`subject.uri` を解析して `repo`（DID）、`collection`、`rkey` を抽出し、`getRecord` エンドポイントに渡す。
+| 400 | パラメータ不正 | エラーログ出力、None を返す |
+| 404（`RecordNotFound`） | レコードが存在しない（削除済み等） | 警告ログ出力、None を返す |
+| 502 / 503 / 504 | サーバーエラー | エラーログ出力、サーキットブレーカーに計上 |
 
 #### API 選定理由
 
-`getAuthorFeed` ではなく `listRecords` を採用する理由:
+`listRecords` ではなく `getAuthorFeed` を採用する理由:
 
-- `getAuthorFeed` は約 1,950 件でカーソルが消失するバグがあり、全件取得が保証できない
-- `listRecords` にはこの制限がなく、公開リポジトリの全レコードを取得可能
-- `listRecords` は raw record を返すため、テキスト抽出には十分な情報を含む
+- `getAuthorFeed` は投稿・リポスト・リプライを時系列の統一タイムラインとして返すため、`max_posts` をタイムライン全体に一貫して適用できる
+- リポストの元投稿データがレスポンスに含まれるため、`getRecord` による追加リクエストが不要
+- 引用リポストの引用元テキストもレスポンスに展開済みで含まれるため、追加リクエストが不要
+- `listRecords` では投稿とリポストが別系統のため `max_posts` の一貫した適用が困難だった
+
+`getAuthorFeed` の既知の制約:
+
+- 約 1,950 件でカーソルが消失するバグがある。ただし `max_posts` のハードリミットが 1000 件のため、本インジェスターの利用範囲では影響しない
 
 ## 想定プロファイル
 
-### rag_crawl_bluesky（BlueSky 投稿一括取り込み・リポストなし）
+### rag_crawl_bluesky（BlueSky 投稿一括取り込み）
+
+`max_posts` はタイムライン全体（リポスト含む）に適用される。
 
 | 項目 | 内容 |
 |------|------|
-| 最悪ケースリクエスト数 | 10（投稿走査: ceil(1000/100)）+ 1000（引用元投稿取得: 全投稿が引用リポストの場合）= 1010。ただしバジェットトラッカー上限 500 で打ち切り。引用のない一般的なケースでは 10 リクエスト程度 |
-| 最悪ケース所要時間 | 500 × 0.1 秒（ハードリミット最小間隔での理論最短）= 50 秒。引用のない一般的なケースではデフォルト設定（1.0 秒間隔）で 10 秒。操作全体タイムアウト 600 秒の範囲内 |
-| 想定エラー率 | AT Protocol API 依存。リトライ機構なし（失敗ページはエラーとして処理中断）。引用元取得失敗時は引用元テキストなしで続行。5 回連続失敗でサーキットブレーカーが発動し操作中断 |
-
-### rag_crawl_bluesky（BlueSky 投稿一括取り込み・リポストあり）
-
-`max_posts` はオリジナル投稿にのみ適用される。リポストは独立に走査し、件数上限は設けない（バジェット上限で制限）。
-
-| 項目 | 内容 |
-|------|------|
-| 最悪ケースリクエスト数 | 10（投稿走査）+ 引用元取得（投稿側）+ リポスト走査（ページ数はリポスト総数依存）+ リポスト元投稿取得（リポスト件数分）+ 引用元取得（リポスト側）。全て合算でバジェットトラッカー上限 500 で打ち切り |
-| 最悪ケース所要時間 | 500 × 0.1 秒（ハードリミット最小間隔での理論最短）= 50 秒。デフォルト設定（1.0 秒間隔）では 500 秒。操作全体タイムアウト 600 秒の範囲内 |
-| 想定エラー率 | リポスト元投稿・引用元投稿の取得失敗時は該当投稿をスキップし処理を続行。5 回連続失敗でサーキットブレーカーが発動し操作中断 |
+| 最悪ケースリクエスト数 | ceil(1000/100) = 10。引用元テキストは `getAuthorFeed` のレスポンスに展開済みのため追加リクエスト不要。バジェットトラッカー上限 500 の範囲内 |
+| 最悪ケース所要時間 | 10 × 0.1 秒（ハードリミット最小間隔での理論最短）= 1 秒。デフォルト設定（1.0 秒間隔）で 10 秒。操作全体タイムアウト 600 秒の範囲内 |
+| 想定エラー率 | AT Protocol API 依存。リトライ機構なし（失敗ページはエラーとして処理中断）。5 回連続失敗でサーキットブレーカーが発動し操作中断 |
 
 ## 安全制約
 
@@ -182,7 +179,7 @@ AT Protocol は分散型プロトコルであり、ユーザーのデータは�
 | 最低リクエスト間隔 | ハードリミット | 0.1 秒 | 引き下げ不可（引き上げ可） |
 | 操作全体タイムアウト | ハードリミット | 600 秒、許容範囲 1〜600 秒 | 引き上げ不可（引き下げ可、下限 1 秒） |
 | サーキットブレーカー閾値 | ハードリミット | 5 回連続失敗 | 引き上げ不可（引き下げ可） |
-| 投稿取得上限 | ハードリミット | 1000 件（オリジナル投稿のみ。リポストは対象外） | 引き上げ不可（引き下げ可） |
+| 投稿取得上限 | ハードリミット | 1000 件（タイムライン全体。リポストを含む全アイテムが対象） | 引き上げ不可（引き下げ可） |
 | 取得投稿数 | 設定値 | 許容範囲 1〜1000、デフォルト 200 | 範囲内で変更可 |
 | リクエストタイムアウト | 設定値 | 許容範囲 1〜120 秒、デフォルト 30 秒 | 範囲内で変更可 |
 | リクエスト間隔 | 設定値 | 許容範囲 0.1〜60 秒、デフォルト 1.0 秒 | 範囲内で変更可 |
@@ -205,8 +202,8 @@ AT Protocol は分散型プロトコルであり、ユーザーのデータは�
 | パラメータ | 型 | 必須 | 説明 |
 |-----------|-----|------|------|
 | `handle` | 文字列 | はい | BlueSky ハンドル（例: `user.bsky.social`）。DID 形式（`did:` 始まり）はバリデーションで拒否する |
-| `max_posts` | 整数 | いいえ | 取得する最大投稿数。デフォルト: 200、許容範囲: 1〜1000 |
-| `include_reposts` | 真偽値 | いいえ | リポストを取得対象に含めるか。デフォルト: `false` |
+| `max_posts` | 整数 | いいえ | 取得する最大投稿数（タイムライン全体に適用）。デフォルト: 200、許容範囲: 1〜1000 |
+| `include_reposts` | 真偽値 | いいえ | タイムラインにリポストを含めるか。`false` の場合、リポスト（`reason.$type` が `app.bsky.feed.defs#reasonRepost` のアイテム）を除外する。デフォルト: `true` |
 
 ツール出力: 取り込み結果のサマリーテキスト（取得投稿数、スキップ数、チャンク数、エラー数）
 
@@ -216,11 +213,11 @@ AT Protocol は分散型プロトコルであり、ユーザーのデータは�
 
 | 環境変数 | 型 | デフォルト | 許容範囲 | 説明 |
 |---------|-----|-----------|---------|------|
-| `RAG_BLUESKY_PDS_URL` | 文字列 | `https://bsky.social` | 有効な HTTPS URL | PDS のベース URL。セルフホスト PDS 等を利用する場合に変更する |
-| `RAG_BLUESKY_MAX_POSTS` | 整数 | 200 | 1〜1000 | 取得する最大投稿数 |
+| `RAG_BLUESKY_APPVIEW_URL` | 文字列 | `https://public.api.bsky.app` | 有効な HTTPS URL | AppView のベース URL |
+| `RAG_BLUESKY_MAX_POSTS` | 整数 | 200 | 1〜1000 | 取得する最大投稿数（タイムライン全体に適用） |
 | `RAG_BLUESKY_REQUEST_TIMEOUT` | 整数 | 30 | 1〜120 | リクエストタイムアウト（秒） |
 | `RAG_BLUESKY_REQUEST_INTERVAL` | 小数 | 1.0 | 0.1〜60 | リクエスト間の最低間隔（秒） |
-| `RAG_BLUESKY_INCLUDE_REPOSTS` | 真偽値 | false | true/false | リポストを取得対象に含めるか |
+| `RAG_BLUESKY_INCLUDE_REPOSTS` | 真偽値 | true | true/false | タイムラインにリポストを含めるか |
 
 ## コンポーネント構成
 
@@ -275,95 +272,91 @@ flowchart TB
 flowchart TD
     START["rag_crawl_bluesky(handle, max_posts, include_reposts)"]
     VALIDATE["入力バリデーション"]
-    DISCOVER["投稿一覧 API を走査"]
-    PAGE["ページ取得（listRecords）"]
+    FEED["タイムライン API を走査"]
+    PAGE["ページ取得（getAuthorFeed）"]
     CHECK_CURSOR{"cursor が存在する?"}
     CHECK_LIMIT{"投稿数上限到達?"}
-    REPOST_CHECK{"include_reposts?"}
-    REPOST_DISCOVER["リポスト一覧 API を走査"]
-    REPOST_FETCH["リポスト元投稿を取得"]
-    EACH_POST{"未処理の投稿がある?"}
+    EACH_ITEM{"未処理のアイテムがある?"}
+    REPOST_FILTER{"リポスト除外?"}
     EXTRACT["テキスト抽出"]
     SKIP_CHECK{"既存 source_id?"}
     INGEST["チャンキング・ベクトル保存"]
     RESULT["結果サマリーを返却"]
 
     START --> VALIDATE
-    VALIDATE --> DISCOVER
-    DISCOVER --> PAGE
+    VALIDATE --> FEED
+    FEED --> PAGE
     PAGE --> CHECK_CURSOR
-    CHECK_CURSOR -->|"いいえ（最終ページ）"| REPOST_CHECK
+    CHECK_CURSOR -->|"いいえ（最終ページ）"| EACH_ITEM
     CHECK_CURSOR -->|"はい"| CHECK_LIMIT
-    CHECK_LIMIT -->|"はい（上限到達）"| REPOST_CHECK
+    CHECK_LIMIT -->|"はい（上限到達）"| EACH_ITEM
     CHECK_LIMIT -->|"いいえ"| PAGE
-    REPOST_CHECK -->|"はい"| REPOST_DISCOVER
-    REPOST_CHECK -->|"いいえ"| EACH_POST
-    REPOST_DISCOVER --> REPOST_FETCH
-    REPOST_FETCH --> EACH_POST
-    EACH_POST -->|"はい"| EXTRACT
-    EACH_POST -->|"いいえ（全件処理済み）"| RESULT
+    EACH_ITEM -->|"はい"| REPOST_FILTER
+    EACH_ITEM -->|"いいえ（全件処理済み）"| RESULT
+    REPOST_FILTER -->|"はい（スキップ）"| EACH_ITEM
+    REPOST_FILTER -->|"いいえ（処理する）"| EXTRACT
     EXTRACT --> SKIP_CHECK
-    SKIP_CHECK -->|"はい（スキップ）"| EACH_POST
+    SKIP_CHECK -->|"はい（スキップ）"| EACH_ITEM
     SKIP_CHECK -->|"いいえ（新規）"| INGEST
-    INGEST --> EACH_POST
+    INGEST --> EACH_ITEM
 ```
 
-### 投稿一覧走査の処理手順
+### タイムライン走査の処理手順
 
-1. `listRecords` API に `collection=app.bsky.feed.post`、`repo={handle}`、`limit=100` でリクエストを送信する
-2. レスポンスから `records` 配列を取得し、各レコードの `uri` から `rkey` を抽出して投稿リストに追加する
-3. 終了判定（以下のいずれかで走査を終了する）:
+1. `getAuthorFeed` API に `actor={handle}`、`limit=100` でリクエストを送信する
+2. レスポンスから `feed` 配列を取得する
+3. 各フィードアイテムを処理する:
+   - `include_reposts` が `false` かつ `reason.$type` が `app.bsky.feed.defs#reasonRepost` の場合、スキップする
+   - `post.uri` から `did` と `rkey` を抽出する
+   - `post.record` からテキストを抽出する
+   - `post.embed`（view 版）から引用元テキストを取得する（引用リポストの場合）
+4. 終了判定（以下のいずれかで走査を終了する）:
    - `cursor` がレスポンスに存在しない（最終ページ）
    - 投稿数上限に到達
    - バジェット上限に到達（ConstrainedClient）
    - サーキットブレーカー発動（ConstrainedClient）
-4. 終了条件を満たさない場合、`cursor` の値でリクエストパラメータを更新し、手順 1 に戻る
-5. 収集した投稿レコードのリストを返す
-
-### リポスト取得の処理手順
-
-`include_reposts` が有効な場合のみ実行する。リポスト走査は `max_posts` の対象外であり、オリジナル投稿とは独立して走査する。リポスト走査の件数上限は設けず、ConstrainedClient のバジェット上限（500 リクエスト）で自然に制限される。
-
-1. `listRecords` API に `collection=app.bsky.feed.repost`、`repo={handle}`、`limit=100` でリクエストを送信する
-2. レスポンスから `records` 配列を取得し、各レコードの `value.subject.uri` を抽出する
-3. 終了判定（以下のいずれかで走査を終了する）:
-   - `cursor` がレスポンスに存在しない（最終ページ）
-   - バジェット上限に到達（ConstrainedClient）
-   - サーキットブレーカー発動（ConstrainedClient）
-4. 各リポストの元投稿を `com.atproto.repo.getRecord` で取得する
-   - 元投稿の取得に失敗した場合は該当リポストをスキップし、次のリポストの処理を続行する
-5. 取得した元投稿を投稿リストに追加する（重複する `source_id` は除外する）
+5. 終了条件を満たさない場合、`cursor` の値でリクエストパラメータを更新し、手順 1 に戻る
+6. 収集した投稿のリストを返す
 
 ### テキスト抽出
 
 投稿は最大 300 文字（grapheme 単位）の短文であり、Markdown 変換は不要。プレーンテキストとして取り込む。
 
+テキスト抽出は `post.record`（raw record）から行う。`post.record` の embed の `$type` に `#view` サフィックスは付かない。
+
 抽出対象フィールド:
 
 | フィールド | パス | 説明 |
 |-----------|------|------|
-| 投稿テキスト | `value.text` | 投稿本文 |
-| 画像 ALT テキスト | `value.embed.images[].alt` | 画像の代替テキスト |
-| 動画 ALT テキスト | `value.embed.alt` | 動画の代替テキスト |
-| リンクカードタイトル | `value.embed.external.title` | 外部リンクのタイトル |
-| リンクカード URL | `value.embed.external.uri` | 外部リンクの URL |
-| リンクカード説明 | `value.embed.external.description` | 外部リンクの説明文 |
+| 投稿テキスト | `record.text` | 投稿本文 |
+| 画像 ALT テキスト | `record.embed.images[].alt` | 画像の代替テキスト |
+| 動画 ALT テキスト | `record.embed.alt` | 動画の代替テキスト |
+| リンクカードタイトル | `record.embed.external.title` | 外部リンクのタイトル |
+| リンクカード URL | `record.embed.external.uri` | 外部リンクの URL |
+| リンクカード説明 | `record.embed.external.description` | 外部リンクの説明文 |
 
 embed の `$type` が `app.bsky.embed.recordWithMedia`（メディア + 引用の複合型）の場合、メディア部分は `embed.media` 配下にネストされる:
 
 | フィールド | パス（recordWithMedia 時） | 説明 |
 |-----------|--------------------------|------|
-| 画像 ALT テキスト | `value.embed.media.images[].alt` | recordWithMedia 時の画像 ALT |
-| 動画 ALT テキスト | `value.embed.media.alt` | recordWithMedia 時の動画 ALT |
-| リンクカードタイトル | `value.embed.media.external.title` | recordWithMedia 時のリンクタイトル |
-| リンクカード URL | `value.embed.media.external.uri` | recordWithMedia 時のリンク URL |
-| リンクカード説明 | `value.embed.media.external.description` | recordWithMedia 時のリンク説明 |
+| 画像 ALT テキスト | `record.embed.media.images[].alt` | recordWithMedia 時の画像 ALT |
+| 動画 ALT テキスト | `record.embed.media.alt` | recordWithMedia 時の動画 ALT |
+| リンクカードタイトル | `record.embed.media.external.title` | recordWithMedia 時のリンクタイトル |
+| リンクカード URL | `record.embed.media.external.uri` | recordWithMedia 時のリンク URL |
+| リンクカード説明 | `record.embed.media.external.description` | recordWithMedia 時のリンク説明 |
 
 #### 引用元投稿テキストの取得
 
-listRecords が返す raw record の `embed.record` は `strongRef`（`uri` + `cid`）のみを含み、引用元の投稿テキストは含まれない。引用元テキストを取得するには `getRecord` による追加リクエストが必要。
+`getAuthorFeed` のレスポンスでは、引用元投稿のテキストが `post.embed`（view 版）に展開済みで含まれる。`getRecord` による追加リクエストは不要。
 
-引用リポスト（`embed.$type` が `app.bsky.embed.record` または `app.bsky.embed.recordWithMedia`）を検出した場合、`embed.record.uri`（recordWithMedia 時は `embed.record.record.uri`）から引用元の AT URI を取得し、`getRecord` で引用元投稿のテキストを取得する。取得失敗時は引用元テキストなしで投稿本文のみを取り込む。
+引用リポスト（`record.embed.$type` が `app.bsky.embed.record` または `app.bsky.embed.recordWithMedia`）を検出した場合、引用元テキストを以下のパスから取得する:
+
+| embed の $type | 引用元テキストのパス |
+|----------------|-------------------|
+| `app.bsky.embed.record` | `post.embed.record.value.text` |
+| `app.bsky.embed.recordWithMedia` | `post.embed.record.record.value.text` |
+
+引用元が投稿以外（スターターパック、フィードジェネレーター等）の場合は `value` キーが存在しない。この場合は引用元テキストなしとして扱う。
 
 抽出対象外:
 
@@ -372,24 +365,27 @@ listRecords が返す raw record の `embed.record` は `strongRef`（`uri` + `c
 抽出したテキストは以下の構造で構築する。各セクションは空行で区切る。該当するセクションがない場合は省略する。
 
 ```
+[Repost: @元投稿者ハンドル]
 投稿テキスト
 
-[画像ALT] 画像の代替テキスト（複数ある場合は改行で連結）
-[動画ALT] 動画の代替テキスト
+[Image ALT] 画像の代替テキスト（複数ある場合は改行で連結）
+[Video ALT] 動画の代替テキスト
 
-[リンクカード]
-タイトル: 外部リンクのタイトル
+[Link Card]
+Title: 外部リンクのタイトル
 URL: 外部リンクの URL
-説明: 外部リンクの説明文
+Description: 外部リンクの説明文
 
-[引用元]
+[Quote]
 引用元の投稿テキスト
 ```
 
+- リポストの場合、先頭に `[Repost: @元投稿者ハンドル]` ヘッダーを付与する。元投稿者のハンドルは `post.author.handle` から取得する
 - 投稿テキストを先頭に配置する（検索ヒット時に最も重要な情報が先頭に来る）
-- 画像/動画 ALT テキストは `[画像ALT]` / `[動画ALT]` プレフィックスで区別する
-- リンクカードは `[リンクカード]` セクション内に構造化する。リンクカードの URL は `embed.external.uri` から取得する
-- 引用元テキストは `[引用元]` セクションに配置する
+- 画像/動画 ALT テキストは `[Image ALT]` / `[Video ALT]` プレフィックスで区別する
+- リンクカードは `[Link Card]` セクション内に構造化する。リンクカードの URL は `embed.external.uri` から取得する
+- 引用元テキストは `[Quote]` セクションに配置する
+- セクションラベルは英語表記とする（LLM による検索・解釈の精度向上のため）
 
 ### チャンキング
 
@@ -405,8 +401,8 @@ BlueSky の投稿は最大 300 文字の短文であり、1 投稿が意味の�
 
 AT URI 形式を使用する: `at://{did}/app.bsky.feed.post/{rkey}`
 
-- `did`: レコードの `uri` フィールドから抽出した DID（例: `did:plc:xxx`）
-- `rkey`: `uri` の末尾パス（`at://did:plc:xxx/app.bsky.feed.post/{rkey}` の `{rkey}` 部分）
+- `did`: `post.author.did` から取得した DID（例: `did:plc:xxx`）。リポストの場合は元投稿者の DID
+- `rkey`: `post.uri` の末尾パス（`at://did:plc:xxx/app.bsky.feed.post/{rkey}` の `{rkey}` 部分）
 
 AT URI を `source_id` に採用する理由:
 
@@ -433,17 +429,17 @@ BlueSky は投稿の編集が不可能なため、既存の `source_id` と一�
 | `source_type` | `"bluesky"` |
 | `metadata` | `handle`、`did`、`rkey`、`url`（`https://bsky.app/profile/{handle}/post/{rkey}`）、`createdAt`、`has_images`、`has_video`、`has_external_link`、`is_reply`、`is_repost` |
 
+`is_repost` の判定: フィードアイテムに `reason` フィールドが存在し、`reason.$type` が `app.bsky.feed.defs#reasonRepost` の場合に `True`。
+
 ## エッジケース
 
 | ケース | 振る舞い |
 |--------|---------|
 | ハンドルが存在しない | API がエラーを返す。エラーメッセージとして「指定されたハンドルが見つかりません」を返す |
-| ユーザーの投稿が 0 件 | 空の `records` 配列。0 件取得として正常終了する |
-| `listRecords` API のレスポンス形式変更 | JSON パースエラーまたは必須フィールド欠落として処理を中断する。エラーの詳細をログ出力する |
+| ユーザーの投稿が 0 件 | 空の `feed` 配列。0 件取得として正常終了する |
+| `getAuthorFeed` API のレスポンス形式変更 | JSON パースエラーまたは必須フィールド欠落として処理を中断する。エラーの詳細をログ出力する |
 | 投稿レコードの `text` フィールドが空 | 他の抽出対象フィールド（ALT テキスト等）がある場合は取り込む。全て空の場合は該当投稿をスキップする |
-| リポスト元投稿の取得失敗（404 等） | 該当リポストをスキップし、他のリポストの処理を続行する。エラーをログ出力する |
-| リポスト元投稿が非公開・削除済み | 取得失敗と同様にスキップする |
-| 同一投稿の重複（オリジナルとリポスト） | `source_id` の一致で重複を検出し、2 件目以降をスキップする |
+| 同一投稿の重複（タイムライン内） | `source_id` の一致で重複を検出し、2 件目以降をスキップする |
 | 既存 source_id との一致 | スキップする（BlueSky は投稿編集不可のため上書き不要） |
 | 取り込み済み投稿が BlueSky 上で削除された | ナレッジベースに残る。削除同期は行わない。ユーザーが `rag_delete` で手動削除する |
 | 大量投稿ユーザー（1000 件超） | 投稿取得上限（1000 件）で打ち切る。取得済み投稿を処理し、上限到達の旨を警告ログに出力する |
@@ -454,7 +450,7 @@ BlueSky は投稿の編集が不可能なため、既存の `source_id` と一�
 | `max_posts` に 0 や負数を指定 | バリデーションエラーとして拒否する（クランプ対象外。制約セクション参照） |
 | `handle` が空文字列 | バリデーションエラーとして拒否する |
 | `handle` に DID 形式（`did:` 始まり）が指定された | バリデーションエラーとして拒否する |
-| 引用元投稿の getRecord 取得失敗 | 引用元テキストなしで投稿本文のみ取り込む。エラーをログ出力する |
+| 引用元が投稿以外（スターターパック等） | 引用元テキストなしとして扱う。エラーにしない |
 | AT Protocol のレート制限（429） | ConstrainedClient のサーキットブレーカーで検出される。連続失敗として計上し、閾値超過で操作を中断する |
 
 ## 関連ドキュメント
