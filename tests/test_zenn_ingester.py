@@ -435,7 +435,7 @@ class TestZennIngesterFetchSingle:
     async def test_fetch_single_html_extraction(
         self, ingester: ZennIngester, mock_client: MagicMock
     ) -> None:
-        """HTML タグが正しく除去されること."""
+        """HTML が Markdown 形式に変換され、不要タグが除去されること."""
         mock_client.get.return_value = _make_article_detail_response(
             body_html=(
                 "<h1>Title</h1>"
@@ -451,9 +451,92 @@ class TestZennIngesterFetchSingle:
         assert result is not None
         assert "alert" not in result.text
         assert ".hidden" not in result.text
-        assert "Title" in result.text
+        # 見出しが Markdown 形式で保持されること
+        assert "# Title" in result.text
         assert "Paragraph 1" in result.text
         assert "Paragraph 2" in result.text
+
+    async def test_fetch_single_markdown_heading_structure(
+        self, ingester: ZennIngester, mock_client: MagicMock
+    ) -> None:
+        """複数レベルの Markdown 見出し構造が保持されること."""
+        mock_client.get.return_value = _make_article_detail_response(
+            body_html=(
+                "<h2>Section 1</h2>"
+                "<p>Content of section 1</p>"
+                "<h2>Section 2</h2>"
+                "<p>Content of section 2</p>"
+                "<h3>Subsection 2.1</h3>"
+                "<p>Content of subsection 2.1</p>"
+            ),
+        )
+
+        result = await ingester.fetch_single("test-article")
+
+        assert result is not None
+        assert "## Section 1" in result.text
+        assert "## Section 2" in result.text
+        assert "### Subsection 2.1" in result.text
+
+    async def test_fetch_single_markdown_table_structure(
+        self, ingester: ZennIngester, mock_client: MagicMock
+    ) -> None:
+        """テーブル構造が Markdown 形式で保持されること."""
+        mock_client.get.return_value = _make_article_detail_response(
+            body_html=(
+                "<table>"
+                "<thead><tr><th>Name</th><th>Value</th></tr></thead>"
+                "<tbody><tr><td>A</td><td>1</td></tr></tbody>"
+                "</table>"
+            ),
+        )
+
+        result = await ingester.fetch_single("test-article")
+
+        assert result is not None
+        assert "| Name | Value |" in result.text
+        assert "| --- | --- |" in result.text
+        assert "| A | 1 |" in result.text
+
+    async def test_fetch_single_markdown_link_url_removal(
+        self, ingester: ZennIngester, mock_client: MagicMock
+    ) -> None:
+        """リンク URL が除去され、テキストのみ保持されること."""
+        mock_client.get.return_value = _make_article_detail_response(
+            body_html=(
+                "<p>See <a href=\"https://example.com/page\">this link</a> for details.</p>"
+                "<p>Visit <a href=\"https://example.com/other\">example site</a>.</p>"
+            ),
+        )
+
+        result = await ingester.fetch_single("test-article")
+
+        assert result is not None
+        assert "this link" in result.text
+        assert "example site" in result.text
+        assert "https://example.com/page" not in result.text
+        assert "https://example.com/other" not in result.text
+
+    async def test_fetch_single_markdown_image_url_removal(
+        self, ingester: ZennIngester, mock_client: MagicMock
+    ) -> None:
+        """画像 URL が除去され、alt テキストのみ保持されること."""
+        mock_client.get.return_value = _make_article_detail_response(
+            body_html=(
+                "<p>Here is an image:</p>"
+                '<img src="https://example.com/image.png" alt="example image">'
+                "<p>And another:</p>"
+                '<img src="https://example.com/photo.jpg" alt="">'
+            ),
+        )
+
+        result = await ingester.fetch_single("test-article")
+
+        assert result is not None
+        assert "example image" in result.text
+        assert "https://example.com/image.png" not in result.text
+        assert "https://example.com/photo.jpg" not in result.text
+
 
     async def test_fetch_single_topics_parsing(
         self, ingester: ZennIngester, mock_client: MagicMock
