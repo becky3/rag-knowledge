@@ -587,14 +587,20 @@ class RAGKnowledgeService:
     async def ingest_content(self, content: IngestedContent) -> int:
         """IngestedContent をチャンキングして保存する.
 
+        content.skip_chunking が True の場合、チャンキングをスキップし
+        テキスト全体を 1 チャンクとして保存する。
+
         Args:
             content: 取り込み済みコンテンツ
 
         Returns:
             保存されたチャンク数
         """
-        # テキストをスマートチャンキング
-        chunks = self._smart_chunk(content.text)
+        # テキストをスマートチャンキング（skip_chunking 時は 1 チャンクで格納）
+        if content.skip_chunking:
+            chunks = [content.text]
+        else:
+            chunks = self._smart_chunk(content.text)
 
         if not chunks:
             logger.info("No chunks generated for content: %s", content.source_id)
