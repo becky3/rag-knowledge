@@ -1,8 +1,8 @@
 """RAG MCPサーバーのテスト.
 
 仕様: docs/specs/rag-knowledge.md
-7つのRAGツール（rag_search, rag_add, rag_crawl, rag_crawl_preview,
-rag_crawl_zenn, rag_delete, rag_stats）が
+9つのRAGツール（rag_search, rag_add, rag_crawl, rag_crawl_preview,
+rag_crawl_zenn, rag_add_local, rag_crawl_local, rag_delete, rag_stats）が
 MCPサーバーとして公開されていることを検証する。
 """
 
@@ -29,8 +29,8 @@ def _reset_rag_global_state() -> None:
 
 
 @pytest.mark.asyncio
-async def test_rag_server_exposes_seven_tools() -> None:
-    """RAG MCPサーバーが7つのツールを公開すること."""
+async def test_rag_server_exposes_nine_tools() -> None:
+    """RAG MCPサーバーが9つのツールを公開すること."""
     mod = import_module("rag.server")
     server = mod.mcp
 
@@ -39,19 +39,20 @@ async def test_rag_server_exposes_seven_tools() -> None:
 
     expected = {
         "rag_search", "rag_add", "rag_crawl", "rag_crawl_preview",
-        "rag_crawl_zenn", "rag_delete", "rag_stats",
+        "rag_crawl_zenn", "rag_add_local", "rag_crawl_local",
+        "rag_delete", "rag_stats",
     }
     assert tool_names == expected, f"Expected {expected}, got {tool_names}"
 
 
 @pytest.mark.asyncio
 async def test_rag_server_tool_count() -> None:
-    """RAG MCPサーバーのツール数が正確に7であること."""
+    """RAG MCPサーバーのツール数が正確に9であること."""
     mod = import_module("rag.server")
     server = mod.mcp
 
     tools = await server.list_tools()
-    assert len(tools) == 7
+    assert len(tools) == 9
 
 
 class TestRagSearchOutput:
