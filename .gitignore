@@ -216,9 +216,6 @@ bm25_index/
 # Evaluation reports
 reports/
 
-# Test fixtures (copyrighted content)
-tests/fixtures/
-
 # Claude Code local settings
 .claude/settings.local.json
 .claude/*.lock
