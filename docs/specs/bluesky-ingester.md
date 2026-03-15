@@ -346,6 +346,7 @@ flowchart TD
 | 画像 ALT テキスト | `value.embed.images[].alt` | 画像の代替テキスト |
 | 動画 ALT テキスト | `value.embed.alt` | 動画の代替テキスト |
 | リンクカードタイトル | `value.embed.external.title` | 外部リンクのタイトル |
+| リンクカード URL | `value.embed.external.uri` | 外部リンクの URL |
 | リンクカード説明 | `value.embed.external.description` | 外部リンクの説明文 |
 
 embed の `$type` が `app.bsky.embed.recordWithMedia`（メディア + 引用の複合型）の場合、メディア部分は `embed.media` 配下にネストされる:
@@ -355,6 +356,7 @@ embed の `$type` が `app.bsky.embed.recordWithMedia`（メディア + 引用�
 | 画像 ALT テキスト | `value.embed.media.images[].alt` | recordWithMedia 時の画像 ALT |
 | 動画 ALT テキスト | `value.embed.media.alt` | recordWithMedia 時の動画 ALT |
 | リンクカードタイトル | `value.embed.media.external.title` | recordWithMedia 時のリンクタイトル |
+| リンクカード URL | `value.embed.media.external.uri` | recordWithMedia 時のリンク URL |
 | リンクカード説明 | `value.embed.media.external.description` | recordWithMedia 時のリンク説明 |
 
 #### 引用元投稿テキストの取得
@@ -367,7 +369,33 @@ listRecords が返す raw record の `embed.record` は `strongRef`（`uri` + `c
 
 - 動画キャプション（VTT）
 
-抽出したテキストはフィールド間を改行で連結し、1 つのプレーンテキストとして構築する。引用元テキストには `[引用元]` プレフィックスを付加し、投稿本文と区別できるようにする。
+抽出したテキストは以下の構造で構築する。各セクションは空行で区切る。該当するセクションがない場合は省略する。
+
+```
+投稿テキスト
+
+[画像ALT] 画像の代替テキスト（複数ある場合は改行で連結）
+[動画ALT] 動画の代替テキスト
+
+[リンクカード]
+タイトル: 外部リンクのタイトル
+URL: 外部リンクの URL
+説明: 外部リンクの説明文
+
+[引用元]
+引用元の投稿テキスト
+```
+
+- 投稿テキストを先頭に配置する（検索ヒット時に最も重要な情報が先頭に来る）
+- 画像/動画 ALT テキストは `[画像ALT]` / `[動画ALT]` プレフィックスで区別する
+- リンクカードは `[リンクカード]` セクション内に構造化する。リンクカードの URL は `embed.external.uri` から取得する
+- 引用元テキストは `[引用元]` セクションに配置する
+
+### チャンキング
+
+BlueSky の投稿は最大 300 文字の短文であり、1 投稿が意味の最小単位である。チャンカーによる文字数ベースの分割は URL の分断やコンテキストの喪失を招くため、チャンキングをスキップし 1 投稿 = 1 チャンクで格納する。
+
+`IngestedContent` の `skip_chunking` フラグを `True` に設定することで、`RAGKnowledgeService.ingest_content` はチャンキングをスキップし、テキスト全体を 1 チャンクとして保存する。
 
 ### スレッドの扱い
 
