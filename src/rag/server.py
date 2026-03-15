@@ -145,6 +145,8 @@ def _build_rag_service() -> RAGKnowledgeService:
 
 # --- MCP ツール定義 ---
 
+_VALID_SOURCE_TYPES: frozenset[str] = frozenset({"web", "zenn", "bluesky", "local"})
+
 
 @mcp.tool()
 async def rag_search(
@@ -172,7 +174,6 @@ async def rag_search(
         RAG_MAX_RESPONSE_CHARS 設定時、累積文字数を追跡し上限到達後はページ全文取得を
         早期打ち切りする。末尾にトランケート通知が付記される。未設定時は無制限。
     """
-    _VALID_SOURCE_TYPES = {"web", "zenn", "bluesky", "local"}
     if source_type is not None and source_type not in _VALID_SOURCE_TYPES:
         valid = ", ".join(sorted(_VALID_SOURCE_TYPES))
         return f"無効な source_type: {source_type!r}（有効値: {valid}）"

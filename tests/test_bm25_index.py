@@ -136,16 +136,19 @@ class TestBM25Index:
         docs = [
             ("doc1", "冒険の旅に出る勇者の物語", "source1", "web"),
             ("doc2", "冒険と魔法の技術記事", "source2", "zenn"),
-            ("doc3", "冒険についての投稿", "source3", "bluesky"),
+            ("doc3", "冒険についての投稿メモ", "source3", "bluesky"),
         ]
         index.add_documents(docs)
 
-        # web のみ
-        results = index.search("冒険", n_results=10, source_type="web")
+        # web のみ（「勇者」は web のドキュメントにのみ含まれる）
+        results = index.search("勇者", n_results=10, source_type="web")
         assert len(results) > 0
-        assert all(
-            index._doc_source_type_map[r.doc_id] == "web" for r in results
-        )
+        assert all("勇者" in r.text for r in results)
+
+        # zenn のみ（「技術記事」は zenn のドキュメントにのみ含まれる）
+        results = index.search("冒険", n_results=10, source_type="zenn")
+        assert len(results) > 0
+        assert all("技術記事" in r.text for r in results)
 
         # 存在しない source_type → 空
         results = index.search("冒険", n_results=10, source_type="nonexistent")
