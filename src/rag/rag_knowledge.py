@@ -851,6 +851,20 @@ class RAGKnowledgeService:
             bm25_results=bm25_items,
         )
 
+    async def source_exists(self, source_url: str) -> bool:
+        """ソースURLに対応するチャンクが存在するか確認する（軽量版）.
+
+        本文を読み出さず IDs の有無のみで判定するため、
+        get_full_page_text よりも低コストで存在確認できる。
+
+        Args:
+            source_url: 確認するソースURL
+
+        Returns:
+            チャンクが 1 件以上存在すれば True
+        """
+        return await self._vector_store.source_exists(source_url)
+
     async def get_full_page_text(self, source_url: str) -> str:
         """ソースURLのページ全文を返す.
 
