@@ -100,6 +100,9 @@ class RAGSettings(BaseSettings):
     rag_zenn_request_timeout: int = Field(default=30, ge=1, le=120)
     rag_zenn_request_interval: float = Field(default=1.0, ge=0.1, le=60.0)
 
+    # ローカルファイルインジェスター
+    rag_local_supported_extensions: str = ".md,.txt,.pdf,.adoc"
+
     # デバッグ
     rag_debug_log_enabled: bool = False
 
