@@ -347,7 +347,7 @@ def _build_bm25_index_from_fixture(
         fixture_data = json.load(f)
 
     bm25_index = BM25Index(k1=k1, b=b, persist_dir=persist_dir)
-    documents: list[tuple[str, str, str]] = []
+    documents: list[tuple[str, str, str, str]] = []
     for doc in fixture_data.get("documents", []):
         source_url = doc.get("source_url", "")
         content = doc.get("content", "")
@@ -357,7 +357,7 @@ def _build_bm25_index_from_fixture(
         normalized_url, _ = urldefrag(source_url)
         url_hash = hashlib.sha256(normalized_url.encode()).hexdigest()[:16]
         for i, chunk in enumerate(chunks):
-            documents.append((f"{url_hash}_{i}", chunk, normalized_url))
+            documents.append((f"{url_hash}_{i}", chunk, normalized_url, "web"))
 
     added = bm25_index.add_documents(documents)
     logger.info("BM25 index built with %d chunks from fixture", added)
