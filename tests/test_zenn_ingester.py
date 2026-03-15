@@ -537,7 +537,6 @@ class TestZennIngesterFetchSingle:
         assert "https://example.com/image.png" not in result.text
         assert "https://example.com/photo.jpg" not in result.text
 
-
     async def test_fetch_single_topics_parsing(
         self, ingester: ZennIngester, mock_client: MagicMock
     ) -> None:
