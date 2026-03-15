@@ -56,8 +56,8 @@
 
 | ツール | 入力 | 振る舞い |
 |--------|------|---------|
-| rag_add_local | file_path | 単一ローカルファイルを読み取り、ナレッジベースに取り込む。同一ファイルの再取り込み時は `source_id`（ファイルの絶対パス）の一致で検出し、既存の知識を最新に置き換える |
-| rag_crawl_local | dir_path、pattern（任意） | 指定ディレクトリ内のファイルを glob パターンで検索し、一括でナレッジベースに取り込む。同一ファイルの再取り込み時は `source_id`（ファイルの絶対パス）の一致で検出し、既存の知識を最新に置き換える |
+| rag_add_local | file_path | 単一ローカルファイルを読み取り、ナレッジベースに取り込む。同一ファイルの再取り込み時は `source_id`（file URI）の一致で検出し、既存の知識を最新に置き換える |
+| rag_crawl_local | dir_path、pattern（任意） | 指定ディレクトリ内のファイルを glob パターンで検索し、一括でナレッジベースに取り込む。同一ファイルの再取り込み時は `source_id`（file URI）の一致で検出し、既存の知識を最新に置き換える |
 
 #### rag_add_local パラメータ
 
@@ -91,10 +91,10 @@
 
 ### source_id
 
-ファイルの絶対パス（`Path.resolve()` で正規化済み）を `source_id` として使用する。
+ファイルの絶対パスを `Path.as_uri()` で file URI に変換した文字列を `source_id` として使用する。file URI を使用することで、パス中の `#` 等の特殊文字が適切にエスケープされ、下流の `urldefrag()` による誤った正規化を防止する。
 
-- 例: `/home/user/documents/resume.md`（Linux）、`C:\Users\user\documents\resume.md`（Windows）
-- 相対パスで指定された場合も、内部で絶対パスに変換してから `source_id` とする
+- 例: `file:///home/user/documents/resume.md`（Linux）、`file:///C:/Users/user/documents/resume.md`（Windows）
+- 相対パスで指定された場合も、内部で絶対パスに変換してから file URI に変換する
 - 同一ファイルの再取り込み時は、`source_id` の一致で既存チャンクを削除→再登録する（既存インジェスターと同一パターン）
 
 ### 設定項目
@@ -206,7 +206,7 @@ flowchart TD
    - `.adoc`: ファイル内容をそのまま読み取る（AsciiDoc 構文はチャンカーの AsciiDoc モードで処理される）
    - その他（設定で追加された拡張子）: プレーンテキストとして読み取る
 6. IngestedContent を構築する:
-   - `source_id`: 正規化済み絶対パス
+   - `source_id`: file URI（`Path.as_uri()` で生成）
    - `title`: ファイル名（拡張子なし）
    - `text`: 抽出済みテキスト
    - `source_type`: `"local"`
@@ -245,7 +245,7 @@ flowchart TD
 | PDF の変換に失敗 | 該当ファイルをスキップし、エラーをログ出力する |
 | glob パターンがファイル数上限を超過 | パスの辞書順でソートした上で先頭 100 件にクランプし、警告ログを出力する。超過分は処理しない |
 | glob パターンに一致するファイルが 0 件 | 0 件処理として正常終了する |
-| 同一ファイルの再取り込み | `source_id`（絶対パス）の一致で検出し、既存データを最新に置き換える |
+| 同一ファイルの再取り込み | `source_id`（file URI）の一致で検出し、既存データを最新に置き換える |
 | ファイルが指定されたがディレクトリだった | バリデーションエラーとして拒否する（`rag_add_local` の場合） |
 | ディレクトリが指定されたがファイルだった | バリデーションエラーとして拒否する（`rag_crawl_local` の場合） |
 | `pattern` に `..` が含まれる、または `Path(pattern).is_absolute()` が真 | バリデーションエラーとして拒否する |
