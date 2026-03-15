@@ -9,7 +9,7 @@ MCP サーバーとして独立動作し、10 個のツールを提供する。
 
 スコープ:
 
-- 知識の取り込み（クロール・単一ページ追加・Zenn 記事取り込み・BlueSky 投稿取り込み・ローカルファイル取り込み）
+- 知識の取り込み（クロール・単一ページ追加・Zenn 記事取り込み・BlueSky 投稿取り込み・ドキュメントファイル取り込み）
 - 知識の検索（ベクトル検索・BM25 キーワード検索）
 - 知識の管理（統計表示・削除）
 - クロールプレビュー（対象ページの事前確認）
@@ -89,8 +89,8 @@ MCP サーバーが公開する 10 個のツール。
 | rag_crawl_preview | URL、パターン | リンク集ページからクロール対象ページのタイトルと URL の一覧を返す。取り込みは行わない |
 | rag_crawl_zenn | username、max_articles（任意） | 指定ユーザーの Zenn 記事を API 経由で取得し、ナレッジベースに取り込む。同一記事の再取り込み時は `source_id`（記事の公開 URL）の一致で検出し、既存の知識を最新に置き換える |
 | rag_crawl_bluesky | handle、max_posts（任意）、include_reposts（任意） | 指定ユーザーの BlueSky 投稿を AT Protocol API 経由で取得し、ナレッジベースに取り込む。max_posts はタイムライン全体（リポスト含む）に適用。BlueSky は投稿編集不可のため、既存 `source_id` と一致する投稿はスキップする（上書き不要） |
-| rag_add_local | file_path | 単一ローカルファイルを読み取り、ナレッジベースに取り込む。同一ファイルの再取り込み時は `source_id`（file URI）の一致で検出し、既存の知識を最新に置き換える |
-| rag_crawl_local | dir_path、pattern（任意） | 指定ディレクトリ内のファイルを glob パターンで検索し、一括でナレッジベースに取り込む。同一ファイルの再取り込み時は `source_id`（file URI）の一致で検出し、既存の知識を最新に置き換える |
+| rag_add_document | file_path | 単一ドキュメントファイルを読み取り、ナレッジベースに取り込む。同一ファイルの再取り込み時は `source_id`（file URI）の一致で検出し、既存の知識を最新に置き換える |
+| rag_crawl_documents | dir_path、pattern（任意） | 指定ディレクトリ内のドキュメントファイルを glob パターンで検索し、一括でナレッジベースに取り込む。同一ファイルの再取り込み時は `source_id`（file URI）の一致で検出し、既存の知識を最新に置き換える |
 | rag_delete | URL | ソース URL 指定でナレッジを削除する |
 | rag_stats | なし | 統計情報（総チャンク数、ソース URL 数）と蓄積データ概要（ドメイン別ソース URL 一覧・タイトル）を返す。表示件数上限は `RAG_STATS_MAX_SOURCES` で制御する |
 
@@ -193,7 +193,7 @@ flowchart LR
 | `title` | str | コンテンツのタイトル |
 | `chunk_index` | int | チャンクの連番（0 始まり） |
 | `crawled_at` | str | 取り込みタイムスタンプ（ISO 8601） |
-| `source_type` | str | データソース種別（`"web"`, `"zenn"`, `"bluesky"`, `"local"`） |
+| `source_type` | str | データソース種別（`"web"`, `"zenn"`, `"bluesky"`, `"document"`） |
 
 #### カスタムフィールド
 
@@ -348,4 +348,4 @@ flowchart LR
 
 - [zenn-ingester.md](zenn-ingester.md) — Zenn インジェスター仕様
 - [bluesky-ingester.md](bluesky-ingester.md) — BlueSky インジェスター仕様
-- [local-file-ingester.md](local-file-ingester.md) — ローカルファイルインジェスター仕様
+- [document-ingester.md](document-ingester.md) — ドキュメントインジェスター仕様

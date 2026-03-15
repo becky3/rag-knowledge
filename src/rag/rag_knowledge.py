@@ -16,14 +16,14 @@ from urllib.parse import urldefrag
 from .chunker import chunk_text
 from .content_detector import ContentType, detect_content_type
 from .heading_chunker import chunk_by_headings
-from .ingesters.base import IngestedContent
+from .ingesters.base_ingester import IngestedContent
 from .table_chunker import chunk_table_data
 from .vector_store import DocumentChunk, VectorStore
 
 if TYPE_CHECKING:
     from .bm25_index import BM25Index
     from .hybrid_search import HybridSearchEngine
-    from .ingesters.web import WebIngester
+    from .ingesters.web_ingester import WebIngester
     from .safe_browsing import SafeBrowsingClient
     from py_common_lib.httpx import ConstrainedClient
     from .web_crawler import CrawlPreviewPage, CrawledPage, WebCrawler

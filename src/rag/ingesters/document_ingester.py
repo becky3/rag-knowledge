@@ -1,7 +1,7 @@
-"""ローカルファイルインジェスター: ローカルファイルを読み取りナレッジベースに取り込む
+"""ドキュメントインジェスター: テキストドキュメントを読み取りナレッジベースに取り込む
 
-仕様: docs/specs/local-file-ingester.md
-Issue: #184
+仕様: docs/specs/document-ingester.md
+Issue: #184, #198
 """
 
 from __future__ import annotations
@@ -9,7 +9,7 @@ from __future__ import annotations
 import logging
 from pathlib import Path
 
-from .base import BaseIngester, IngestedContent
+from .base_ingester import BaseIngester, IngestedContent
 
 logger = logging.getLogger(__name__)
 
@@ -18,13 +18,13 @@ MAX_FILES_HARD_LIMIT = 100
 """ディレクトリ一括取り込み時のファイル数上限"""
 
 
-class LocalFileIngester(BaseIngester):
-    """ローカルファイル取り込み用インジェスター.
+class DocumentIngester(BaseIngester):
+    """ドキュメント取り込み用インジェスター.
 
-    仕様: docs/specs/local-file-ingester.md
+    仕様: docs/specs/document-ingester.md
 
-    ローカルファイルシステムからドキュメントを読み取り、
-    IngestedContent に変換する。BaseIngester を継承する。
+    テキストドキュメント（Markdown、プレーンテキスト、PDF、AsciiDoc）を
+    読み取り、IngestedContent に変換する。BaseIngester を継承する。
     """
 
     def __init__(
@@ -32,7 +32,7 @@ class LocalFileIngester(BaseIngester):
         *,
         supported_extensions: list[str] | None = None,
     ) -> None:
-        """LocalFileIngester を初期化する.
+        """DocumentIngester を初期化する.
 
         Args:
             supported_extensions: 対応ファイル拡張子のリスト
@@ -119,7 +119,7 @@ class LocalFileIngester(BaseIngester):
             title=path.stem,
             text=text,
             ingested_at=IngestedContent.now_iso(),
-            source_type="local",
+            source_type="document",
             metadata={
                 "file_extension": path.suffix.lower(),
                 "file_size_bytes": file_size,

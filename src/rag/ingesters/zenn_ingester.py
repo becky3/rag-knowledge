@@ -14,7 +14,7 @@ from urllib.parse import urlencode
 from bs4 import BeautifulSoup
 
 from ..markdown import RagMarkdownConverter
-from .base import BaseIngester, IngestedContent
+from .base_ingester import BaseIngester, IngestedContent
 
 if TYPE_CHECKING:
     from py_common_lib.httpx import ConstrainedClient

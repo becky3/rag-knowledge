@@ -1,8 +1,8 @@
-# ローカルファイルインジェスター
+# ドキュメントインジェスター
 
 ## 概要
 
-ローカルファイルシステム上のドキュメントを読み取り、ナレッジベースに取り込むインジェスター。
+テキストドキュメントを読み取り、ナレッジベースに取り込むインジェスター。
 単一ファイルの追加とディレクトリ一括取り込みの 2 つの操作を提供する。
 
 スコープ:
@@ -21,12 +21,12 @@
 
 ## 背景
 
-- 既存のインジェスター（WebIngester、ZennIngester）は外部 Web リソースからの取り込みに特化しており、ローカルファイル（職務経歴書、学習ノート等）を直接取り込む手段がない
+- 既存のインジェスター（WebIngester、ZennIngester）は外部 Web リソースからの取り込みに特化しており、テキストドキュメント（職務経歴書、学習ノート等）を直接取り込む手段がない
 - BaseIngester / IngestedContent の共通インターフェースに準拠し、プラグイン構造（#109）の一環として設計する
 
 ## 制約
 
-- ファイル読み取りはローカルファイルシステムのみ対象とする（外部 HTTP リクエストは発生しない）
+- 現時点ではローカルファイルシステムのみ対象とする（外部 HTTP リクエストは発生しない）
 - パストラバーサル対策: ファイルパスを `Path.resolve()` で正規化し、`..` を含むパスの解決後に実際のファイルシステムパスとして扱う
 - アクセス許可ディレクトリの制限は設けない（OS レベルのファイル権限に委ねる）
   - **前提**: 本機能は stdio モードでの信頼済みローカル環境での利用を想定する。HTTP モードで外部公開する場合は、認証・ネットワーク制御等の対策が必須である。HTTP モードでの本ツールの有効化は明示的な opt-in とし、デフォルトでは無効とする
@@ -50,16 +50,14 @@
 
 ### MCP ツール
 
-既存の `rag_add`（URL ベースの単一ページ追加）および `rag_crawl`（URL ベースの一括クロール）とは独立した新規ツールとして追加する。ローカルファイルはファイルシステムからの読み取りであり、Web クロールとは取得方式・制約が異なるため分離する。
-
-> **Note**: 本仕様書は設計先行（`docs(pre-impl)`）で作成している。後続の実装フェーズで `rag-knowledge.md` のツール数・ツール一覧も併せて更新する。
+既存の `rag_add`（URL ベースの単一ページ追加）および `rag_crawl`（URL ベースの一括クロール）とは独立した新規ツールとして追加する。ドキュメントファイルはファイルシステムからの読み取りであり、Web クロールとは取得方式・制約が異なるため分離する。
 
 | ツール | 入力 | 振る舞い |
 |--------|------|---------|
-| rag_add_local | file_path | 単一ローカルファイルを読み取り、ナレッジベースに取り込む。同一ファイルの再取り込み時は `source_id`（file URI）の一致で検出し、既存の知識を最新に置き換える |
-| rag_crawl_local | dir_path、pattern（任意） | 指定ディレクトリ内のファイルを glob パターンで検索し、一括でナレッジベースに取り込む。同一ファイルの再取り込み時は `source_id`（file URI）の一致で検出し、既存の知識を最新に置き換える |
+| rag_add_document | file_path | 単一ドキュメントファイルを読み取り、ナレッジベースに取り込む。同一ファイルの再取り込み時は `source_id`（file URI）の一致で検出し、既存の知識を最新に置き換える |
+| rag_crawl_documents | dir_path、pattern（任意） | 指定ディレクトリ内のドキュメントファイルを glob パターンで検索し、一括でナレッジベースに取り込む。同一ファイルの再取り込み時は `source_id`（file URI）の一致で検出し、既存の知識を最新に置き換える |
 
-#### rag_add_local パラメータ
+#### rag_add_document パラメータ
 
 | パラメータ | 型 | 必須 | 説明 |
 |-----------|-----|------|------|
@@ -67,7 +65,7 @@
 
 ツール出力: 取り込み結果のサマリーテキスト（ファイル名、チャンク数）
 
-#### rag_crawl_local パラメータ
+#### rag_crawl_documents パラメータ
 
 | パラメータ | 型 | 必須 | 説明 |
 |-----------|-----|------|------|
@@ -87,7 +85,7 @@
 | `.pdf` | `pymupdf4llm` で Markdown に変換して取り込む |
 | `.adoc` | AsciiDoc としてそのまま取り込む |
 
-対応拡張子は環境変数 `RAG_LOCAL_SUPPORTED_EXTENSIONS` で追加可能（セクション「設定項目」参照）。追加した拡張子のファイルはプレーンテキストとして取り込む。
+対応拡張子は環境変数 `RAG_DOCUMENT_SUPPORTED_EXTENSIONS` で追加可能（セクション「設定項目」参照）。追加した拡張子のファイルはプレーンテキストとして取り込む。
 
 ### source_id
 
@@ -101,11 +99,11 @@
 
 | 環境変数 | 型 | デフォルト | 説明 |
 |---------|-----|-----------|------|
-| `RAG_LOCAL_SUPPORTED_EXTENSIONS` | 文字列 | `".md,.txt,.pdf,.adoc"` | 対応ファイル拡張子のカンマ区切りリスト。先頭にドット（`.`）を含める |
+| `RAG_DOCUMENT_SUPPORTED_EXTENSIONS` | 文字列 | `".md,.txt,.pdf,.adoc"` | 対応ファイル拡張子のカンマ区切りリスト。先頭にドット（`.`）を含める |
 
 ## コンポーネント構成
 
-### ローカルファイルインジェスターの位置付け
+### ドキュメントインジェスターの位置付け
 
 ```mermaid
 flowchart TB
@@ -121,28 +119,28 @@ flowchart TB
     subgraph Ingesters["インジェスター"]
         WING["WebIngester"]
         ZING["ZennIngester"]
-        LING["LocalFileIngester"]
+        DING["DocumentIngester"]
     end
 
-    FS["ローカルファイルシステム"]
+    FS["ファイルシステム"]
 
     CLIENT -->|stdio / http| TOOLS
     TOOLS --> Service
     Service --> Ingesters
-    LING --> FS
+    DING --> FS
 ```
 
 ### コンポーネント一覧
 
 | コンポーネント | 役割 |
 |--------------|------|
-| LocalFileIngester | ローカルファイル取り込み用インジェスター。BaseIngester を継承し、ファイルシステムからドキュメントを読み取る |
+| DocumentIngester | ドキュメント取り込み用インジェスター。BaseIngester を継承し、ファイルシステムからドキュメントを読み取る |
 
 ### 単一ファイル取り込みフロー
 
 ```mermaid
 flowchart TD
-    START["rag_add_local(file_path)"]
+    START["rag_add_document(file_path)"]
     VALIDATE["入力バリデーション"]
     RESOLVE["パス正規化（resolve）"]
     CHECK_EXT{"拡張子は対応済み?"}
@@ -164,7 +162,7 @@ flowchart TD
 
 ```mermaid
 flowchart TD
-    START["rag_crawl_local(dir_path, pattern)"]
+    START["rag_crawl_documents(dir_path, pattern)"]
     VALIDATE["入力バリデーション（パターン含む）"]
     RESOLVE["パス正規化（resolve）"]
     GLOB["glob パターンでファイル検索"]
@@ -209,7 +207,7 @@ flowchart TD
    - `source_id`: file URI（`Path.as_uri()` で生成）
    - `title`: ファイル名（拡張子なし）
    - `text`: 抽出済みテキスト
-   - `source_type`: `"local"`
+   - `source_type`: `"document"`
    - `metadata`: `file_extension`、`file_size_bytes`、`file_path`（元の指定パス）
 7. ナレッジサービス経由でチャンキング・ベクトル保存を行う
 
@@ -246,8 +244,8 @@ flowchart TD
 | glob パターンがファイル数上限を超過 | パスの辞書順でソートした上で先頭 100 件にクランプし、警告ログを出力する。超過分は処理しない |
 | glob パターンに一致するファイルが 0 件 | 0 件処理として正常終了する |
 | 同一ファイルの再取り込み | `source_id`（file URI）の一致で検出し、既存データを最新に置き換える |
-| ファイルが指定されたがディレクトリだった | バリデーションエラーとして拒否する（`rag_add_local` の場合） |
-| ディレクトリが指定されたがファイルだった | バリデーションエラーとして拒否する（`rag_crawl_local` の場合） |
+| ファイルが指定されたがディレクトリだった | バリデーションエラーとして拒否する（`rag_add_document` の場合） |
+| ディレクトリが指定されたがファイルだった | バリデーションエラーとして拒否する（`rag_crawl_documents` の場合） |
 | `pattern` に `..` が含まれる、または `Path(pattern).is_absolute()` が真 | バリデーションエラーとして拒否する |
 | glob マッチ結果が `dir_path` 配下でない | 該当ファイルを除外する |
 

@@ -1,8 +1,8 @@
 """RAG MCPサーバーのテスト.
 
 仕様: docs/specs/rag-knowledge.md
-9つのRAGツール（rag_search, rag_add, rag_crawl, rag_crawl_preview,
-rag_crawl_zenn, rag_add_local, rag_crawl_local, rag_delete, rag_stats）が
+10個のRAGツール（rag_search, rag_add, rag_crawl, rag_crawl_preview,
+rag_crawl_zenn, rag_crawl_bluesky, rag_add_document, rag_crawl_documents, rag_delete, rag_stats）が
 MCPサーバーとして公開されていることを検証する。
 """
 
@@ -39,8 +39,8 @@ async def test_rag_server_exposes_ten_tools() -> None:
 
     expected = {
         "rag_search", "rag_add", "rag_crawl", "rag_crawl_preview",
-        "rag_crawl_zenn", "rag_crawl_bluesky", "rag_add_local",
-        "rag_crawl_local", "rag_delete", "rag_stats",
+        "rag_crawl_zenn", "rag_crawl_bluesky", "rag_add_document",
+        "rag_crawl_documents", "rag_delete", "rag_stats",
     }
     assert tool_names == expected, f"Expected {expected}, got {tool_names}"
 

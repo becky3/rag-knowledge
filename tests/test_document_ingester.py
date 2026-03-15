@@ -1,10 +1,10 @@
-"""ローカルファイルインジェスターのテスト
+"""ドキュメントインジェスターのテスト
 
-仕様: docs/specs/local-file-ingester.md
-Issue: #184
+仕様: docs/specs/document-ingester.md
+Issue: #184, #198
 
 テスト方針:
-- 単体テスト: LocalFileIngester の fetch_single / validate_identifier / collect_files
+- 単体テスト: DocumentIngester の fetch_single / validate_identifier / collect_files
 - 正常系: .md / .txt / .adoc ファイルの取り込み、ディレクトリ一括取り込み
 - 異常系: 存在しないファイル、空パス、未対応拡張子、空ファイル（0バイト）、UTF-8以外
 - バリデーション: パストラバーサル対策、pattern の '..' / 絶対パス拒否
@@ -19,9 +19,9 @@ from unittest.mock import patch
 
 import pytest
 
-from rag.ingesters.local_file import (
+from rag.ingesters.document_ingester import (
     MAX_FILES_HARD_LIMIT,
-    LocalFileIngester,
+    DocumentIngester,
 )
 
 
@@ -60,54 +60,54 @@ class TestHardLimits:
         assert MAX_FILES_HARD_LIMIT == 100
 
 
-# --- LocalFileIngester.validate_identifier テスト ---
+# --- DocumentIngester.validate_identifier テスト ---
 
 
-class TestLocalFileIngesterValidate:
-    """LocalFileIngester.validate_identifier のテスト."""
+class TestDocumentIngesterValidate:
+    """DocumentIngester.validate_identifier のテスト."""
 
     @pytest.fixture()
-    def ingester(self) -> LocalFileIngester:
-        return LocalFileIngester()
+    def ingester(self) -> DocumentIngester:
+        return DocumentIngester()
 
-    def test_valid_md_file(self, ingester: LocalFileIngester, tmp_path: Path) -> None:
+    def test_valid_md_file(self, ingester: DocumentIngester, tmp_path: Path) -> None:
         """正しい .md ファイルのパスが正規化されて返ること."""
         f = _create_text_file(tmp_path, "test.md", "# Hello")
         result = ingester.validate_identifier(str(f))
         assert result == str(f.resolve())
 
-    def test_valid_txt_file(self, ingester: LocalFileIngester, tmp_path: Path) -> None:
+    def test_valid_txt_file(self, ingester: DocumentIngester, tmp_path: Path) -> None:
         """正しい .txt ファイルのパスが正規化されて返ること."""
         f = _create_text_file(tmp_path, "test.txt", "Hello")
         result = ingester.validate_identifier(str(f))
         assert result == str(f.resolve())
 
-    def test_valid_adoc_file(self, ingester: LocalFileIngester, tmp_path: Path) -> None:
+    def test_valid_adoc_file(self, ingester: DocumentIngester, tmp_path: Path) -> None:
         """正しい .adoc ファイルのパスが正規化されて返ること."""
         f = _create_text_file(tmp_path, "test.adoc", "= Hello")
         result = ingester.validate_identifier(str(f))
         assert result == str(f.resolve())
 
-    def test_valid_pdf_file(self, ingester: LocalFileIngester, tmp_path: Path) -> None:
+    def test_valid_pdf_file(self, ingester: DocumentIngester, tmp_path: Path) -> None:
         """正しい .pdf ファイルのパスが正規化されて返ること."""
         f = _create_binary_file(tmp_path, "test.pdf", b"%PDF-1.4 dummy")
         result = ingester.validate_identifier(str(f))
         assert result == str(f.resolve())
 
-    def test_empty_path(self, ingester: LocalFileIngester) -> None:
+    def test_empty_path(self, ingester: DocumentIngester) -> None:
         """空文字列がバリデーションエラーになること."""
         with pytest.raises(ValueError, match="must not be empty"):
             ingester.validate_identifier("")
         with pytest.raises(ValueError, match="must not be empty"):
             ingester.validate_identifier("   ")
 
-    def test_nonexistent_file(self, ingester: LocalFileIngester) -> None:
+    def test_nonexistent_file(self, ingester: DocumentIngester) -> None:
         """存在しないファイルがバリデーションエラーになること."""
         with pytest.raises(ValueError, match="File not found"):
             ingester.validate_identifier("/nonexistent/path/file.md")
 
     def test_unsupported_extension(
-        self, ingester: LocalFileIngester, tmp_path: Path
+        self, ingester: DocumentIngester, tmp_path: Path
     ) -> None:
         """未対応拡張子がバリデーションエラーになること."""
         f = _create_text_file(tmp_path, "test.docx", "Hello")
@@ -115,14 +115,14 @@ class TestLocalFileIngesterValidate:
             ingester.validate_identifier(str(f))
 
     def test_directory_path(
-        self, ingester: LocalFileIngester, tmp_path: Path
+        self, ingester: DocumentIngester, tmp_path: Path
     ) -> None:
         """ディレクトリパスがバリデーションエラーになること."""
         with pytest.raises(ValueError, match="Path is a directory"):
             ingester.validate_identifier(str(tmp_path))
 
     def test_whitespace_trimmed(
-        self, ingester: LocalFileIngester, tmp_path: Path
+        self, ingester: DocumentIngester, tmp_path: Path
     ) -> None:
         """前後の空白がトリムされること."""
         f = _create_text_file(tmp_path, "test.md", "# Hello")
@@ -131,7 +131,7 @@ class TestLocalFileIngesterValidate:
 
     def test_custom_extensions(self, tmp_path: Path) -> None:
         """カスタム拡張子が受け入れられること."""
-        ingester = LocalFileIngester(supported_extensions=[".md", ".rst"])
+        ingester = DocumentIngester(supported_extensions=[".md", ".rst"])
         f = _create_text_file(tmp_path, "test.rst", "Hello")
         result = ingester.validate_identifier(str(f))
         assert result == str(f.resolve())
@@ -142,18 +142,18 @@ class TestLocalFileIngesterValidate:
             ingester.validate_identifier(str(f2))
 
 
-# --- LocalFileIngester.fetch_single テスト ---
+# --- DocumentIngester.fetch_single テスト ---
 
 
-class TestLocalFileIngesterFetchSingle:
-    """LocalFileIngester.fetch_single のテスト."""
+class TestDocumentIngesterFetchSingle:
+    """DocumentIngester.fetch_single のテスト."""
 
     @pytest.fixture()
-    def ingester(self) -> LocalFileIngester:
-        return LocalFileIngester()
+    def ingester(self) -> DocumentIngester:
+        return DocumentIngester()
 
     async def test_fetch_md_file(
-        self, ingester: LocalFileIngester, tmp_path: Path
+        self, ingester: DocumentIngester, tmp_path: Path
     ) -> None:
         """Markdown ファイルが正常に取り込まれること."""
         f = _create_text_file(tmp_path, "document.md", "# Hello World\n\nThis is content.")
@@ -163,13 +163,13 @@ class TestLocalFileIngesterFetchSingle:
         assert result.source_id == f.resolve().as_uri()
         assert result.title == "document"
         assert result.text == "# Hello World\n\nThis is content."
-        assert result.source_type == "local"
+        assert result.source_type == "document"
         assert result.metadata["file_extension"] == ".md"
         assert result.metadata["file_size_bytes"] > 0
         assert result.metadata["file_path"] == str(f)
 
     async def test_fetch_txt_file(
-        self, ingester: LocalFileIngester, tmp_path: Path
+        self, ingester: DocumentIngester, tmp_path: Path
     ) -> None:
         """テキストファイルが正常に取り込まれること."""
         f = _create_text_file(tmp_path, "notes.txt", "Some plain text notes.")
@@ -180,7 +180,7 @@ class TestLocalFileIngesterFetchSingle:
         assert result.text == "Some plain text notes."
 
     async def test_fetch_adoc_file(
-        self, ingester: LocalFileIngester, tmp_path: Path
+        self, ingester: DocumentIngester, tmp_path: Path
     ) -> None:
         """AsciiDoc ファイルが正常に取り込まれること."""
         f = _create_text_file(tmp_path, "guide.adoc", "= Guide Title\n\nContent here.")
@@ -191,7 +191,7 @@ class TestLocalFileIngesterFetchSingle:
         assert result.text == "= Guide Title\n\nContent here."
 
     async def test_fetch_empty_file(
-        self, ingester: LocalFileIngester, tmp_path: Path
+        self, ingester: DocumentIngester, tmp_path: Path
     ) -> None:
         """空ファイル（0バイト）がスキップされること."""
         f = _create_empty_file(tmp_path, "empty.md")
@@ -200,14 +200,14 @@ class TestLocalFileIngesterFetchSingle:
         assert result is None
 
     async def test_fetch_nonexistent_file(
-        self, ingester: LocalFileIngester
+        self, ingester: DocumentIngester
     ) -> None:
         """存在しないファイルで ValueError を送出すること."""
         with pytest.raises(ValueError, match="File not found"):
             await ingester.fetch_single("/nonexistent/file.md")
 
     async def test_fetch_unsupported_extension(
-        self, ingester: LocalFileIngester, tmp_path: Path
+        self, ingester: DocumentIngester, tmp_path: Path
     ) -> None:
         """未対応拡張子で ValueError を送出すること."""
         f = _create_text_file(tmp_path, "test.docx", "Hello")
@@ -215,7 +215,7 @@ class TestLocalFileIngesterFetchSingle:
             await ingester.fetch_single(str(f))
 
     async def test_fetch_non_utf8_file(
-        self, ingester: LocalFileIngester, tmp_path: Path
+        self, ingester: DocumentIngester, tmp_path: Path
     ) -> None:
         """UTF-8 以外のエンコーディングのファイルで None を返すこと."""
         f = tmp_path / "shift_jis.txt"
@@ -225,13 +225,13 @@ class TestLocalFileIngesterFetchSingle:
         assert result is None
 
     async def test_fetch_pdf_with_mock(
-        self, ingester: LocalFileIngester, tmp_path: Path
+        self, ingester: DocumentIngester, tmp_path: Path
     ) -> None:
         """PDF ファイルが pymupdf4llm 経由で取り込まれること（モック）."""
         f = _create_binary_file(tmp_path, "report.pdf", b"%PDF-1.4 dummy content")
 
         with patch(
-            "rag.ingesters.local_file.LocalFileIngester._extract_pdf",
+            "rag.ingesters.document_ingester.DocumentIngester._extract_pdf",
             return_value="# Extracted PDF Content\n\nParagraph from PDF.",
         ):
             result = await ingester.fetch_single(str(f))
@@ -242,13 +242,13 @@ class TestLocalFileIngesterFetchSingle:
         assert result.metadata["file_extension"] == ".pdf"
 
     async def test_fetch_pdf_extraction_failure(
-        self, ingester: LocalFileIngester, tmp_path: Path
+        self, ingester: DocumentIngester, tmp_path: Path
     ) -> None:
         """PDF 変換失敗時に None を返すこと."""
         f = _create_binary_file(tmp_path, "bad.pdf", b"%PDF-1.4 corrupted")
 
         with patch(
-            "rag.ingesters.local_file.LocalFileIngester._extract_pdf",
+            "rag.ingesters.document_ingester.DocumentIngester._extract_pdf",
             return_value=None,
         ):
             result = await ingester.fetch_single(str(f))
@@ -256,7 +256,7 @@ class TestLocalFileIngesterFetchSingle:
         assert result is None
 
     async def test_fetch_whitespace_only_content(
-        self, ingester: LocalFileIngester, tmp_path: Path
+        self, ingester: DocumentIngester, tmp_path: Path
     ) -> None:
         """空白のみのファイルで None を返すこと."""
         f = _create_text_file(tmp_path, "whitespace.md", "   \n\n   ")
@@ -265,7 +265,7 @@ class TestLocalFileIngesterFetchSingle:
         assert result is None
 
     async def test_source_id_is_file_uri(
-        self, ingester: LocalFileIngester, tmp_path: Path
+        self, ingester: DocumentIngester, tmp_path: Path
     ) -> None:
         """source_id が file URI であること."""
         f = _create_text_file(tmp_path, "doc.md", "Content")
@@ -275,7 +275,7 @@ class TestLocalFileIngesterFetchSingle:
         assert result.source_id.startswith("file:///")
 
     async def test_ingested_at_is_set(
-        self, ingester: LocalFileIngester, tmp_path: Path
+        self, ingester: DocumentIngester, tmp_path: Path
     ) -> None:
         """ingested_at がセットされること."""
         f = _create_text_file(tmp_path, "doc.md", "Content")
@@ -285,47 +285,47 @@ class TestLocalFileIngesterFetchSingle:
         assert result.ingested_at  # 空でない
 
 
-# --- LocalFileIngester.validate_pattern テスト ---
+# --- DocumentIngester.validate_pattern テスト ---
 
 
-class TestLocalFileIngesterValidatePattern:
-    """LocalFileIngester.validate_pattern のテスト."""
+class TestDocumentIngesterValidatePattern:
+    """DocumentIngester.validate_pattern のテスト."""
 
     @pytest.fixture()
-    def ingester(self) -> LocalFileIngester:
-        return LocalFileIngester()
+    def ingester(self) -> DocumentIngester:
+        return DocumentIngester()
 
-    def test_valid_pattern(self, ingester: LocalFileIngester) -> None:
+    def test_valid_pattern(self, ingester: DocumentIngester) -> None:
         """正しいパターンがそのまま返ること."""
         assert ingester.validate_pattern("**/*.md") == "**/*.md"
         assert ingester.validate_pattern("*.txt") == "*.txt"
         assert ingester.validate_pattern("docs/**/*") == "docs/**/*"
 
-    def test_pattern_with_dotdot(self, ingester: LocalFileIngester) -> None:
+    def test_pattern_with_dotdot(self, ingester: DocumentIngester) -> None:
         """'..' を含むパターンがバリデーションエラーになること."""
         with pytest.raises(ValueError, match="must not contain '..'"):
             ingester.validate_pattern("../**/*.md")
         with pytest.raises(ValueError, match="must not contain '..'"):
             ingester.validate_pattern("docs/../../etc/passwd")
 
-    def test_absolute_pattern(self, ingester: LocalFileIngester) -> None:
+    def test_absolute_pattern(self, ingester: DocumentIngester) -> None:
         """絶対パスのパターンがバリデーションエラーになること."""
         with pytest.raises(ValueError, match="must not be an absolute path"):
             ingester.validate_pattern("/etc/**/*.md")
 
 
-# --- LocalFileIngester.collect_files テスト ---
+# --- DocumentIngester.collect_files テスト ---
 
 
-class TestLocalFileIngesterCollectFiles:
-    """LocalFileIngester.collect_files のテスト."""
+class TestDocumentIngesterCollectFiles:
+    """DocumentIngester.collect_files のテスト."""
 
     @pytest.fixture()
-    def ingester(self) -> LocalFileIngester:
-        return LocalFileIngester()
+    def ingester(self) -> DocumentIngester:
+        return DocumentIngester()
 
     def test_collect_from_directory(
-        self, ingester: LocalFileIngester, tmp_path: Path
+        self, ingester: DocumentIngester, tmp_path: Path
     ) -> None:
         """ディレクトリからファイルが収集されること."""
         _create_text_file(tmp_path, "a.md", "Content A")
@@ -341,7 +341,7 @@ class TestLocalFileIngesterCollectFiles:
         assert "c.py" not in names
 
     def test_collect_recursive(
-        self, ingester: LocalFileIngester, tmp_path: Path
+        self, ingester: DocumentIngester, tmp_path: Path
     ) -> None:
         """サブディレクトリ内のファイルも再帰的に収集されること."""
         sub = tmp_path / "sub"
@@ -354,7 +354,7 @@ class TestLocalFileIngesterCollectFiles:
         assert len(files) == 2
 
     def test_collect_with_pattern(
-        self, ingester: LocalFileIngester, tmp_path: Path
+        self, ingester: DocumentIngester, tmp_path: Path
     ) -> None:
         """glob パターンでフィルタされること."""
         _create_text_file(tmp_path, "a.md", "Content A")
@@ -366,7 +366,7 @@ class TestLocalFileIngesterCollectFiles:
         assert files[0].name == "a.md"
 
     def test_collect_sorted(
-        self, ingester: LocalFileIngester, tmp_path: Path
+        self, ingester: DocumentIngester, tmp_path: Path
     ) -> None:
         """ファイルがパスの辞書順でソートされること."""
         _create_text_file(tmp_path, "c.md", "C")
@@ -379,7 +379,7 @@ class TestLocalFileIngesterCollectFiles:
         assert names == sorted(names)
 
     def test_collect_empty_directory(
-        self, ingester: LocalFileIngester, tmp_path: Path
+        self, ingester: DocumentIngester, tmp_path: Path
     ) -> None:
         """空ディレクトリで空リストを返すこと."""
         files = ingester.collect_files(str(tmp_path))
@@ -387,7 +387,7 @@ class TestLocalFileIngesterCollectFiles:
         assert files == []
 
     def test_collect_no_matching_files(
-        self, ingester: LocalFileIngester, tmp_path: Path
+        self, ingester: DocumentIngester, tmp_path: Path
     ) -> None:
         """対応拡張子に一致するファイルがない場合に空リストを返すこと."""
         _create_text_file(tmp_path, "script.py", "print('hello')")
@@ -396,7 +396,7 @@ class TestLocalFileIngesterCollectFiles:
 
         assert files == []
 
-    def test_collect_empty_dir_path(self, ingester: LocalFileIngester) -> None:
+    def test_collect_empty_dir_path(self, ingester: DocumentIngester) -> None:
         """空の dir_path がバリデーションエラーになること."""
         with pytest.raises(ValueError, match="dir_path must not be empty"):
             ingester.collect_files("")
@@ -404,14 +404,14 @@ class TestLocalFileIngesterCollectFiles:
             ingester.collect_files("   ")
 
     def test_collect_nonexistent_directory(
-        self, ingester: LocalFileIngester
+        self, ingester: DocumentIngester
     ) -> None:
         """存在しないディレクトリがバリデーションエラーになること."""
         with pytest.raises(ValueError, match="Directory not found"):
             ingester.collect_files("/nonexistent/directory")
 
     def test_collect_file_instead_of_directory(
-        self, ingester: LocalFileIngester, tmp_path: Path
+        self, ingester: DocumentIngester, tmp_path: Path
     ) -> None:
         """ファイルパスがバリデーションエラーになること."""
         f = _create_text_file(tmp_path, "file.md", "Content")
@@ -419,21 +419,21 @@ class TestLocalFileIngesterCollectFiles:
             ingester.collect_files(str(f))
 
     def test_collect_pattern_with_dotdot(
-        self, ingester: LocalFileIngester, tmp_path: Path
+        self, ingester: DocumentIngester, tmp_path: Path
     ) -> None:
         """'..' を含むパターンがバリデーションエラーになること."""
         with pytest.raises(ValueError, match="must not contain '..'"):
             ingester.collect_files(str(tmp_path), pattern="../**/*.md")
 
     def test_collect_absolute_pattern(
-        self, ingester: LocalFileIngester, tmp_path: Path
+        self, ingester: DocumentIngester, tmp_path: Path
     ) -> None:
         """絶対パスのパターンがバリデーションエラーになること."""
         with pytest.raises(ValueError, match="must not be an absolute path"):
             ingester.collect_files(str(tmp_path), pattern="/etc/**/*.md")
 
     def test_collect_clamp_at_limit(
-        self, ingester: LocalFileIngester, tmp_path: Path
+        self, ingester: DocumentIngester, tmp_path: Path
     ) -> None:
         """ファイル数上限超過時にクランプされること（テスト安全値: 5件）."""
         for i in range(8):
@@ -447,7 +447,7 @@ class TestLocalFileIngesterCollectFiles:
         assert names == ["file_00.md", "file_01.md", "file_02.md", "file_03.md", "file_04.md"]
 
     def test_collect_within_limit(
-        self, ingester: LocalFileIngester, tmp_path: Path
+        self, ingester: DocumentIngester, tmp_path: Path
     ) -> None:
         """ファイル数上限以内の場合にクランプされないこと."""
         for i in range(3):
@@ -458,7 +458,7 @@ class TestLocalFileIngesterCollectFiles:
         assert len(files) == 3
 
     def test_collect_max_files_capped_by_hard_limit(
-        self, ingester: LocalFileIngester, tmp_path: Path
+        self, ingester: DocumentIngester, tmp_path: Path
     ) -> None:
         """max_files が MAX_FILES_HARD_LIMIT を超えないこと."""
         _create_text_file(tmp_path, "a.md", "Content")
@@ -471,15 +471,15 @@ class TestLocalFileIngesterCollectFiles:
 # --- PDF 抽出テスト（モック） ---
 
 
-class TestLocalFileIngesterPdf:
+class TestDocumentIngesterPdf:
     """PDF テキスト抽出のテスト（pymupdf4llm をモック）."""
 
     @pytest.fixture()
-    def ingester(self) -> LocalFileIngester:
-        return LocalFileIngester()
+    def ingester(self) -> DocumentIngester:
+        return DocumentIngester()
 
     def test_extract_pdf_success(
-        self, ingester: LocalFileIngester, tmp_path: Path
+        self, ingester: DocumentIngester, tmp_path: Path
     ) -> None:
         """pymupdf4llm で正常にテキスト抽出されること."""
         f = _create_binary_file(tmp_path, "doc.pdf", b"%PDF-1.4 dummy")
@@ -495,7 +495,7 @@ class TestLocalFileIngesterPdf:
         assert result == "# PDF Title\n\nPDF content here."
 
     def test_extract_pdf_import_error(
-        self, ingester: LocalFileIngester, tmp_path: Path
+        self, ingester: DocumentIngester, tmp_path: Path
     ) -> None:
         """pymupdf4llm が未インストールの場合に None を返すこと."""
         f = _create_binary_file(tmp_path, "doc.pdf", b"%PDF-1.4 dummy")
@@ -506,7 +506,7 @@ class TestLocalFileIngesterPdf:
         assert result is None
 
     def test_extract_pdf_conversion_error(
-        self, ingester: LocalFileIngester, tmp_path: Path
+        self, ingester: DocumentIngester, tmp_path: Path
     ) -> None:
         """PDF 変換エラー時に None を返すこと."""
         f = _create_binary_file(tmp_path, "doc.pdf", b"%PDF-1.4 dummy")

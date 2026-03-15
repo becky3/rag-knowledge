@@ -10,7 +10,7 @@ import asyncio
 import logging
 from typing import TYPE_CHECKING
 
-from .base import BaseIngester, IngestedContent
+from .base_ingester import BaseIngester, IngestedContent
 
 if TYPE_CHECKING:
     from ..safe_browsing import SafeBrowsingClient

@@ -19,7 +19,7 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-from rag.ingesters.zenn import (
+from rag.ingesters.zenn_ingester import (
     MAX_ARTICLES_HARD_LIMIT,
     MAX_PAGINATION_PAGES,
     ZennIngester,

@@ -4,17 +4,17 @@
 Issue: #62
 """
 
-from .base import BaseIngester, IngestedContent
-from .bluesky import BlueskyIngester
-from .local_file import LocalFileIngester
-from .web import WebIngester
-from .zenn import ZennIngester
+from .base_ingester import BaseIngester, IngestedContent
+from .bluesky_ingester import BlueskyIngester
+from .document_ingester import DocumentIngester
+from .web_ingester import WebIngester
+from .zenn_ingester import ZennIngester
 
 __all__ = [
     "BaseIngester",
     "BlueskyIngester",
+    "DocumentIngester",
     "IngestedContent",
-    "LocalFileIngester",
     "WebIngester",
     "ZennIngester",
 ]

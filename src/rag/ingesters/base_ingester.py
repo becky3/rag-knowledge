@@ -24,7 +24,7 @@ class IngestedContent:
         title: コンテンツのタイトル
         text: 抽出済みテキスト
         ingested_at: 取り込みタイムスタンプ（ISO 8601）
-        source_type: データソース種別（"web", "zenn", "bluesky", "local"）
+        source_type: データソース種別（"web", "zenn", "bluesky", "document"）
         metadata: ソース固有のメタデータ
         skip_chunking: True の場合、チャンキングをスキップし 1 チャンクで格納する
     """

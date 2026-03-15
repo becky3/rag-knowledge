@@ -21,7 +21,7 @@
 | ディレクトリ | 責務 |
 |---|---|
 | `src/rag/embedding/` | Embedding プロバイダー抽象化（ローカル / OpenAI）とファクトリ |
-| `src/rag/ingesters/` | インジェスタープラグイン（BaseIngester 抽象基底・IngestedContent 共通モデル・WebIngester・ZennIngester・LocalFileIngester・BlueskyIngester） |
+| `src/rag/ingesters/` | インジェスタープラグイン（BaseIngester 抽象基底・IngestedContent 共通モデル・WebIngester・ZennIngester・DocumentIngester・BlueskyIngester） |
 
 ### ルートレベルファイル
 
@@ -48,9 +48,9 @@
 | 仕様書 | 実装モジュール |
 |---|---|
 | `rag-knowledge.md` | `src/rag/` 全体 |
-| `zenn-ingester.md` | `src/rag/ingesters/zenn.py` |
-| `local-file-ingester.md` | `src/rag/ingesters/local_file.py` |
-| `bluesky-ingester.md` | `src/rag/ingesters/bluesky.py` |
+| `zenn-ingester.md` | `src/rag/ingesters/zenn_ingester.py` |
+| `document-ingester.md` | `src/rag/ingesters/document_ingester.py` |
+| `bluesky-ingester.md` | `src/rag/ingesters/bluesky_ingester.py` |
 
 ### Claude Code 拡張
 
