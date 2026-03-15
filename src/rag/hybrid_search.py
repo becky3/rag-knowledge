@@ -94,7 +94,7 @@ class HybridSearchResult:
 
     doc_id: str
     text: str
-    metadata: dict[str, str | int]
+    metadata: dict[str, str | int | float | bool]
     vector_distance: float | None  # ベクトル検索での距離（Noneの場合はBM25のみでヒット）
     bm25_score: float | None  # BM25スコア（Noneの場合はベクトル検索のみでヒット）
     combined_score: float  # CCで統合されたスコア
@@ -197,7 +197,7 @@ class HybridSearchEngine:
         """
         # --- ベクトル検索結果の処理 ---
         # doc_id → (similarity, text, metadata, distance) のマッピング
-        vector_doc_data: dict[str, tuple[float, str, dict[str, str | int], float]] = {}
+        vector_doc_data: dict[str, tuple[float, str, dict[str, str | int | float | bool], float]] = {}
 
         for i, vr in enumerate(vector_results):
             source_url = str(vr.metadata.get("source_url", ""))
@@ -227,11 +227,11 @@ class HybridSearchEngine:
             norm_vector_scores = dict(zip(doc_ids, normalized))
 
         # --- BM25結果の処理 ---
-        bm25_doc_data: dict[str, tuple[float, str, dict[str, str | int]]] = {}
+        bm25_doc_data: dict[str, tuple[float, str, dict[str, str | int | float | bool]]] = {}
 
         for br in bm25_results:
             bm25_source_url = self._bm25_index.get_source_url(br.doc_id)
-            bm25_metadata: dict[str, str | int] = {}
+            bm25_metadata: dict[str, str | int | float | bool] = {}
             if bm25_source_url:
                 bm25_metadata["source_url"] = bm25_source_url
             bm25_doc_data[br.doc_id] = (br.score, br.text, bm25_metadata)

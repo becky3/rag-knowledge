@@ -1291,4 +1291,36 @@ class TestRetrieveRawResults:
             "test",
             n_results=3,
             similarity_threshold=None,
+            where=None,
+        )
+
+    async def test_source_type_filter_passed_to_stores(
+        self,
+        mock_vector_store: MagicMock,
+        mock_web_crawler: MagicMock,
+    ) -> None:
+        """source_type 指定時にベクトルストアと BM25 に正しく伝播すること."""
+        mock_vector_store.search.return_value = []
+        mock_bm25 = MagicMock()
+        mock_bm25.search.return_value = []
+
+        service = RAGKnowledgeService(
+            vector_store=mock_vector_store,
+            web_crawler=mock_web_crawler,
+            chunk_size=200,
+            chunk_overlap=30,
+            similarity_threshold=0.5,
+            bm25_index=mock_bm25,
+        )
+
+        await service.retrieve_raw_results("test", n_results=3, source_type="bluesky")
+
+        mock_vector_store.search.assert_called_once_with(
+            "test",
+            n_results=3,
+            similarity_threshold=None,
+            where={"source_type": "bluesky"},
+        )
+        mock_bm25.search.assert_called_once_with(
+            "test", n_results=3, source_type="bluesky",
         )
