@@ -26,6 +26,7 @@ from rag.ingesters.bluesky import (
     _make_title,
     _parse_at_uri,
     _validate_max_posts,
+    _validate_pds_url,
 )
 
 
@@ -904,6 +905,62 @@ class TestBlueskyIngesterInit:
             pds_url="https://bsky.social/",
         )
         assert ingester._pds_url == "https://bsky.social"
+
+    def test_pds_url_whitespace_stripped(self) -> None:
+        """PDS URL の前後空白がトリムされること."""
+        ingester = BlueskyIngester(
+            client=_make_mock_client(),
+            pds_url="  https://bsky.social  ",
+        )
+        assert ingester._pds_url == "https://bsky.social"
+
+    def test_reject_empty_pds_url(self) -> None:
+        """空の PDS URL でバリデーションエラーになること."""
+        with pytest.raises(ValueError, match="must not be empty"):
+            BlueskyIngester(client=_make_mock_client(), pds_url="")
+        with pytest.raises(ValueError, match="must not be empty"):
+            BlueskyIngester(client=_make_mock_client(), pds_url="   ")
+
+    def test_reject_non_https_pds_url(self) -> None:
+        """非 HTTPS の PDS URL でバリデーションエラーになること."""
+        with pytest.raises(ValueError, match="HTTPS"):
+            BlueskyIngester(client=_make_mock_client(), pds_url="http://bsky.social")
+
+
+# --- _validate_pds_url テスト ---
+
+
+class TestValidatePdsUrl:
+    """PDS URL のバリデーションテスト."""
+
+    def test_valid_https_url(self) -> None:
+        """正しい HTTPS URL がそのまま返ること."""
+        assert _validate_pds_url("https://bsky.social") == "https://bsky.social"
+
+    def test_trailing_slash_stripped(self) -> None:
+        """末尾スラッシュが除去されること."""
+        assert _validate_pds_url("https://bsky.social/") == "https://bsky.social"
+
+    def test_whitespace_stripped(self) -> None:
+        """前後の空白がトリムされること."""
+        assert _validate_pds_url("  https://bsky.social  ") == "https://bsky.social"
+
+    def test_reject_empty(self) -> None:
+        """空文字列がバリデーションエラーになること."""
+        with pytest.raises(ValueError, match="must not be empty"):
+            _validate_pds_url("")
+        with pytest.raises(ValueError, match="must not be empty"):
+            _validate_pds_url("   ")
+
+    def test_reject_http(self) -> None:
+        """HTTP スキームがバリデーションエラーになること."""
+        with pytest.raises(ValueError, match="HTTPS"):
+            _validate_pds_url("http://bsky.social")
+
+    def test_reject_no_scheme(self) -> None:
+        """スキームなしがバリデーションエラーになること."""
+        with pytest.raises(ValueError, match="HTTPS"):
+            _validate_pds_url("bsky.social")
 
 
 # --- ハードリミット定数テスト ---

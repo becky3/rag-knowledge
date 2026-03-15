@@ -245,6 +245,24 @@ class VectorStore:
         chunks.sort(key=lambda c: int(c.metadata.get("chunk_index", 0)))
         return chunks
 
+    async def source_exists(self, source_url: str) -> bool:
+        """ソースURLに対応するチャンクが存在するか確認する（軽量版）.
+
+        documents / metadatas を取得せず、IDs の有無のみで判定する。
+
+        Args:
+            source_url: 確認するソースURL
+
+        Returns:
+            チャンクが 1 件以上存在すれば True
+        """
+        results = await asyncio.to_thread(
+            self._collection.get,
+            where={"source_url": source_url},
+            include=[],
+        )
+        return bool(results["ids"])
+
     async def delete_by_source(self, source_url: str) -> int:
         """ソースURL指定でチャンクを削除.
 
