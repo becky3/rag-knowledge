@@ -197,6 +197,28 @@ def _make_title(text: str) -> str:
     return flat
 
 
+def _validate_pds_url(url: str) -> str:
+    """PDS URL をバリデーションし、正規化する.
+
+    Args:
+        url: PDS URL 文字列
+
+    Returns:
+        正規化済み PDS URL（末尾スラッシュ除去済み）
+
+    Raises:
+        ValueError: URL が空または HTTPS スキームでない場合
+    """
+    url = url.strip()
+    if not url:
+        raise ValueError("pds_url must not be empty")
+    if not url.startswith("https://"):
+        raise ValueError(
+            f"pds_url must use HTTPS scheme, got: {url!r}"
+        )
+    return url.rstrip("/")
+
+
 class BlueskyIngester(BaseIngester):
     """BlueSky 投稿取り込み用インジェスター.
 
@@ -221,11 +243,11 @@ class BlueskyIngester(BaseIngester):
             max_posts: 取得する最大投稿数（デフォルト: 200、許容範囲: 1〜1000）
 
         Raises:
-            ValueError: max_posts が 0 または負数の場合
+            ValueError: max_posts が 0 または負数の場合、pds_url が空または非 HTTPS の場合
             TypeError: max_posts が整数でない場合
         """
         self._client = client
-        self._pds_url = pds_url.rstrip("/")
+        self._pds_url = _validate_pds_url(pds_url)
         self._max_posts = _validate_max_posts(max_posts)
 
     def validate_identifier(self, identifier: str) -> str:

@@ -458,7 +458,8 @@ async def rag_crawl_bluesky(
 
     Args:
         handle: BlueSky ハンドル（例: user.bsky.social）。DID 形式は不可
-        max_posts: 取得する最大投稿数（未指定時は設定値を使用、許容範囲: 1〜1000）
+        max_posts: 取得する最大オリジナル投稿数（未指定時は設定値を使用、許容範囲: 1〜1000）。
+            リポストには適用されない（リポストは独立して走査され、バジェット上限で制限される）
         include_reposts: リポストを取得対象に含めるか（未指定時は設定値を使用）
 
     Returns:
@@ -520,8 +521,7 @@ async def rag_crawl_bluesky(
             for content in contents:
                 # 既存 source_id チェック（スキップ判定）
                 # BlueSky は投稿編集不可のため、既存投稿はスキップする
-                existing = await service.get_full_page_text(content.source_id)
-                if existing:
+                if await service.source_exists(content.source_id):
                     skipped += 1
                     continue
 
