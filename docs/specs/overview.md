@@ -17,7 +17,8 @@ RAG Knowledge は、外部 Web ページから収集した知識をベクトル 
 | 7 | URL 安全性チェック | Google Safe Browsing API による URL 検証 | [rag-knowledge.md](rag-knowledge.md) |
 | 8 | クロールプレビュー | クロール対象ページのタイトル・URL 一覧を事前確認 | [rag-knowledge.md](rag-knowledge.md) |
 | 9 | Zenn インジェスター | Zenn 記事を API 経由で取得・ナレッジベースに取り込み | [zenn-ingester.md](zenn-ingester.md) |
-| 10 | ローカルファイルインジェスター | ローカルファイルをナレッジベースに取り込み | [local-file-ingester.md](local-file-ingester.md) |
+| 10 | BlueSky インジェスター | BlueSky 投稿を AT Protocol API 経由で取得・ナレッジベースに取り込み | [bluesky-ingester.md](bluesky-ingester.md) |
+| 11 | ローカルファイルインジェスター | ローカルファイルをナレッジベースに取り込み | [local-file-ingester.md](local-file-ingester.md) |
 
 ## 3. 技術スタック
 
