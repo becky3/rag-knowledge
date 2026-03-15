@@ -376,7 +376,7 @@ class BlueskyIngester(BaseIngester):
         handle: str,
         *,
         max_posts: int | None = None,
-        include_reposts: bool = False,
+        include_reposts: bool = True,
     ) -> list[IngestedContent]:
         """指定ユーザーの BlueSky 投稿を統一タイムラインから一括取得する.
 
