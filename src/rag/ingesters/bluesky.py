@@ -98,87 +98,103 @@ def _parse_at_uri(uri: str) -> tuple[str, str, str] | None:
 
 
 def _extract_text_from_post(value: dict[str, Any]) -> str:
-    """投稿レコードからテキストを抽出する.
+    """投稿レコードからテキストを構造化して抽出する.
 
     仕様: docs/specs/bluesky-ingester.md「テキスト抽出」
 
-    抽出対象:
-    - 投稿テキスト (value.text)
-    - 画像 ALT テキスト (value.embed.images[].alt)
-    - 動画 ALT テキスト (value.embed.alt)
-    - リンクカードタイトル (value.embed.external.title)
-    - リンクカード説明 (value.embed.external.description)
-    - recordWithMedia 時の media 配下も同様
+    構造:
+    1. 投稿テキスト（先頭）
+    2. 画像/動画 ALT テキスト（[画像ALT] / [動画ALT] プレフィックス）
+    3. リンクカード（[リンクカード] セクション）
+
+    引用元テキストは呼び出し元で [引用元] セクションとして追加する。
 
     Args:
         value: 投稿レコードの value オブジェクト
 
     Returns:
-        改行で連結されたプレーンテキスト
+        構造化されたプレーンテキスト
     """
-    parts: list[str] = []
+    sections: list[str] = []
 
-    # 投稿テキスト
+    # 1. 投稿テキスト（先頭）
     text = value.get("text", "")
     if text:
-        parts.append(text)
+        sections.append(text)
 
+    # 2-3. embed からメディア情報を抽出
     embed = value.get("embed")
     if isinstance(embed, dict):
-        _extract_embed_text(embed, parts)
+        media_sections = _extract_embed_sections(embed)
+        sections.extend(media_sections)
 
-    return "\n".join(parts)
+    return "\n\n".join(sections)
 
 
-def _extract_embed_text(embed: dict[str, Any], parts: list[str]) -> None:
-    """embed オブジェクトからテキストを抽出する.
+def _extract_embed_sections(embed: dict[str, Any]) -> list[str]:
+    """embed オブジェクトから構造化セクションを抽出する.
 
     Args:
         embed: embed オブジェクト
-        parts: テキストパーツのリスト（破壊的に追加）
+
+    Returns:
+        構造化セクションのリスト
     """
     embed_type = embed.get("$type", "")
 
     if embed_type == "app.bsky.embed.recordWithMedia":
-        # recordWithMedia: media 配下にメディア情報がネスト
         media = embed.get("media")
         if isinstance(media, dict):
-            _extract_media_text(media, parts)
-    else:
-        # 通常の embed
-        _extract_media_text(embed, parts)
+            return _extract_media_sections(media)
+        return []
+
+    return _extract_media_sections(embed)
 
 
-def _extract_media_text(media: dict[str, Any], parts: list[str]) -> None:
-    """メディアオブジェクトからテキストを抽出する.
+def _extract_media_sections(media: dict[str, Any]) -> list[str]:
+    """メディアオブジェクトから構造化セクションを抽出する.
 
     Args:
         media: メディアオブジェクト（embed または embed.media）
-        parts: テキストパーツのリスト（破壊的に追加）
+
+    Returns:
+        構造化セクションのリスト
     """
+    sections: list[str] = []
+
     # 画像 ALT テキスト
     images = media.get("images")
     if isinstance(images, list):
-        for img in images:
-            if isinstance(img, dict):
-                alt = img.get("alt", "")
-                if alt:
-                    parts.append(alt)
+        alt_texts = [
+            img.get("alt", "")
+            for img in images
+            if isinstance(img, dict) and img.get("alt", "")
+        ]
+        if alt_texts:
+            sections.append("[画像ALT] " + "\n".join(alt_texts))
 
     # 動画 ALT テキスト
     video_alt = media.get("alt", "")
     if video_alt:
-        parts.append(video_alt)
+        sections.append(f"[動画ALT] {video_alt}")
 
     # リンクカード
     external = media.get("external")
     if isinstance(external, dict):
+        card_parts: list[str] = ["[リンクカード]"]
         ext_title = external.get("title", "")
         if ext_title:
-            parts.append(ext_title)
+            card_parts.append(f"タイトル: {ext_title}")
+        ext_uri = external.get("uri", "")
+        if ext_uri:
+            card_parts.append(f"URL: {ext_uri}")
         ext_desc = external.get("description", "")
         if ext_desc:
-            parts.append(ext_desc)
+            card_parts.append(f"説明: {ext_desc}")
+        if len(card_parts) > 1:
+            sections.append("\n".join(card_parts))
+
+    return sections
 
 
 def _make_title(text: str) -> str:
@@ -413,7 +429,8 @@ class BlueskyIngester(BaseIngester):
         # 引用元テキストの取得
         quote_text = await self._fetch_quote_text(value)
         if quote_text:
-            text = text + "\n[引用元]\n" + quote_text if text else "[引用元]\n" + quote_text
+            quote_section = "[引用元]\n" + quote_text
+            text = text + "\n\n" + quote_section if text else quote_section
 
         if not text.strip():
             logger.debug("Skipping empty post: %s", uri)
@@ -745,6 +762,7 @@ class BlueskyIngester(BaseIngester):
             ingested_at=IngestedContent.now_iso(),
             source_type="bluesky",
             metadata=metadata,
+            skip_chunking=True,
         )
 
     @staticmethod

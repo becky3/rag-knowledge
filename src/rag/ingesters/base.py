@@ -26,6 +26,7 @@ class IngestedContent:
         ingested_at: 取り込みタイムスタンプ（ISO 8601）
         source_type: データソース種別（"web", "file" 等）
         metadata: ソース固有のメタデータ
+        skip_chunking: True の場合、チャンキングをスキップし 1 チャンクで格納する
     """
 
     source_id: str
@@ -34,6 +35,7 @@ class IngestedContent:
     ingested_at: str
     source_type: str
     metadata: dict[str, object] = field(default_factory=dict)
+    skip_chunking: bool = False
 
     @staticmethod
     def now_iso() -> str:

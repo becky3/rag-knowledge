@@ -208,7 +208,7 @@ class TestExtractTextFromPost:
         assert _extract_text_from_post(value) == ""
 
     def test_image_alt_text(self) -> None:
-        """画像 ALT テキストが抽出されること."""
+        """画像 ALT テキストが [画像ALT] プレフィックス付きで抽出されること."""
         value = {
             "text": "Photo post",
             "embed": {
@@ -220,9 +220,12 @@ class TestExtractTextFromPost:
             },
         }
         result = _extract_text_from_post(value)
-        assert "Photo post" in result
+        assert result.startswith("Photo post")
+        assert "[画像ALT] " in result
         assert "A beautiful sunset" in result
         assert "Mountain view" in result
+        # セクション間は空行区切り
+        assert "\n\n" in result
 
     def test_image_empty_alt(self) -> None:
         """空の ALT テキストは無視されること."""
@@ -237,7 +240,7 @@ class TestExtractTextFromPost:
         assert "Good alt" in result
 
     def test_video_alt_text(self) -> None:
-        """動画 ALT テキストが抽出されること."""
+        """動画 ALT テキストが [動画ALT] プレフィックス付きで抽出されること."""
         value = {
             "text": "Video post",
             "embed": {
@@ -246,11 +249,11 @@ class TestExtractTextFromPost:
             },
         }
         result = _extract_text_from_post(value)
-        assert "Video post" in result
-        assert "Video description" in result
+        assert result.startswith("Video post")
+        assert "[動画ALT] Video description" in result
 
     def test_external_link(self) -> None:
-        """リンクカードのタイトルと説明が抽出されること."""
+        """リンクカードが [リンクカード] セクション構造で抽出されること."""
         value = {
             "text": "Check this out",
             "embed": {
@@ -263,12 +266,14 @@ class TestExtractTextFromPost:
             },
         }
         result = _extract_text_from_post(value)
-        assert "Check this out" in result
-        assert "Example Article" in result
-        assert "Article description" in result
+        assert result.startswith("Check this out")
+        assert "[リンクカード]" in result
+        assert "タイトル: Example Article" in result
+        assert "URL: https://example.com" in result
+        assert "説明: Article description" in result
 
     def test_record_with_media_images(self) -> None:
-        """recordWithMedia 型のメディア配下画像 ALT が抽出されること."""
+        """recordWithMedia 型の画像 ALT が [画像ALT] プレフィックス付きで抽出されること."""
         value = {
             "text": "Quote with images",
             "embed": {
@@ -286,11 +291,11 @@ class TestExtractTextFromPost:
             },
         }
         result = _extract_text_from_post(value)
-        assert "Quote with images" in result
-        assert "Media image alt" in result
+        assert result.startswith("Quote with images")
+        assert "[画像ALT] Media image alt" in result
 
     def test_record_with_media_external(self) -> None:
-        """recordWithMedia 型の media.external が抽出されること."""
+        """recordWithMedia 型の media.external が [リンクカード] セクションで抽出されること."""
         value = {
             "text": "Quote with link",
             "embed": {
@@ -312,8 +317,11 @@ class TestExtractTextFromPost:
             },
         }
         result = _extract_text_from_post(value)
-        assert "Link Title" in result
-        assert "Link Desc" in result
+        assert result.startswith("Quote with link")
+        assert "[リンクカード]" in result
+        assert "タイトル: Link Title" in result
+        assert "URL: https://example.com" in result
+        assert "説明: Link Desc" in result
 
     def test_no_embed(self) -> None:
         """embed なしでテキストのみ返ること."""
@@ -451,6 +459,7 @@ class TestBlueskyIngesterFetchSingle:
         assert result.metadata["handle"] == "did:plc:test123"
         assert result.metadata["url"] == "https://bsky.app/profile/did:plc:test123/post/abc123"
         assert result.metadata["is_repost"] is False
+        assert result.skip_chunking is True
 
     async def test_fetch_single_404(
         self, ingester: BlueskyIngester, mock_client: MagicMock
@@ -829,6 +838,7 @@ class TestBlueskyIngesterCrawl:
         assert meta["has_images"] is True
         assert meta["is_reply"] is True
         assert meta["is_repost"] is False
+        assert contents[0].skip_chunking is True
 
     async def test_crawl_source_id_format(
         self, ingester: BlueskyIngester, mock_client: MagicMock
