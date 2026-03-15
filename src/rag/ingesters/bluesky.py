@@ -479,11 +479,13 @@ class BlueskyIngester(BaseIngester):
             quote_section = "[Quote]\n" + quote_text
             text = text + "\n\n" + quote_section if text else quote_section
 
-        # リポストヘッダーの付与
+        # リポスト: 元投稿者のハンドルを使用（URL・メタデータの正確性のため）
+        effective_handle = handle
         if is_repost:
             author = post.get("author")
             author_handle = author.get("handle", "") if isinstance(author, dict) else ""
             if author_handle:
+                effective_handle = author_handle
                 text = f"[Repost: @{author_handle}]\n{text}"
 
         if not text.strip():
@@ -495,7 +497,7 @@ class BlueskyIngester(BaseIngester):
             rkey=rkey,
             value=record,
             text=text,
-            handle=handle,
+            handle=effective_handle,
             is_repost=is_repost,
         )
 
