@@ -18,6 +18,9 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 # LM Studio のデフォルトベースURL
 DEFAULT_LMSTUDIO_BASE_URL = "http://localhost:1234"
 
+# デフォルトEmbeddingモデル名
+DEFAULT_EMBEDDING_MODEL_LOCAL = "nomic-embed-text"
+
 # プロジェクトルートの .env を参照
 _ENV_FILE = Path(__file__).parent.parent.parent / ".env"
 
@@ -36,7 +39,7 @@ class RAGSettings(BaseSettings):
 
     # Embedding設定
     embedding_provider: Literal["local", "online"] = "local"
-    embedding_model_local: str = "nomic-embed-text"
+    embedding_model_local: str = DEFAULT_EMBEDDING_MODEL_LOCAL
     embedding_model_online: str = "text-embedding-3-small"
     embedding_prefix_enabled: bool = True
     lmstudio_base_url: str = DEFAULT_LMSTUDIO_BASE_URL
@@ -65,7 +68,7 @@ class RAGSettings(BaseSettings):
         default=0.75, ge=0.0, le=1.0
     )
 
-    # クロール
+    # クロール（範囲外の値は WebCrawler / ConstrainedClient が警告付きでクランプする）
     rag_max_crawl_pages: int = Field(default=50, ge=1)
     rag_crawl_delay_sec: float = Field(default=1.0, ge=0)
 
@@ -85,6 +88,27 @@ class RAGSettings(BaseSettings):
     rag_http_host: str = "127.0.0.1"
     rag_http_port: int = Field(default=8081, ge=1, le=65535)
     rag_dns_rebinding_protection: bool = True
+
+    # レスポンスサイズ制限
+    rag_max_response_chars: int | None = Field(default=None, ge=1)
+
+    # rag_stats ソース一覧の最大表示件数
+    rag_stats_max_sources: int = Field(default=100, ge=1)
+
+    # Zenn インジェスター
+    rag_zenn_max_articles: int = Field(default=50, ge=1, le=100)
+    rag_zenn_request_timeout: int = Field(default=30, ge=1, le=120)
+    rag_zenn_request_interval: float = Field(default=1.0, ge=0.1, le=60.0)
+
+    # ドキュメントインジェスター
+    rag_document_supported_extensions: str = ".md,.txt,.pdf,.adoc"
+
+    # BlueSky インジェスター
+    rag_bluesky_appview_url: str = "https://public.api.bsky.app"
+    rag_bluesky_max_posts: int = Field(default=200, ge=1, le=1000)
+    rag_bluesky_request_timeout: int = Field(default=30, ge=1, le=120)
+    rag_bluesky_request_interval: float = Field(default=1.0, ge=0.1, le=60.0)
+    rag_bluesky_include_reposts: bool = True
 
     # デバッグ
     rag_debug_log_enabled: bool = False

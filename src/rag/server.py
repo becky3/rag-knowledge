@@ -3,10 +3,15 @@
 仕様: docs/specs/rag-knowledge.md
 独立リポジトリとして動作する。
 
-FastMCP を使用して 5 つの RAG ツールを公開する:
+FastMCP を使用して 10 個の RAG ツールを公開する:
 - rag_search: ナレッジベースから関連情報を検索
 - rag_add: 単一ページをナレッジベースに取り込み
 - rag_crawl: リンク集ページからクロール＆一括取り込み
+- rag_crawl_preview: クロール対象ページのプレビュー（タイトル・URL一覧）
+- rag_crawl_zenn: Zenn 記事の一括取り込み
+- rag_crawl_bluesky: BlueSky 投稿の一括取り込み
+- rag_add_document: ドキュメントファイルをナレッジベースに取り込み
+- rag_crawl_documents: ディレクトリ内ドキュメントを一括取り込み
 - rag_delete: ソースURL指定でナレッジから削除
 - rag_stats: ナレッジベースの統計情報を表示
 """
@@ -34,10 +39,16 @@ with contextlib.redirect_stdout(io.StringIO()):
     from .bm25_index import BM25Index
     from .config import get_settings
     from .embedding.factory import get_embedding_provider
+    from .ingesters.bluesky_ingester import BlueskyIngester
+    from .ingesters.document_ingester import DocumentIngester
+    from .ingesters.web_ingester import WebIngester
+    from .ingesters.zenn_ingester import ZennIngester
     from .rag_knowledge import RAGKnowledgeService
     from .safe_browsing import create_safe_browsing_client
     from .vector_store import VectorStore
     from .web_crawler import WebCrawler
+
+from py_common_lib.httpx import ConstrainedClient  # safety:allowed
 
 from mcp.server.fastmcp import FastMCP
 
@@ -111,6 +122,11 @@ def _build_rag_service() -> RAGKnowledgeService:
             persist_dir=settings.bm25_persist_dir,
         )
 
+    web_ingester = WebIngester(
+        web_crawler=web_crawler,
+        safe_browsing_client=safe_browsing_client,
+    )
+
     return RAGKnowledgeService(
         vector_store=vector_store,
         web_crawler=web_crawler,
@@ -123,36 +139,58 @@ def _build_rag_service() -> RAGKnowledgeService:
         vector_weight=settings.rag_vector_weight,
         min_combined_score=settings.rag_min_combined_score,
         debug_log_enabled=settings.rag_debug_log_enabled,
+        web_ingester=web_ingester,
     )
 
 
 # --- MCP ツール定義 ---
 
+_VALID_SOURCE_TYPES: frozenset[str] = frozenset({"web", "zenn", "bluesky", "document"})
+
 
 @mcp.tool()
-async def rag_search(query: str, n_results: int | None = None) -> str:
-    """ユーザーの質問に答えるためにナレッジベースを検索する。挨拶・雑談以外の質問では必ずこのツールを最初に呼び出すこと。
+async def rag_search(
+    query: str,
+    n_results: int | None = None,
+    source_type: str | None = None,
+) -> str:
+    """[rag-knowledge] RAG search - ナレッジベース検索。挨拶・雑談以外の質問では必ずこのツールを最初に呼び出すこと。
 
+    knowledge base, vector search, BM25, retrieval-augmented generation.
     ナレッジベースにはゲーム攻略情報・技術文書等が格納されている。
+    蓄積データの詳細は rag_stats ツールで確認できる。
     知らない用語や固有名詞を含む質問でも必ず検索すること。
 
     Args:
         query: 検索クエリ（ユーザーの質問からキーワードを抽出して構成する）
         n_results: 各エンジンから取得する結果数（未指定時は設定値を使用）
+        source_type: ソース種別フィルタ（"web", "zenn", "bluesky", "document"）。
+            指定時はそのソース種別のチャンクのみを検索対象とする。未指定時は全種別を検索。
 
     Returns:
         検索結果テキスト。ベクトル検索結果とBM25検索結果をセクション分けして返す。
         ヒットしたチャンクのページ全文を返却し、同一URLの重複は参照テキストで省略する。
         結果が0件の場合は「該当する情報が見つかりませんでした」を返す。
+        RAG_MAX_RESPONSE_CHARS 設定時、累積文字数を追跡し上限到達後はページ全文取得を
+        早期打ち切りする。末尾にトランケート通知が付記される。
+        未設定時はトランケーションなし（検索結果をそのまま返す）。
     """
+    if source_type is not None and source_type not in _VALID_SOURCE_TYPES:
+        valid = ", ".join(sorted(_VALID_SOURCE_TYPES))
+        return f"無効な source_type: {source_type!r}（有効値: {valid}）"
+
     service = await _get_rag_service()
     if n_results is None:
         n_results = get_settings().rag_retrieval_count
 
-    raw = await service.retrieve_raw_results(query, n_results=n_results)
+    raw = await service.retrieve_raw_results(
+        query, n_results=n_results, source_type=source_type,
+    )
 
     if not raw.vector_results and not raw.bm25_results:
         return "該当する情報が見つかりませんでした"
+
+    max_chars = get_settings().rag_max_response_chars
 
     # ページ全文キャッシュ（同一URLの多重DB問い合わせ防止）
     page_cache: dict[str, str] = {}
@@ -165,49 +203,99 @@ async def rag_search(query: str, n_results: int | None = None) -> str:
         return page_cache[url]
 
     parts: list[str] = []
+    # 累積文字数を追跡（改行セパレータ分も含む）
+    current_chars = 0
+    budget_exceeded = False
+
+    def _append_part(text: str) -> None:
+        """parts にテキストを追加し、累積文字数を更新する."""
+        nonlocal current_chars, budget_exceeded
+        # 改行セパレータ分を加算（最初の要素以外）
+        sep_len = 1 if parts else 0
+        new_chars = sep_len + len(text)
+
+        if max_chars is not None and current_chars + new_chars > max_chars:
+            # 空セパレータは装飾目的なので、超過しても打ち切りとみなさずスキップ
+            if not text:
+                return
+            # 残り文字数分だけ追加してトランケート
+            remaining = max_chars - current_chars - sep_len
+            if remaining > 0:
+                parts.append(text[:remaining])
+                current_chars = max_chars
+            budget_exceeded = True
+            return
+
+        parts.append(text)
+        current_chars += new_chars
 
     # ベクトル検索結果
     if raw.vector_results:
-        parts.append("## ベクトル検索結果 (意味的類似度)\n")
+        _append_part("## ベクトル検索結果 (意味的類似度)\n")
         for i, vec_item in enumerate(raw.vector_results, start=1):
-            parts.append(f"### Result {i} [distance={vec_item.distance:.3f}]")
-            parts.append(f"Source: {vec_item.source_url}")
+            if budget_exceeded:
+                break
+            _append_part(f"### Result {i} [distance={vec_item.distance:.3f}]")
+            if budget_exceeded:
+                break
+            _append_part(f"Source: {vec_item.source_url}")
+            if budget_exceeded:
+                break
 
             if vec_item.source_url not in url_first_seen:
                 url_first_seen[vec_item.source_url] = ("ベクトル検索結果", i)
                 full_text = await _get_page_text(vec_item.source_url)
-                parts.append(full_text)
+                _append_part(full_text)
             else:
                 section, num = url_first_seen[vec_item.source_url]
-                parts.append(
+                _append_part(
                     f"（この URL のページ全文は{section} Result {num} に掲載済み）"
                 )
-            parts.append("")
+            if budget_exceeded:
+                break
+            _append_part("")
 
     # BM25検索結果
-    if raw.bm25_results:
-        parts.append("## BM25検索結果 (キーワード一致)\n")
+    if raw.bm25_results and not budget_exceeded:
+        _append_part("## BM25検索結果 (キーワード一致)\n")
         for i, bm25_item in enumerate(raw.bm25_results, start=1):
-            parts.append(f"### Result {i} [score={bm25_item.score:.3f}]")
-            parts.append(f"Source: {bm25_item.source_url}")
+            if budget_exceeded:
+                break
+            _append_part(f"### Result {i} [score={bm25_item.score:.3f}]")
+            if budget_exceeded:
+                break
+            _append_part(f"Source: {bm25_item.source_url}")
+            if budget_exceeded:
+                break
 
             if bm25_item.source_url not in url_first_seen:
                 url_first_seen[bm25_item.source_url] = ("BM25検索結果", i)
                 full_text = await _get_page_text(bm25_item.source_url)
-                parts.append(full_text)
+                _append_part(full_text)
             else:
                 section, num = url_first_seen[bm25_item.source_url]
-                parts.append(
+                _append_part(
                     f"（この URL のページ全文は{section} Result {num} に掲載済み）"
                 )
-            parts.append("")
+            if budget_exceeded:
+                break
+            _append_part("")
 
-    return "\n".join(parts).rstrip()
+    response = "\n".join(parts).rstrip()
+
+    if budget_exceeded:
+        response += "\n\n…（レスポンスが上限の{:,}文字を超えたため切り詰めました）".format(
+            max_chars
+        )
+
+    return response
 
 
 @mcp.tool()
 async def rag_add(url: str) -> str:
-    """単一ページをナレッジベースに取り込む.
+    """[rag-knowledge] RAG add - 単一ページをナレッジベースに取り込む.
+
+    knowledge base, ingest, web page, crawl single URL.
 
     Args:
         url: 取り込むページのURL
@@ -230,7 +318,9 @@ async def rag_add(url: str) -> str:
 
 @mcp.tool()
 async def rag_crawl(url: str, pattern: str = "") -> str:
-    """リンク集ページからクロール＆一括取り込み.
+    """[rag-knowledge] RAG crawl - リンク集ページからクロール＆一括取り込み.
+
+    knowledge base, bulk ingest, web crawl, link index.
 
     Args:
         url: リンク集ページのURL
@@ -254,8 +344,343 @@ async def rag_crawl(url: str, pattern: str = "") -> str:
 
 
 @mcp.tool()
+async def rag_crawl_preview(url: str, pattern: str = "") -> str:
+    """[rag-knowledge] RAG crawl preview - クロール対象ページのプレビュー.
+
+    knowledge base, crawl preview, dry run, link list.
+    実際の取り込み（チャンキング・ベクトル化）は行わず、
+    クロール対象となるページのタイトルとURLの一覧を返す。
+
+    Args:
+        url: リンク集ページのURL
+        pattern: URLフィルタリング用の正規表現パターン（任意）
+
+    Returns:
+        クロール対象ページの一覧テキスト
+    """
+    service = await _get_rag_service()
+    try:
+        pages = await service.crawl_preview(url, url_pattern=pattern)
+        if not pages:
+            return "対象ページが見つかりませんでした"
+
+        lines: list[str] = [f"クロール対象: {len(pages)}ページ", ""]
+        for i, page in enumerate(pages, start=1):
+            title = page.title or "(タイトル取得不可)"
+            lines.append(f"{i}. {title}")
+            lines.append(f"   {page.url}")
+        return "\n".join(lines)
+    except ValueError as e:
+        return f"エラー: {e}"
+    except Exception:
+        logger.exception("Failed to preview crawl: %s", url)
+        return f"エラー: プレビューに失敗しました。URL: {url}"
+
+
+@mcp.tool()
+async def rag_crawl_zenn(username: str, max_articles: int | None = None) -> str:
+    """[rag-knowledge] RAG crawl Zenn - Zenn 記事を API 経由で取得し一括取り込み.
+
+    knowledge base, Zenn, ingest, articles, API.
+    指定ユーザーの Zenn 記事を API 経由で取得し、ナレッジベースに取り込む。
+    同一記事の再取り込み時は既存の知識を最新に置き換える。
+
+    Args:
+        username: Zenn ユーザー名
+        max_articles: 取得する最大記事数（未指定時は設定値を使用、許容範囲: 1〜100）
+
+    Returns:
+        取り込み結果のサマリーテキスト（取得記事数、チャンク数、エラー数）
+    """
+    service = await _get_rag_service()
+    settings = get_settings()
+
+    # max_articles のデフォルト解決: 未指定時は設定値を使用
+    if max_articles is None:
+        max_articles = settings.rag_zenn_max_articles
+
+    # max_articles のバリデーション（MCP ツール入力として）
+    if not isinstance(max_articles, int) or isinstance(max_articles, bool):
+        return f"エラー: max_articles は整数で指定してください（入力値: {max_articles!r}）"
+    if max_articles <= 0:
+        return f"エラー: max_articles は正の整数で指定してください（入力値: {max_articles}）"
+
+    if not username or not username.strip():
+        return "エラー: username を指定してください"
+
+    try:
+        async with ConstrainedClient(
+            request_timeout=settings.rag_zenn_request_timeout,
+            request_interval=settings.rag_zenn_request_interval,
+        ) as client:
+            ingester = ZennIngester(
+                client=client,
+                max_articles=max_articles,
+            )
+
+            # 記事一覧を走査
+            slugs = await ingester.discover(username.strip())
+            if not slugs:
+                return f"記事が見つかりませんでした（ユーザー: {username}）"
+
+            # 各記事を取得してナレッジベースに取り込む
+            total_chunks = 0
+            errors = 0
+            skipped = 0
+            ingested_count = 0
+
+            for slug in slugs:
+                try:
+                    content = await ingester.fetch_single(slug)
+                    if content is None:
+                        skipped += 1
+                        continue
+                    chunks = await service.ingest_content(content)
+                    total_chunks += chunks
+                    ingested_count += 1
+                except Exception:
+                    logger.exception("Failed to ingest Zenn article: %s", slug)
+                    errors += 1
+
+            parts = [
+                f"完了: {ingested_count}記事 / {total_chunks}チャンク",
+            ]
+            if skipped > 0:
+                parts.append(f"スキップ: {skipped}件")
+            if errors > 0:
+                parts.append(f"エラー: {errors}件")
+            parts.append(f"（ユーザー: {username}）")
+
+            return " / ".join(parts)
+    except (ValueError, TypeError) as e:
+        return f"エラー: {e}"
+    except Exception:
+        logger.exception("Failed to crawl Zenn articles for user: %s", username)
+        return f"エラー: Zenn 記事の取り込みに失敗しました（ユーザー: {username}）"
+
+
+@mcp.tool()
+async def rag_crawl_bluesky(
+    handle: str,
+    max_posts: int | None = None,
+    include_reposts: bool | None = None,
+) -> str:
+    """[rag-knowledge] RAG crawl BlueSky - BlueSky 投稿を AT Protocol API 経由で取得し一括取り込み.
+
+    knowledge base, BlueSky, Bluesky, ingest, posts, AT Protocol.
+    指定ユーザーの BlueSky 投稿を AT Protocol API 経由で取得し、ナレッジベースに取り込む。
+    BlueSky は投稿編集不可のため、既存の投稿はスキップする（上書き不要）。
+
+    Args:
+        handle: BlueSky ハンドル（例: user.bsky.social）。DID 形式は不可
+        max_posts: 取得する最大投稿数（タイムライン全体に適用、未指定時は設定値を使用、許容範囲: 1〜1000）
+        include_reposts: タイムラインにリポストを含めるか（未指定時は設定値を使用）
+
+    Returns:
+        取り込み結果のサマリーテキスト（取得投稿数、スキップ数、チャンク数、エラー数）
+    """
+    service = await _get_rag_service()
+    settings = get_settings()
+
+    # max_posts のデフォルト解決: 未指定時は設定値を使用
+    if max_posts is None:
+        max_posts = settings.rag_bluesky_max_posts
+
+    # include_reposts のデフォルト解決
+    if include_reposts is None:
+        include_reposts = settings.rag_bluesky_include_reposts
+
+    # max_posts のバリデーション（MCP ツール入力として）
+    if not isinstance(max_posts, int) or isinstance(max_posts, bool):
+        return f"エラー: max_posts は整数で指定してください（入力値: {max_posts!r}）"
+    if max_posts <= 0:
+        return f"エラー: max_posts は正の整数で指定してください（入力値: {max_posts}）"
+
+    if not handle or not handle.strip():
+        return "エラー: handle を指定してください"
+
+    handle = handle.strip()
+    if handle.startswith("did:"):
+        return (
+            f"エラー: DID 形式は使用できません: {handle!r}。"
+            "ハンドル（例: user.bsky.social）を指定してください"
+        )
+
+    try:
+        async with ConstrainedClient(
+            request_timeout=settings.rag_bluesky_request_timeout,
+            request_interval=settings.rag_bluesky_request_interval,
+        ) as client:
+            ingester = BlueskyIngester(
+                client=client,
+                appview_url=settings.rag_bluesky_appview_url,
+                max_posts=max_posts,
+            )
+
+            # 投稿を一括取得
+            contents = await ingester.crawl(
+                handle,
+                include_reposts=include_reposts,
+            )
+
+            if not contents:
+                return f"投稿が見つかりませんでした（ハンドル: {handle}）"
+
+            # 各投稿をナレッジベースに取り込む
+            total_chunks = 0
+            errors = 0
+            skipped = 0
+            ingested_count = 0
+
+            for content in contents:
+                # 既存 source_id チェック（スキップ判定）
+                # BlueSky は投稿編集不可のため、既存投稿はスキップする
+                if await service.source_exists(content.source_id):
+                    skipped += 1
+                    continue
+
+                try:
+                    chunks = await service.ingest_content(content)
+                    total_chunks += chunks
+                    ingested_count += 1
+                except Exception:
+                    logger.exception(
+                        "Failed to ingest BlueSky post: %s", content.source_id
+                    )
+                    errors += 1
+
+            parts = [
+                f"完了: {ingested_count}投稿 / {total_chunks}チャンク",
+            ]
+            if skipped > 0:
+                parts.append(f"スキップ: {skipped}件")
+            if errors > 0:
+                parts.append(f"エラー: {errors}件")
+            parts.append(f"（ハンドル: {handle}）")
+
+            return " / ".join(parts)
+    except (ValueError, TypeError) as e:
+        return f"エラー: {e}"
+    except Exception:
+        logger.exception(
+            "Failed to crawl BlueSky posts for handle: %s", handle
+        )
+        return f"エラー: BlueSky 投稿の取り込みに失敗しました（ハンドル: {handle}）"
+
+
+def _create_document_ingester() -> DocumentIngester:
+    """設定に基づいて DocumentIngester を生成する."""
+    settings = get_settings()
+    extensions = [
+        ext.strip() if ext.strip().startswith(".") else f".{ext.strip()}"
+        for ext in settings.rag_document_supported_extensions.split(",")
+        if ext.strip()
+    ]
+    return DocumentIngester(supported_extensions=extensions)
+
+
+@mcp.tool()
+async def rag_add_document(file_path: str) -> str:
+    """[rag-knowledge] RAG add document - ドキュメントファイルをナレッジベースに取り込む.
+
+    knowledge base, ingest, document, file, text.
+    ドキュメントファイル（Markdown、テキスト、PDF、AsciiDoc）を読み取り、
+    ナレッジベースに取り込む。同一ファイルの再取り込み時は既存の知識を最新に置き換える。
+    stdio モード専用。HTTP モードでは無効。
+
+    Args:
+        file_path: 取り込み対象ファイルのパス（絶対パスまたは相対パス）
+
+    Returns:
+        取り込み結果のメッセージ（ファイル名、チャンク数）
+    """
+    if get_settings().rag_transport == "http":
+        return "エラー: rag_add_document は HTTP モードでは無効です（セキュリティ上の制約）"
+
+    service = await _get_rag_service()
+    ingester = _create_document_ingester()
+
+    try:
+        content = await ingester.fetch_single(file_path)
+        if content is None:
+            return f"エラー: ファイルの取り込みに失敗しました。パス: {file_path}"
+        chunks = await service.ingest_content(content)
+        if chunks <= 0:
+            return f"エラー: ファイルの取り込みに失敗しました。パス: {file_path}"
+        return f"ファイルを取り込みました: {file_path} ({chunks}チャンク)"
+    except ValueError as e:
+        return f"エラー: {e}"
+    except Exception:
+        logger.exception("Failed to add document file: %s", file_path)
+        return f"エラー: ファイルの取り込みに失敗しました。パス: {file_path}"
+
+
+@mcp.tool()
+async def rag_crawl_documents(dir_path: str, pattern: str = "**/*") -> str:
+    """[rag-knowledge] RAG crawl documents - ディレクトリ内のドキュメントを一括取り込み.
+
+    knowledge base, ingest, document directory, bulk import, glob.
+    指定ディレクトリ内のドキュメントファイルを glob パターンで検索し、
+    一括でナレッジベースに取り込む。同一ファイルの再取り込み時は
+    既存の知識を最新に置き換える。
+    stdio モード専用。HTTP モードでは無効。
+
+    Args:
+        dir_path: 取り込み対象ディレクトリのパス（絶対パスまたは相対パス）
+        pattern: glob パターン（デフォルト: ``**/*`` で再帰的に全対応ファイルを検索）
+
+    Returns:
+        取り込み結果のサマリーテキスト（処理ファイル数、総チャンク数、スキップ数、エラー数）
+    """
+    if get_settings().rag_transport == "http":
+        return "エラー: rag_crawl_documents は HTTP モードでは無効です（セキュリティ上の制約）"
+
+    service = await _get_rag_service()
+    ingester = _create_document_ingester()
+
+    try:
+        files = ingester.collect_files(dir_path, pattern)
+    except ValueError as e:
+        return f"エラー: {e}"
+
+    if not files:
+        return f"対象ファイルが見つかりませんでした（ディレクトリ: {dir_path}）"
+
+    total_chunks = 0
+    errors = 0
+    skipped = 0
+    ingested_count = 0
+
+    for file in files:
+        try:
+            content = await ingester.fetch_single(str(file))
+            if content is None:
+                skipped += 1
+                continue
+            chunks = await service.ingest_content(content)
+            total_chunks += chunks
+            ingested_count += 1
+        except Exception:
+            logger.exception("Failed to ingest document file: %s", file)
+            errors += 1
+
+    parts = [
+        f"完了: {ingested_count}ファイル / {total_chunks}チャンク",
+    ]
+    if skipped > 0:
+        parts.append(f"スキップ: {skipped}件")
+    if errors > 0:
+        parts.append(f"エラー: {errors}件")
+    parts.append(f"（ディレクトリ: {dir_path}）")
+
+    return " / ".join(parts)
+
+
+@mcp.tool()
 async def rag_delete(url: str) -> str:
-    """ソースURL指定でナレッジから削除.
+    """[rag-knowledge] RAG delete - ソースURL指定でナレッジから削除.
+
+    knowledge base, remove source, delete document.
 
     Args:
         url: 削除するソースURL
@@ -276,17 +701,78 @@ async def rag_delete(url: str) -> str:
 
 @mcp.tool()
 async def rag_stats() -> str:
-    """ナレッジベースの統計情報を表示.
+    """[rag-knowledge] RAG stats - ナレッジベースの統計情報と蓄積データ概要を表示.
+
+    knowledge base, statistics, chunk count, source count, source list.
+    蓄積されているナレッジの概要（ソースURL一覧とタイトル）を返す。
+    検索前にこのツールを呼ぶことで、ナレッジベースの内容を把握し
+    適切な検索キーワードを構成できる。
 
     Returns:
-        統計情報のテキスト
+        統計情報と蓄積データ概要のテキスト
     """
     service = await _get_rag_service()
     try:
         stats = await service.get_stats()
         total_chunks = stats.get("total_chunks", 0)
         source_count = stats.get("source_count", 0)
-        return f"ナレッジベース統計:\n  総チャンク数: {total_chunks}\n  ソースURL数: {source_count}"
+        sources = stats.get("sources", [])
+
+        parts: list[str] = [
+            "ナレッジベース統計:",
+            f"  総チャンク数: {total_chunks}",
+            f"  ソースURL数: {source_count}",
+        ]
+
+        if sources and isinstance(sources, list):
+            max_sources = get_settings().rag_stats_max_sources
+            parts.append("")
+            parts.append("蓄積データ概要:")
+
+            displayed = 0
+            hit_limit = False
+            for group in sources:
+                if not isinstance(group, dict):
+                    continue
+                domain = group.get("domain", "unknown")
+                pages = group.get("pages", [])
+                if not isinstance(pages, list):
+                    continue
+
+                if displayed >= max_sources:
+                    hit_limit = True
+                    break
+
+                page_count = len(pages)
+                parts.append("")
+                parts.append(f"[{domain}] ({page_count}ページ)")
+
+                shown_in_domain = 0
+                for page in pages:
+                    if displayed >= max_sources:
+                        hit_limit = True
+                        remaining = page_count - shown_in_domain
+                        if remaining > 0:
+                            parts.append(f"  ... 他 {remaining} ページ")
+                        break
+                    if not isinstance(page, dict):
+                        continue
+                    title = page.get("title", "") or "(タイトル取得不可)"
+                    url = page.get("url", "")
+                    parts.append(f"  - {title} ({url})")
+                    displayed += 1
+                    shown_in_domain += 1
+
+                if hit_limit:
+                    break
+
+            if hit_limit:
+                parts.append("")
+                parts.append(
+                    f"(表示上限 {max_sources} 件に達したため省略されたソースがあります)"
+                )
+
+        return "\n".join(parts)
     except Exception:
         logger.exception("Failed to get stats")
         return "エラー: 統計情報の取得に失敗しました。"
@@ -310,9 +796,17 @@ def _configure_and_run() -> None:
                     "transport_security is None; "
                     "cannot disable DNS rebinding protection"
                 )
-        mcp.run(transport="streamable-http")
+
+    try:
+        if transport == "http":
+            mcp.run(transport="streamable-http")
+        else:
+            mcp.run()
+    except KeyboardInterrupt:
+        logger.info("MCP server shut down")
+        raise SystemExit(130)
     else:
-        mcp.run()
+        logger.info("MCP server shut down")
 
 
 if __name__ == "__main__":

@@ -230,6 +230,7 @@ class TestAC11GetStats:
         stats = ephemeral_store.get_stats()
         assert stats["total_chunks"] == 0
         assert stats["source_count"] == 0
+        assert stats["sources"] == []
 
     @pytest.mark.asyncio
     async def test_get_stats_with_documents(self, ephemeral_store: VectorStore) -> None:
@@ -238,17 +239,29 @@ class TestAC11GetStats:
             DocumentChunk(
                 id="doc1_0",
                 text="テキスト1",
-                metadata={"source_url": "https://example.com/page1", "chunk_index": 0},
+                metadata={
+                    "source_url": "https://example.com/page1",
+                    "title": "ページ1",
+                    "chunk_index": 0,
+                },
             ),
             DocumentChunk(
                 id="doc1_1",
                 text="テキスト2",
-                metadata={"source_url": "https://example.com/page1", "chunk_index": 1},
+                metadata={
+                    "source_url": "https://example.com/page1",
+                    "title": "ページ1",
+                    "chunk_index": 1,
+                },
             ),
             DocumentChunk(
                 id="doc2_0",
                 text="テキスト3",
-                metadata={"source_url": "https://example.com/page2", "chunk_index": 0},
+                metadata={
+                    "source_url": "https://example.com/page2",
+                    "title": "ページ2",
+                    "chunk_index": 0,
+                },
             ),
         ]
         await ephemeral_store.add_documents(chunks)
@@ -256,6 +269,70 @@ class TestAC11GetStats:
         stats = ephemeral_store.get_stats()
         assert stats["total_chunks"] == 3
         assert stats["source_count"] == 2
+
+    @pytest.mark.asyncio
+    async def test_get_stats_returns_sources_with_domain_grouping(
+        self,
+        ephemeral_store: VectorStore,
+    ) -> None:
+        """ソース一覧がドメイン別にグルーピングされて返ること."""
+        chunks = [
+            DocumentChunk(
+                id="a_0",
+                text="テキスト1",
+                metadata={
+                    "source_url": "https://example.com/page1",
+                    "title": "ページA",
+                    "chunk_index": 0,
+                },
+            ),
+            DocumentChunk(
+                id="a_1",
+                text="テキスト2",
+                metadata={
+                    "source_url": "https://example.com/page1",
+                    "title": "ページA",
+                    "chunk_index": 1,
+                },
+            ),
+            DocumentChunk(
+                id="b_0",
+                text="テキスト3",
+                metadata={
+                    "source_url": "https://other.com/doc",
+                    "title": "ドキュメントB",
+                    "chunk_index": 0,
+                },
+            ),
+        ]
+        await ephemeral_store.add_documents(chunks)
+
+        stats = ephemeral_store.get_stats()
+        sources = stats["sources"]
+        assert isinstance(sources, list)
+        assert len(sources) == 2
+
+        # ドメイン名でソートされている
+        domains = [g["domain"] for g in sources]
+        assert domains == ["example.com", "other.com"]
+
+        # example.com のページ情報
+        example_group = sources[0]
+        assert example_group["domain"] == "example.com"
+        pages = example_group["pages"]
+        assert len(pages) == 1  # 1つのユニークURL
+        assert pages[0]["url"] == "https://example.com/page1"
+        assert pages[0]["title"] == "ページA"
+        assert pages[0]["chunks"] == 2
+
+        # other.com のページ情報
+        other_group = sources[1]
+        assert other_group["domain"] == "other.com"
+        pages = other_group["pages"]
+        assert len(pages) == 1
+        assert pages[0]["url"] == "https://other.com/doc"
+        assert pages[0]["title"] == "ドキュメントB"
+        assert pages[0]["chunks"] == 1
 
 
 class TestVectorStoreDataClasses:
@@ -438,6 +515,105 @@ class TestAC38SimilarityThreshold:
             if "Similarity threshold filtering" in r.message
         ]
         assert len(threshold_logs) > 0, "閾値フィルタリングのログが出力されていない"
+
+
+class TestGetChunksBySource:
+    """get_chunks_by_source() のテスト (Issue #27)."""
+
+    @pytest.mark.asyncio
+    async def test_get_chunks_by_source_returns_correct_results(
+        self,
+        ephemeral_store: VectorStore,
+    ) -> None:
+        """ソースURL指定で正しい結果が返ること."""
+        # Arrange: 2つのソースからドキュメントを追加
+        chunks = [
+            DocumentChunk(
+                id="page1_0",
+                text="Page1 チャンク0",
+                metadata={"source_url": "https://example.com/page1", "chunk_index": 0},
+            ),
+            DocumentChunk(
+                id="page1_1",
+                text="Page1 チャンク1",
+                metadata={"source_url": "https://example.com/page1", "chunk_index": 1},
+            ),
+            DocumentChunk(
+                id="page2_0",
+                text="Page2 チャンク0",
+                metadata={"source_url": "https://example.com/page2", "chunk_index": 0},
+            ),
+        ]
+        await ephemeral_store.add_documents(chunks)
+
+        # Act
+        results = await ephemeral_store.get_chunks_by_source("https://example.com/page1")
+
+        # Assert
+        assert len(results) == 2
+        assert all(isinstance(r, RetrievalResult) for r in results)
+        assert results[0].text == "Page1 チャンク0"
+        assert results[1].text == "Page1 チャンク1"
+        # distance は 0.0 固定
+        assert all(r.distance == 0.0 for r in results)
+
+    @pytest.mark.asyncio
+    async def test_get_chunks_by_source_sorted_by_chunk_index(
+        self,
+        ephemeral_store: VectorStore,
+    ) -> None:
+        """chunk_index 昇順でソートされること."""
+        # Arrange: chunk_index を逆順で追加
+        chunks = [
+            DocumentChunk(
+                id="page_2",
+                text="チャンク2",
+                metadata={"source_url": "https://example.com/page", "chunk_index": 2},
+            ),
+            DocumentChunk(
+                id="page_0",
+                text="チャンク0",
+                metadata={"source_url": "https://example.com/page", "chunk_index": 0},
+            ),
+            DocumentChunk(
+                id="page_1",
+                text="チャンク1",
+                metadata={"source_url": "https://example.com/page", "chunk_index": 1},
+            ),
+        ]
+        await ephemeral_store.add_documents(chunks)
+
+        # Act
+        results = await ephemeral_store.get_chunks_by_source("https://example.com/page")
+
+        # Assert: chunk_index 昇順
+        assert len(results) == 3
+        assert results[0].text == "チャンク0"
+        assert results[1].text == "チャンク1"
+        assert results[2].text == "チャンク2"
+        assert int(results[0].metadata["chunk_index"]) == 0
+        assert int(results[1].metadata["chunk_index"]) == 1
+        assert int(results[2].metadata["chunk_index"]) == 2
+
+    @pytest.mark.asyncio
+    async def test_get_chunks_by_source_nonexistent_url(
+        self,
+        ephemeral_store: VectorStore,
+    ) -> None:
+        """存在しないURLに対して空リストが返ること."""
+        # Arrange: 別のURLのドキュメントを追加
+        chunk = DocumentChunk(
+            id="page1_0",
+            text="テスト",
+            metadata={"source_url": "https://example.com/page1", "chunk_index": 0},
+        )
+        await ephemeral_store.add_documents([chunk])
+
+        # Act
+        results = await ephemeral_store.get_chunks_by_source("https://example.com/nonexistent")
+
+        # Assert
+        assert results == []
 
 
 class TestEmbeddingMethodDispatch:

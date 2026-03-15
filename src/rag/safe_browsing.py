@@ -13,7 +13,7 @@ from dataclasses import dataclass, field
 from enum import Enum
 from typing import TYPE_CHECKING, Any
 
-import aiohttp
+import httpx
 
 if TYPE_CHECKING:
     from .config import RAGSettings
@@ -116,6 +116,7 @@ class SafeBrowsingClient:
         client_id: str = "rag-knowledge",
         client_version: str = "1.0.0",
         max_cache_size: int | None = None,
+        constrained_client_kwargs: dict[str, Any] | None = None,
     ) -> None:
         """SafeBrowsingClient を初期化する.
 
@@ -127,9 +128,11 @@ class SafeBrowsingClient:
             client_id: クライアント識別子
             client_version: クライアントバージョン
             max_cache_size: キャッシュの最大エントリ数（None の場合はデフォルト値を使用）
+            constrained_client_kwargs: ConstrainedClient の生成パラメータ。
+                指定時は API 呼び出しごとに ConstrainedClient を都度生成する。
         """
         self._api_key = api_key
-        self._timeout = aiohttp.ClientTimeout(total=timeout)
+        self._timeout = httpx.Timeout(timeout)
         self._cache_ttl = cache_ttl
         self._fail_open = fail_open
         self._client_id = client_id
@@ -137,6 +140,7 @@ class SafeBrowsingClient:
         self._max_cache_size = max_cache_size if max_cache_size is not None else self.MAX_CACHE_SIZE
         self._cache: dict[str, CacheEntry] = {}
         self._cache_lock = asyncio.Lock()
+        self._cc_kwargs = constrained_client_kwargs
 
     def _get_cache_key(self, url: str) -> str:
         """URLからキャッシュキーを生成する."""
@@ -307,18 +311,34 @@ class SafeBrowsingClient:
 
     async def _call_api(self, urls: list[str]) -> dict[str, SafeBrowsingResult]:
         """Safe Browsing API を呼び出す."""
+        from py_common_lib.httpx import ConstrainedClient
+
         request_body = self._build_request_body(urls)
 
-        async with aiohttp.ClientSession(timeout=self._timeout) as session:
-            async with session.post(
-                self.API_URL, params={"key": self._api_key}, json=request_body
-            ) as resp:
-                if resp.status != 200:
-                    error_text = await resp.text()
+        if self._cc_kwargs is not None:
+            # 都度生成: 再入・並行利用による状態干渉を防ぐ
+            cc = ConstrainedClient(**self._cc_kwargs)
+            async with cc as client:
+                resp = await client.post(
+                    self.API_URL,
+                    params={"key": self._api_key},
+                    json=request_body,
+                )
+                if resp.status_code != 200:
                     raise RuntimeError(
-                        f"Safe Browsing API error: {resp.status} - {error_text}"
+                        f"Safe Browsing API error: {resp.status_code} - {resp.text}"
                     )
-                response_data = await resp.json()
+                response_data = resp.json()
+        else:
+            async with httpx.AsyncClient(timeout=self._timeout) as session:  # safety:allowed
+                resp = await session.post(
+                    self.API_URL, params={"key": self._api_key}, json=request_body
+                )
+                if resp.status_code != 200:
+                    raise RuntimeError(
+                        f"Safe Browsing API error: {resp.status_code} - {resp.text}"
+                    )
+                response_data = resp.json()
 
         return self._parse_response(response_data, urls)
 
@@ -392,4 +412,9 @@ def create_safe_browsing_client(settings: RAGSettings) -> SafeBrowsingClient | N
         timeout=settings.rag_url_safety_timeout,
         cache_ttl=cache_ttl,
         fail_open=settings.rag_url_safety_fail_open,
+        constrained_client_kwargs={
+            "request_timeout": settings.rag_url_safety_timeout,
+            "max_requests": 10,
+            "circuit_breaker_threshold": 3,
+        },
     )

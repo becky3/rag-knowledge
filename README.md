@@ -13,6 +13,11 @@
 | **MCP サーバー** | FastMCP による stdio/HTTP インターフェース |
 | **評価 CLI** | 検索精度の評価パイプライン |
 | **URL 安全性チェック** | Google Safe Browsing API による URL 検証 |
+| **クロールプレビュー** | クロール対象ページのタイトル・URL 一覧を事前確認 |
+| **Zenn インジェスター** | Zenn 記事を API 経由で取得・ナレッジベースに取り込み |
+| **BlueSky インジェスター** | BlueSky 投稿を AT Protocol API 経由で取得・ナレッジベースに取り込み |
+| **ドキュメントインジェスター** | テキストドキュメント（Markdown、テキスト、PDF、AsciiDoc）をナレッジベースに取り込み |
+| **制約付き HTTP クライアント** | バジェット・サーキットブレーカー・レート制限を統合した安全な HTTP アクセス（py-common-lib 提供） |
 
 ## 動作環境
 
@@ -27,11 +32,14 @@
 | 言語 | Python 3.11+ |
 | パッケージ管理 | uv |
 | MCP SDK | FastMCP |
-| HTTP クライアント | aiohttp |
+| HTTP クライアント | httpx |
+| 制約付き HTTP クライアント | py-common-lib (ConstrainedClient) |
 | ベクトル DB | ChromaDB |
 | キーワード検索 | BM25s |
 | Embedding | OpenAI SDK / LM Studio (OpenAI 互換 API) |
 | HTML 解析 | BeautifulSoup4 |
+| HTML→Markdown 変換 | markdownify |
+| PDF テキスト抽出 | pymupdf4llm |
 
 ## セットアップ
 
@@ -107,9 +115,12 @@ git-flow ベースのブランチ戦略を採用。詳細は `~/.claude/docs/spe
 ### 基盤仕様
 
 - [RAG ナレッジ](docs/specs/rag-knowledge.md)
+- [Zenn インジェスター](docs/specs/zenn-ingester.md)
+- [BlueSky インジェスター](docs/specs/bluesky-ingester.md)
+- [ドキュメントインジェスター](docs/specs/document-ingester.md)
 
 ### Claude Code 拡張（agentic）
 
-**プロジェクト固有エージェント:**
+**プロジェクト固有スキル:**
 
-- [Test Runner エージェント](docs/specs/agentic/agents/test-runner-agent.md)
+- `/test-run` — テスト実行・コード品質チェック（`.claude/skills/test-run/SKILL.md`）

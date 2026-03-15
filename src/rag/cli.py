@@ -19,8 +19,17 @@ from urllib.parse import urldefrag
 
 from .evaluation import (
     EvaluationReport,
+    FailureTag,
     evaluate_retrieval,
 )
+
+# 失敗タグの日本語説明と改善ターゲット
+FAILURE_TAG_DESCRIPTIONS: dict[str, tuple[str, str]] = {
+    FailureTag.RETRIEVAL_MISS.value: ("関連文書が検索されなかった", "チャンキング / Embedding"),
+    FailureTag.RETRIEVAL_NOISE.value: ("無関係な文書が上位に来た", "スコアリング / フィルタリング"),
+    FailureTag.CHUNK_FRAGMENTATION.value: ("回答に必要な情報が分断された", "チャンクサイズ"),
+    FailureTag.QUERY_MISMATCH.value: ("クエリと文書の表現が異なる", "クエリ拡張 / Embedding"),
+}
 
 if TYPE_CHECKING:
     from .bm25_index import BM25Index
@@ -86,7 +95,7 @@ def main() -> None:
     eval_parser = subparsers.add_parser("evaluate", help="RAG検索精度を評価")
     eval_parser.add_argument(
         "--dataset",
-        default="tests/fixtures/rag_evaluation_dataset.json",
+        required=True,
         help="評価データセットのパス",
     )
     eval_parser.add_argument(
@@ -146,7 +155,7 @@ def main() -> None:
     )
     eval_parser.add_argument(
         "--fixture",
-        default="tests/fixtures/rag_test_documents.json",
+        required=True,
         help="BM25インデックス構築用のテストドキュメントフィクスチャ",
     )
     eval_parser.add_argument(
@@ -189,7 +198,7 @@ def main() -> None:
     )
     init_parser.add_argument(
         "--fixture",
-        default="tests/fixtures/rag_test_documents.json",
+        required=True,
         help="テストドキュメントフィクスチャ",
     )
     init_parser.add_argument(
@@ -222,12 +231,33 @@ def main() -> None:
         help="BM25 bパラメータ（例: 0.75）",
     )
 
+    # crawl-preview サブコマンド
+    preview_parser = subparsers.add_parser("crawl-preview", help="クロール対象ページをプレビュー")
+    preview_parser.add_argument(
+        "--url",
+        required=True,
+        help="リンク集ページのURL",
+    )
+    preview_parser.add_argument(
+        "--pattern",
+        default="",
+        help="URLフィルタリング用の正規表現パターン（任意）",
+    )
+    preview_parser.add_argument(
+        "--format",
+        choices=["text", "json"],
+        default="text",
+        help="出力フォーマット（text/json）",
+    )
+
     args = parser.parse_args()
 
     if args.command == "evaluate":
         asyncio.run(run_evaluation(args))
     elif args.command == "init-test-db":
         asyncio.run(init_test_db(args))
+    elif args.command == "crawl-preview":
+        asyncio.run(run_crawl_preview(args))
 
 
 async def create_rag_service(
@@ -317,7 +347,7 @@ def _build_bm25_index_from_fixture(
         fixture_data = json.load(f)
 
     bm25_index = BM25Index(k1=k1, b=b, persist_dir=persist_dir)
-    documents: list[tuple[str, str, str]] = []
+    documents: list[tuple[str, str, str, str]] = []
     for doc in fixture_data.get("documents", []):
         source_url = doc.get("source_url", "")
         content = doc.get("content", "")
@@ -327,7 +357,7 @@ def _build_bm25_index_from_fixture(
         normalized_url, _ = urldefrag(source_url)
         url_hash = hashlib.sha256(normalized_url.encode()).hexdigest()[:16]
         for i, chunk in enumerate(chunks):
-            documents.append((f"{url_hash}_{i}", chunk, normalized_url))
+            documents.append((f"{url_hash}_{i}", chunk, normalized_url, "web"))
 
     added = bm25_index.add_documents(documents)
     logger.info("BM25 index built with %d chunks from fixture", added)
@@ -508,6 +538,7 @@ def write_json_report(
             "average_ndcg": report.average_ndcg,
             "average_mrr": report.average_mrr,
             "negative_source_violations": len(report.negative_source_violations),
+            "failure_tag_summary": report.failure_tag_summary,
         },
         "regression": regression,
         "query_results": [
@@ -522,6 +553,7 @@ def write_json_report(
                 "retrieved_sources": qr.retrieved_sources,
                 "expected_sources": qr.expected_sources,
                 "negative_violations": qr.negative_violations,
+                "failure_tags": [tag.value for tag in qr.failure_tags],
             }
             for qr in report.query_results
         ],
@@ -581,6 +613,18 @@ def write_markdown_report(
         "",
     ])
 
+    if report.failure_tag_summary:
+        lines.extend([
+            "## 失敗タグ分類",
+            "",
+            "| タグ | 件数 | 意味 | 改善ターゲット |",
+            "|------|------|------|----------------|",
+        ])
+        for tag_value, count in sorted(report.failure_tag_summary.items(), key=lambda x: -x[1]):
+            desc, target = FAILURE_TAG_DESCRIPTIONS.get(tag_value, (tag_value, "-"))
+            lines.append(f"| {tag_value} | {count} | {desc} | {target} |")
+        lines.append("")
+
     if regression:
         lines.extend([
             "## リグレッション検出",
@@ -622,6 +666,9 @@ def write_markdown_report(
         ])
         if qr.negative_violations:
             lines.append(f"- **禁止ソース違反**: {qr.negative_violations}")
+        if qr.failure_tags:
+            tag_strs = [tag.value for tag in qr.failure_tags]
+            lines.append(f"- **失敗タグ**: {', '.join(tag_strs)}")
         lines.append("")
 
     with open(output_path, "w", encoding="utf-8") as f:
@@ -705,6 +752,40 @@ async def init_test_db(args: argparse.Namespace) -> None:
         "BM25 index persisted at %s (%d documents)",
         args.bm25_persist_dir, bm25_index.get_document_count(),
     )
+
+
+async def run_crawl_preview(args: argparse.Namespace) -> None:
+    """クロール対象ページのプレビューを実行する.
+
+    Args:
+        args: コマンドライン引数
+    """
+    from .web_crawler import WebCrawler
+
+    logger.info("Starting crawl preview for: %s", args.url)
+
+    crawler = WebCrawler()
+
+    try:
+        pages = await crawler.crawl_preview(args.url, url_pattern=args.pattern)
+    except ValueError as e:
+        logger.error("URL validation failed: %s", e)
+        sys.exit(1)
+
+    if not pages:
+        print("対象ページが見つかりませんでした")
+        return
+
+    if args.format == "json":
+        data = [{"title": p.title, "url": p.url} for p in pages]
+        print(json.dumps(data, ensure_ascii=False, indent=2))
+    else:
+        print(f"クロール対象: {len(pages)}ページ")
+        print()
+        for i, page in enumerate(pages, start=1):
+            title = page.title or "(タイトル取得不可)"
+            print(f"{i}. {title}")
+            print(f"   {page.url}")
 
 
 if __name__ == "__main__":

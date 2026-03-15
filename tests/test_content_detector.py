@@ -67,9 +67,9 @@ class TestDetectContentType:
     def test_numeric_heavy_text_returns_table(self) -> None:
         """数値が多いテキストはTABLEを返す."""
         text = """
-        りゅうおう  200  100  140  75
-        ゾーマ      500  255  220  150
-        スライム    8    0    5    4
+        魔王        200  100  140  75
+        闇の王      500  255  220  150
+        ゴブリン    8    0    5    4
         """
         assert detect_content_type(text) == ContentType.TABLE
 

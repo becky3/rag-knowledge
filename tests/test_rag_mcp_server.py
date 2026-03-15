@@ -1,7 +1,8 @@
 """RAG MCPサーバーのテスト.
 
 仕様: docs/specs/rag-knowledge.md
-5つのRAGツール（rag_search, rag_add, rag_crawl, rag_delete, rag_stats）が
+10個のRAGツール（rag_search, rag_add, rag_crawl, rag_crawl_preview,
+rag_crawl_zenn, rag_crawl_bluesky, rag_add_document, rag_crawl_documents, rag_delete, rag_stats）が
 MCPサーバーとして公開されていることを検証する。
 """
 
@@ -18,6 +19,7 @@ from rag.rag_knowledge import (
     VectorSearchItem,
 )
 from rag.server import _configure_and_run, _reset_rag_service
+from rag.web_crawler import CrawlPreviewPage
 
 
 @pytest.fixture(autouse=True)
@@ -27,26 +29,30 @@ def _reset_rag_global_state() -> None:
 
 
 @pytest.mark.asyncio
-async def test_rag_server_exposes_five_tools() -> None:
-    """AC20: RAG MCPサーバーが5つのツールを公開すること."""
+async def test_rag_server_exposes_ten_tools() -> None:
+    """RAG MCPサーバーが10個のツールを公開すること."""
     mod = import_module("rag.server")
     server = mod.mcp
 
     tools = await server.list_tools()
     tool_names = {t.name for t in tools}
 
-    expected = {"rag_search", "rag_add", "rag_crawl", "rag_delete", "rag_stats"}
+    expected = {
+        "rag_search", "rag_add", "rag_crawl", "rag_crawl_preview",
+        "rag_crawl_zenn", "rag_crawl_bluesky", "rag_add_document",
+        "rag_crawl_documents", "rag_delete", "rag_stats",
+    }
     assert tool_names == expected, f"Expected {expected}, got {tool_names}"
 
 
 @pytest.mark.asyncio
 async def test_rag_server_tool_count() -> None:
-    """AC20: RAG MCPサーバーのツール数が正確に5であること."""
+    """RAG MCPサーバーのツール数が正確に10であること."""
     mod = import_module("rag.server")
     server = mod.mcp
 
     tools = await server.list_tools()
-    assert len(tools) == 5
+    assert len(tools) == 10
 
 
 class TestRagSearchOutput:
@@ -61,6 +67,7 @@ class TestRagSearchOutput:
         )
         self.mock_settings = MagicMock()
         self.mock_settings.rag_retrieval_count = 3
+        self.mock_settings.rag_max_response_chars = None
 
     async def test_output_contains_vector_and_bm25_sections(self) -> None:
         """出力にベクトル検索結果とBM25検索結果のセクションが含まれること（#548）."""
@@ -323,3 +330,733 @@ class TestConfigureAndRun:
         mock_run.assert_called_once_with(transport="streamable-http")
         assert mod.mcp.settings.host == "0.0.0.0"
         assert mod.mcp.settings.port == 9090
+
+    def test_keyboard_interrupt_graceful_shutdown(self) -> None:
+        """Ctrl+C (KeyboardInterrupt) で終了コード130で終了すること (#42)."""
+        mod = import_module("rag.server")
+        mock_settings = MagicMock()
+        mock_settings.rag_transport = "http"
+        mock_settings.rag_http_host = "127.0.0.1"
+        mock_settings.rag_http_port = 8080
+        mock_settings.rag_dns_rebinding_protection = True
+
+        with (
+            patch.object(mod, "get_settings", return_value=mock_settings),
+            patch.object(
+                mod.mcp, "run", side_effect=KeyboardInterrupt
+            ),
+            patch.object(mod.logger, "info") as mock_log,
+            pytest.raises(SystemExit, match="130"),
+        ):
+            _configure_and_run()
+
+        mock_log.assert_called_once_with("MCP server shut down")
+
+    def test_stdio_keyboard_interrupt_graceful_shutdown(self) -> None:
+        """stdio モードでも KeyboardInterrupt で終了コード130で終了すること (#42)."""
+        mod = import_module("rag.server")
+        mock_settings = MagicMock()
+        mock_settings.rag_transport = "stdio"
+
+        with (
+            patch.object(mod, "get_settings", return_value=mock_settings),
+            patch.object(
+                mod.mcp, "run", side_effect=KeyboardInterrupt
+            ),
+            patch.object(mod.logger, "info") as mock_log,
+            pytest.raises(SystemExit, match="130"),
+        ):
+            _configure_and_run()
+
+        mock_log.assert_called_once_with("MCP server shut down")
+
+    def test_shutdown_log_on_normal_exit(self) -> None:
+        """正常終了時もシャットダウンログが出力されること (#42)."""
+        mod = import_module("rag.server")
+        mock_settings = MagicMock()
+        mock_settings.rag_transport = "stdio"
+
+        with (
+            patch.object(mod, "get_settings", return_value=mock_settings),
+            patch.object(mod.mcp, "run"),
+            patch.object(mod.logger, "info") as mock_log,
+        ):
+            _configure_and_run()
+
+        mock_log.assert_called_once_with("MCP server shut down")
+
+
+class TestRagSearchResponseTruncation:
+    """rag_search レスポンスサイズ上限ガードのテスト（#26）."""
+
+    @pytest.fixture(autouse=True)
+    def _patch_rag_service(self) -> None:
+        """rag_search のテスト用に RAGKnowledgeService をモックする."""
+        self.mock_service = AsyncMock()
+        self.mock_settings = MagicMock()
+        self.mock_settings.rag_retrieval_count = 3
+
+    async def test_response_not_truncated_when_limit_is_none(self) -> None:
+        """上限未設定時はレスポンスがそのまま返ること（#26）."""
+        mod = import_module("rag.server")
+
+        self.mock_service.retrieve_raw_results = AsyncMock(
+            return_value=RawSearchResults(
+                vector_results=[
+                    VectorSearchItem(
+                        text="テキスト",
+                        source_url="https://example.com/page1",
+                        distance=0.1,
+                        chunk_index=0,
+                    ),
+                ],
+                bm25_results=[],
+            )
+        )
+        self.mock_service.get_full_page_text = AsyncMock(
+            return_value="ページ全文テキスト"
+        )
+        self.mock_settings.rag_max_response_chars = None
+
+        with (
+            patch.object(mod, "_get_rag_service", return_value=self.mock_service),
+            patch.object(mod, "get_settings", return_value=self.mock_settings),
+        ):
+            result = await mod.rag_search("テスト")
+
+        assert "切り詰めました" not in result
+        assert "ページ全文テキスト" in result
+
+    async def test_response_not_truncated_when_within_limit(self) -> None:
+        """レスポンスが上限以下の場合はそのまま返ること（#26）."""
+        mod = import_module("rag.server")
+
+        self.mock_service.retrieve_raw_results = AsyncMock(
+            return_value=RawSearchResults(
+                vector_results=[
+                    VectorSearchItem(
+                        text="テキスト",
+                        source_url="https://example.com/page1",
+                        distance=0.1,
+                        chunk_index=0,
+                    ),
+                ],
+                bm25_results=[],
+            )
+        )
+        self.mock_service.get_full_page_text = AsyncMock(
+            return_value="短いテキスト"
+        )
+        self.mock_settings.rag_max_response_chars = 100000
+
+        with (
+            patch.object(mod, "_get_rag_service", return_value=self.mock_service),
+            patch.object(mod, "get_settings", return_value=self.mock_settings),
+        ):
+            result = await mod.rag_search("テスト")
+
+        assert "切り詰めました" not in result
+        assert "短いテキスト" in result
+
+    async def test_response_truncated_when_exceeds_limit(self) -> None:
+        """レスポンスが上限を超えた場合にトランケートされること（#26）."""
+        mod = import_module("rag.server")
+
+        long_text = "あ" * 500
+        self.mock_service.retrieve_raw_results = AsyncMock(
+            return_value=RawSearchResults(
+                vector_results=[
+                    VectorSearchItem(
+                        text="テキスト",
+                        source_url="https://example.com/page1",
+                        distance=0.1,
+                        chunk_index=0,
+                    ),
+                ],
+                bm25_results=[],
+            )
+        )
+        self.mock_service.get_full_page_text = AsyncMock(
+            return_value=long_text
+        )
+        self.mock_settings.rag_max_response_chars = 100
+
+        with (
+            patch.object(mod, "_get_rag_service", return_value=self.mock_service),
+            patch.object(mod, "get_settings", return_value=self.mock_settings),
+        ):
+            result = await mod.rag_search("テスト")
+
+        assert "切り詰めました" in result
+        assert "100" in result
+
+    async def test_truncated_response_starts_with_original_content(self) -> None:
+        """トランケートされたレスポンスが元の内容の先頭部分を含むこと（#26）."""
+        mod = import_module("rag.server")
+
+        self.mock_service.retrieve_raw_results = AsyncMock(
+            return_value=RawSearchResults(
+                vector_results=[
+                    VectorSearchItem(
+                        text="テキスト",
+                        source_url="https://example.com/page1",
+                        distance=0.1,
+                        chunk_index=0,
+                    ),
+                ],
+                bm25_results=[],
+            )
+        )
+        self.mock_service.get_full_page_text = AsyncMock(
+            return_value="あ" * 1000
+        )
+        self.mock_settings.rag_max_response_chars = 50
+
+        with (
+            patch.object(mod, "_get_rag_service", return_value=self.mock_service),
+            patch.object(mod, "get_settings", return_value=self.mock_settings),
+        ):
+            result = await mod.rag_search("テスト")
+
+        # トランケート通知の前の部分が正確に50文字であること
+        truncation_marker = "\n\n…（レスポンスが上限の"
+        marker_pos = result.index(truncation_marker)
+        assert marker_pos == 50
+
+    async def test_early_termination_skips_later_page_fetches(self) -> None:
+        """上限到達後は後続Resultのページ全文取得が呼ばれないこと（#56）."""
+        mod = import_module("rag.server")
+
+        # 3つの結果を用意し、上限を小さく設定
+        self.mock_service.retrieve_raw_results = AsyncMock(
+            return_value=RawSearchResults(
+                vector_results=[
+                    VectorSearchItem(
+                        text="テキスト1",
+                        source_url="https://example.com/page1",
+                        distance=0.1,
+                        chunk_index=0,
+                    ),
+                    VectorSearchItem(
+                        text="テキスト2",
+                        source_url="https://example.com/page2",
+                        distance=0.2,
+                        chunk_index=0,
+                    ),
+                    VectorSearchItem(
+                        text="テキスト3",
+                        source_url="https://example.com/page3",
+                        distance=0.3,
+                        chunk_index=0,
+                    ),
+                ],
+                bm25_results=[],
+            )
+        )
+        call_log: list[str] = []
+
+        async def _mock_get_full_page_text(url: str) -> str:
+            call_log.append(url)
+            return "あ" * 500
+
+        self.mock_service.get_full_page_text = _mock_get_full_page_text
+        # 最初の Result のヘッダー + ページ全文で超過する程度の上限
+        self.mock_settings.rag_max_response_chars = 100
+
+        with (
+            patch.object(mod, "_get_rag_service", return_value=self.mock_service),
+            patch.object(mod, "get_settings", return_value=self.mock_settings),
+        ):
+            result = await mod.rag_search("テスト")
+
+        # page1 の全文は取得されるが、page2, page3 は取得されない
+        assert "https://example.com/page1" in call_log
+        assert "https://example.com/page2" not in call_log
+        assert "https://example.com/page3" not in call_log
+        assert "切り詰めました" in result
+
+    async def test_early_termination_skips_bm25_when_vector_exhausts_budget(
+        self,
+    ) -> None:
+        """ベクトル検索結果で上限到達時、BM25のページ全文取得が呼ばれないこと（#56）."""
+        mod = import_module("rag.server")
+
+        self.mock_service.retrieve_raw_results = AsyncMock(
+            return_value=RawSearchResults(
+                vector_results=[
+                    VectorSearchItem(
+                        text="テキスト",
+                        source_url="https://example.com/vec1",
+                        distance=0.1,
+                        chunk_index=0,
+                    ),
+                ],
+                bm25_results=[
+                    BM25SearchItem(
+                        text="テキスト",
+                        source_url="https://example.com/bm25_1",
+                        score=5.0,
+                        doc_id="doc1",
+                    ),
+                ],
+            )
+        )
+        call_log: list[str] = []
+
+        async def _mock_get_full_page_text(url: str) -> str:
+            call_log.append(url)
+            return "あ" * 500
+
+        self.mock_service.get_full_page_text = _mock_get_full_page_text
+        self.mock_settings.rag_max_response_chars = 100
+
+        with (
+            patch.object(mod, "_get_rag_service", return_value=self.mock_service),
+            patch.object(mod, "get_settings", return_value=self.mock_settings),
+        ):
+            result = await mod.rag_search("テスト")
+
+        # BM25側のページ全文は取得されない
+        assert "https://example.com/bm25_1" not in call_log
+        assert "切り詰めました" in result
+
+    async def test_no_early_termination_when_limit_is_none(self) -> None:
+        """上限未設定時は全Resultのページ全文が取得されること（#56）."""
+        mod = import_module("rag.server")
+
+        self.mock_service.retrieve_raw_results = AsyncMock(
+            return_value=RawSearchResults(
+                vector_results=[
+                    VectorSearchItem(
+                        text="テキスト1",
+                        source_url="https://example.com/page1",
+                        distance=0.1,
+                        chunk_index=0,
+                    ),
+                    VectorSearchItem(
+                        text="テキスト2",
+                        source_url="https://example.com/page2",
+                        distance=0.2,
+                        chunk_index=0,
+                    ),
+                ],
+                bm25_results=[],
+            )
+        )
+        call_log: list[str] = []
+
+        async def _mock_get_full_page_text(url: str) -> str:
+            call_log.append(url)
+            return "あ" * 500
+
+        self.mock_service.get_full_page_text = _mock_get_full_page_text
+        self.mock_settings.rag_max_response_chars = None
+
+        with (
+            patch.object(mod, "_get_rag_service", return_value=self.mock_service),
+            patch.object(mod, "get_settings", return_value=self.mock_settings),
+        ):
+            result = await mod.rag_search("テスト")
+
+        # 全てのページ全文が取得される
+        assert "https://example.com/page1" in call_log
+        assert "https://example.com/page2" in call_log
+        assert "切り詰めました" not in result
+
+    async def test_exact_fit_separator_does_not_trigger_truncation(self) -> None:
+        """内容が上限ちょうどに収まった時、空セパレータで誤って打ち切り通知が出ないこと."""
+        mod = import_module("rag.server")
+
+        page_text = "テスト内容"
+        self.mock_service.retrieve_raw_results = AsyncMock(
+            return_value=RawSearchResults(
+                vector_results=[
+                    VectorSearchItem(
+                        text="テキスト",
+                        source_url="https://example.com/page1",
+                        distance=0.1,
+                        chunk_index=0,
+                    ),
+                ],
+                bm25_results=[],
+            )
+        )
+        self.mock_service.get_full_page_text = AsyncMock(return_value=page_text)
+
+        # まず上限なしで実行し、実際のレスポンス長を取得
+        self.mock_settings.rag_max_response_chars = None
+        with (
+            patch.object(mod, "_get_rag_service", return_value=self.mock_service),
+            patch.object(mod, "get_settings", return_value=self.mock_settings),
+        ):
+            unlimited_result = await mod.rag_search("テスト")
+
+        # rstrip 後のレスポンス長をちょうど上限に設定
+        # （空セパレータが上限超過の原因にならないことを確認）
+        exact_limit = len(unlimited_result.rstrip())
+        self.mock_settings.rag_max_response_chars = exact_limit
+
+        with (
+            patch.object(mod, "_get_rag_service", return_value=self.mock_service),
+            patch.object(mod, "get_settings", return_value=self.mock_settings),
+        ):
+            result = await mod.rag_search("テスト")
+
+        assert "切り詰めました" not in result
+
+    async def test_empty_results_not_affected_by_limit(self) -> None:
+        """0件結果は上限設定に影響されないこと（#26）."""
+        mod = import_module("rag.server")
+
+        self.mock_service.retrieve_raw_results = AsyncMock(
+            return_value=RawSearchResults(
+                vector_results=[],
+                bm25_results=[],
+            )
+        )
+        self.mock_settings.rag_max_response_chars = 10
+
+        with (
+            patch.object(mod, "_get_rag_service", return_value=self.mock_service),
+            patch.object(mod, "get_settings", return_value=self.mock_settings),
+        ):
+            result = await mod.rag_search("テスト")
+
+        assert result == "該当する情報が見つかりませんでした"
+
+
+class TestRagCrawlPreviewTool:
+    """rag_crawl_preview ツールのテスト（Issue #45）."""
+
+    @pytest.mark.asyncio
+    async def test_crawl_preview_returns_page_list(self) -> None:
+        """クロール対象ページの一覧テキストが返ること."""
+        mod = import_module("rag.server")
+        mock_service = AsyncMock()
+        mock_service.crawl_preview = AsyncMock(
+            return_value=[
+                CrawlPreviewPage(url="https://example.com/page1", title="ページ1"),
+                CrawlPreviewPage(url="https://example.com/page2", title="ページ2"),
+            ]
+        )
+
+        with patch.object(mod, "_get_rag_service", return_value=mock_service):
+            result = await mod.rag_crawl_preview("https://example.com/index")
+
+        assert "クロール対象: 2ページ" in result
+        assert "ページ1" in result
+        assert "https://example.com/page1" in result
+        assert "ページ2" in result
+        assert "https://example.com/page2" in result
+
+    @pytest.mark.asyncio
+    async def test_crawl_preview_empty_result(self) -> None:
+        """対象ページが見つからない場合のメッセージが返ること."""
+        mod = import_module("rag.server")
+        mock_service = AsyncMock()
+        mock_service.crawl_preview = AsyncMock(return_value=[])
+
+        with patch.object(mod, "_get_rag_service", return_value=mock_service):
+            result = await mod.rag_crawl_preview("https://example.com/empty")
+
+        assert result == "対象ページが見つかりませんでした"
+
+    @pytest.mark.asyncio
+    async def test_crawl_preview_shows_fallback_title(self) -> None:
+        """タイトル取得不可の場合にフォールバックテキストが表示されること."""
+        mod = import_module("rag.server")
+        mock_service = AsyncMock()
+        mock_service.crawl_preview = AsyncMock(
+            return_value=[
+                CrawlPreviewPage(url="https://example.com/page1", title=""),
+            ]
+        )
+
+        with patch.object(mod, "_get_rag_service", return_value=mock_service):
+            result = await mod.rag_crawl_preview("https://example.com/index")
+
+        assert "(タイトル取得不可)" in result
+
+    @pytest.mark.asyncio
+    async def test_crawl_preview_with_pattern(self) -> None:
+        """patternパラメータがservice.crawl_previewに渡されること."""
+        mod = import_module("rag.server")
+        mock_service = AsyncMock()
+        mock_service.crawl_preview = AsyncMock(return_value=[])
+
+        with patch.object(mod, "_get_rag_service", return_value=mock_service):
+            await mod.rag_crawl_preview(
+                "https://example.com/index", pattern=r"\.html$"
+            )
+
+        mock_service.crawl_preview.assert_called_once_with(
+            "https://example.com/index", url_pattern=r"\.html$"
+        )
+
+    @pytest.mark.asyncio
+    async def test_crawl_preview_value_error(self) -> None:
+        """URL検証エラー時にエラーメッセージが返ること."""
+        mod = import_module("rag.server")
+        mock_service = AsyncMock()
+        mock_service.crawl_preview = AsyncMock(
+            side_effect=ValueError("許可されていないスキームです")
+        )
+
+        with patch.object(mod, "_get_rag_service", return_value=mock_service):
+            result = await mod.rag_crawl_preview("ftp://example.com")
+
+        assert "エラー:" in result
+        assert "許可されていないスキームです" in result
+
+    @pytest.mark.asyncio
+    async def test_crawl_preview_unexpected_error(self) -> None:
+        """予期しないエラー時にエラーメッセージが返ること."""
+        mod = import_module("rag.server")
+        mock_service = AsyncMock()
+        mock_service.crawl_preview = AsyncMock(
+            side_effect=RuntimeError("Unexpected")
+        )
+
+        with patch.object(mod, "_get_rag_service", return_value=mock_service):
+            result = await mod.rag_crawl_preview("https://example.com/index")
+
+        assert "エラー: プレビューに失敗しました" in result
+
+
+class TestRagStatsOutput:
+    """rag_stats ツールの出力フォーマットテスト（Issue #25）."""
+
+    @pytest.fixture(autouse=True)
+    def _patch_rag_service(self) -> None:
+        """rag_stats のテスト用に RAGKnowledgeService をモックする."""
+        self.mock_service = AsyncMock()
+        self.mock_settings = MagicMock()
+        self.mock_settings.rag_stats_max_sources = 100
+
+    async def test_stats_contains_sources_section(self) -> None:
+        """蓄積データ概要セクションが出力に含まれること（#25）."""
+        mod = import_module("rag.server")
+
+        self.mock_service.get_stats = AsyncMock(
+            return_value={
+                "total_chunks": 150,
+                "source_count": 3,
+                "sources": [
+                    {
+                        "domain": "example.com",
+                        "pages": [
+                            {
+                                "url": "https://example.com/page1",
+                                "title": "テストページ1",
+                                "chunks": 5,
+                            },
+                            {
+                                "url": "https://example.com/page2",
+                                "title": "テストページ2",
+                                "chunks": 3,
+                            },
+                        ],
+                    },
+                    {
+                        "domain": "other.com",
+                        "pages": [
+                            {
+                                "url": "https://other.com/doc",
+                                "title": "ドキュメント",
+                                "chunks": 10,
+                            },
+                        ],
+                    },
+                ],
+            }
+        )
+
+        with (
+            patch.object(mod, "_get_rag_service", return_value=self.mock_service),
+            patch.object(mod, "get_settings", return_value=self.mock_settings),
+        ):
+            result = await mod.rag_stats()
+
+        assert "ナレッジベース統計:" in result
+        assert "総チャンク数: 150" in result
+        assert "ソースURL数: 3" in result
+        assert "蓄積データ概要:" in result
+        assert "[example.com] (2ページ)" in result
+        assert "テストページ1 (https://example.com/page1)" in result
+        assert "テストページ2 (https://example.com/page2)" in result
+        assert "[other.com] (1ページ)" in result
+        assert "ドキュメント (https://other.com/doc)" in result
+
+    async def test_stats_empty_sources(self) -> None:
+        """ソースが空の場合は蓄積データ概要セクションが含まれないこと（#25）."""
+        mod = import_module("rag.server")
+
+        self.mock_service.get_stats = AsyncMock(
+            return_value={
+                "total_chunks": 0,
+                "source_count": 0,
+                "sources": [],
+            }
+        )
+
+        with (
+            patch.object(mod, "_get_rag_service", return_value=self.mock_service),
+            patch.object(mod, "get_settings", return_value=self.mock_settings),
+        ):
+            result = await mod.rag_stats()
+
+        assert "ナレッジベース統計:" in result
+        assert "総チャンク数: 0" in result
+        assert "蓄積データ概要:" not in result
+
+    async def test_stats_truncation_when_exceeds_limit(self) -> None:
+        """表示上限を超える場合に省略メッセージが出ること（#25）."""
+        mod = import_module("rag.server")
+
+        # 3ページ分のデータを用意し、上限を2に設定
+        self.mock_settings.rag_stats_max_sources = 2
+        self.mock_service.get_stats = AsyncMock(
+            return_value={
+                "total_chunks": 30,
+                "source_count": 3,
+                "sources": [
+                    {
+                        "domain": "example.com",
+                        "pages": [
+                            {
+                                "url": "https://example.com/page1",
+                                "title": "ページ1",
+                                "chunks": 10,
+                            },
+                            {
+                                "url": "https://example.com/page2",
+                                "title": "ページ2",
+                                "chunks": 10,
+                            },
+                            {
+                                "url": "https://example.com/page3",
+                                "title": "ページ3",
+                                "chunks": 10,
+                            },
+                        ],
+                    },
+                ],
+            }
+        )
+
+        with (
+            patch.object(mod, "_get_rag_service", return_value=self.mock_service),
+            patch.object(mod, "get_settings", return_value=self.mock_settings),
+        ):
+            result = await mod.rag_stats()
+
+        # 最初の2ページは表示される
+        assert "ページ1" in result
+        assert "ページ2" in result
+        # 3ページ目は省略される
+        assert "ページ3" not in result
+        assert "表示上限 2 件に達したため省略されたソースがあります" in result
+
+    async def test_stats_fallback_title(self) -> None:
+        """タイトルが空の場合にフォールバックテキストが表示されること（#25）."""
+        mod = import_module("rag.server")
+
+        self.mock_service.get_stats = AsyncMock(
+            return_value={
+                "total_chunks": 5,
+                "source_count": 1,
+                "sources": [
+                    {
+                        "domain": "example.com",
+                        "pages": [
+                            {
+                                "url": "https://example.com/page1",
+                                "title": "",
+                                "chunks": 5,
+                            },
+                        ],
+                    },
+                ],
+            }
+        )
+
+        with (
+            patch.object(mod, "_get_rag_service", return_value=self.mock_service),
+            patch.object(mod, "get_settings", return_value=self.mock_settings),
+        ):
+            result = await mod.rag_stats()
+
+        assert "(タイトル取得不可)" in result
+
+
+class TestRagCrawlZennTool:
+    """rag_crawl_zenn ツールのテスト（#168）."""
+
+    @pytest.mark.asyncio
+    async def test_constrained_client_receives_settings(self) -> None:
+        """ConstrainedClient に設定値が正しく渡されること."""
+        mod = import_module("rag.server")
+        mock_service = AsyncMock()
+        mock_service.ingest_content = AsyncMock(return_value=5)
+        mock_settings = MagicMock()
+        mock_settings.rag_zenn_max_articles = 50
+        mock_settings.rag_zenn_request_timeout = 15
+        mock_settings.rag_zenn_request_interval = 0.3
+
+        mock_client_instance = AsyncMock()
+        mock_client_instance.get = AsyncMock(
+            return_value=MagicMock(
+                status_code=200,
+                json=MagicMock(return_value={"articles": [], "next_page": None}),
+            )
+        )
+        mock_client_cls = MagicMock()
+        mock_client_cls.return_value.__aenter__ = AsyncMock(
+            return_value=mock_client_instance
+        )
+        mock_client_cls.return_value.__aexit__ = AsyncMock(return_value=False)
+
+        with (
+            patch.object(mod, "_get_rag_service", return_value=mock_service),
+            patch.object(mod, "get_settings", return_value=mock_settings),
+            patch.object(mod, "ConstrainedClient", mock_client_cls),
+        ):
+            await mod.rag_crawl_zenn("testuser")
+
+        mock_client_cls.assert_called_once_with(
+            request_timeout=15,
+            request_interval=0.3,
+        )
+
+    @pytest.mark.asyncio
+    async def test_empty_username_returns_error(self) -> None:
+        """空のユーザー名でエラーメッセージを返すこと."""
+        mod = import_module("rag.server")
+        mock_service = AsyncMock()
+        mock_settings = MagicMock()
+        mock_settings.rag_zenn_max_articles = 50
+
+        with (
+            patch.object(mod, "_get_rag_service", return_value=mock_service),
+            patch.object(mod, "get_settings", return_value=mock_settings),
+        ):
+            result = await mod.rag_crawl_zenn("")
+
+        assert "エラー" in result
+        assert "username" in result
+
+    @pytest.mark.asyncio
+    async def test_invalid_max_articles_returns_error(self) -> None:
+        """不正な max_articles でエラーメッセージを返すこと."""
+        mod = import_module("rag.server")
+        mock_service = AsyncMock()
+        mock_settings = MagicMock()
+        mock_settings.rag_zenn_max_articles = 50
+
+        with (
+            patch.object(mod, "_get_rag_service", return_value=mock_service),
+            patch.object(mod, "get_settings", return_value=mock_settings),
+        ):
+            result = await mod.rag_crawl_zenn("testuser", max_articles=-1)
+
+        assert "エラー" in result

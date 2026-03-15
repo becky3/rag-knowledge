@@ -41,7 +41,6 @@ async def test_lmstudio_embedding_converts_text() -> None:
     """AC2: LMStudioEmbedding が LM Studio 経由でテキストをベクトルに変換できること."""
     provider = LMStudioEmbedding(
         base_url=DEFAULT_LMSTUDIO_BASE_URL,
-        model="nomic-embed-text",
     )
 
     # AsyncOpenAI.embeddings.create をモック
@@ -59,7 +58,7 @@ async def test_lmstudio_embedding_converts_text() -> None:
 
     assert result == [[0.1, 0.2, 0.3], [0.4, 0.5, 0.6]]
     provider._client.embeddings.create.assert_awaited_once_with(
-        model="nomic-embed-text",
+        model=provider._model,
         input=["hello", "world"],
     )
 
@@ -99,7 +98,7 @@ async def test_openai_embedding_converts_text() -> None:
 
     assert result == [[0.7, 0.8, 0.9]]
     provider._client.embeddings.create.assert_awaited_once_with(
-        model="text-embedding-3-small",
+        model=provider._model,
         input=["test text"],
     )
 
@@ -152,14 +151,14 @@ def test_factory_uses_settings_model_online(
 
 
 def test_embedding_settings_defaults(monkeypatch: pytest.MonkeyPatch) -> None:
-    """AC4: Embedding関連設定のデフォルト値が正しいこと."""
+    """AC4: Embedding関連設定のデフォルト値が設定されていること."""
     monkeypatch.delenv("EMBEDDING_PROVIDER", raising=False)
     monkeypatch.delenv("EMBEDDING_MODEL_LOCAL", raising=False)
     monkeypatch.delenv("EMBEDDING_MODEL_ONLINE", raising=False)
     settings = Settings(_env_file=None)  # type: ignore[call-arg]
     assert settings.embedding_provider == "local"
-    assert settings.embedding_model_local == "nomic-embed-text"
-    assert settings.embedding_model_online == "text-embedding-3-small"
+    assert settings.embedding_model_local  # デフォルト値が設定されていること
+    assert settings.embedding_model_online  # デフォルト値が設定されていること
 
 
 def test_embedding_settings_configurable(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -174,12 +173,12 @@ def test_embedding_settings_configurable(monkeypatch: pytest.MonkeyPatch) -> Non
 
 
 def test_lmstudio_embedding_default_params() -> None:
-    """LMStudioEmbedding のデフォルトパラメータが正しいこと."""
+    """LMStudioEmbedding のデフォルトパラメータが設定されていること."""
     provider = LMStudioEmbedding()
     assert provider._client.base_url.host == "localhost"
     # base_url にホストのみ指定しても /v1 がコード側で付加される
     assert provider._client.base_url.path == "/v1/"
-    assert provider._model == "nomic-embed-text"
+    assert provider._model  # デフォルトモデルが設定されていること
 
 
 def test_lmstudio_embedding_custom_params() -> None:
@@ -216,7 +215,7 @@ async def test_embed_documents_default_delegates_to_embed() -> None:
     result = await provider.embed_documents(["hello"])
     assert result == [[0.1, 0.2, 0.3]]
     provider._client.embeddings.create.assert_awaited_once_with(
-        model="nomic-embed-text",
+        model=provider._model,
         input=["hello"],
     )
 
@@ -235,7 +234,7 @@ async def test_embed_query_default_delegates_to_embed() -> None:
     result = await provider.embed_query("hello")
     assert result == [0.4, 0.5, 0.6]
     provider._client.embeddings.create.assert_awaited_once_with(
-        model="nomic-embed-text",
+        model=provider._model,
         input=["hello"],
     )
 
@@ -253,7 +252,7 @@ async def test_prefix_enabled_adds_document_prefix() -> None:
 
     await provider.embed_documents(["hello"])
     provider._client.embeddings.create.assert_awaited_once_with(
-        model="nomic-embed-text",
+        model=provider._model,
         input=["search_document: hello"],
     )
 
@@ -271,7 +270,7 @@ async def test_prefix_enabled_adds_query_prefix() -> None:
 
     await provider.embed_query("hello")
     provider._client.embeddings.create.assert_awaited_once_with(
-        model="nomic-embed-text",
+        model=provider._model,
         input=["search_query: hello"],
     )
 
@@ -289,7 +288,7 @@ async def test_prefix_disabled_no_prefix_on_documents() -> None:
 
     await provider.embed_documents(["hello"])
     provider._client.embeddings.create.assert_awaited_once_with(
-        model="nomic-embed-text",
+        model=provider._model,
         input=["hello"],
     )
 

@@ -238,7 +238,7 @@ class TestTableDataSearch:
         mock_web_crawler: MagicMock,
         mock_bm25_index: MagicMock,
     ) -> None:
-        """AC12: 「りゅうおう」クエリでテーブル内のデータが検索できること.
+        """AC12: 「魔王」クエリでテーブル内のデータが検索できること.
 
         ベクトル検索では閾値を超えてしまうケースでも、
         BM25検索でキーワードマッチにより検索できる。
@@ -258,7 +258,7 @@ class TestTableDataSearch:
         # Arrange: ベクトル検索は閾値超過（距離が大きい）
         mock_vector_store.search.return_value = [
             RetrievalResult(
-                text="名前: りゅうおう\nHP: 200, MP: 100, 攻撃力: 140",
+                text="名前: 魔王\nHP: 200, MP: 100, 攻撃力: 140",
                 metadata={"source_url": "https://example.com/monsters", "chunk_index": 0},
                 distance=0.7,  # 閾値0.5を超過
             ),
@@ -271,16 +271,16 @@ class TestTableDataSearch:
             BM25Result(
                 doc_id=f"{url_hash}_0",
                 score=8.5,
-                text="名前: りゅうおう\nHP: 200, MP: 100, 攻撃力: 140",
+                text="名前: 魔王\nHP: 200, MP: 100, 攻撃力: 140",
             ),
         ]
 
         # Act
-        result = await service.retrieve("りゅうおう", n_results=5)
+        result = await service.retrieve("魔王", n_results=5)
 
         # Assert: BM25のおかげで結果が返る
         assert isinstance(result, RAGRetrievalResult)
-        assert "りゅうおう" in result.context
+        assert "魔王" in result.context
         assert "HP: 200" in result.context
 
 
@@ -328,8 +328,8 @@ class TestSmartChunking:
         """AC1: テーブルデータが正しく検出・チャンキングされること."""
         # Arrange: テーブル形式のテキスト
         table_text = """名前	HP	MP	攻撃力
-りゅうおう	200	100	140
-スライム	8	0	5
+魔王	200	100	140
+ゴブリン	8	0	5
 ゴーレム	120	0	90"""
 
         # Act
@@ -338,7 +338,7 @@ class TestSmartChunking:
         # Assert: テーブルとして処理され、各行がチャンクになる
         assert len(chunks) > 0
         # テーブルチャンクはフォーマット済みで「名前:」を含む
-        assert any("名前:" in chunk or "りゅうおう" in chunk for chunk in chunks)
+        assert any("名前:" in chunk or "魔王" in chunk for chunk in chunks)
 
     def test_smart_chunk_detects_headings(
         self,

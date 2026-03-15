@@ -15,6 +15,10 @@ RAG Knowledge は、外部 Web ページから収集した知識をベクトル 
 | 5 | MCP サーバー | FastMCP による stdio/HTTP インターフェース | [rag-knowledge.md](rag-knowledge.md) |
 | 6 | 評価 CLI | 検索精度の評価パイプライン | [rag-knowledge.md](rag-knowledge.md) |
 | 7 | URL 安全性チェック | Google Safe Browsing API による URL 検証 | [rag-knowledge.md](rag-knowledge.md) |
+| 8 | クロールプレビュー | クロール対象ページのタイトル・URL 一覧を事前確認 | [rag-knowledge.md](rag-knowledge.md) |
+| 9 | Zenn インジェスター | Zenn 記事を API 経由で取得・ナレッジベースに取り込み | [zenn-ingester.md](zenn-ingester.md) |
+| 10 | BlueSky インジェスター | BlueSky 投稿を AT Protocol API 経由で取得・ナレッジベースに取り込み | [bluesky-ingester.md](bluesky-ingester.md) |
+| 11 | ドキュメントインジェスター | テキストドキュメントをナレッジベースに取り込み | [document-ingester.md](document-ingester.md) |
 
 ## 3. 技術スタック
 
@@ -23,11 +27,14 @@ RAG Knowledge は、外部 Web ページから収集した知識をベクトル 
 | 言語 | Python 3.11+ |
 | パッケージ管理 | uv |
 | MCP SDK | FastMCP |
-| HTTP クライアント | aiohttp |
+| HTTP クライアント | httpx |
+| 制約付き HTTP クライアント | py-common-lib (ConstrainedClient) |
 | ベクトル DB | ChromaDB |
 | キーワード検索 | BM25s |
 | Embedding | OpenAI SDK / LM Studio (OpenAI 互換 API) |
 | HTML 解析 | BeautifulSoup4 |
+| HTML→Markdown 変換 | markdownify |
+| PDF テキスト抽出 | pymupdf4llm |
 | 設定管理 | pydantic-settings (.env) |
 
 ## 4. 開発方針
@@ -61,6 +68,6 @@ git-flow ベースのブランチ戦略を採用。詳細は `~/.claude/docs/spe
 
 ## 5. Claude Code 拡張（agentic）
 
-**プロジェクト固有エージェント:**
+**プロジェクト固有スキル:**
 
-- [テストランナーエージェント](agentic/agents/test-runner-agent.md)
+- `/test-run` — テスト実行・コード品質チェック（`.claude/skills/test-run/SKILL.md`）

@@ -9,9 +9,10 @@ import asyncio
 import logging
 from dataclasses import dataclass
 from typing import cast
+from urllib.parse import urlparse
 
 import chromadb
-from chromadb.api.types import Embeddings, IncludeEnum
+from chromadb.api.types import Embeddings
 from chromadb.config import Settings as ChromaSettings
 
 from .embedding.base import EmbeddingProvider
@@ -25,7 +26,7 @@ class DocumentChunk:
 
     id: str  # ユニークID（URLハッシュ + chunk_index）
     text: str  # チャンク本文
-    metadata: dict[str, str | int]  # source_url, title, chunk_index, crawled_at
+    metadata: dict[str, str | int | float | bool]  # source_url, title, chunk_index, crawled_at, source_type, custom:*
 
 
 @dataclass
@@ -33,7 +34,7 @@ class RetrievalResult:
     """検索結果."""
 
     text: str
-    metadata: dict[str, str | int]
+    metadata: dict[str, str | int | float | bool]
     distance: float  # 小さいほど類似度が高い
 
 
@@ -136,6 +137,7 @@ class VectorStore:
         query: str,
         n_results: int = 5,
         similarity_threshold: float | None = None,
+        where: dict[str, str | int | float | bool] | None = None,
     ) -> list[RetrievalResult]:
         """クエリに類似するチャンクを検索する.
 
@@ -143,6 +145,7 @@ class VectorStore:
             query: 検索クエリ
             n_results: 返却する結果の最大数
             similarity_threshold: 類似度閾値（cosine距離）。指定時、この値より大きいdistanceの結果を除外
+            where: メタデータフィルタ（例: {"source_type": "bluesky"}）
 
         Returns:
             検索結果のリスト（類似度の高い順）
@@ -167,11 +170,17 @@ class VectorStore:
             return []
 
         # ChromaDBで検索（同期APIなのでto_threadでラップ）
+        query_kwargs: dict[str, object] = {
+            "query_embeddings": query_embeddings,
+            "n_results": fetch_count,
+            "include": ["documents", "metadatas", "distances"],
+        }
+        if where is not None:
+            query_kwargs["where"] = where
+
         results = await asyncio.to_thread(
             self._collection.query,
-            query_embeddings=query_embeddings,
-            n_results=fetch_count,
-            include=[IncludeEnum.documents, IncludeEnum.metadatas, IncludeEnum.distances],
+            **query_kwargs,  # type: ignore[arg-type]
         )
 
         # 結果を変換
@@ -221,7 +230,7 @@ class VectorStore:
         results = await asyncio.to_thread(
             self._collection.get,
             where={"source_url": source_url},
-            include=[IncludeEnum.documents, IncludeEnum.metadatas],
+            include=["documents", "metadatas"],
         )
 
         if not results["ids"]:
@@ -244,6 +253,24 @@ class VectorStore:
         chunks.sort(key=lambda c: int(c.metadata.get("chunk_index", 0)))
         return chunks
 
+    async def source_exists(self, source_url: str) -> bool:
+        """ソースURLに対応するチャンクが存在するか確認する（軽量版）.
+
+        documents / metadatas を取得せず、IDs の有無のみで判定する。
+
+        Args:
+            source_url: 確認するソースURL
+
+        Returns:
+            チャンクが 1 件以上存在すれば True
+        """
+        results = await asyncio.to_thread(
+            self._collection.get,
+            where={"source_url": source_url},
+            include=[],
+        )
+        return bool(results["ids"])
+
     async def delete_by_source(self, source_url: str) -> int:
         """ソースURL指定でチャンクを削除.
 
@@ -257,7 +284,7 @@ class VectorStore:
         results = await asyncio.to_thread(
             self._collection.get,
             where={"source_url": source_url},
-            include=[IncludeEnum.metadatas],
+            include=["metadatas"],
         )
 
         if not results["ids"]:
@@ -291,7 +318,7 @@ class VectorStore:
         results = await asyncio.to_thread(
             self._collection.get,
             where={"source_url": source_url},
-            include=[IncludeEnum.metadatas],
+            include=["metadatas"],
         )
 
         if not results["ids"]:
@@ -314,27 +341,61 @@ class VectorStore:
         )
         return len(stale_ids)
 
-    def get_stats(self) -> dict[str, int]:
-        """ナレッジベース統計（総チャンク数等）を返す.
+    def get_stats(self) -> dict[str, object]:
+        """ナレッジベース統計（総チャンク数等）とソース一覧を返す.
 
         Note:
             この関数は全チャンクのメタデータを走査するため O(N) のコストがかかる。
             チャンク数が多い場合は頻繁な呼び出しを避けること。
 
         Returns:
-            統計情報の辞書
+            統計情報の辞書。キー:
+            - total_chunks: 総チャンク数
+            - source_count: ユニークソースURL数
+            - sources: ドメイン別ソース一覧
         """
         count = self._collection.count()
 
-        # ユニークなソースURL数を取得
-        all_docs = self._collection.get(include=[IncludeEnum.metadatas])
+        # ユニークなソースURL数とソース詳細を取得
+        all_docs = self._collection.get(include=["metadatas"])
         source_urls: set[str] = set()
+        # url -> {"title": str, "chunks": int}
+        source_details: dict[str, dict[str, str | int]] = {}
         if all_docs["metadatas"]:
             for meta in all_docs["metadatas"]:
                 if meta and "source_url" in meta:
-                    source_urls.add(str(meta["source_url"]))
+                    url = str(meta["source_url"])
+                    source_urls.add(url)
+                    if url not in source_details:
+                        source_details[url] = {
+                            "title": str(meta.get("title", "")),
+                            "chunks": 0,
+                        }
+                    source_details[url]["chunks"] = int(source_details[url]["chunks"]) + 1
+
+        # ドメイン別にグルーピング
+        domain_groups: dict[str, list[dict[str, str | int]]] = {}
+        for url, detail in source_details.items():
+            domain = urlparse(url).netloc or "unknown"
+            if domain not in domain_groups:
+                domain_groups[domain] = []
+            domain_groups[domain].append({
+                "url": url,
+                "title": detail["title"],
+                "chunks": detail["chunks"],
+            })
+
+        # ドメイン名でソート、各ドメイン内はタイトルでソート
+        sources: list[dict[str, object]] = []
+        for domain in sorted(domain_groups.keys()):
+            pages = sorted(domain_groups[domain], key=lambda p: str(p.get("title", "")))
+            sources.append({
+                "domain": domain,
+                "pages": pages,
+            })
 
         return {
             "total_chunks": count,
             "source_count": len(source_urls),
+            "sources": sources,
         }

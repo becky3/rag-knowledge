@@ -10,7 +10,7 @@
 | `docs/specs/` | 機能仕様書・エージェント定義（実装の根拠） |
 | `tests/` | pytest テストコード |
 | `tests/fixtures/` | テスト用フィクスチャ（評価データセット・テスト文書） |
-| `scripts/` | 評価データ収集・パラメータスイープ・分析スクリプト |
+| `scripts/` | 評価データ収集・パラメータスイープ・分析・CI チェックスクリプト |
 | `.claude/` | Claude Code プロジェクト設定（エージェント・スキル） |
 | `.github/` | GitHub Actions ワークフロー |
 
@@ -21,6 +21,7 @@
 | ディレクトリ | 責務 |
 |---|---|
 | `src/rag/embedding/` | Embedding プロバイダー抽象化（ローカル / OpenAI）とファクトリ |
+| `src/rag/ingesters/` | インジェスタープラグイン（BaseIngester 抽象基底・IngestedContent 共通モデル・WebIngester・ZennIngester・DocumentIngester・BlueskyIngester） |
 
 ### ルートレベルファイル
 
@@ -30,6 +31,7 @@
 | `src/rag/cli.py` | CLI エントリーポイント（評価・DB 初期化） |
 | `src/rag/config.py` | pydantic-settings による環境変数・設定管理 |
 | `src/rag/rag_knowledge.py` | ナレッジサービス（取り込み・検索・削除のオーケストレーション） |
+| `src/rag/markdown.py` | RAG 用 Markdown コンバーター（リンク・画像 URL 除去） |
 | `src/rag/web_crawler.py` | Web クローラー（ページ取得・本文抽出・SSRF 対策・robots.txt 遵守） |
 | `src/rag/vector_store.py` | ベクトルストア（ChromaDB による Embedding 格納・検索） |
 | `src/rag/bm25_index.py` | BM25 インデックス（日本語形態素解析・ディスク永続化） |
@@ -46,12 +48,13 @@
 | 仕様書 | 実装モジュール |
 |---|---|
 | `rag-knowledge.md` | `src/rag/` 全体 |
+| `zenn-ingester.md` | `src/rag/ingesters/zenn_ingester.py` |
+| `document-ingester.md` | `src/rag/ingesters/document_ingester.py` |
+| `bluesky-ingester.md` | `src/rag/ingesters/bluesky_ingester.py` |
 
-### agentic/
+### Claude Code 拡張
 
-| 仕様書 | 対象 |
-|---|---|
-| `agentic/agents/test-runner-agent.md` | テスト実行・品質チェックエージェント |
+テストランナーエージェント（test-runner）は dotfiles（`~/.claude/agents/test-runner.md`）で汎用定義されており、プロジェクト固有の `/test-run` スキル（`.claude/skills/test-run/SKILL.md`）に委譲して実行する。
 
 ## 関連ドキュメント
 

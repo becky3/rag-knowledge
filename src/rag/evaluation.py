@@ -8,7 +8,9 @@ from __future__ import annotations
 import json
 import logging
 import math
+from collections import Counter
 from dataclasses import dataclass, field
+from enum import Enum
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
@@ -175,6 +177,67 @@ def check_negative_sources(
     return list(retrieved_set & negative_set)
 
 
+class FailureTag(Enum):
+    """失敗タグ: 検索失敗の原因分類."""
+
+    RETRIEVAL_MISS = "retrieval_miss"
+    RETRIEVAL_NOISE = "retrieval_noise"
+    CHUNK_FRAGMENTATION = "chunk_fragmentation"
+    QUERY_MISMATCH = "query_mismatch"
+
+
+def classify_failure_tags(
+    pr_result: PrecisionRecallResult,
+    retrieved_sources: list[str],
+    expected_sources: list[str],
+    ndcg: float,
+) -> list[FailureTag]:
+    """検索結果のメトリクスから失敗タグを分類する.
+
+    Args:
+        pr_result: Precision/Recall計算結果
+        retrieved_sources: RAG検索で取得されたソースURLリスト
+        expected_sources: 期待されるソースURLリスト（正解データ）
+        ndcg: NDCGスコア
+
+    Returns:
+        該当する失敗タグのリスト（完璧な検索の場合は空リスト）
+    """
+    tags: list[FailureTag] = []
+
+    # 完璧な検索結果の場合はタグなし
+    if pr_result.precision == 1.0 and pr_result.recall == 1.0:
+        return tags
+
+    # retrieval_miss: 関連文書が検索されなかった（Recall < 1.0 で FN > 0）
+    if pr_result.false_negatives > 0:
+        tags.append(FailureTag.RETRIEVAL_MISS)
+
+    # retrieval_noise: 無関係な文書が上位に来た（Precision < 1.0 で FP > 0）
+    if pr_result.false_positives > 0:
+        tags.append(FailureTag.RETRIEVAL_NOISE)
+
+    # chunk_fragmentation: 回答に必要な情報が分断された
+    # 正解ソースが部分的に取得されている（Recall > 0 かつ Recall < 1.0）のに
+    # NDCGが低い場合、関連情報が分断されている可能性が高い
+    if (
+        pr_result.recall > 0.0
+        and pr_result.recall < 1.0
+        and ndcg < 0.5
+    ):
+        tags.append(FailureTag.CHUNK_FRAGMENTATION)
+
+    # query_mismatch: クエリと文書の表現が異なる
+    # 何も取得できない、または取得したが正解が1つも含まれない場合
+    if len(retrieved_sources) > 0 and pr_result.true_positives == 0 and len(expected_sources) > 0:
+        tags.append(FailureTag.QUERY_MISMATCH)
+    # 取得結果がゼロ（検索自体がヒットしなかった）場合もquery_mismatchの可能性
+    elif len(retrieved_sources) == 0 and len(expected_sources) > 0:
+        tags.append(FailureTag.QUERY_MISMATCH)
+
+    return tags
+
+
 @dataclass
 class QueryEvaluationResult:
     """個別クエリの評価結果."""
@@ -189,6 +252,7 @@ class QueryEvaluationResult:
     retrieved_sources: list[str]
     expected_sources: list[str]
     negative_violations: list[str]  # 検出された禁止ソース
+    failure_tags: list[FailureTag] = field(default_factory=list)
 
 
 @dataclass
@@ -203,6 +267,7 @@ class EvaluationReport:
     average_mrr: float
     negative_source_violations: list[str]  # 違反があったクエリIDリスト
     query_results: list[QueryEvaluationResult] = field(default_factory=list)
+    failure_tag_summary: dict[str, int] = field(default_factory=dict)
 
 
 @dataclass
@@ -331,6 +396,14 @@ async def evaluate_retrieval(
                 violations,
             )
 
+        # 失敗タグ分類
+        failure_tags = classify_failure_tags(
+            pr_result=pr_result,
+            retrieved_sources=retrieved_sources,
+            expected_sources=dataset_query.expected_sources,
+            ndcg=ndcg,
+        )
+
         # 結果を記録
         query_result = QueryEvaluationResult(
             query_id=dataset_query.id,
@@ -343,6 +416,7 @@ async def evaluate_retrieval(
             retrieved_sources=retrieved_sources,
             expected_sources=dataset_query.expected_sources,
             negative_violations=violations,
+            failure_tags=failure_tags,
         )
         query_results.append(query_result)
 
@@ -370,6 +444,13 @@ async def evaluate_retrieval(
     avg_ndcg = total_ndcg / num_queries
     avg_mrr = total_mrr / num_queries
 
+    # 失敗タグ集計
+    tag_counter: Counter[str] = Counter()
+    for qr in query_results:
+        for tag in qr.failure_tags:
+            tag_counter[tag.value] += 1
+    failure_tag_summary = dict(tag_counter)
+
     logger.info(
         "Evaluation complete: %d queries, avg_precision=%.3f, avg_recall=%.3f, "
         "avg_f1=%.3f, avg_ndcg=%.3f, avg_mrr=%.3f",
@@ -380,6 +461,8 @@ async def evaluate_retrieval(
         avg_ndcg,
         avg_mrr,
     )
+    if failure_tag_summary:
+        logger.info("Failure tag summary: %s", failure_tag_summary)
 
     return EvaluationReport(
         queries_evaluated=num_queries,
@@ -390,4 +473,5 @@ async def evaluate_retrieval(
         average_mrr=avg_mrr,
         negative_source_violations=negative_violations,
         query_results=query_results,
+        failure_tag_summary=failure_tag_summary,
     )

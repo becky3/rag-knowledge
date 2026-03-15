@@ -38,7 +38,11 @@ def mock_vector_store(mock_embedding_provider: MagicMock) -> MagicMock:
     mock.search = AsyncMock(return_value=[])
     mock.delete_by_source = AsyncMock(return_value=0)
     mock.delete_stale_chunks = AsyncMock(return_value=0)
-    mock.get_stats = MagicMock(return_value={"total_chunks": 10, "source_count": 2})
+    mock.get_stats = MagicMock(return_value={
+        "total_chunks": 10,
+        "source_count": 2,
+        "sources": [],
+    })
     return mock
 
 
@@ -53,6 +57,11 @@ def mock_web_crawler() -> MagicMock:
     mock.validate_url = MagicMock(side_effect=lambda url: url)
     # クロール間隔（進捗フィードバック機能で使用）
     mock._crawl_delay = 0.0  # テスト時は遅延なし
+    # create_client() が async context manager を返すようにモック
+    mock_client = MagicMock()
+    mock_client.__aenter__ = AsyncMock(return_value=mock_client)
+    mock_client.__aexit__ = AsyncMock(return_value=None)
+    mock.create_client.return_value = mock_client
     return mock
 
 
@@ -114,11 +123,18 @@ class TestIngestFromIndex:
         assert result["pages_crawled"] == 2
         assert result["chunks_stored"] >= 2
         assert result["errors"] == 0
-        mock_web_crawler.crawl_index_page.assert_called_once_with(
-            "https://example.com/index", r"page\d"
-        )
-        # crawl_page が各URLに対して呼ばれたことを確認
+        # create_client() が呼ばれ、async context manager として使用されたこと
+        mock_web_crawler.create_client.assert_called_once()
+        mock_client = mock_web_crawler.create_client.return_value
+        # crawl_index_page に create_client() の同一インスタンスが渡されたこと
+        mock_web_crawler.crawl_index_page.assert_called_once()
+        call_args = mock_web_crawler.crawl_index_page.call_args
+        assert call_args[0] == ("https://example.com/index", r"page\d")
+        assert call_args.kwargs["client"] is mock_client
+        # crawl_page が各URLに対して同一 client で呼ばれたことを確認
         assert mock_web_crawler.crawl_page.call_count == 2
+        for call in mock_web_crawler.crawl_page.call_args_list:
+            assert call.kwargs["client"] is mock_client
 
     async def test_ingest_from_index_with_errors(
         self,
@@ -328,6 +344,14 @@ class TestGetStats:
         mock_vector_store.get_stats.return_value = {
             "total_chunks": 100,
             "source_count": 10,
+            "sources": [
+                {
+                    "domain": "example.com",
+                    "pages": [
+                        {"url": "https://example.com/p1", "title": "Page 1", "chunks": 5},
+                    ],
+                },
+            ],
         }
 
         # Act
@@ -336,6 +360,8 @@ class TestGetStats:
         # Assert
         assert result["total_chunks"] == 100
         assert result["source_count"] == 10
+        assert isinstance(result["sources"], list)
+        assert len(result["sources"]) == 1
 
 
 class TestConfiguration:
@@ -1024,6 +1050,64 @@ class TestSafeBrowsingIntegration:
         mock_web_crawler.crawl_page.assert_called_once()
 
 
+class TestGetFullPageText:
+    """get_full_page_text() のテスト (Issue #27)."""
+
+    async def test_get_full_page_text_joins_chunks(
+        self,
+        rag_service: RAGKnowledgeService,
+        mock_vector_store: MagicMock,
+    ) -> None:
+        """チャンクが '\\n' で結合されること."""
+        # Arrange
+        mock_vector_store.get_chunks_by_source = AsyncMock(
+            return_value=[
+                RetrievalResult(
+                    text="チャンク1のテキスト",
+                    metadata={"source_url": "https://example.com/page", "chunk_index": 0},
+                    distance=0.0,
+                ),
+                RetrievalResult(
+                    text="チャンク2のテキスト",
+                    metadata={"source_url": "https://example.com/page", "chunk_index": 1},
+                    distance=0.0,
+                ),
+                RetrievalResult(
+                    text="チャンク3のテキスト",
+                    metadata={"source_url": "https://example.com/page", "chunk_index": 2},
+                    distance=0.0,
+                ),
+            ]
+        )
+
+        # Act
+        result = await rag_service.get_full_page_text("https://example.com/page")
+
+        # Assert
+        assert result == "チャンク1のテキスト\nチャンク2のテキスト\nチャンク3のテキスト"
+        mock_vector_store.get_chunks_by_source.assert_called_once_with(
+            "https://example.com/page"
+        )
+
+    async def test_get_full_page_text_empty_chunks(
+        self,
+        rag_service: RAGKnowledgeService,
+        mock_vector_store: MagicMock,
+    ) -> None:
+        """チャンクが存在しない場合に空文字列が返ること."""
+        # Arrange
+        mock_vector_store.get_chunks_by_source = AsyncMock(return_value=[])
+
+        # Act
+        result = await rag_service.get_full_page_text("https://example.com/nonexistent")
+
+        # Assert
+        assert result == ""
+        mock_vector_store.get_chunks_by_source.assert_called_once_with(
+            "https://example.com/nonexistent"
+        )
+
+
 class TestRetrieveRawResults:
     """retrieve_raw_results() のテスト（準Agentic Search, Issue #548）."""
 
@@ -1207,4 +1291,36 @@ class TestRetrieveRawResults:
             "test",
             n_results=3,
             similarity_threshold=None,
+            where=None,
+        )
+
+    async def test_source_type_filter_passed_to_stores(
+        self,
+        mock_vector_store: MagicMock,
+        mock_web_crawler: MagicMock,
+    ) -> None:
+        """source_type 指定時にベクトルストアと BM25 に正しく伝播すること."""
+        mock_vector_store.search.return_value = []
+        mock_bm25 = MagicMock()
+        mock_bm25.search.return_value = []
+
+        service = RAGKnowledgeService(
+            vector_store=mock_vector_store,
+            web_crawler=mock_web_crawler,
+            chunk_size=200,
+            chunk_overlap=30,
+            similarity_threshold=0.5,
+            bm25_index=mock_bm25,
+        )
+
+        await service.retrieve_raw_results("test", n_results=3, source_type="bluesky")
+
+        mock_vector_store.search.assert_called_once_with(
+            "test",
+            n_results=3,
+            similarity_threshold=None,
+            where={"source_type": "bluesky"},
+        )
+        mock_bm25.search.assert_called_once_with(
+            "test", n_results=3, source_type="bluesky",
         )

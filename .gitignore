@@ -218,3 +218,5 @@ reports/
 
 # Claude Code local settings
 .claude/settings.local.json
+.claude/*.lock
+scheduled_tasks.lock
