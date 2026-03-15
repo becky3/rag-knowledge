@@ -427,7 +427,7 @@ BlueSky は投稿の編集が不可能なため、既存の `source_id` と一�
 | `title` | 投稿テキストの先頭 50 文字（50 文字を超える場合は末尾に `...` を付加） |
 | `text` | 抽出済みプレーンテキスト |
 | `source_type` | `"bluesky"` |
-| `metadata` | `handle`、`did`、`rkey`、`url`（`https://bsky.app/profile/{handle}/post/{rkey}`）、`createdAt`、`has_images`、`has_video`、`has_external_link`、`is_reply`、`is_repost` |
+| `metadata` | `handle`（元投稿者のハンドル。リポスト時は `post.author.handle`）、`did`、`rkey`、`url`（`https://bsky.app/profile/{handle}/post/{rkey}`）、`createdAt`、`has_images`、`has_video`、`has_external_link`、`is_reply`、`is_repost` |
 
 `is_repost` の判定: フィードアイテムに `reason` フィールドが存在し、`reason.$type` が `app.bsky.feed.defs#reasonRepost` の場合に `True`。
 

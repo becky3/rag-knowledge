@@ -818,6 +818,9 @@ class TestBlueskyIngesterCrawl:
         assert repost_content.text.startswith("[Repost: @other.bsky.social]")
         assert "Reposted content" in repost_content.text
         assert repost_content.metadata["is_repost"] is True
+        # リポストの handle・url は元投稿者のもの
+        assert repost_content.metadata["handle"] == "other.bsky.social"
+        assert repost_content.metadata["url"] == "https://bsky.app/profile/other.bsky.social/post/reposted1"
 
     async def test_crawl_repost_filtered_by_default(
         self, ingester: BlueskyIngester, mock_client: MagicMock
