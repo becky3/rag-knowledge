@@ -458,9 +458,8 @@ async def rag_crawl_bluesky(
 
     Args:
         handle: BlueSky ハンドル（例: user.bsky.social）。DID 形式は不可
-        max_posts: 取得する最大オリジナル投稿数（未指定時は設定値を使用、許容範囲: 1〜1000）。
-            リポストには適用されない（リポストは独立して走査され、バジェット上限で制限される）
-        include_reposts: リポストを取得対象に含めるか（未指定時は設定値を使用）
+        max_posts: 取得する最大投稿数（タイムライン全体に適用、未指定時は設定値を使用、許容範囲: 1〜1000）
+        include_reposts: タイムラインにリポストを含めるか（未指定時は設定値を使用）
 
     Returns:
         取り込み結果のサマリーテキスト（取得投稿数、スキップ数、チャンク数、エラー数）
@@ -499,7 +498,7 @@ async def rag_crawl_bluesky(
         ) as client:
             ingester = BlueskyIngester(
                 client=client,
-                pds_url=settings.rag_bluesky_pds_url,
+                appview_url=settings.rag_bluesky_appview_url,
                 max_posts=max_posts,
             )
 
