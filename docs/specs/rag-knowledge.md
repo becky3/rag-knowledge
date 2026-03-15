@@ -5,11 +5,11 @@
 外部 Web ページから収集した知識をベクトル DB に蓄積し、
 MCP クライアントからのクエリに対して関連情報を検索・提供する
 RAG（Retrieval-Augmented Generation）基盤。
-MCP サーバーとして独立動作し、9 つのツールを提供する。
+MCP サーバーとして独立動作し、10 個のツールを提供する。
 
 スコープ:
 
-- 知識の取り込み（クロール・単一ページ追加・Zenn 記事取り込み・ローカルファイル取り込み）
+- 知識の取り込み（クロール・単一ページ追加・Zenn 記事取り込み・BlueSky 投稿取り込み・ローカルファイル取り込み）
 - 知識の検索（ベクトル検索・BM25 キーワード検索）
 - 知識の管理（統計表示・削除）
 - クロールプレビュー（対象ページの事前確認）
@@ -79,7 +79,7 @@ MCP サーバーとして独立動作し、9 つのツールを提供する。
 
 ### MCP ツール
 
-MCP サーバーが公開する 9 つのツール。
+MCP サーバーが公開する 10 個のツール。
 
 | ツール | 入力 | 振る舞い |
 | --- | --- | --- |
@@ -88,6 +88,7 @@ MCP サーバーが公開する 9 つのツール。
 | rag_crawl | URL、パターン | リンク集ページから一括クロールして取り込む。同一ドメインのみ対象 |
 | rag_crawl_preview | URL、パターン | リンク集ページからクロール対象ページのタイトルと URL の一覧を返す。取り込みは行わない |
 | rag_crawl_zenn | username、max_articles（任意） | 指定ユーザーの Zenn 記事を API 経由で取得し、ナレッジベースに取り込む。同一記事の再取り込み時は `source_id`（記事の公開 URL）の一致で検出し、既存の知識を最新に置き換える |
+| rag_crawl_bluesky | handle、max_posts（任意）、include_reposts（任意） | 指定ユーザーの BlueSky 投稿を AT Protocol API 経由で取得し、ナレッジベースに取り込む。BlueSky は投稿編集不可のため、既存 `source_id` と一致する投稿はスキップする（上書き不要） |
 | rag_add_local | file_path | 単一ローカルファイルを読み取り、ナレッジベースに取り込む。同一ファイルの再取り込み時は `source_id`（file URI）の一致で検出し、既存の知識を最新に置き換える |
 | rag_crawl_local | dir_path、pattern（任意） | 指定ディレクトリ内のファイルを glob パターンで検索し、一括でナレッジベースに取り込む。同一ファイルの再取り込み時は `source_id`（file URI）の一致で検出し、既存の知識を最新に置き換える |
 | rag_delete | URL | ソース URL 指定でナレッジを削除する |
@@ -311,4 +312,5 @@ flowchart LR
 ## 関連ドキュメント
 
 - [zenn-ingester.md](zenn-ingester.md) — Zenn インジェスター仕様
+- [bluesky-ingester.md](bluesky-ingester.md) — BlueSky インジェスター仕様
 - [local-file-ingester.md](local-file-ingester.md) — ローカルファイルインジェスター仕様

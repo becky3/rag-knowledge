@@ -15,6 +15,7 @@
 | **URL 安全性チェック** | Google Safe Browsing API による URL 検証 |
 | **クロールプレビュー** | クロール対象ページのタイトル・URL 一覧を事前確認 |
 | **Zenn インジェスター** | Zenn 記事を API 経由で取得・ナレッジベースに取り込み |
+| **BlueSky インジェスター** | BlueSky 投稿を AT Protocol API 経由で取得・ナレッジベースに取り込み |
 | **ローカルファイルインジェスター** | ローカルファイル（Markdown、テキスト、PDF、AsciiDoc）をナレッジベースに取り込み |
 | **制約付き HTTP クライアント** | バジェット・サーキットブレーカー・レート制限を統合した安全な HTTP アクセス（py-common-lib 提供） |
 
@@ -115,6 +116,7 @@ git-flow ベースのブランチ戦略を採用。詳細は `~/.claude/docs/spe
 
 - [RAG ナレッジ](docs/specs/rag-knowledge.md)
 - [Zenn インジェスター](docs/specs/zenn-ingester.md)
+- [BlueSky インジェスター](docs/specs/bluesky-ingester.md)
 - [ローカルファイルインジェスター](docs/specs/local-file-ingester.md)
 
 ### Claude Code 拡張（agentic）
