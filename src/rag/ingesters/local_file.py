@@ -196,7 +196,7 @@ class LocalFileIngester(BaseIngester):
             raise ValueError(
                 f"Pattern must not contain '..': {pattern!r}"
             )
-        if Path(pattern).is_absolute():
+        if pattern.startswith("/") or Path(pattern).is_absolute():
             raise ValueError(
                 f"Pattern must not be an absolute path: {pattern!r}"
             )
