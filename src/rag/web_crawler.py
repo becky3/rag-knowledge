@@ -14,19 +14,18 @@ import time
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from urllib.parse import urldefrag, urljoin, urlparse
-from typing import Any
 from urllib.robotparser import RobotFileParser
 
 import httpx
 from bs4 import BeautifulSoup
 from charset_normalizer import from_bytes
-from markdownify import MarkdownConverter
-
 from py_common_lib.httpx import (
     ConstrainedClient,
     clamp_request_interval,
     clamp_request_timeout,
 )
+
+from .markdown import RagMarkdownConverter
 
 logger = logging.getLogger(__name__)
 
@@ -43,24 +42,6 @@ class _RobotsCacheEntry:
     parser: RobotFileParser
     fetched_at: float
     crawl_delay: float | None = field(default=None)
-
-
-class _RagMarkdownConverter(MarkdownConverter):  # type: ignore[misc]
-    """RAG用カスタムMarkdownコンバーター.
-
-    リンクURLと画像URLを除去し、テキスト情報のみを保持する。
-    RAGではリンク先URLはチャンクサイズの無駄遣いとなり、
-    出典情報は source_url メタデータで管理するため不要。
-    """
-
-    def convert_a(self, el: Any, text: str, convert_as_inline: bool) -> str:
-        """リンクはテキストのみ保持（URLは出典管理で別途管理）."""
-        return text or ""
-
-    def convert_img(self, el: Any, text: str, convert_as_inline: bool) -> str:
-        """画像タグはalt属性のみ保持（RAGでは画像不要）."""
-        alt: str = el.attrs.get("alt", None) or ""
-        return alt
 
 
 @dataclass
@@ -276,7 +257,7 @@ class WebCrawler:
             if respect_robots_txt
             else None
         )
-        self._md_converter = _RagMarkdownConverter(
+        self._md_converter = RagMarkdownConverter(
             heading_style="ATX",
             table_infer_header=True,
             escape_underscores=False,
