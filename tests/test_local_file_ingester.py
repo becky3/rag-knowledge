@@ -160,7 +160,7 @@ class TestLocalFileIngesterFetchSingle:
         result = await ingester.fetch_single(str(f))
 
         assert result is not None
-        assert result.source_id == str(f.resolve())
+        assert result.source_id == f.resolve().as_uri()
         assert result.title == "document"
         assert result.text == "# Hello World\n\nThis is content."
         assert result.source_type == "local"
@@ -264,15 +264,15 @@ class TestLocalFileIngesterFetchSingle:
 
         assert result is None
 
-    async def test_source_id_is_absolute_path(
+    async def test_source_id_is_file_uri(
         self, ingester: LocalFileIngester, tmp_path: Path
     ) -> None:
-        """source_id が絶対パスであること."""
+        """source_id が file URI であること."""
         f = _create_text_file(tmp_path, "doc.md", "Content")
         result = await ingester.fetch_single(str(f))
 
         assert result is not None
-        assert Path(result.source_id).is_absolute()
+        assert result.source_id.startswith("file:///")
 
     async def test_ingested_at_is_set(
         self, ingester: LocalFileIngester, tmp_path: Path

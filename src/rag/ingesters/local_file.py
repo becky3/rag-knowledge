@@ -115,7 +115,7 @@ class LocalFileIngester(BaseIngester):
             return None
 
         return IngestedContent(
-            source_id=resolved_path_str,
+            source_id=path.as_uri(),
             title=path.stem,
             text=text,
             ingested_at=IngestedContent.now_iso(),
@@ -239,12 +239,15 @@ class LocalFileIngester(BaseIngester):
         # パターンバリデーション
         validated_pattern = self.validate_pattern(pattern)
 
-        # glob でファイルを検索
-        matched = list(resolved_dir.glob(validated_pattern))
+        # ハードリミット適用（max_files が 0 以下の場合は 1 にクランプ）
+        effective_limit = min(max(max_files, 1), MAX_FILES_HARD_LIMIT)
 
-        # ファイルのみ、resolve して dir_path 配下チェック、対応拡張子フィルタ
+        # glob を遅延イテレーションし、候補ファイルを収集する。
+        # メモリ使用量を抑えるため、候補数の上限（scan_cap）を設ける。
+        # ソートが必要なため effective_limit より多めに収集する。
+        scan_cap = effective_limit * 10
         files: list[Path] = []
-        for p in matched:
+        for p in resolved_dir.glob(validated_pattern):
             resolved = p.resolve()
 
             # ファイルでない場合はスキップ
@@ -266,11 +269,19 @@ class LocalFileIngester(BaseIngester):
 
             files.append(resolved)
 
+            # スキャン上限に達したら打ち切り
+            if len(files) >= scan_cap:
+                logger.warning(
+                    "Glob scan reached cap (%d candidates), "
+                    "stopping enumeration early",
+                    scan_cap,
+                )
+                break
+
         # パスの辞書順でソート
         files.sort(key=lambda p: str(p))
 
-        # ハードリミット適用
-        effective_limit = min(max_files, MAX_FILES_HARD_LIMIT)
+        # ファイル数上限適用
         if len(files) > effective_limit:
             logger.warning(
                 "File count %d exceeds limit %d, clamping to %d",

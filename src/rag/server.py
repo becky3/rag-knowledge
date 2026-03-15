@@ -446,7 +446,7 @@ def _create_local_ingester() -> LocalFileIngester:
     """設定に基づいて LocalFileIngester を生成する."""
     settings = get_settings()
     extensions = [
-        ext.strip()
+        ext.strip() if ext.strip().startswith(".") else f".{ext.strip()}"
         for ext in settings.rag_local_supported_extensions.split(",")
         if ext.strip()
     ]
