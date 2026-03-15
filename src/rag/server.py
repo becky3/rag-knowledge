@@ -172,7 +172,8 @@ async def rag_search(
         ヒットしたチャンクのページ全文を返却し、同一URLの重複は参照テキストで省略する。
         結果が0件の場合は「該当する情報が見つかりませんでした」を返す。
         RAG_MAX_RESPONSE_CHARS 設定時、累積文字数を追跡し上限到達後はページ全文取得を
-        早期打ち切りする。末尾にトランケート通知が付記される。未設定時は無制限。
+        早期打ち切りする。末尾にトランケート通知が付記される。
+        未設定時はトランケーションなし（検索結果をそのまま返す）。
     """
     if source_type is not None and source_type not in _VALID_SOURCE_TYPES:
         valid = ", ".join(sorted(_VALID_SOURCE_TYPES))
