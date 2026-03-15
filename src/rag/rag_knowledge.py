@@ -598,7 +598,7 @@ class RAGKnowledgeService:
         """
         # テキストをスマートチャンキング（skip_chunking 時は 1 チャンクで格納）
         if content.skip_chunking:
-            chunks = [content.text]
+            chunks = [content.text] if content.text.strip() else []
         else:
             chunks = self._smart_chunk(content.text)
 
