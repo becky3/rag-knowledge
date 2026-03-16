@@ -10,6 +10,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 from py_common_lib.secrets import SecretNotFoundError
 
+from conftest import TEST_SETTINGS_DEFAULTS
 from rag.config import DEFAULT_LMSTUDIO_BASE_URL, RAGSettings as Settings
 from rag.embedding.base import EmbeddingProvider
 from rag.embedding.factory import get_embedding_provider
@@ -116,14 +117,14 @@ async def test_openai_embedding_is_available() -> None:
 
 def test_factory_returns_correct_provider_local() -> None:
     """AC4: get_embedding_provider() が 'local' 設定で LMStudioEmbedding を返すこと."""
-    settings = Settings()
+    settings = Settings(**TEST_SETTINGS_DEFAULTS)
     provider = get_embedding_provider(settings, "local")
     assert isinstance(provider, LMStudioEmbedding)
 
 
 def test_factory_returns_correct_provider_online() -> None:
     """AC4: get_embedding_provider() が 'online' 設定で OpenAIEmbedding を返すこと."""
-    settings = Settings()
+    settings = Settings(**TEST_SETTINGS_DEFAULTS)
     with patch("rag.embedding.factory.get_secret", return_value="sk-test"):
         provider = get_embedding_provider(settings, "online")
     assert isinstance(provider, OpenAIEmbedding)
@@ -131,7 +132,7 @@ def test_factory_returns_correct_provider_online() -> None:
 
 def test_factory_raises_on_missing_api_key() -> None:
     """OPENAI_API_KEY 未登録時に ValueError を送出すること."""
-    settings = Settings()
+    settings = Settings(**TEST_SETTINGS_DEFAULTS)
     with patch(
         "rag.embedding.factory.get_secret",
         side_effect=SecretNotFoundError("not found"),
@@ -142,7 +143,7 @@ def test_factory_raises_on_missing_api_key() -> None:
 
 def test_factory_raises_on_empty_api_key() -> None:
     """OPENAI_API_KEY が空文字列の場合に ValueError を送出すること."""
-    settings = Settings()
+    settings = Settings(**TEST_SETTINGS_DEFAULTS)
     with patch("rag.embedding.factory.get_secret", return_value=""):
         with pytest.raises(ValueError, match="empty"):
             get_embedding_provider(settings, "online")
@@ -150,7 +151,7 @@ def test_factory_raises_on_empty_api_key() -> None:
 
 def test_factory_uses_settings_model_local() -> None:
     """AC4: ファクトリが Settings の embedding_model_local を使用すること."""
-    settings = Settings()
+    settings = Settings(**TEST_SETTINGS_DEFAULTS)
     provider = get_embedding_provider(settings, "local")
     assert isinstance(provider, LMStudioEmbedding)
     assert provider._model == settings.embedding_model_local
@@ -158,16 +159,16 @@ def test_factory_uses_settings_model_local() -> None:
 
 def test_factory_uses_settings_model_online() -> None:
     """AC4: ファクトリが Settings の embedding_model_online を使用すること."""
-    settings = Settings(embedding_model_online="text-embedding-3-large")
+    settings = Settings(**{**TEST_SETTINGS_DEFAULTS, "embedding_model_online": "text-embedding-3-large"})
     with patch("rag.embedding.factory.get_secret", return_value="sk-test"):
         provider = get_embedding_provider(settings, "online")
     assert isinstance(provider, OpenAIEmbedding)
     assert provider._model == "text-embedding-3-large"
 
 
-def test_embedding_settings_defaults() -> None:
-    """AC4: Embedding関連設定のデフォルト値が設定されていること."""
-    settings = Settings()
+def test_embedding_settings_accepted() -> None:
+    """AC4: Embedding関連設定が正しく受け入れられること."""
+    settings = Settings(**TEST_SETTINGS_DEFAULTS)
     assert settings.embedding_provider == "local"
     assert settings.embedding_model_local  # デフォルト値が設定されていること
     assert settings.embedding_model_online  # デフォルト値が設定されていること
@@ -175,11 +176,12 @@ def test_embedding_settings_defaults() -> None:
 
 def test_embedding_settings_configurable() -> None:
     """AC4: Embedding関連設定が設定可能であること."""
-    settings = Settings(
-        embedding_provider="online",
-        embedding_model_local="custom-embed-model",
-        embedding_model_online="text-embedding-3-large",
-    )
+    settings = Settings(**{
+        **TEST_SETTINGS_DEFAULTS,
+        "embedding_provider": "online",
+        "embedding_model_local": "custom-embed-model",
+        "embedding_model_online": "text-embedding-3-large",
+    })
     assert settings.embedding_provider == "online"
     assert settings.embedding_model_local == "custom-embed-model"
     assert settings.embedding_model_online == "text-embedding-3-large"
@@ -336,21 +338,21 @@ async def test_openai_embed_query_delegates_to_embed() -> None:
     assert result == [1.0, 2.0, 3.0]
 
 
-def test_embedding_prefix_enabled_setting_default() -> None:
-    """embedding_prefix_enabled のデフォルト値が True であること."""
-    settings = Settings()
+def test_embedding_prefix_enabled_setting_accepted() -> None:
+    """embedding_prefix_enabled が正しく受け入れられること."""
+    settings = Settings(**TEST_SETTINGS_DEFAULTS)
     assert settings.embedding_prefix_enabled is True
 
 
 def test_embedding_prefix_enabled_setting_configurable() -> None:
     """embedding_prefix_enabled が設定可能であること."""
-    settings = Settings(embedding_prefix_enabled=True)
+    settings = Settings(**{**TEST_SETTINGS_DEFAULTS, "embedding_prefix_enabled": True})
     assert settings.embedding_prefix_enabled is True
 
 
 def test_factory_passes_prefix_enabled() -> None:
     """ファクトリが prefix_enabled を LMStudioEmbedding に渡すこと."""
-    settings = Settings(embedding_prefix_enabled=True)
+    settings = Settings(**{**TEST_SETTINGS_DEFAULTS, "embedding_prefix_enabled": True})
     provider = get_embedding_provider(settings, "local")
     assert isinstance(provider, LMStudioEmbedding)
     assert provider._prefix_enabled is True
@@ -358,7 +360,7 @@ def test_factory_passes_prefix_enabled() -> None:
 
 def test_factory_passes_prefix_enabled_by_default() -> None:
     """ファクトリがデフォルトで prefix_enabled=True を渡すこと."""
-    settings = Settings()
+    settings = Settings(**TEST_SETTINGS_DEFAULTS)
     provider = get_embedding_provider(settings, "local")
     assert isinstance(provider, LMStudioEmbedding)
     assert provider._prefix_enabled is True

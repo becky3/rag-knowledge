@@ -1,0 +1,50 @@
+"""テスト共通フィクスチャ."""
+
+from __future__ import annotations
+
+# RAGSettings の全必須フィールドのテスト用デフォルト値。
+# config.py のフィールドにデフォルト値がないため、テストで RAGSettings を
+# 直接生成する際にこの辞書を使用する。
+# Optional (None デフォルト) フィールドは含まない。
+# 注意: 本番 config.toml の値とは意図的に異なる場合がある（テスト用に安全・軽量な値を使用）。
+TEST_SETTINGS_DEFAULTS: dict[str, object] = {
+    # .env フィールド
+    "embedding_provider": "local",
+    "lmstudio_base_url": "http://localhost:1234",
+    "chromadb_persist_dir": "./chroma_db",
+    "bm25_persist_dir": "./bm25_index",
+    "rag_transport": "stdio",
+    "rag_http_host": "127.0.0.1",
+    "rag_http_port": 8081,
+    "rag_dns_rebinding_protection": True,
+    "rag_debug_log_enabled": False,
+    # config.toml フィールド
+    "embedding_model_local": "nomic-embed-text",
+    "embedding_model_online": "text-embedding-3-small",
+    "embedding_prefix_enabled": True,
+    "rag_chunk_size": 200,
+    "rag_chunk_overlap": 30,
+    "rag_retrieval_count": 3,
+    "rag_hybrid_search_enabled": False,
+    "rag_vector_weight": 0.90,
+    "rag_bm25_k1": 2.5,
+    "rag_bm25_b": 0.50,
+    "rag_max_crawl_pages": 50,
+    "rag_crawl_delay_sec": 1.0,
+    "rag_respect_robots_txt": True,
+    "rag_robots_txt_cache_ttl": 3600,
+    "rag_url_safety_check": False,
+    "rag_url_safety_cache_ttl": 300,
+    "rag_url_safety_fail_open": True,
+    "rag_url_safety_timeout": 5.0,
+    "rag_stats_max_sources": 100,
+    "rag_zenn_max_articles": 50,
+    "rag_zenn_request_timeout": 30,
+    "rag_zenn_request_interval": 1.0,
+    "rag_document_supported_extensions": ".md,.txt,.pdf,.adoc",
+    "rag_bluesky_appview_url": "https://public.api.bsky.app",
+    "rag_bluesky_max_posts": 200,
+    "rag_bluesky_request_timeout": 30,
+    "rag_bluesky_request_interval": 1.0,
+    "rag_bluesky_include_reposts": True,
+}
