@@ -157,3 +157,52 @@ class TestTomlConfigValidation:
         from rag.config import _EnvLoader
 
         assert _ENV_FIELD_NAMES == frozenset(_EnvLoader.model_fields.keys())
+
+
+class TestGetSettingsIntegration:
+    """get_settings() の統合テスト (#207)."""
+
+    def test_env_values_reflected(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        """.env の値が RAGSettings に反映されること."""
+        from rag.config import get_settings
+
+        get_settings.cache_clear()
+        env_file = tmp_path / ".env"
+        env_file.write_text("EMBEDDING_PROVIDER=online\n")
+        toml_file = tmp_path / "config.toml"
+        toml_file.write_text("")
+        with patch("rag.config._ENV_FILE", str(env_file)), \
+             patch("rag.config._TOML_FILE", toml_file):
+            # _EnvLoader が新しい _ENV_FILE を使うよう再構成
+            from rag.config import _EnvLoader
+            monkeypatch.delenv("EMBEDDING_PROVIDER", raising=False)
+            monkeypatch.setenv("EMBEDDING_PROVIDER", "online")
+            settings = get_settings()
+            assert settings.embedding_provider == "online"
+        get_settings.cache_clear()
+
+    def test_toml_values_reflected(self, tmp_path: Path) -> None:
+        """config.toml の値が RAGSettings に反映されること."""
+        from rag.config import get_settings
+
+        get_settings.cache_clear()
+        toml_file = tmp_path / "config.toml"
+        toml_file.write_text("rag_chunk_size = 999\n")
+        with patch("rag.config._TOML_FILE", toml_file):
+            settings = get_settings()
+            assert settings.rag_chunk_size == 999
+        get_settings.cache_clear()
+
+    def test_env_and_toml_merged(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        """.env と config.toml の値が統合されること."""
+        from rag.config import get_settings
+
+        get_settings.cache_clear()
+        toml_file = tmp_path / "config.toml"
+        toml_file.write_text("rag_chunk_size = 300\n")
+        monkeypatch.setenv("RAG_TRANSPORT", "http")
+        with patch("rag.config._TOML_FILE", toml_file):
+            settings = get_settings()
+            assert settings.rag_chunk_size == 300
+            assert settings.rag_transport == "http"
+        get_settings.cache_clear()

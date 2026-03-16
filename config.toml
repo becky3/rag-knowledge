@@ -14,7 +14,7 @@ rag_chunk_overlap = 30
 rag_retrieval_count = 3
 # rag_similarity_threshold = (未設定時は None)
 
-# ハイブリッド検索
+# ハイブリッド検索（ベクトル検索 + BM25 の併用。運用環境で有効化済み）
 rag_hybrid_search_enabled = true
 rag_vector_weight = 0.90
 rag_bm25_k1 = 2.5
@@ -30,6 +30,8 @@ rag_respect_robots_txt = true
 rag_robots_txt_cache_ttl = 3600
 
 # URL 安全性チェック (Google Safe Browsing API)
+# true にするには keyring に GOOGLE_SAFE_BROWSING_API_KEY の登録が必要
+# 未登録の場合はチェックが無効化され警告ログが出力される
 rag_url_safety_check = true
 rag_url_safety_cache_ttl = 300
 rag_url_safety_fail_open = true
