@@ -48,7 +48,7 @@ uv sync
 cp .env.example .env  # Embedding 設定等を編集
 ```
 
-API キーは py-common-lib の `get_secret` で OS セキュアストレージから取得する（サービス名: `rag-knowledge`、キー名: `OPENAI_API_KEY` / `GOOGLE_SAFE_BROWSING_API_KEY`）。登録方法は [py-common-lib の仕様書](https://github.com/becky3/py-common-lib/blob/main/docs/specs/infrastructure/secret-store.md) を参照。
+API キーは py-common-lib の `get_secret` で OS セキュアストレージから取得する（サービス名: `rag-knowledge`）。登録方法は [py-common-lib の仕様書](https://github.com/becky3/py-common-lib/blob/main/docs/specs/infrastructure/secret-store.md) を参照。
 
 ## 起動
 
