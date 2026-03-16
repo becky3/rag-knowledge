@@ -45,10 +45,23 @@
 
 ```bash
 uv sync
-cp .env.example .env  # Embedding 設定等を編集
+cp .env.example .env  # 環境依存値を編集
 ```
 
-API キーは py-common-lib の `get_secret` で OS セキュアストレージから取得する（サービス名: `rag-knowledge`）。登録方法は [py-common-lib の仕様書](https://github.com/becky3/py-common-lib/blob/main/docs/specs/infrastructure/secret-store.md) を参照。
+API キーは py-common-lib の `get_secret` で OS セキュアストレージから取得する（サービス名: `rag-knowledge`）。
+登録方法は [py-common-lib の仕様書](https://github.com/becky3/py-common-lib/blob/main/docs/specs/infrastructure/secret-store.md) を参照。
+
+## 設定管理
+
+設定値はセキュリティレベルに応じて3層に分離し、各値の取得元は1つに固定する（フォールバックなし）。
+
+| 層 | 保管先 | git管理 | 分類基準 |
+|---|--------|---------|---------|
+| シークレット | OS セキュアストレージ (keyring) | 管理外 | 漏洩時に直接被害が発生する値（API キー、トークン、パスワード） |
+| 環境依存値 | `.env` | 管理外 | デプロイ先・マシンごとに異なる値（接続先 URL、ストレージパス、ネットワーク設定、デバッグフラグ） |
+| 共通設定値 | `config.toml` | **管理する** | プロジェクトとして統一管理する値（チューニングパラメータ、ポリシー設定、モデル名、機能フラグ） |
+
+新しい設定値を追加する際は、上記の判断基準に従って適切な層に配置すること。詳細は [設定管理仕様](docs/specs/rag-knowledge.md#設定管理) を参照。
 
 ## 起動
 
