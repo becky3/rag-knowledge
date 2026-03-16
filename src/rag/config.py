@@ -2,6 +2,12 @@
 
 仕様: docs/specs/rag-knowledge.md
 独立リポジトリとして動作する。
+
+設定値はセキュリティレベルに応じて3層に分離し、
+各設定値の取得元は1つに固定する（フォールバックなし）:
+- シークレット: OS セキュアストレージ (keyring)
+- 環境依存値: .env（_EnvLoader）
+- 共通設定値: config.toml
 """
 
 from __future__ import annotations
@@ -9,10 +15,11 @@ from __future__ import annotations
 import functools
 import io
 import sys
+import tomllib
 from pathlib import Path
-from typing import Literal
+from typing import Any, Literal
 
-from pydantic import Field, model_validator
+from pydantic import BaseModel, Field, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 # LM Studio のデフォルトベースURL
@@ -21,14 +28,16 @@ DEFAULT_LMSTUDIO_BASE_URL = "http://localhost:1234"
 # デフォルトEmbeddingモデル名
 DEFAULT_EMBEDDING_MODEL_LOCAL = "nomic-embed-text"
 
-# プロジェクトルートの .env を参照
-_ENV_FILE = Path(__file__).parent.parent.parent / ".env"
+# プロジェクトルートのパス
+_PROJECT_ROOT = Path(__file__).parent.parent.parent
+_ENV_FILE = _PROJECT_ROOT / ".env"
+_TOML_FILE = _PROJECT_ROOT / "config.toml"
 
 
-class RAGSettings(BaseSettings):
-    """RAG MCP サーバーの設定.
+class _EnvLoader(BaseSettings):
+    """環境依存設定のローダー（内部用）.
 
-    仕様: docs/specs/rag-knowledge.md
+    .env および環境変数から、デプロイ先・マシンごとに異なる値を取得する。
     """
 
     model_config = SettingsConfigDict(
@@ -37,16 +46,55 @@ class RAGSettings(BaseSettings):
         extra="ignore",
     )
 
-    # Embedding設定
+    # Embedding 接続
     embedding_provider: Literal["local", "online"] = "local"
-    embedding_model_local: str = DEFAULT_EMBEDDING_MODEL_LOCAL
-    embedding_model_online: str = "text-embedding-3-small"
-    embedding_prefix_enabled: bool = True
     lmstudio_base_url: str = DEFAULT_LMSTUDIO_BASE_URL
 
     # ストレージ（MCP サーバー起動 cwd からの相対パス）
     chromadb_persist_dir: str = "./chroma_db"
     bm25_persist_dir: str = "./bm25_index"
+
+    # トランスポート
+    rag_transport: Literal["stdio", "http"] = "stdio"
+    rag_http_host: str = "127.0.0.1"
+    rag_http_port: int = Field(default=8081, ge=1, le=65535)
+    rag_dns_rebinding_protection: bool = True
+
+    # デバッグ
+    rag_debug_log_enabled: bool = False
+
+
+# .env 管理フィールド名の集合（重複検出に使用）
+_ENV_FIELD_NAMES = frozenset(_EnvLoader.model_fields.keys())
+
+
+class RAGSettings(BaseModel):
+    """RAG MCP サーバーの統合設定.
+
+    仕様: docs/specs/rag-knowledge.md
+
+    各設定値の取得元は1つに固定されている（フォールバックなし）:
+    - 環境依存値(.env): embedding_provider, lmstudio_base_url 等
+    - 共通設定値(config.toml): rag_chunk_size, rag_retrieval_count 等
+    """
+
+    # --- .env から取得（環境依存値） ---
+    embedding_provider: Literal["local", "online"] = "local"
+    lmstudio_base_url: str = DEFAULT_LMSTUDIO_BASE_URL
+    chromadb_persist_dir: str = "./chroma_db"
+    bm25_persist_dir: str = "./bm25_index"
+    rag_transport: Literal["stdio", "http"] = "stdio"
+    rag_http_host: str = "127.0.0.1"
+    rag_http_port: int = Field(default=8081, ge=1, le=65535)
+    rag_dns_rebinding_protection: bool = True
+    rag_debug_log_enabled: bool = False
+
+    # --- config.toml から取得（共通設定値） ---
+
+    # Embedding モデル
+    embedding_model_local: str = DEFAULT_EMBEDDING_MODEL_LOCAL
+    embedding_model_online: str = "text-embedding-3-small"
+    embedding_prefix_enabled: bool = True
 
     # チャンキング
     rag_chunk_size: int = Field(default=200, ge=1)
@@ -81,12 +129,6 @@ class RAGSettings(BaseSettings):
     rag_url_safety_fail_open: bool = True
     rag_url_safety_timeout: float = Field(default=5.0, gt=0)
 
-    # トランスポート
-    rag_transport: Literal["stdio", "http"] = "stdio"
-    rag_http_host: str = "127.0.0.1"
-    rag_http_port: int = Field(default=8081, ge=1, le=65535)
-    rag_dns_rebinding_protection: bool = True
-
     # レスポンスサイズ制限
     rag_max_response_chars: int | None = Field(default=None, ge=1)
 
@@ -108,9 +150,6 @@ class RAGSettings(BaseSettings):
     rag_bluesky_request_interval: float = Field(default=1.0, ge=0.1, le=60.0)
     rag_bluesky_include_reposts: bool = True
 
-    # デバッグ
-    rag_debug_log_enabled: bool = False
-
     @model_validator(mode="after")
     def validate_chunk_settings(self) -> RAGSettings:
         """チャンク設定の相関バリデーション."""
@@ -122,10 +161,39 @@ class RAGSettings(BaseSettings):
         return self
 
 
+def _load_toml_config() -> dict[str, Any]:
+    """config.toml を読み込み、層の重複を検証する."""
+    if not _TOML_FILE.exists():
+        return {}
+    with open(_TOML_FILE, "rb") as f:
+        data: dict[str, Any] = tomllib.load(f)
+    # config.toml に環境依存値が混入していないか検証
+    env_overlap = set(data.keys()) & _ENV_FIELD_NAMES
+    if env_overlap:
+        msg = (
+            f"config.toml に環境依存設定が含まれています（.env に移動してください）: "
+            f"{sorted(env_overlap)}"
+        )
+        raise ValueError(msg)
+    # 未知のキーを検証
+    toml_field_names = frozenset(RAGSettings.model_fields.keys()) - _ENV_FIELD_NAMES
+    unknown = set(data.keys()) - toml_field_names
+    if unknown:
+        msg = f"config.toml に未知の設定が含まれています: {sorted(unknown)}"
+        raise ValueError(msg)
+    return data
+
+
 @functools.lru_cache(maxsize=1)
 def get_settings() -> RAGSettings:
-    """キャッシュ付きでRAGSettingsインスタンスを返す."""
-    return RAGSettings()
+    """キャッシュ付きでRAGSettingsインスタンスを返す.
+
+    .env から環境依存値、config.toml から共通設定値を取得し、
+    統合した RAGSettings を返す。
+    """
+    env_loader = _EnvLoader()
+    toml_data = _load_toml_config()
+    return RAGSettings(**env_loader.model_dump(), **toml_data)
 
 
 def ensure_utf8_streams(*, include_stdout: bool = False) -> None:

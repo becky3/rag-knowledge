@@ -116,14 +116,14 @@ async def test_openai_embedding_is_available() -> None:
 
 def test_factory_returns_correct_provider_local() -> None:
     """AC4: get_embedding_provider() が 'local' 設定で LMStudioEmbedding を返すこと."""
-    settings = Settings(_env_file=None)  # type: ignore[call-arg]
+    settings = Settings()
     provider = get_embedding_provider(settings, "local")
     assert isinstance(provider, LMStudioEmbedding)
 
 
 def test_factory_returns_correct_provider_online() -> None:
     """AC4: get_embedding_provider() が 'online' 設定で OpenAIEmbedding を返すこと."""
-    settings = Settings(_env_file=None)  # type: ignore[call-arg]
+    settings = Settings()
     with patch("rag.embedding.factory.get_secret", return_value="sk-test"):
         provider = get_embedding_provider(settings, "online")
     assert isinstance(provider, OpenAIEmbedding)
@@ -131,7 +131,7 @@ def test_factory_returns_correct_provider_online() -> None:
 
 def test_factory_raises_on_missing_api_key() -> None:
     """OPENAI_API_KEY 未登録時に ValueError を送出すること."""
-    settings = Settings(_env_file=None)  # type: ignore[call-arg]
+    settings = Settings()
     with patch(
         "rag.embedding.factory.get_secret",
         side_effect=SecretNotFoundError("not found"),
@@ -142,7 +142,7 @@ def test_factory_raises_on_missing_api_key() -> None:
 
 def test_factory_raises_on_empty_api_key() -> None:
     """OPENAI_API_KEY が空文字列の場合に ValueError を送出すること."""
-    settings = Settings(_env_file=None)  # type: ignore[call-arg]
+    settings = Settings()
     with patch("rag.embedding.factory.get_secret", return_value=""):
         with pytest.raises(ValueError, match="empty"):
             get_embedding_provider(settings, "online")
@@ -150,41 +150,36 @@ def test_factory_raises_on_empty_api_key() -> None:
 
 def test_factory_uses_settings_model_local() -> None:
     """AC4: ファクトリが Settings の embedding_model_local を使用すること."""
-    settings = Settings(_env_file=None)  # type: ignore[call-arg]
+    settings = Settings()
     provider = get_embedding_provider(settings, "local")
     assert isinstance(provider, LMStudioEmbedding)
     assert provider._model == settings.embedding_model_local
 
 
-def test_factory_uses_settings_model_online(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
+def test_factory_uses_settings_model_online() -> None:
     """AC4: ファクトリが Settings の embedding_model_online を使用すること."""
-    monkeypatch.setenv("EMBEDDING_MODEL_ONLINE", "text-embedding-3-large")
-    settings = Settings(_env_file=None)  # type: ignore[call-arg]
+    settings = Settings(embedding_model_online="text-embedding-3-large")
     with patch("rag.embedding.factory.get_secret", return_value="sk-test"):
         provider = get_embedding_provider(settings, "online")
     assert isinstance(provider, OpenAIEmbedding)
     assert provider._model == "text-embedding-3-large"
 
 
-def test_embedding_settings_defaults(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_embedding_settings_defaults() -> None:
     """AC4: Embedding関連設定のデフォルト値が設定されていること."""
-    monkeypatch.delenv("EMBEDDING_PROVIDER", raising=False)
-    monkeypatch.delenv("EMBEDDING_MODEL_LOCAL", raising=False)
-    monkeypatch.delenv("EMBEDDING_MODEL_ONLINE", raising=False)
-    settings = Settings(_env_file=None)  # type: ignore[call-arg]
+    settings = Settings()
     assert settings.embedding_provider == "local"
     assert settings.embedding_model_local  # デフォルト値が設定されていること
     assert settings.embedding_model_online  # デフォルト値が設定されていること
 
 
-def test_embedding_settings_configurable(monkeypatch: pytest.MonkeyPatch) -> None:
-    """AC4: Embedding関連設定が環境変数で変更可能であること."""
-    monkeypatch.setenv("EMBEDDING_PROVIDER", "online")
-    monkeypatch.setenv("EMBEDDING_MODEL_LOCAL", "custom-embed-model")
-    monkeypatch.setenv("EMBEDDING_MODEL_ONLINE", "text-embedding-3-large")
-    settings = Settings(_env_file=None)  # type: ignore[call-arg]
+def test_embedding_settings_configurable() -> None:
+    """AC4: Embedding関連設定が設定可能であること."""
+    settings = Settings(
+        embedding_provider="online",
+        embedding_model_local="custom-embed-model",
+        embedding_model_online="text-embedding-3-large",
+    )
     assert settings.embedding_provider == "online"
     assert settings.embedding_model_local == "custom-embed-model"
     assert settings.embedding_model_online == "text-embedding-3-large"
@@ -341,24 +336,21 @@ async def test_openai_embed_query_delegates_to_embed() -> None:
     assert result == [1.0, 2.0, 3.0]
 
 
-def test_embedding_prefix_enabled_setting_default(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_embedding_prefix_enabled_setting_default() -> None:
     """embedding_prefix_enabled のデフォルト値が True であること."""
-    monkeypatch.delenv("EMBEDDING_PREFIX_ENABLED", raising=False)
-    settings = Settings(_env_file=None)  # type: ignore[call-arg]
+    settings = Settings()
     assert settings.embedding_prefix_enabled is True
 
 
-def test_embedding_prefix_enabled_setting_configurable(monkeypatch: pytest.MonkeyPatch) -> None:
-    """embedding_prefix_enabled が環境変数で変更可能であること."""
-    monkeypatch.setenv("EMBEDDING_PREFIX_ENABLED", "true")
-    settings = Settings(_env_file=None)  # type: ignore[call-arg]
+def test_embedding_prefix_enabled_setting_configurable() -> None:
+    """embedding_prefix_enabled が設定可能であること."""
+    settings = Settings(embedding_prefix_enabled=True)
     assert settings.embedding_prefix_enabled is True
 
 
-def test_factory_passes_prefix_enabled(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_factory_passes_prefix_enabled() -> None:
     """ファクトリが prefix_enabled を LMStudioEmbedding に渡すこと."""
-    monkeypatch.setenv("EMBEDDING_PREFIX_ENABLED", "true")
-    settings = Settings(_env_file=None)  # type: ignore[call-arg]
+    settings = Settings(embedding_prefix_enabled=True)
     provider = get_embedding_provider(settings, "local")
     assert isinstance(provider, LMStudioEmbedding)
     assert provider._prefix_enabled is True
@@ -366,7 +358,7 @@ def test_factory_passes_prefix_enabled(monkeypatch: pytest.MonkeyPatch) -> None:
 
 def test_factory_passes_prefix_enabled_by_default() -> None:
     """ファクトリがデフォルトで prefix_enabled=True を渡すこと."""
-    settings = Settings(_env_file=None)  # type: ignore[call-arg]
+    settings = Settings()
     provider = get_embedding_provider(settings, "local")
     assert isinstance(provider, LMStudioEmbedding)
     assert provider._prefix_enabled is True
