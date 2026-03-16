@@ -1,4 +1,4 @@
-"""テスト共通フィクスチャ."""
+"""テスト用設定デフォルト値."""
 
 from __future__ import annotations
 

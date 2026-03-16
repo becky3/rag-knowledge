@@ -10,7 +10,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 from py_common_lib.secrets import SecretNotFoundError
 
-from conftest import TEST_SETTINGS_DEFAULTS
+from settings_defaults import TEST_SETTINGS_DEFAULTS
 from rag.config import DEFAULT_LMSTUDIO_BASE_URL, RAGSettings as Settings
 from rag.embedding.base import EmbeddingProvider
 from rag.embedding.factory import get_embedding_provider

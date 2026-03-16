@@ -11,7 +11,7 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 from pydantic import ValidationError
 
-from conftest import TEST_SETTINGS_DEFAULTS
+from settings_defaults import TEST_SETTINGS_DEFAULTS
 from rag.bm25_index import BM25Index, BM25Result
 from rag.config import RAGSettings
 from rag.vector_store import RetrievalResult, VectorStore

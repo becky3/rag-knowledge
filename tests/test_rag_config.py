@@ -17,7 +17,7 @@ from unittest.mock import patch
 import pytest
 from pydantic import ValidationError
 
-from conftest import TEST_SETTINGS_DEFAULTS
+from settings_defaults import TEST_SETTINGS_DEFAULTS
 from rag.config import RAGSettings, _ENV_FIELD_NAMES, _load_toml_config
 
 

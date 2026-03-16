@@ -10,7 +10,8 @@
 - 共通設定値: config.toml
 
 全設定値は明示的に .env / config.toml に記載する必要がある。
-未記載の場合はバリデーションエラーとなる。
+config.toml が存在しない場合は FileNotFoundError、
+設定値が不足している場合は pydantic の ValidationError となる。
 例外: rag_similarity_threshold, rag_max_response_chars, rag_min_combined_score
 （未設定 = 機能無効を意図する項目は None がデフォルト）
 """
