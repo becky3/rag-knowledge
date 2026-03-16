@@ -1,37 +1,28 @@
 """RAGSettings のバリデーションテスト.
 
-Issue: #168
+Issue: #168, #207
 
 テスト方針:
 - Zenn インジェスター設定項目のデフォルト値・許容範囲・境界値を検証
-- 環境変数からの読み込みを検証
+- コンストラクタ引数での設定を検証
 - pydantic ValidationError の発生を検証
+- 3層分離のバリデーションロジックを検証
 """
 
 from __future__ import annotations
 
+from pathlib import Path
+from unittest.mock import patch
+
 import pytest
 from pydantic import ValidationError
 
-from rag.config import RAGSettings
-
-_ZENN_ENV_VARS = [
-    "RAG_ZENN_MAX_ARTICLES",
-    "RAG_ZENN_REQUEST_TIMEOUT",
-    "RAG_ZENN_REQUEST_INTERVAL",
-]
-
-
-@pytest.fixture(autouse=True)
-def _clear_zenn_env(monkeypatch: pytest.MonkeyPatch) -> None:
-    """テスト間で Zenn 関連の環境変数をクリアする."""
-    for var in _ZENN_ENV_VARS:
-        monkeypatch.delenv(var, raising=False)
+from rag.config import RAGSettings, _ENV_FIELD_NAMES, _load_toml_config
 
 
 def _make_settings(**overrides: object) -> RAGSettings:
-    """テスト用 RAGSettings を生成する（.env を読み込まない）."""
-    return RAGSettings(_env_file=None, **overrides)  # type: ignore[call-arg]
+    """テスト用 RAGSettings を生成する."""
+    return RAGSettings(**overrides)
 
 
 # --- Zenn インジェスター: rag_zenn_max_articles ---
@@ -63,12 +54,6 @@ class TestZennMaxArticles:
         with pytest.raises(ValidationError):
             _make_settings(rag_zenn_max_articles=101)
 
-    def test_from_env(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        """環境変数から読み込めること."""
-        monkeypatch.setenv("RAG_ZENN_MAX_ARTICLES", "75")
-        settings = _make_settings()
-        assert settings.rag_zenn_max_articles == 75
-
 
 # --- Zenn インジェスター: rag_zenn_request_timeout ---
 
@@ -98,12 +83,6 @@ class TestZennRequestTimeout:
         """上限超過でバリデーションエラーになること."""
         with pytest.raises(ValidationError):
             _make_settings(rag_zenn_request_timeout=121)
-
-    def test_from_env(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        """環境変数から読み込めること."""
-        monkeypatch.setenv("RAG_ZENN_REQUEST_TIMEOUT", "60")
-        settings = _make_settings()
-        assert settings.rag_zenn_request_timeout == 60
 
 
 # --- Zenn インジェスター: rag_zenn_request_interval ---
@@ -135,8 +114,95 @@ class TestZennRequestInterval:
         with pytest.raises(ValidationError):
             _make_settings(rag_zenn_request_interval=60.1)
 
-    def test_from_env(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        """環境変数から float として読み込めること."""
-        monkeypatch.setenv("RAG_ZENN_REQUEST_INTERVAL", "0.5")
-        settings = _make_settings()
-        assert settings.rag_zenn_request_interval == 0.5
+
+# --- 3層分離バリデーション ---
+
+
+class TestTomlConfigValidation:
+    """_load_toml_config のバリデーションテスト (#207)."""
+
+    def test_rejects_env_fields_in_toml(self, tmp_path: Path) -> None:
+        """config.toml に環境依存フィールドが含まれている場合 ValueError."""
+        toml_file = tmp_path / "config.toml"
+        toml_file.write_text('embedding_provider = "online"\n')
+        with patch("rag.config._TOML_FILE", toml_file):
+            with pytest.raises(ValueError, match="環境依存設定"):
+                _load_toml_config()
+
+    def test_rejects_unknown_fields_in_toml(self, tmp_path: Path) -> None:
+        """config.toml に未知のフィールドが含まれている場合 ValueError."""
+        toml_file = tmp_path / "config.toml"
+        toml_file.write_text("unknown_setting = 42\n")
+        with patch("rag.config._TOML_FILE", toml_file):
+            with pytest.raises(ValueError, match="未知の設定"):
+                _load_toml_config()
+
+    def test_valid_toml_loads_successfully(self, tmp_path: Path) -> None:
+        """有効な config.toml が正常に読み込めること."""
+        toml_file = tmp_path / "config.toml"
+        toml_file.write_text("rag_chunk_size = 500\n")
+        with patch("rag.config._TOML_FILE", toml_file):
+            data = _load_toml_config()
+        assert data["rag_chunk_size"] == 500
+
+    def test_missing_toml_returns_empty(self, tmp_path: Path) -> None:
+        """config.toml が存在しない場合は空辞書を返すこと."""
+        toml_file = tmp_path / "nonexistent.toml"
+        with patch("rag.config._TOML_FILE", toml_file):
+            data = _load_toml_config()
+        assert data == {}
+
+    def test_env_field_names_match_env_loader(self) -> None:
+        """_ENV_FIELD_NAMES が _EnvLoader のフィールドと一致すること."""
+        from rag.config import _EnvLoader
+
+        assert _ENV_FIELD_NAMES == frozenset(_EnvLoader.model_fields.keys())
+
+
+class TestGetSettingsIntegration:
+    """get_settings() の統合テスト (#207)."""
+
+    def test_env_values_reflected(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        """.env の値が RAGSettings に反映されること."""
+        from rag.config import get_settings
+
+        get_settings.cache_clear()
+        env_file = tmp_path / ".env"
+        env_file.write_text("EMBEDDING_PROVIDER=online\n")
+        toml_file = tmp_path / "config.toml"
+        toml_file.write_text("")
+        with patch("rag.config._ENV_FILE", str(env_file)), \
+             patch("rag.config._TOML_FILE", toml_file):
+            # _EnvLoader が新しい _ENV_FILE を使うよう再構成
+            from rag.config import _EnvLoader
+            monkeypatch.delenv("EMBEDDING_PROVIDER", raising=False)
+            monkeypatch.setenv("EMBEDDING_PROVIDER", "online")
+            settings = get_settings()
+            assert settings.embedding_provider == "online"
+        get_settings.cache_clear()
+
+    def test_toml_values_reflected(self, tmp_path: Path) -> None:
+        """config.toml の値が RAGSettings に反映されること."""
+        from rag.config import get_settings
+
+        get_settings.cache_clear()
+        toml_file = tmp_path / "config.toml"
+        toml_file.write_text("rag_chunk_size = 999\n")
+        with patch("rag.config._TOML_FILE", toml_file):
+            settings = get_settings()
+            assert settings.rag_chunk_size == 999
+        get_settings.cache_clear()
+
+    def test_env_and_toml_merged(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        """.env と config.toml の値が統合されること."""
+        from rag.config import get_settings
+
+        get_settings.cache_clear()
+        toml_file = tmp_path / "config.toml"
+        toml_file.write_text("rag_chunk_size = 300\n")
+        monkeypatch.setenv("RAG_TRANSPORT", "http")
+        with patch("rag.config._TOML_FILE", toml_file):
+            settings = get_settings()
+            assert settings.rag_chunk_size == 300
+            assert settings.rag_transport == "http"
+        get_settings.cache_clear()

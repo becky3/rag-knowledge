@@ -368,75 +368,53 @@ class TestConfiguration:
     """設定のテスト (AC28, AC29) — RAGSettings (src/rag/config.py)."""
 
     def test_embedding_provider_switch(self) -> None:
-        """AC28: EMBEDDING_PROVIDER で local / online を切り替えられること."""
-        import os
-        from unittest.mock import patch
-
+        """AC28: embedding_provider で local / online を切り替えられること."""
         from rag.config import RAGSettings
 
-        with patch.dict(os.environ, {"EMBEDDING_PROVIDER": "local"}):
-            settings = RAGSettings(_env_file=None)  # type: ignore[call-arg]
-            assert settings.embedding_provider == "local"
+        settings = RAGSettings(embedding_provider="local")
+        assert settings.embedding_provider == "local"
 
-        with patch.dict(os.environ, {"EMBEDDING_PROVIDER": "online"}):
-            settings = RAGSettings(_env_file=None)  # type: ignore[call-arg]
-            assert settings.embedding_provider == "online"
+        settings = RAGSettings(embedding_provider="online")
+        assert settings.embedding_provider == "online"
 
     def test_configurable_parameters(self) -> None:
-        """AC29: チャンクサイズ・オーバーラップ・検索件数が環境変数で設定可能であること."""
-        import os
-        from unittest.mock import patch
-
+        """AC29: チャンクサイズ・オーバーラップ・検索件数が設定可能であること."""
         from rag.config import RAGSettings
 
-        with patch.dict(
-            os.environ,
-            {
-                "RAG_CHUNK_SIZE": "1000",
-                "RAG_CHUNK_OVERLAP": "100",
-                "RAG_RETRIEVAL_COUNT": "10",
-            },
-        ):
-            settings = RAGSettings(_env_file=None)  # type: ignore[call-arg]
-            assert settings.rag_chunk_size == 1000
-            assert settings.rag_chunk_overlap == 100
-            assert settings.rag_retrieval_count == 10
+        settings = RAGSettings(
+            rag_chunk_size=1000,
+            rag_chunk_overlap=100,
+            rag_retrieval_count=10,
+        )
+        assert settings.rag_chunk_size == 1000
+        assert settings.rag_chunk_overlap == 100
+        assert settings.rag_retrieval_count == 10
 
     def test_similarity_threshold_configurable(self) -> None:
-        """類似度閾値が環境変数で設定可能であること (Issue #190)."""
-        import os
-        from unittest.mock import patch
-
+        """類似度閾値が設定可能であること (Issue #190)."""
         from rag.config import RAGSettings
 
         # 設定あり
-        with patch.dict(os.environ, {"RAG_SIMILARITY_THRESHOLD": "0.5"}):
-            settings = RAGSettings(_env_file=None)  # type: ignore[call-arg]
-            assert settings.rag_similarity_threshold == 0.5
+        settings = RAGSettings(rag_similarity_threshold=0.5)
+        assert settings.rag_similarity_threshold == 0.5
 
         # 設定なし（デフォルト: None）
-        with patch.dict(os.environ, {}, clear=True):
-            settings = RAGSettings(_env_file=None)  # type: ignore[call-arg]
-            assert settings.rag_similarity_threshold is None
+        settings = RAGSettings()
+        assert settings.rag_similarity_threshold is None
 
     def test_similarity_threshold_validation(self) -> None:
         """類似度閾値のバリデーション (Issue #190)."""
-        import os
-        from unittest.mock import patch
-
         from pydantic import ValidationError
 
         from rag.config import RAGSettings
 
         # 負の値は拒否
-        with patch.dict(os.environ, {"RAG_SIMILARITY_THRESHOLD": "-0.1"}):
-            with pytest.raises(ValidationError):
-                RAGSettings(_env_file=None)  # type: ignore[call-arg]
+        with pytest.raises(ValidationError):
+            RAGSettings(rag_similarity_threshold=-0.1)
 
         # 2.0を超える値は拒否（cosine距離の最大値は2.0）
-        with patch.dict(os.environ, {"RAG_SIMILARITY_THRESHOLD": "2.5"}):
-            with pytest.raises(ValidationError):
-                RAGSettings(_env_file=None)  # type: ignore[call-arg]
+        with pytest.raises(ValidationError):
+            RAGSettings(rag_similarity_threshold=2.5)
 
 
 class TestRAGDebugLog:

@@ -1,0 +1,57 @@
+# RAG Knowledge — 共通設定（git 管理）
+# 設定管理仕様: docs/specs/rag-knowledge.md#設定管理
+
+# Embedding モデル
+embedding_model_local = "text-embedding-nomic-embed-text-v2-moe"
+embedding_model_online = "text-embedding-3-small"
+embedding_prefix_enabled = true
+
+# チャンキング
+rag_chunk_size = 200
+rag_chunk_overlap = 30
+
+# 検索
+rag_retrieval_count = 3
+# rag_similarity_threshold = (未設定時は None)
+
+# ハイブリッド検索（ベクトル検索 + BM25 の併用。運用環境で有効化済み）
+rag_hybrid_search_enabled = true
+rag_vector_weight = 0.90
+rag_bm25_k1 = 2.5
+rag_bm25_b = 0.50
+rag_min_combined_score = 0.75
+
+# クロール
+rag_max_crawl_pages = 50
+rag_crawl_delay_sec = 1.0
+
+# robots.txt
+rag_respect_robots_txt = true
+rag_robots_txt_cache_ttl = 3600
+
+# URL 安全性チェック (Google Safe Browsing API)
+# true にするには keyring に GOOGLE_SAFE_BROWSING_API_KEY の登録が必要
+# 未登録の場合はチェックが無効化され警告ログが出力される
+rag_url_safety_check = true
+rag_url_safety_cache_ttl = 300
+rag_url_safety_fail_open = true
+rag_url_safety_timeout = 5.0
+
+# レスポンス制御
+# rag_max_response_chars = (未設定時は None)
+rag_stats_max_sources = 100
+
+# Zenn インジェスター
+rag_zenn_max_articles = 100
+rag_zenn_request_timeout = 30
+rag_zenn_request_interval = 0.1
+
+# ドキュメントインジェスター
+rag_document_supported_extensions = ".md,.txt,.pdf,.adoc"
+
+# BlueSky インジェスター
+rag_bluesky_appview_url = "https://public.api.bsky.app"
+rag_bluesky_max_posts = 200
+rag_bluesky_request_timeout = 30
+rag_bluesky_request_interval = 1.0
+rag_bluesky_include_reposts = true
