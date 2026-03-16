@@ -35,7 +35,7 @@ RAG Knowledge は、外部 Web ページから収集した知識をベクトル 
 | HTML 解析 | BeautifulSoup4 |
 | HTML→Markdown 変換 | markdownify |
 | PDF テキスト抽出 | pymupdf4llm |
-| 設定管理 | pydantic-settings (.env) |
+| 設定管理 | pydantic-settings (.env + config.toml) |
 
 ## 4. 開発方針
 

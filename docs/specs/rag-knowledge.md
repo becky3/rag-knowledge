@@ -23,13 +23,46 @@ MCP サーバーとして独立動作し、10 個のツールを提供する。
 
 ## 制約
 
-- プロジェクトルートの `.env` で非機密設定を管理する。
-  API キー・認証トークン等のシークレットは
-  OS セキュアストレージ（keyring）から取得する
-  （py-common-lib の `get_secret` を使用）
+### 設定管理
+
+設定値はセキュリティレベルに応じて3層に分離し、各設定値の取得元は1つに固定する（フォールバックなし）。
+`.env` と `config.toml` は同じキーを持たない（取得元の一意性を保証）。
+`.env` は環境変数の慣例に従い大文字、`config.toml` は TOML の慣例に従い小文字スネークケースで記述する。
+
+| 層 | 保管先 | git管理 | 分類基準 |
+|---|--------|---------|---------|
+| シークレット | OS セキュアストレージ (keyring) | 管理外 | 漏洩時に直接被害が発生する値。py-common-lib の `get_secret` で取得 |
+| 環境依存値 | `.env` | 管理外 | デプロイ先・マシンごとに異なる値 |
+| 共通設定値 | `config.toml` | **管理する** | プロジェクトとして統一管理する値 |
+
+#### `.env`（環境依存値）
+
+| カテゴリ | 設定項目 |
+|---------|---------|
+| Embedding 接続 | `EMBEDDING_PROVIDER`, `LMSTUDIO_BASE_URL` |
+| ストレージ | `CHROMADB_PERSIST_DIR`, `BM25_PERSIST_DIR` |
+| トランスポート | `RAG_TRANSPORT`, `RAG_HTTP_HOST`, `RAG_HTTP_PORT`, `RAG_DNS_REBINDING_PROTECTION` |
+| デバッグ | `RAG_DEBUG_LOG_ENABLED` |
+
+#### `config.toml`（共通設定値）
+
+| カテゴリ | 設定項目 |
+|---------|---------|
+| Embedding モデル | `embedding_model_local`, `embedding_model_online`, `embedding_prefix_enabled` |
+| チャンキング | `rag_chunk_size`, `rag_chunk_overlap` |
+| 検索 | `rag_retrieval_count`, `rag_similarity_threshold` |
+| ハイブリッド検索 | `rag_hybrid_search_enabled`, `rag_vector_weight`, `rag_bm25_k1`, `rag_bm25_b`, `rag_min_combined_score` |
+| クロール | `rag_max_crawl_pages`, `rag_crawl_delay_sec` |
+| robots.txt | `rag_respect_robots_txt`, `rag_robots_txt_cache_ttl` |
+| URL 安全性 | `rag_url_safety_check`, `rag_url_safety_cache_ttl`, `rag_url_safety_fail_open`, `rag_url_safety_timeout` |
+| レスポンス制御 | `rag_max_response_chars`, `rag_stats_max_sources` |
+| Zenn インジェスター | `rag_zenn_max_articles`, `rag_zenn_request_timeout`, `rag_zenn_request_interval` |
+| BlueSky インジェスター | `rag_bluesky_appview_url`, `rag_bluesky_max_posts`, `rag_bluesky_request_timeout`, `rag_bluesky_request_interval`, `rag_bluesky_include_reposts` |
+| ドキュメントインジェスター | `rag_document_supported_extensions` |
+
 - Embedding モデルを変更した場合、既存データとの類似度計算が不正確になるため、コレクション再構築が必要
 - 呼び出し元が MCP クライアントとして本サーバーに接続することで RAG 機能を利用できる
-- トランスポートは stdio（デフォルト）と http（Streamable HTTP）を切替可能。環境変数でトランスポート種別・ホスト・ポート・DNS リバインディング保護を設定する。HTTP モードはローカル／信頼済みネットワーク向けを想定しており、デフォルトではループバックアドレスにバインドする。外部ネットワークへ公開する場合は、ファイアウォールやリバースプロキシでの認証付与などによりアクセス制御を行うこと
+- トランスポートは stdio（デフォルト）と http（Streamable HTTP）を切替可能。`.env` でトランスポート種別・ホスト・ポート・DNS リバインディング保護を設定する。HTTP モードはローカル／信頼済みネットワーク向けを想定しており、デフォルトではループバックアドレスにバインドする。外部ネットワークへ公開する場合は、ファイアウォールやリバースプロキシでの認証付与などによりアクセス制御を行うこと
 - `src/` 配下の外部 HTTP リクエストは ConstrainedClient（py-common-lib パッケージで提供）経由で実行する。`httpx.AsyncClient`/`httpx.Client`・`aiohttp.ClientSession`・`requests`・`urllib.request` の直接利用は禁止
 - CI（`check-raw-http` ワークフロー）で ConstrainedClient を経由しない直接 HTTP クライアント利用を検出し、違反があればマージをブロックする。ConstrainedClient は `src/` 外のパッケージのため検出対象外。許可例外: `# safety:allowed` コメントが付与された行
 - ハードリミット（コード内定数。設定・引数・環境変数で緩和不可。厳格化は可能）:
