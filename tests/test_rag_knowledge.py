@@ -9,8 +9,11 @@ import logging
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
+from pydantic import ValidationError
 
+from settings_defaults import TEST_SETTINGS_DEFAULTS
 from rag.bm25_index import BM25Index, BM25Result
+from rag.config import RAGSettings
 from rag.vector_store import RetrievalResult, VectorStore
 from rag.rag_knowledge import (
     BM25SearchItem,
@@ -369,52 +372,43 @@ class TestConfiguration:
 
     def test_embedding_provider_switch(self) -> None:
         """AC28: embedding_provider で local / online を切り替えられること."""
-        from rag.config import RAGSettings
-
-        settings = RAGSettings(embedding_provider="local")
+        settings = RAGSettings(**{**TEST_SETTINGS_DEFAULTS, "embedding_provider": "local"})
         assert settings.embedding_provider == "local"
 
-        settings = RAGSettings(embedding_provider="online")
+        settings = RAGSettings(**{**TEST_SETTINGS_DEFAULTS, "embedding_provider": "online"})
         assert settings.embedding_provider == "online"
 
     def test_configurable_parameters(self) -> None:
         """AC29: チャンクサイズ・オーバーラップ・検索件数が設定可能であること."""
-        from rag.config import RAGSettings
-
-        settings = RAGSettings(
-            rag_chunk_size=1000,
-            rag_chunk_overlap=100,
-            rag_retrieval_count=10,
-        )
+        settings = RAGSettings(**{
+            **TEST_SETTINGS_DEFAULTS,
+            "rag_chunk_size": 1000,
+            "rag_chunk_overlap": 100,
+            "rag_retrieval_count": 10,
+        })
         assert settings.rag_chunk_size == 1000
         assert settings.rag_chunk_overlap == 100
         assert settings.rag_retrieval_count == 10
 
     def test_similarity_threshold_configurable(self) -> None:
         """類似度閾値が設定可能であること (Issue #190)."""
-        from rag.config import RAGSettings
-
         # 設定あり
-        settings = RAGSettings(rag_similarity_threshold=0.5)
+        settings = RAGSettings(**{**TEST_SETTINGS_DEFAULTS, "rag_similarity_threshold": 0.5})
         assert settings.rag_similarity_threshold == 0.5
 
         # 設定なし（デフォルト: None）
-        settings = RAGSettings()
+        settings = RAGSettings(**TEST_SETTINGS_DEFAULTS)
         assert settings.rag_similarity_threshold is None
 
     def test_similarity_threshold_validation(self) -> None:
         """類似度閾値のバリデーション (Issue #190)."""
-        from pydantic import ValidationError
-
-        from rag.config import RAGSettings
-
         # 負の値は拒否
         with pytest.raises(ValidationError):
-            RAGSettings(rag_similarity_threshold=-0.1)
+            RAGSettings(**{**TEST_SETTINGS_DEFAULTS, "rag_similarity_threshold": -0.1})
 
         # 2.0を超える値は拒否（cosine距離の最大値は2.0）
         with pytest.raises(ValidationError):
-            RAGSettings(rag_similarity_threshold=2.5)
+            RAGSettings(**{**TEST_SETTINGS_DEFAULTS, "rag_similarity_threshold": 2.5})
 
 
 class TestRAGDebugLog:

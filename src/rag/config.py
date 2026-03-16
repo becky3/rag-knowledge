@@ -8,6 +8,12 @@
 - シークレット: OS セキュアストレージ (keyring)
 - 環境依存値: .env（_EnvLoader）
 - 共通設定値: config.toml
+
+全設定値は明示的に .env / config.toml に記載する必要がある。
+config.toml が存在しない場合は FileNotFoundError、
+設定値が不足している場合は pydantic の ValidationError となる。
+例外: rag_similarity_threshold, rag_max_response_chars, rag_min_combined_score
+（未設定 = 機能無効を意図する項目は None がデフォルト）
 """
 
 from __future__ import annotations
@@ -22,10 +28,10 @@ from typing import Any, Literal
 from pydantic import BaseModel, Field, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
-# LM Studio のデフォルトベースURL
+# LM Studio のデフォルトベースURL（LMStudioEmbedding コンストラクタ用）
 DEFAULT_LMSTUDIO_BASE_URL = "http://localhost:1234"
 
-# デフォルトEmbeddingモデル名
+# デフォルトEmbeddingモデル名（LMStudioEmbedding コンストラクタ用）
 DEFAULT_EMBEDDING_MODEL_LOCAL = "nomic-embed-text"
 
 # プロジェクトルートのパス
@@ -38,6 +44,7 @@ class _EnvLoader(BaseSettings):
     """環境依存設定のローダー（内部用）.
 
     .env および環境変数から、デプロイ先・マシンごとに異なる値を取得する。
+    全フィールドは必須。未設定時はバリデーションエラーとなる。
     """
 
     model_config = SettingsConfigDict(
@@ -47,21 +54,21 @@ class _EnvLoader(BaseSettings):
     )
 
     # Embedding 接続
-    embedding_provider: Literal["local", "online"] = "local"
-    lmstudio_base_url: str = DEFAULT_LMSTUDIO_BASE_URL
+    embedding_provider: Literal["local", "online"]
+    lmstudio_base_url: str
 
     # ストレージ（MCP サーバー起動 cwd からの相対パス）
-    chromadb_persist_dir: str = "./chroma_db"
-    bm25_persist_dir: str = "./bm25_index"
+    chromadb_persist_dir: str
+    bm25_persist_dir: str
 
     # トランスポート
-    rag_transport: Literal["stdio", "http"] = "stdio"
-    rag_http_host: str = "127.0.0.1"
-    rag_http_port: int = Field(default=8081, ge=1, le=65535)
-    rag_dns_rebinding_protection: bool = True
+    rag_transport: Literal["stdio", "http"]
+    rag_http_host: str
+    rag_http_port: int = Field(ge=1, le=65535)
+    rag_dns_rebinding_protection: bool
 
     # デバッグ
-    rag_debug_log_enabled: bool = False
+    rag_debug_log_enabled: bool
 
 
 # .env 管理フィールド名の集合（重複検出に使用）
@@ -76,79 +83,82 @@ class RAGSettings(BaseModel):
     各設定値の取得元は1つに固定されている（フォールバックなし）:
     - 環境依存値(.env): embedding_provider, lmstudio_base_url 等
     - 共通設定値(config.toml): rag_chunk_size, rag_retrieval_count 等
+
+    全フィールドは必須。例外: float | None / int | None 型のフィールドは
+    未設定時に None（機能無効）がデフォルト。
     """
 
     # --- .env から取得（環境依存値） ---
-    embedding_provider: Literal["local", "online"] = "local"
-    lmstudio_base_url: str = DEFAULT_LMSTUDIO_BASE_URL
-    chromadb_persist_dir: str = "./chroma_db"
-    bm25_persist_dir: str = "./bm25_index"
-    rag_transport: Literal["stdio", "http"] = "stdio"
-    rag_http_host: str = "127.0.0.1"
-    rag_http_port: int = Field(default=8081, ge=1, le=65535)
-    rag_dns_rebinding_protection: bool = True
-    rag_debug_log_enabled: bool = False
+    embedding_provider: Literal["local", "online"]
+    lmstudio_base_url: str
+    chromadb_persist_dir: str
+    bm25_persist_dir: str
+    rag_transport: Literal["stdio", "http"]
+    rag_http_host: str
+    rag_http_port: int = Field(ge=1, le=65535)
+    rag_dns_rebinding_protection: bool
+    rag_debug_log_enabled: bool
 
     # --- config.toml から取得（共通設定値） ---
 
     # Embedding モデル
-    embedding_model_local: str = DEFAULT_EMBEDDING_MODEL_LOCAL
-    embedding_model_online: str = "text-embedding-3-small"
-    embedding_prefix_enabled: bool = True
+    embedding_model_local: str
+    embedding_model_online: str
+    embedding_prefix_enabled: bool
 
     # チャンキング
-    rag_chunk_size: int = Field(default=200, ge=1)
-    rag_chunk_overlap: int = Field(default=30, ge=0)
+    rag_chunk_size: int = Field(ge=1)
+    rag_chunk_overlap: int = Field(ge=0)
 
     # 検索
-    rag_retrieval_count: int = Field(default=3, ge=1)
+    rag_retrieval_count: int = Field(ge=1)
     rag_similarity_threshold: float | None = Field(
         default=None, ge=0.0, le=2.0
     )
 
     # ハイブリッド検索
-    rag_hybrid_search_enabled: bool = False
-    rag_vector_weight: float = Field(default=0.90, ge=0.0, le=1.0)
-    rag_bm25_k1: float = Field(default=2.5, gt=0.0)
-    rag_bm25_b: float = Field(default=0.50, ge=0.0, le=1.0)
+    rag_hybrid_search_enabled: bool
+    rag_vector_weight: float = Field(ge=0.0, le=1.0)
+    rag_bm25_k1: float = Field(gt=0.0)
+    rag_bm25_b: float = Field(ge=0.0, le=1.0)
     rag_min_combined_score: float | None = Field(
-        default=0.75, ge=0.0, le=1.0
+        default=None, ge=0.0, le=1.0
     )
 
     # クロール（範囲外の値は WebCrawler / ConstrainedClient が警告付きでクランプする）
-    rag_max_crawl_pages: int = Field(default=50, ge=1)
-    rag_crawl_delay_sec: float = Field(default=1.0, ge=0)
+    rag_max_crawl_pages: int = Field(ge=1)
+    rag_crawl_delay_sec: float = Field(ge=0)
 
     # robots.txt
-    rag_respect_robots_txt: bool = True
-    rag_robots_txt_cache_ttl: int = Field(default=3600, ge=0)
+    rag_respect_robots_txt: bool
+    rag_robots_txt_cache_ttl: int = Field(ge=0)
 
     # URL安全性チェック (Google Safe Browsing API)
-    rag_url_safety_check: bool = False
-    rag_url_safety_cache_ttl: int = Field(default=300, ge=0)
-    rag_url_safety_fail_open: bool = True
-    rag_url_safety_timeout: float = Field(default=5.0, gt=0)
+    rag_url_safety_check: bool
+    rag_url_safety_cache_ttl: int = Field(ge=0)
+    rag_url_safety_fail_open: bool
+    rag_url_safety_timeout: float = Field(gt=0)
 
     # レスポンスサイズ制限
     rag_max_response_chars: int | None = Field(default=None, ge=1)
 
     # rag_stats ソース一覧の最大表示件数
-    rag_stats_max_sources: int = Field(default=100, ge=1)
+    rag_stats_max_sources: int = Field(ge=1)
 
     # Zenn インジェスター
-    rag_zenn_max_articles: int = Field(default=50, ge=1, le=100)
-    rag_zenn_request_timeout: int = Field(default=30, ge=1, le=120)
-    rag_zenn_request_interval: float = Field(default=1.0, ge=0.1, le=60.0)
+    rag_zenn_max_articles: int = Field(ge=1, le=100)
+    rag_zenn_request_timeout: int = Field(ge=1, le=120)
+    rag_zenn_request_interval: float = Field(ge=0.1, le=60.0)
 
     # ドキュメントインジェスター
-    rag_document_supported_extensions: str = ".md,.txt,.pdf,.adoc"
+    rag_document_supported_extensions: str
 
     # BlueSky インジェスター
-    rag_bluesky_appview_url: str = "https://public.api.bsky.app"
-    rag_bluesky_max_posts: int = Field(default=200, ge=1, le=1000)
-    rag_bluesky_request_timeout: int = Field(default=30, ge=1, le=120)
-    rag_bluesky_request_interval: float = Field(default=1.0, ge=0.1, le=60.0)
-    rag_bluesky_include_reposts: bool = True
+    rag_bluesky_appview_url: str
+    rag_bluesky_max_posts: int = Field(ge=1, le=1000)
+    rag_bluesky_request_timeout: int = Field(ge=1, le=120)
+    rag_bluesky_request_interval: float = Field(ge=0.1, le=60.0)
+    rag_bluesky_include_reposts: bool
 
     @model_validator(mode="after")
     def validate_chunk_settings(self) -> RAGSettings:
@@ -164,7 +174,8 @@ class RAGSettings(BaseModel):
 def _load_toml_config() -> dict[str, Any]:
     """config.toml を読み込み、層の重複を検証する."""
     if not _TOML_FILE.exists():
-        return {}
+        msg = f"config.toml が見つかりません: {_TOML_FILE}"
+        raise FileNotFoundError(msg)
     with open(_TOML_FILE, "rb") as f:
         data: dict[str, Any] = tomllib.load(f)
     # config.toml に環境依存値が混入していないか検証
@@ -191,7 +202,7 @@ def get_settings() -> RAGSettings:
     .env から環境依存値、config.toml から共通設定値を取得し、
     統合した RAGSettings を返す。
     """
-    env_loader = _EnvLoader()
+    env_loader = _EnvLoader()  # type: ignore[call-arg]  # pydantic-settings が .env/環境変数から読み込み
     toml_data = _load_toml_config()
     return RAGSettings(**env_loader.model_dump(), **toml_data)
 

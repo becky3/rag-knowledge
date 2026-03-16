@@ -17,12 +17,13 @@ from unittest.mock import patch
 import pytest
 from pydantic import ValidationError
 
+from settings_defaults import TEST_SETTINGS_DEFAULTS
 from rag.config import RAGSettings, _ENV_FIELD_NAMES, _load_toml_config
 
 
 def _make_settings(**overrides: object) -> RAGSettings:
-    """テスト用 RAGSettings を生成する."""
-    return RAGSettings(**overrides)
+    """テスト用 RAGSettings を生成する（全必須フィールドをデフォルト値付きで提供）."""
+    return RAGSettings(**{**TEST_SETTINGS_DEFAULTS, **overrides})
 
 
 # --- Zenn インジェスター: rag_zenn_max_articles ---
@@ -32,7 +33,7 @@ class TestZennMaxArticles:
     """rag_zenn_max_articles のバリデーションテスト."""
 
     def test_default_value(self) -> None:
-        """デフォルト値が 50 であること."""
+        """テスト用デフォルト値が 50 であること."""
         settings = _make_settings()
         assert settings.rag_zenn_max_articles == 50
 
@@ -62,7 +63,7 @@ class TestZennRequestTimeout:
     """rag_zenn_request_timeout のバリデーションテスト."""
 
     def test_default_value(self) -> None:
-        """デフォルト値が 30 であること."""
+        """テスト用デフォルト値が 30 であること."""
         settings = _make_settings()
         assert settings.rag_zenn_request_timeout == 30
 
@@ -92,7 +93,7 @@ class TestZennRequestInterval:
     """rag_zenn_request_interval のバリデーションテスト."""
 
     def test_default_value(self) -> None:
-        """デフォルト値が 1.0 であること."""
+        """テスト用デフォルト値が 1.0 であること."""
         settings = _make_settings()
         assert settings.rag_zenn_request_interval == 1.0
 
@@ -145,12 +146,12 @@ class TestTomlConfigValidation:
             data = _load_toml_config()
         assert data["rag_chunk_size"] == 500
 
-    def test_missing_toml_returns_empty(self, tmp_path: Path) -> None:
-        """config.toml が存在しない場合は空辞書を返すこと."""
+    def test_missing_toml_raises_error(self, tmp_path: Path) -> None:
+        """config.toml が存在しない場合は FileNotFoundError."""
         toml_file = tmp_path / "nonexistent.toml"
         with patch("rag.config._TOML_FILE", toml_file):
-            data = _load_toml_config()
-        assert data == {}
+            with pytest.raises(FileNotFoundError, match="config.toml"):
+                _load_toml_config()
 
     def test_env_field_names_match_env_loader(self) -> None:
         """_ENV_FIELD_NAMES が _EnvLoader のフィールドと一致すること."""
@@ -162,32 +163,78 @@ class TestTomlConfigValidation:
 class TestGetSettingsIntegration:
     """get_settings() の統合テスト (#207)."""
 
+    # config.toml の全必須フィールド（TOML形式文字列）
+    _TOML_CONTENT = """\
+embedding_model_local = "nomic-embed-text"
+embedding_model_online = "text-embedding-3-small"
+embedding_prefix_enabled = true
+rag_chunk_size = 200
+rag_chunk_overlap = 30
+rag_retrieval_count = 3
+rag_hybrid_search_enabled = false
+rag_vector_weight = 0.90
+rag_bm25_k1 = 2.5
+rag_bm25_b = 0.50
+rag_max_crawl_pages = 50
+rag_crawl_delay_sec = 1.0
+rag_respect_robots_txt = true
+rag_robots_txt_cache_ttl = 3600
+rag_url_safety_check = false
+rag_url_safety_cache_ttl = 300
+rag_url_safety_fail_open = true
+rag_url_safety_timeout = 5.0
+rag_stats_max_sources = 100
+rag_zenn_max_articles = 50
+rag_zenn_request_timeout = 30
+rag_zenn_request_interval = 1.0
+rag_document_supported_extensions = ".md,.txt,.pdf,.adoc"
+rag_bluesky_appview_url = "https://public.api.bsky.app"
+rag_bluesky_max_posts = 200
+rag_bluesky_request_timeout = 30
+rag_bluesky_request_interval = 1.0
+rag_bluesky_include_reposts = true
+"""
+
+    def _set_all_env(self, monkeypatch: pytest.MonkeyPatch, **overrides: str) -> None:
+        """全必須 env フィールドを monkeypatch で設定する."""
+        defaults = {
+            "EMBEDDING_PROVIDER": "local",
+            "LMSTUDIO_BASE_URL": "http://localhost:1234",
+            "CHROMADB_PERSIST_DIR": "./chroma_db",
+            "BM25_PERSIST_DIR": "./bm25_index",
+            "RAG_TRANSPORT": "stdio",
+            "RAG_HTTP_HOST": "127.0.0.1",
+            "RAG_HTTP_PORT": "8081",
+            "RAG_DNS_REBINDING_PROTECTION": "true",
+            "RAG_DEBUG_LOG_ENABLED": "false",
+        }
+        defaults.update(overrides)
+        for key, value in defaults.items():
+            monkeypatch.setenv(key, value)
+
     def test_env_values_reflected(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
         """.env の値が RAGSettings に反映されること."""
         from rag.config import get_settings
 
         get_settings.cache_clear()
-        env_file = tmp_path / ".env"
-        env_file.write_text("EMBEDDING_PROVIDER=online\n")
         toml_file = tmp_path / "config.toml"
-        toml_file.write_text("")
-        with patch("rag.config._ENV_FILE", str(env_file)), \
-             patch("rag.config._TOML_FILE", toml_file):
-            # _EnvLoader が新しい _ENV_FILE を使うよう再構成
-            from rag.config import _EnvLoader
-            monkeypatch.delenv("EMBEDDING_PROVIDER", raising=False)
-            monkeypatch.setenv("EMBEDDING_PROVIDER", "online")
+        toml_file.write_text(self._TOML_CONTENT)
+        self._set_all_env(monkeypatch, EMBEDDING_PROVIDER="online")
+        with patch("rag.config._TOML_FILE", toml_file):
             settings = get_settings()
             assert settings.embedding_provider == "online"
         get_settings.cache_clear()
 
-    def test_toml_values_reflected(self, tmp_path: Path) -> None:
+    def test_toml_values_reflected(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
         """config.toml の値が RAGSettings に反映されること."""
         from rag.config import get_settings
 
         get_settings.cache_clear()
         toml_file = tmp_path / "config.toml"
-        toml_file.write_text("rag_chunk_size = 999\n")
+        toml_file.write_text(self._TOML_CONTENT.replace(
+            "rag_chunk_size = 200", "rag_chunk_size = 999"
+        ))
+        self._set_all_env(monkeypatch)
         with patch("rag.config._TOML_FILE", toml_file):
             settings = get_settings()
             assert settings.rag_chunk_size == 999
@@ -199,8 +246,10 @@ class TestGetSettingsIntegration:
 
         get_settings.cache_clear()
         toml_file = tmp_path / "config.toml"
-        toml_file.write_text("rag_chunk_size = 300\n")
-        monkeypatch.setenv("RAG_TRANSPORT", "http")
+        toml_file.write_text(self._TOML_CONTENT.replace(
+            "rag_chunk_size = 200", "rag_chunk_size = 300"
+        ))
+        self._set_all_env(monkeypatch, RAG_TRANSPORT="http")
         with patch("rag.config._TOML_FILE", toml_file):
             settings = get_settings()
             assert settings.rag_chunk_size == 300
