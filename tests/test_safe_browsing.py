@@ -10,6 +10,7 @@ import time
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
+from py_common_lib.secrets import SecretNotFoundError
 
 from rag.safe_browsing import (
     CacheEntry,
@@ -451,24 +452,36 @@ class TestCreateSafeBrowsingClient:
         assert client is None
 
     def test_create_client_no_api_key(self) -> None:
-        """AC5: GOOGLE_SAFE_BROWSING_API_KEY 未設定の場合、スキップ."""
+        """AC5: GOOGLE_SAFE_BROWSING_API_KEY 未登録の場合、スキップ."""
         mock_settings = MagicMock()
         mock_settings.rag_url_safety_check = True
-        mock_settings.google_safe_browsing_api_key = ""
 
-        client = create_safe_browsing_client(mock_settings)
+        with patch(
+            "rag.safe_browsing.get_secret",
+            side_effect=SecretNotFoundError("not found"),
+        ):
+            client = create_safe_browsing_client(mock_settings)
+        assert client is None
+
+    def test_create_client_empty_api_key(self) -> None:
+        """GOOGLE_SAFE_BROWSING_API_KEY が空文字列の場合、スキップ."""
+        mock_settings = MagicMock()
+        mock_settings.rag_url_safety_check = True
+
+        with patch("rag.safe_browsing.get_secret", return_value=""):
+            client = create_safe_browsing_client(mock_settings)
         assert client is None
 
     def test_create_client_enabled(self) -> None:
         """有効な設定でクライアントが作成されること."""
         mock_settings = MagicMock()
         mock_settings.rag_url_safety_check = True
-        mock_settings.google_safe_browsing_api_key = "test-api-key"
         mock_settings.rag_url_safety_cache_ttl = 300
         mock_settings.rag_url_safety_fail_open = True
         mock_settings.rag_url_safety_timeout = 5.0
 
-        client = create_safe_browsing_client(mock_settings)
+        with patch("rag.safe_browsing.get_secret", return_value="test-api-key"):
+            client = create_safe_browsing_client(mock_settings)
         assert client is not None
         assert isinstance(client, SafeBrowsingClient)
 
@@ -476,12 +489,12 @@ class TestCreateSafeBrowsingClient:
         """カスタムキャッシュTTLで作成されること."""
         mock_settings = MagicMock()
         mock_settings.rag_url_safety_check = True
-        mock_settings.google_safe_browsing_api_key = "test-api-key"
         mock_settings.rag_url_safety_cache_ttl = 600
         mock_settings.rag_url_safety_fail_open = True
         mock_settings.rag_url_safety_timeout = 5.0
 
-        client = create_safe_browsing_client(mock_settings)
+        with patch("rag.safe_browsing.get_secret", return_value="test-api-key"):
+            client = create_safe_browsing_client(mock_settings)
         assert client is not None
         assert client._cache_ttl == 600.0
 
@@ -489,12 +502,12 @@ class TestCreateSafeBrowsingClient:
         """キャッシュTTL=0の場合、APIレスポンスに従う設定になること."""
         mock_settings = MagicMock()
         mock_settings.rag_url_safety_check = True
-        mock_settings.google_safe_browsing_api_key = "test-api-key"
         mock_settings.rag_url_safety_cache_ttl = 0
         mock_settings.rag_url_safety_fail_open = True
         mock_settings.rag_url_safety_timeout = 5.0
 
-        client = create_safe_browsing_client(mock_settings)
+        with patch("rag.safe_browsing.get_secret", return_value="test-api-key"):
+            client = create_safe_browsing_client(mock_settings)
         assert client is not None
         assert client._cache_ttl is None  # APIレスポンスに従う
 
@@ -502,12 +515,12 @@ class TestCreateSafeBrowsingClient:
         """fail_open=Falseで作成されること."""
         mock_settings = MagicMock()
         mock_settings.rag_url_safety_check = True
-        mock_settings.google_safe_browsing_api_key = "test-api-key"
         mock_settings.rag_url_safety_cache_ttl = 300
         mock_settings.rag_url_safety_fail_open = False
         mock_settings.rag_url_safety_timeout = 5.0
 
-        client = create_safe_browsing_client(mock_settings)
+        with patch("rag.safe_browsing.get_secret", return_value="test-api-key"):
+            client = create_safe_browsing_client(mock_settings)
         assert client is not None
         assert client._fail_open is False
 
@@ -515,12 +528,12 @@ class TestCreateSafeBrowsingClient:
         """ファクトリ関数で ConstrainedClient kwargs が設定されること."""
         mock_settings = MagicMock()
         mock_settings.rag_url_safety_check = True
-        mock_settings.google_safe_browsing_api_key = "test-api-key"
         mock_settings.rag_url_safety_cache_ttl = 300
         mock_settings.rag_url_safety_fail_open = True
         mock_settings.rag_url_safety_timeout = 5.0
 
-        client = create_safe_browsing_client(mock_settings)
+        with patch("rag.safe_browsing.get_secret", return_value="test-api-key"):
+            client = create_safe_browsing_client(mock_settings)
         assert client is not None
         assert client._cc_kwargs is not None
         assert client._cc_kwargs["request_timeout"] == 5.0

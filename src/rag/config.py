@@ -43,7 +43,6 @@ class RAGSettings(BaseSettings):
     embedding_model_online: str = "text-embedding-3-small"
     embedding_prefix_enabled: bool = True
     lmstudio_base_url: str = DEFAULT_LMSTUDIO_BASE_URL
-    openai_api_key: str = ""
 
     # ストレージ（MCP サーバー起動 cwd からの相対パス）
     chromadb_persist_dir: str = "./chroma_db"
@@ -78,7 +77,6 @@ class RAGSettings(BaseSettings):
 
     # URL安全性チェック (Google Safe Browsing API)
     rag_url_safety_check: bool = False
-    google_safe_browsing_api_key: str = ""
     rag_url_safety_cache_ttl: int = Field(default=300, ge=0)
     rag_url_safety_fail_open: bool = True
     rag_url_safety_timeout: float = Field(default=5.0, gt=0)
