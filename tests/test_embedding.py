@@ -5,7 +5,7 @@
 
 from __future__ import annotations
 
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
@@ -120,13 +120,11 @@ def test_factory_returns_correct_provider_local() -> None:
     assert isinstance(provider, LMStudioEmbedding)
 
 
-def test_factory_returns_correct_provider_online(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
+def test_factory_returns_correct_provider_online() -> None:
     """AC4: get_embedding_provider() が 'online' 設定で OpenAIEmbedding を返すこと."""
-    monkeypatch.setenv("OPENAI_API_KEY", "sk-test")
     settings = Settings(_env_file=None)  # type: ignore[call-arg]
-    provider = get_embedding_provider(settings, "online")
+    with patch("rag.embedding.factory.get_secret", return_value="sk-test"):
+        provider = get_embedding_provider(settings, "online")
     assert isinstance(provider, OpenAIEmbedding)
 
 
@@ -142,10 +140,10 @@ def test_factory_uses_settings_model_online(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """AC4: ファクトリが Settings の embedding_model_online を使用すること."""
-    monkeypatch.setenv("OPENAI_API_KEY", "sk-test")
     monkeypatch.setenv("EMBEDDING_MODEL_ONLINE", "text-embedding-3-large")
     settings = Settings(_env_file=None)  # type: ignore[call-arg]
-    provider = get_embedding_provider(settings, "online")
+    with patch("rag.embedding.factory.get_secret", return_value="sk-test"):
+        provider = get_embedding_provider(settings, "online")
     assert isinstance(provider, OpenAIEmbedding)
     assert provider._model == "text-embedding-3-large"
 

@@ -14,9 +14,12 @@ from enum import Enum
 from typing import TYPE_CHECKING, Any
 
 import httpx
+from py_common_lib.secrets import SecretNotFoundError, SecretStoreError, get_secret
 
 if TYPE_CHECKING:
     from .config import RAGSettings
+
+_SERVICE_NAME = "rag-knowledge"
 
 logger = logging.getLogger(__name__)
 
@@ -396,9 +399,18 @@ def create_safe_browsing_client(settings: RAGSettings) -> SafeBrowsingClient | N
         logger.debug("URL safety check is disabled")
         return None
 
-    if not settings.google_safe_browsing_api_key:
+    try:
+        api_key = get_secret("GOOGLE_SAFE_BROWSING_API_KEY", service=_SERVICE_NAME)
+    except (SecretNotFoundError, SecretStoreError):
         logger.warning(
-            "URL safety check is enabled but GOOGLE_SAFE_BROWSING_API_KEY is not set. "
+            "URL safety check is enabled but GOOGLE_SAFE_BROWSING_API_KEY is not "
+            "registered in the secret store. Skipping Safe Browsing integration."
+        )
+        return None
+
+    if not api_key:
+        logger.warning(
+            "URL safety check is enabled but GOOGLE_SAFE_BROWSING_API_KEY is empty. "
             "Skipping Safe Browsing integration."
         )
         return None
@@ -408,7 +420,7 @@ def create_safe_browsing_client(settings: RAGSettings) -> SafeBrowsingClient | N
         cache_ttl = float(settings.rag_url_safety_cache_ttl)
 
     return SafeBrowsingClient(
-        api_key=settings.google_safe_browsing_api_key,
+        api_key=api_key,
         timeout=settings.rag_url_safety_timeout,
         cache_ttl=cache_ttl,
         fail_open=settings.rag_url_safety_fail_open,

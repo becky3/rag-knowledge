@@ -48,6 +48,13 @@ uv sync
 cp .env.example .env  # Embedding 設定等を編集
 ```
 
+API キーは OS セキュアストレージに登録する（サービス名: `rag-knowledge`）:
+
+```bash
+uv run python -c "import keyring; keyring.set_password('rag-knowledge', 'OPENAI_API_KEY', input('Value: '))"
+uv run python -c "import keyring; keyring.set_password('rag-knowledge', 'GOOGLE_SAFE_BROWSING_API_KEY', input('Value: '))"
+```
+
 ## 起動
 
 ```bash
