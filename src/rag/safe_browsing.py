@@ -401,10 +401,17 @@ def create_safe_browsing_client(settings: RAGSettings) -> SafeBrowsingClient | N
 
     try:
         api_key = get_secret("GOOGLE_SAFE_BROWSING_API_KEY", service=_SERVICE_NAME)
-    except (SecretNotFoundError, SecretStoreError):
+    except SecretNotFoundError:
         logger.warning(
             "URL safety check is enabled but GOOGLE_SAFE_BROWSING_API_KEY is not "
             "registered in the secret store. Skipping Safe Browsing integration."
+        )
+        return None
+    except SecretStoreError:
+        logger.warning(
+            "URL safety check is enabled but failed to access the secret store. "
+            "Skipping Safe Browsing integration.",
+            exc_info=True,
         )
         return None
 

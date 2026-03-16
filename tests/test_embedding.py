@@ -8,6 +8,7 @@ from __future__ import annotations
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
+from py_common_lib.secrets import SecretNotFoundError
 
 from rag.config import DEFAULT_LMSTUDIO_BASE_URL, RAGSettings as Settings
 from rag.embedding.base import EmbeddingProvider
@@ -126,6 +127,25 @@ def test_factory_returns_correct_provider_online() -> None:
     with patch("rag.embedding.factory.get_secret", return_value="sk-test"):
         provider = get_embedding_provider(settings, "online")
     assert isinstance(provider, OpenAIEmbedding)
+
+
+def test_factory_raises_on_missing_api_key() -> None:
+    """OPENAI_API_KEY 未登録時に ValueError を送出すること."""
+    settings = Settings(_env_file=None)  # type: ignore[call-arg]
+    with patch(
+        "rag.embedding.factory.get_secret",
+        side_effect=SecretNotFoundError("not found"),
+    ):
+        with pytest.raises(ValueError, match="not registered"):
+            get_embedding_provider(settings, "online")
+
+
+def test_factory_raises_on_empty_api_key() -> None:
+    """OPENAI_API_KEY が空文字列の場合に ValueError を送出すること."""
+    settings = Settings(_env_file=None)  # type: ignore[call-arg]
+    with patch("rag.embedding.factory.get_secret", return_value=""):
+        with pytest.raises(ValueError, match="empty"):
+            get_embedding_provider(settings, "online")
 
 
 def test_factory_uses_settings_model_local() -> None:
