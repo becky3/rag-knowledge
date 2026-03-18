@@ -47,4 +47,12 @@ TEST_SETTINGS_DEFAULTS: dict[str, object] = {
     "rag_bluesky_request_timeout": 30,
     "rag_bluesky_request_interval": 1.0,
     "rag_bluesky_include_reposts": True,
+    # PDF バックエンド
+    "rag_pdf_backend": "auto",
+    "rag_pdf_mineru_mfd_conf_thres": 0.6,
+    "rag_pdf_quality_ufffd_threshold": 0.10,
+    "rag_pdf_quality_greek_threshold": 0.15,
+    "rag_pdf_quality_cjk_min_threshold": 0.05,
+    "rag_pdf_quality_min_chars_per_page": 10,
+    "rag_pdf_quality_sample_pages": 10,
 }

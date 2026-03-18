@@ -49,6 +49,14 @@ rag_zenn_request_interval = 0.1
 # ドキュメントインジェスター
 rag_document_supported_extensions = ".md,.txt,.pdf,.adoc"
 
+# PDF バックエンド
+rag_pdf_mineru_mfd_conf_thres = 0.6
+rag_pdf_quality_ufffd_threshold = 0.10
+rag_pdf_quality_greek_threshold = 0.15
+rag_pdf_quality_cjk_min_threshold = 0.05
+rag_pdf_quality_min_chars_per_page = 10
+rag_pdf_quality_sample_pages = 10
+
 # BlueSky インジェスター
 rag_bluesky_appview_url = "https://public.api.bsky.app"
 rag_bluesky_max_posts = 200

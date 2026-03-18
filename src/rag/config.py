@@ -67,6 +67,9 @@ class _EnvLoader(BaseSettings):
     rag_http_port: int = Field(ge=1, le=65535)
     rag_dns_rebinding_protection: bool
 
+    # PDF バックエンド
+    rag_pdf_backend: Literal["auto", "mineru", "pymupdf4llm"]
+
     # デバッグ
     rag_debug_log_enabled: bool
 
@@ -152,6 +155,15 @@ class RAGSettings(BaseModel):
 
     # ドキュメントインジェスター
     rag_document_supported_extensions: str
+
+    # PDF バックエンド
+    rag_pdf_backend: Literal["auto", "mineru", "pymupdf4llm"]
+    rag_pdf_mineru_mfd_conf_thres: float = Field(ge=0.0, le=1.0)
+    rag_pdf_quality_ufffd_threshold: float = Field(ge=0.0, le=1.0)
+    rag_pdf_quality_greek_threshold: float = Field(ge=0.0, le=1.0)
+    rag_pdf_quality_cjk_min_threshold: float = Field(ge=0.0, le=1.0)
+    rag_pdf_quality_min_chars_per_page: int = Field(ge=1, le=10000)
+    rag_pdf_quality_sample_pages: int = Field(ge=1, le=100)
 
     # BlueSky インジェスター
     rag_bluesky_appview_url: str

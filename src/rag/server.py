@@ -570,13 +570,24 @@ async def rag_crawl_bluesky(
 
 def _create_document_ingester() -> DocumentIngester:
     """設定に基づいて DocumentIngester を生成する."""
+    from .ingesters.document_ingester import PdfBackendConfig
+
     settings = get_settings()
     extensions = [
         ext.strip() if ext.strip().startswith(".") else f".{ext.strip()}"
         for ext in settings.rag_document_supported_extensions.split(",")
         if ext.strip()
     ]
-    return DocumentIngester(supported_extensions=extensions)
+    pdf_config = PdfBackendConfig(
+        backend=settings.rag_pdf_backend,
+        mineru_mfd_conf_thres=settings.rag_pdf_mineru_mfd_conf_thres,
+        quality_ufffd_threshold=settings.rag_pdf_quality_ufffd_threshold,
+        quality_greek_threshold=settings.rag_pdf_quality_greek_threshold,
+        quality_cjk_min_threshold=settings.rag_pdf_quality_cjk_min_threshold,
+        quality_min_chars_per_page=settings.rag_pdf_quality_min_chars_per_page,
+        quality_sample_pages=settings.rag_pdf_quality_sample_pages,
+    )
+    return DocumentIngester(supported_extensions=extensions, pdf_config=pdf_config)
 
 
 @mcp.tool()
