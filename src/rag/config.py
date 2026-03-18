@@ -156,7 +156,7 @@ class RAGSettings(BaseModel):
     # ドキュメントインジェスター
     rag_document_supported_extensions: str
 
-    # PDF バックエンド
+    # PDF バックエンド（rag_pdf_backend は .env から取得、閾値は config.toml から取得）
     rag_pdf_backend: Literal["auto", "mineru", "pymupdf4llm"]
     rag_pdf_mineru_mfd_conf_thres: float = Field(ge=0.0, le=1.0)
     rag_pdf_quality_ufffd_threshold: float = Field(ge=0.0, le=1.0)

@@ -262,6 +262,9 @@ class DocumentIngester(BaseIngester):
 
         try:
             return self._run_assessment(doc)
+        except Exception:
+            logger.warning("PDF assessment failed, falling back to pymupdf4llm: %s", path)
+            return _PdfAssessment(backend="pymupdf4llm", reason="assessment failed")
         finally:
             doc.close()  # type: ignore[no-untyped-call]
 
@@ -291,8 +294,17 @@ class DocumentIngester(BaseIngester):
         # --- Phase 2: フォント検査 ---
         page_count: int = doc.page_count
         for page_idx in range(page_count):
-            page = doc[page_idx]
-            fonts = page.get_fonts()
+            # 両方検出済みなら早期終了
+            if tounicode_missing and math_font_detected:
+                break
+
+            try:
+                page = doc[page_idx]
+                fonts = page.get_fonts()
+            except Exception:
+                logger.debug("Failed to get fonts for page %d", page_idx)
+                continue
+
             for font_info in fonts:
                 font_name = (font_info[3] if len(font_info) > 3 else "").lower()
                 # 数式フォント検出
