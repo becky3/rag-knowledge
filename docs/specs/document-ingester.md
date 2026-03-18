@@ -82,7 +82,7 @@
 |--------|----------------|
 | `.md` | そのまま Markdown として取り込む |
 | `.txt` | プレーンテキストとして取り込む（構造変換なし） |
-| `.pdf` | `pymupdf4llm` で Markdown に変換して取り込む |
+| `.pdf` | PDF バックエンド自動選択により pymupdf4llm または MinerU で Markdown に変換して取り込む（詳細は「PDF 抽出バックエンドの自動選択」参照） |
 | `.adoc` | AsciiDoc としてそのまま取り込む |
 
 対応拡張子は環境変数 `RAG_DOCUMENT_SUPPORTED_EXTENSIONS` で追加可能（セクション「設定項目」参照）。追加した拡張子のファイルはプレーンテキストとして取り込む。
@@ -95,11 +95,115 @@
 - 相対パスで指定された場合も、内部で絶対パスに変換してから file URI に変換する
 - 同一ファイルの再取り込み時は、`source_id` の一致で既存チャンクを削除→再登録する（既存インジェスターと同一パターン）
 
+### PDF 抽出バックエンドの自動選択
+
+PDF のテキスト抽出に pymupdf4llm と MinerU の 2 つのバックエンドを使い分ける。PDF の特性を事前に軽量検査し、最適なバックエンドを自動選択する。
+
+#### バックエンド
+
+| バックエンド | 用途 | ライセンス |
+|------------|------|-----------|
+| pymupdf4llm | 通常の PDF（テキストレイヤーが正常） | AGPL-3.0 |
+| MinerU | CID フォント文字化け PDF、画像ベース PDF、数式を含む PDF | AGPL-3.0 |
+
+MinerU はオプショナル依存。未インストール時は pymupdf4llm にフォールバックし、警告ログを出力する。
+
+#### バックエンド選択方式
+
+`RAG_PDF_BACKEND` 設定で選択方式を制御する:
+
+| 値 | 振る舞い |
+|----|---------|
+| `auto` | 事前判定フローで自動選択（デフォルト） |
+| `mineru` | MinerU を強制使用 |
+| `pymupdf4llm` | pymupdf4llm を強制使用 |
+
+#### 事前判定フロー
+
+`RAG_PDF_BACKEND=auto` の場合、PDF 抽出の前に 3 フェーズの軽量検査を実行し、バックエンドを自動選択する。全ページ抽出前に判定するため、「抽出→品質不良→やり直し」の無駄が発生しない。
+
+```mermaid
+flowchart TD
+    START["PDF 抽出開始"]
+    META["Phase 1: メタデータ検査（1ms 未満）"]
+    FONT["Phase 2: フォント検査（10ms 未満）"]
+    SAMPLE["Phase 3: サンプルテキスト品質検査（100ms 未満）"]
+    MATRIX["判定マトリクスで評価"]
+    MINERU["MinerU で抽出"]
+    PYMUPDF["pymupdf4llm で抽出"]
+
+    START --> META
+    META --> FONT
+    FONT --> SAMPLE
+    SAMPLE --> MATRIX
+    MATRIX -->|"CID 問題 / 画像 PDF"| MINERU
+    MATRIX -->|"数式あり / TeX 由来"| MINERU
+    MATRIX -->|"上記すべて非該当"| PYMUPDF
+```
+
+##### Phase 1: メタデータ検査
+
+PDF メタデータの `producer` / `creator` に TeX/LaTeX 系キーワード（`tex`, `latex`, `pdflatex`, `xelatex`, `lualatex`, `dvips`, `dvipdfm`）が含まれるか確認する。該当すれば TeX 由来フラグを立てる。
+
+##### Phase 2: フォント検査
+
+各ページのフォント情報を検査する:
+
+- Type0（CID）フォントの ToUnicode CMap 存在チェック
+- 数式フォント名の検出（CMMI, CMSY, CMEX, MSAM, MSBM, STIX, Cambria Math, Latin Modern Math 等）
+
+##### Phase 3: サンプルテキスト品質検査
+
+均等分布で最大 `rag_pdf_quality_sample_pages` ページをサンプリングし、テキスト品質を計測する:
+
+- Unicode 置換文字（U+FFFD）の出現率
+- CJK 文字比率
+- ギリシャ文字比率
+- テキスト量（ページあたり文字数）
+
+サンプリングは全体を均等分割した中間位置から取得する（先頭・末尾の内容が薄いページを回避）。
+
+#### 判定マトリクス
+
+上から順に評価し、最初にマッチした行のバックエンド・モードを採用する:
+
+| 検出結果 | バックエンド | MinerU モード | 理由 |
+|---------|------------|-------------|------|
+| ToUnicode CMap 欠落 | MinerU | OCR | テキストレイヤーが信頼できない |
+| ufffd 率 > 閾値 | MinerU | OCR | テキストレイヤーが信頼できない |
+| CJK 比率 < 閾値 かつ ギリシャ文字比率 > 閾値 | MinerU | OCR | CID フォント文字化けの兆候 |
+| テキスト量 < 閾値（画像ベース PDF） | MinerU | OCR | テキストレイヤーが存在しない |
+| 数式フォント検出 | MinerU | txt | 数式の LaTeX 変換が目的 |
+| TeX 由来メタデータ | MinerU | txt | 数式の LaTeX 変換が目的 |
+| 上記すべて非該当 | pymupdf4llm | — | 通常の PDF |
+
+#### MinerU のデバイス選択
+
+CUDA が利用可能なら GPU、なければ CPU を自動選択する。
+
+#### MinerU の MFD 信頼度閾値
+
+MinerU の数式検出（MFD: Math Formula Detection）は YOLOv8 ベースで動作する。デフォルトの信頼度閾値（0.25）ではひらがな等の非数式要素を数式として誤検出する場合がある。`rag_pdf_mineru_mfd_conf_thres`（デフォルト: 0.6）で閾値を引き上げ、数式検出 100% を維持しつつ誤検出を 85% 削減する。
+
 ### 設定項目
 
-| 環境変数 | 型 | デフォルト | 説明 |
-|---------|-----|-----------|------|
-| `RAG_DOCUMENT_SUPPORTED_EXTENSIONS` | 文字列 | `".md,.txt,.pdf,.adoc"` | 対応ファイル拡張子のカンマ区切りリスト。先頭にドット（`.`）を含める |
+#### 環境依存値（.env）
+
+| 環境変数 | 型 | デフォルト | 許容範囲 | 説明 |
+|---------|-----|-----------|---------|------|
+| `RAG_DOCUMENT_SUPPORTED_EXTENSIONS` | 文字列 | `".md,.txt,.pdf,.adoc"` | ドット始まりのカンマ区切り文字列 | 対応ファイル拡張子のカンマ区切りリスト。先頭にドット（`.`）を含める |
+| `RAG_PDF_BACKEND` | 文字列 | `"auto"` | `auto` / `mineru` / `pymupdf4llm` | PDF 抽出バックエンド選択 |
+
+#### 共通設定値（config.toml）
+
+| 設定キー | 型 | デフォルト | 許容範囲 | 説明 |
+|---------|-----|-----------|---------|------|
+| `rag_pdf_mineru_mfd_conf_thres` | float | 0.6 | 0.0〜1.0 | MinerU MFD の信頼度閾値 |
+| `rag_pdf_quality_ufffd_threshold` | float | 0.10 | 0.0〜1.0 | ufffd 率の閾値（超過で MinerU OCR 選択） |
+| `rag_pdf_quality_greek_threshold` | float | 0.15 | 0.0〜1.0 | ギリシャ文字比率の閾値 |
+| `rag_pdf_quality_cjk_min_threshold` | float | 0.05 | 0.0〜1.0 | CJK 比率の下限閾値 |
+| `rag_pdf_quality_min_chars_per_page` | int | 10 | 1〜10000 | ページあたり最小文字数の閾値 |
+| `rag_pdf_quality_sample_pages` | int | 10 | 1〜100 | サンプリングページ数（PDF の全ページ数を超える場合は全ページ対象） |
 
 ## コンポーネント構成
 
@@ -200,7 +304,7 @@ flowchart TD
 5. ファイル形式に応じたテキスト抽出を行う（テキストファイルは UTF-8 エンコーディングで読み取る）:
    - `.md`: ファイル内容をそのまま読み取る
    - `.txt`: ファイル内容をそのまま読み取る
-   - `.pdf`: `pymupdf4llm` で Markdown に変換する
+   - `.pdf`: PDF バックエンド自動選択により pymupdf4llm または MinerU で Markdown に変換する
    - `.adoc`: ファイル内容をそのまま読み取る（AsciiDoc 構文はチャンカーの AsciiDoc モードで処理される）
    - その他（設定で追加された拡張子）: プレーンテキストとして読み取る
 6. IngestedContent を構築する:
@@ -241,6 +345,10 @@ flowchart TD
 | ファイルサイズが 0 バイト | 該当ファイルをスキップする。空テキストの取り込みは行わない |
 | テキストエンコーディングが UTF-8 以外 | `UnicodeDecodeError` をキャッチし、該当ファイルをスキップする。エラーをログ出力する |
 | PDF の変換に失敗 | 該当ファイルをスキップし、エラーをログ出力する |
+| MinerU が未インストール（`RAG_PDF_BACKEND=auto`） | pymupdf4llm にフォールバックし、警告ログを出力する |
+| MinerU が未インストール（`RAG_PDF_BACKEND=mineru`） | pymupdf4llm にフォールバックし、警告ログを出力する |
+| PDF 事前判定で検査が失敗 | pymupdf4llm にフォールバックし、警告ログを出力する |
+| `RAG_PDF_BACKEND` に無効な値が設定 | pydantic のバリデーションエラー（起動時に検出） |
 | glob パターンがファイル数上限を超過 | パスの辞書順でソートした上で先頭 100 件にクランプし、警告ログを出力する。超過分は処理しない |
 | glob パターンに一致するファイルが 0 件 | 0 件処理として正常終了する |
 | 同一ファイルの再取り込み | `source_id`（file URI）の一致で検出し、既存データを最新に置き換える |
