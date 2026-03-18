@@ -193,6 +193,7 @@ rag_bluesky_max_posts = 200
 rag_bluesky_request_timeout = 30
 rag_bluesky_request_interval = 1.0
 rag_bluesky_include_reposts = true
+rag_pdf_backend = "auto"
 rag_pdf_mineru_mfd_conf_thres = 0.6
 rag_pdf_quality_ufffd_threshold = 0.10
 rag_pdf_quality_greek_threshold = 0.15
@@ -213,7 +214,6 @@ rag_pdf_quality_sample_pages = 10
             "RAG_HTTP_PORT": "8081",
             "RAG_DNS_REBINDING_PROTECTION": "true",
             "RAG_DEBUG_LOG_ENABLED": "false",
-            "RAG_PDF_BACKEND": "auto",
         }
         defaults.update(overrides)
         for key, value in defaults.items():

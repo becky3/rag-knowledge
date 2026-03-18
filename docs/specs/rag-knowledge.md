@@ -43,7 +43,6 @@ MCP サーバーとして独立動作し、10 個のツールを提供する。
 | ストレージ | `CHROMADB_PERSIST_DIR`, `BM25_PERSIST_DIR` |
 | トランスポート | `RAG_TRANSPORT`, `RAG_HTTP_HOST`, `RAG_HTTP_PORT`, `RAG_DNS_REBINDING_PROTECTION` |
 | デバッグ | `RAG_DEBUG_LOG_ENABLED` |
-| PDF バックエンド | `RAG_PDF_BACKEND` |
 
 #### `config.toml`（共通設定値）
 
@@ -60,7 +59,7 @@ MCP サーバーとして独立動作し、10 個のツールを提供する。
 | Zenn インジェスター | `rag_zenn_max_articles`, `rag_zenn_request_timeout`, `rag_zenn_request_interval` |
 | BlueSky インジェスター | `rag_bluesky_appview_url`, `rag_bluesky_max_posts`, `rag_bluesky_request_timeout`, `rag_bluesky_request_interval`, `rag_bluesky_include_reposts` |
 | ドキュメントインジェスター | `rag_document_supported_extensions` |
-| PDF バックエンド | `rag_pdf_mineru_mfd_conf_thres`, `rag_pdf_quality_ufffd_threshold`, `rag_pdf_quality_greek_threshold`, `rag_pdf_quality_cjk_min_threshold`, `rag_pdf_quality_min_chars_per_page`, `rag_pdf_quality_sample_pages` |
+| PDF バックエンド | `rag_pdf_backend`, `rag_pdf_mineru_mfd_conf_thres`, `rag_pdf_quality_ufffd_threshold`, `rag_pdf_quality_greek_threshold`, `rag_pdf_quality_cjk_min_threshold`, `rag_pdf_quality_min_chars_per_page`, `rag_pdf_quality_sample_pages` |
 
 - Embedding モデルを変更した場合、既存データとの類似度計算が不正確になるため、コレクション再構築が必要
 - 呼び出し元が MCP クライアントとして本サーバーに接続することで RAG 機能を利用できる

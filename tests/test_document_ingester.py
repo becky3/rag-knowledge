@@ -790,7 +790,7 @@ class TestExtractPdfMineru:
         ingester = DocumentIngester()
         f = _create_binary_file(tmp_path, "doc.pdf", b"%PDF-1.4 dummy")
 
-        with patch.dict("sys.modules", {"mineru.pdf_parser": None}):
+        with patch.dict("sys.modules", {"mineru.backend.pipeline.pipeline_analyze": None}):
             result = ingester._extract_pdf_mineru(f, mode="ocr")
 
         assert result is None

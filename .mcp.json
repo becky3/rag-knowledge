@@ -1,0 +1,11 @@
+{
+  "mcpServers": {
+    "rag-knowledge": {
+      "command": "uv",
+      "args": ["run", "python", "-m", "rag.server"],
+      "env": {
+        "RAG_TRANSPORT": "stdio"
+      }
+    }
+  }
+}

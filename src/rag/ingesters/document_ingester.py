@@ -7,6 +7,8 @@ Issue: #184, #198, #221
 from __future__ import annotations
 
 import logging
+import os
+import tempfile
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Literal
@@ -209,7 +211,7 @@ class DocumentIngester(BaseIngester):
         if backend == "mineru":
             if not self._is_mineru_available():
                 logger.error(
-                    "MinerU is not installed but RAG_PDF_BACKEND=mineru. "
+                    "MinerU is not installed but rag_pdf_backend=mineru. "
                     "Install with: uv sync --extra mineru"
                 )
                 return None
@@ -396,11 +398,13 @@ class DocumentIngester(BaseIngester):
 
     @staticmethod
     def _is_mineru_available() -> bool:
-        """MinerU がインストールされているか確認する."""
+        """MinerU pipeline がインストールされているか確認する."""
         try:
-            import mineru  # noqa: F401
+            from mineru.backend.pipeline import pipeline_analyze  # noqa: F401
             return True
-        except ImportError:
+        except (ImportError, RuntimeError, OSError):
+            # ImportError: 未インストール
+            # RuntimeError/OSError: GPU ドライバ不整合、DLL ロード失敗等
             return False
 
     def _extract_pdf_pymupdf4llm(self, path: Path) -> str | None:
@@ -430,6 +434,11 @@ class DocumentIngester(BaseIngester):
     def _extract_pdf_mineru(self, path: Path, *, mode: str = "ocr") -> str | None:
         """MinerU で PDF からテキストを抽出する.
 
+        MinerU pipeline API を使用:
+        1. doc_analyze: PDF bytes → モデル推論結果
+        2. result_to_middle_json: 推論結果 → 中間 JSON
+        3. union_make: 中間 JSON → Markdown 文字列
+
         Args:
             path: PDF ファイルパス
             mode: MinerU の解析モード（"ocr" or "txt"）
@@ -438,49 +447,71 @@ class DocumentIngester(BaseIngester):
             抽出テキスト（Markdown 形式）、または失敗時は None
         """
         try:
-            from mineru.pdf_parser import PDFParser
+            from mineru.backend.pipeline.pipeline_analyze import (
+                doc_analyze as pipeline_doc_analyze,
+            )
+            from mineru.backend.pipeline.model_json_to_middle_json import (
+                result_to_middle_json as pipeline_result_to_middle_json,
+            )
+            from mineru.backend.pipeline.pipeline_middle_json_mkcontent import (
+                union_make as pipeline_union_make,
+            )
+            from mineru.data.data_reader_writer import FileBasedDataWriter
+            from mineru.utils.enum_class import MakeMode
         except ImportError:
             logger.error(
                 "MinerU is not installed. Install with: uv sync --extra mineru"
             )
             return None
 
-        # デバイス選択
-        device = "cpu"
-        try:
-            import torch
-            if torch.cuda.is_available():
-                device = "cuda"
-        except ImportError:
-            pass
+        # デバイス選択（環境変数で MinerU に伝達）
+        if "MINERU_DEVICE_MODE" not in os.environ:
+            try:
+                import torch
+                if torch.cuda.is_available():
+                    os.environ["MINERU_DEVICE_MODE"] = "cuda"
+                else:
+                    os.environ["MINERU_DEVICE_MODE"] = "cpu"
+            except ImportError:
+                os.environ["MINERU_DEVICE_MODE"] = "cpu"
 
-        # MFD conf_thres のモンキーパッチ
+        # MFD conf_thres のモンキーパッチ（モデル初期化前に適用）
         target_conf = self._pdf_config.mineru_mfd_conf_thres
         self._apply_mfd_conf_thres_patch(target_conf)
 
         try:
-            parser = PDFParser(
-                str(path),
-                method=mode,
-                device=device,
-            )
-            result = parser.parse()
-            # MinerU の parse() は (content_list, images) のタプルを返す
-            if isinstance(result, tuple):
-                content_list = result[0]
-            else:
-                content_list = result
+            # PDF bytes を読み込み
+            pdf_bytes = path.read_bytes()
 
-            # content_list から Markdown テキストを組み立てる
-            md_parts: list[str] = []
-            for item in content_list:
-                if isinstance(item, dict):
-                    text = item.get("text", "")
-                    if text:
-                        md_parts.append(text)
-                elif isinstance(item, str):
-                    md_parts.append(item)
-            return "\n\n".join(md_parts)
+            # Step 1: モデル推論
+            infer_results, all_image_lists, all_pdf_docs, lang_list, ocr_enabled_list = (
+                pipeline_doc_analyze(
+                    [pdf_bytes],
+                    ["japan"],  # MinerU の日本語コード（PaddleOCR 準拠）
+                    parse_method=mode,
+                    formula_enable=True,
+                    table_enable=True,
+                )
+            )
+
+            # Step 2: 中間 JSON に変換（画像は一時ディレクトリに書き出し）
+            with tempfile.TemporaryDirectory() as tmpdir:
+                image_writer = FileBasedDataWriter(str(Path(tmpdir) / "images"))
+                middle_json: dict[str, Any] = pipeline_result_to_middle_json(
+                    infer_results[0],
+                    all_image_lists[0],
+                    all_pdf_docs[0],
+                    image_writer,
+                    lang_list[0],
+                    ocr_enabled_list[0],
+                    True,  # formula_enable
+                )
+
+                # Step 3: Markdown 文字列を生成（NLP モード: 画像参照なし）
+                pdf_info = middle_json["pdf_info"]
+                md_content: str = pipeline_union_make(pdf_info, MakeMode.NLP_MD, "")
+
+            return md_content if md_content.strip() else None
         except Exception:
             logger.exception("Failed to extract PDF with MinerU: %s", path)
             return None
