@@ -463,6 +463,9 @@ class DocumentIngester(BaseIngester):
                 "MinerU is not installed. Install with: uv sync --extra mineru"
             )
             return None
+        except (RuntimeError, OSError):
+            logger.exception("MinerU module failed to load (GPU driver or DLL issue)")
+            return None
 
         # デバイス選択（環境変数で MinerU に伝達）
         if "MINERU_DEVICE_MODE" not in os.environ:
