@@ -115,7 +115,7 @@ MinerU はオプショナル依存。未インストール時は pymupdf4llm に
 | 値 | 振る舞い |
 |----|---------|
 | `auto` | 事前判定フローで自動選択（デフォルト） |
-| `mineru` | MinerU を強制使用（未インストール時はエラー） |
+| `mineru` | MinerU を強制使用（OCR モード。未インストール時はエラー） |
 | `pymupdf4llm` | pymupdf4llm を強制使用 |
 
 #### 事前判定フロー
@@ -191,13 +191,13 @@ MinerU の数式検出（MFD: Math Formula Detection）は YOLOv8 ベースで�
 
 | 環境変数 | 型 | デフォルト | 許容範囲 | 説明 |
 |---------|-----|-----------|---------|------|
-| `RAG_DOCUMENT_SUPPORTED_EXTENSIONS` | 文字列 | `".md,.txt,.pdf,.adoc"` | ドット始まりのカンマ区切り文字列 | 対応ファイル拡張子のカンマ区切りリスト。先頭にドット（`.`）を含める |
 | `RAG_PDF_BACKEND` | 文字列 | `"auto"` | `auto` / `mineru` / `pymupdf4llm` | PDF 抽出バックエンド選択 |
 
 #### 共通設定値（config.toml）
 
 | 設定キー | 型 | デフォルト | 許容範囲 | 説明 |
 |---------|-----|-----------|---------|------|
+| `rag_document_supported_extensions` | 文字列 | `".md,.txt,.pdf,.adoc"` | ドット始まりのカンマ区切り文字列 | 対応ファイル拡張子のカンマ区切りリスト |
 | `rag_pdf_mineru_mfd_conf_thres` | float | 0.6 | 0.0〜1.0 | MinerU MFD の信頼度閾値 |
 | `rag_pdf_quality_ufffd_threshold` | float | 0.10 | 0.0〜1.0 | ufffd 率の閾値（超過で MinerU OCR 選択） |
 | `rag_pdf_quality_greek_threshold` | float | 0.15 | 0.0〜1.0 | ギリシャ文字比率の閾値 |

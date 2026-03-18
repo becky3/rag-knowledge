@@ -1,7 +1,7 @@
 """ドキュメントインジェスターのテスト
 
 仕様: docs/specs/document-ingester.md
-Issue: #184, #198
+Issue: #184, #198, #221
 
 テスト方針:
 - 単体テスト: DocumentIngester の fetch_single / validate_identifier / collect_files
@@ -10,18 +10,21 @@ Issue: #184, #198
 - バリデーション: パストラバーサル対策、pattern の '..' / 絶対パス拒否
 - クランプ: ファイル数上限超過時のクランプ動作（テスト時は 5 件で実行）
 - PDF テスト: pymupdf4llm をモックしてテスト（実 PDF ファイルは不要）
+- PDF バックエンド: 事前判定ロジック、バックエンド切替、フォールバック
 """
 
 from __future__ import annotations
 
 from pathlib import Path
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 import pytest
 
 from rag.ingesters.document_ingester import (
     MAX_FILES_HARD_LIMIT,
     DocumentIngester,
+    PdfBackendConfig,
+    _PdfAssessment,
 )
 
 
@@ -476,7 +479,9 @@ class TestDocumentIngesterPdf:
 
     @pytest.fixture()
     def ingester(self) -> DocumentIngester:
-        return DocumentIngester()
+        return DocumentIngester(
+            pdf_config=PdfBackendConfig(backend="pymupdf4llm"),
+        )
 
     def test_extract_pdf_success(
         self, ingester: DocumentIngester, tmp_path: Path
@@ -520,3 +525,308 @@ class TestDocumentIngesterPdf:
                 result = ingester._extract_pdf(f)
 
         assert result is None
+
+
+# --- PDF バックエンド自動選択テスト ---
+
+
+class TestPdfBackendConfig:
+    """PdfBackendConfig のテスト."""
+
+    def test_default_values(self) -> None:
+        """デフォルト値が仕様通りであること."""
+        cfg = PdfBackendConfig()
+        assert cfg.backend == "auto"
+        assert cfg.mineru_mfd_conf_thres == 0.6
+        assert cfg.quality_ufffd_threshold == 0.10
+        assert cfg.quality_greek_threshold == 0.15
+        assert cfg.quality_cjk_min_threshold == 0.05
+        assert cfg.quality_min_chars_per_page == 10
+        assert cfg.quality_sample_pages == 10
+
+
+class TestPdfBackendSelection:
+    """PDF バックエンド選択のテスト."""
+
+    def test_forced_pymupdf4llm(self, tmp_path: Path) -> None:
+        """backend=pymupdf4llm で pymupdf4llm が使われること."""
+        ingester = DocumentIngester(
+            pdf_config=PdfBackendConfig(backend="pymupdf4llm"),
+        )
+        f = _create_binary_file(tmp_path, "doc.pdf", b"%PDF-1.4 dummy")
+
+        with patch.object(ingester, "_extract_pdf_pymupdf4llm", return_value="mock text") as mock:
+            result = ingester._extract_pdf(f)
+
+        mock.assert_called_once_with(f)
+        assert result == "mock text"
+
+    def test_forced_mineru_not_installed(self, tmp_path: Path) -> None:
+        """backend=mineru で MinerU 未インストール時にエラー（None）を返すこと."""
+        ingester = DocumentIngester(
+            pdf_config=PdfBackendConfig(backend="mineru"),
+        )
+        f = _create_binary_file(tmp_path, "doc.pdf", b"%PDF-1.4 dummy")
+
+        with patch.object(ingester, "_is_mineru_available", return_value=False):
+            result = ingester._extract_pdf(f)
+
+        assert result is None
+
+    def test_forced_mineru_installed(self, tmp_path: Path) -> None:
+        """backend=mineru で MinerU インストール済みなら MinerU が使われること."""
+        ingester = DocumentIngester(
+            pdf_config=PdfBackendConfig(backend="mineru"),
+        )
+        f = _create_binary_file(tmp_path, "doc.pdf", b"%PDF-1.4 dummy")
+
+        with patch.object(ingester, "_is_mineru_available", return_value=True):
+            with patch.object(ingester, "_extract_pdf_mineru", return_value="mineru text") as mock:
+                result = ingester._extract_pdf(f)
+
+        mock.assert_called_once_with(f, mode="ocr")
+        assert result == "mineru text"
+
+    def test_auto_normal_pdf(self, tmp_path: Path) -> None:
+        """backend=auto で通常 PDF は pymupdf4llm が使われること."""
+        ingester = DocumentIngester(
+            pdf_config=PdfBackendConfig(backend="auto"),
+        )
+        f = _create_binary_file(tmp_path, "doc.pdf", b"%PDF-1.4 dummy")
+
+        assessment = _PdfAssessment(backend="pymupdf4llm", reason="normal PDF")
+        with patch.object(ingester, "_assess_pdf", return_value=assessment):
+            with patch.object(ingester, "_extract_pdf_pymupdf4llm", return_value="text") as mock:
+                result = ingester._extract_pdf(f)
+
+        mock.assert_called_once_with(f)
+        assert result == "text"
+
+    def test_auto_mineru_needed_but_not_installed(self, tmp_path: Path) -> None:
+        """backend=auto で MinerU 推奨だが未インストール時にフォールバックすること."""
+        ingester = DocumentIngester(
+            pdf_config=PdfBackendConfig(backend="auto"),
+        )
+        f = _create_binary_file(tmp_path, "doc.pdf", b"%PDF-1.4 dummy")
+
+        assessment = _PdfAssessment(
+            backend="mineru", mineru_mode="ocr", reason="ToUnicode CMap missing"
+        )
+        with patch.object(ingester, "_assess_pdf", return_value=assessment):
+            with patch.object(ingester, "_is_mineru_available", return_value=False):
+                with patch.object(ingester, "_extract_pdf_pymupdf4llm", return_value="fallback") as mock:
+                    result = ingester._extract_pdf(f)
+
+        mock.assert_called_once_with(f)
+        assert result == "fallback"
+
+    def test_auto_mineru_needed_and_installed(self, tmp_path: Path) -> None:
+        """backend=auto で MinerU 推奨かつインストール済みなら MinerU が使われること."""
+        ingester = DocumentIngester(
+            pdf_config=PdfBackendConfig(backend="auto"),
+        )
+        f = _create_binary_file(tmp_path, "doc.pdf", b"%PDF-1.4 dummy")
+
+        assessment = _PdfAssessment(
+            backend="mineru", mineru_mode="txt", reason="math font detected"
+        )
+        with patch.object(ingester, "_assess_pdf", return_value=assessment):
+            with patch.object(ingester, "_is_mineru_available", return_value=True):
+                with patch.object(ingester, "_extract_pdf_mineru", return_value="math text") as mock:
+                    result = ingester._extract_pdf(f)
+
+        mock.assert_called_once_with(f, mode="txt")
+        assert result == "math text"
+
+
+class TestPdfAssessment:
+    """PDF 事前判定ロジックのテスト."""
+
+    def _make_mock_doc(
+        self,
+        *,
+        metadata: dict[str, str] | None = None,
+        pages: list[dict[str, object]] | None = None,
+    ) -> MagicMock:
+        """テスト用のモック pymupdf.Document を生成する."""
+        doc = MagicMock()
+        doc.metadata = metadata or {}
+        page_list = pages or []
+        doc.page_count = len(page_list)
+
+        def getitem(_self: object, idx: int) -> MagicMock:
+            page = MagicMock()
+            page_data = page_list[idx] if idx < len(page_list) else {}
+            page.get_fonts.return_value = page_data.get("fonts", [])
+            page.get_text.return_value = page_data.get("text", "")
+            return page
+
+        doc.__getitem__ = getitem
+        doc.xref_get_key = MagicMock(return_value=("xref", "/ToUnicode"))
+        return doc
+
+    def test_normal_pdf(self) -> None:
+        """通常の PDF で pymupdf4llm が選択されること."""
+        ingester = DocumentIngester()
+        doc = self._make_mock_doc(
+            metadata={"producer": "LibreOffice"},
+            pages=[{"text": "日本語テキスト " * 20, "fonts": []}],
+        )
+        result = ingester._run_assessment(doc)
+        assert result.backend == "pymupdf4llm"
+        assert result.reason == "normal PDF"
+
+    def test_tex_origin(self) -> None:
+        """TeX 由来 PDF で MinerU txt が選択されること."""
+        ingester = DocumentIngester()
+        doc = self._make_mock_doc(
+            metadata={"producer": "pdfTeX-1.40.25"},
+            pages=[{"text": "English text content " * 20, "fonts": []}],
+        )
+        result = ingester._run_assessment(doc)
+        assert result.backend == "mineru"
+        assert result.mineru_mode == "txt"
+        assert "TeX" in result.reason
+
+    def test_math_font_detected(self) -> None:
+        """数式フォント検出で MinerU txt が選択されること."""
+        ingester = DocumentIngester()
+        doc = self._make_mock_doc(
+            metadata={"producer": "LibreOffice"},
+            pages=[{
+                "text": "Normal text " * 20,
+                "fonts": [(1, "Type1", "", "CMMI10", "")],
+            }],
+        )
+        result = ingester._run_assessment(doc)
+        assert result.backend == "mineru"
+        assert result.mineru_mode == "txt"
+        assert "math font" in result.reason
+
+    def test_tounicode_missing(self) -> None:
+        """ToUnicode 欠落で MinerU OCR が選択されること."""
+        ingester = DocumentIngester()
+        doc = self._make_mock_doc(
+            metadata={},
+            pages=[{
+                "text": "Some text",
+                "fonts": [(42, "Type0", "", "CIDFont", "")],
+            }],
+        )
+        doc.xref_get_key = MagicMock(return_value=("null", ""))
+        result = ingester._run_assessment(doc)
+        assert result.backend == "mineru"
+        assert result.mineru_mode == "ocr"
+        assert "ToUnicode" in result.reason
+
+    def test_high_ufffd_ratio(self) -> None:
+        """ufffd 率が高い PDF で MinerU OCR が選択されること."""
+        ingester = DocumentIngester(
+            pdf_config=PdfBackendConfig(quality_ufffd_threshold=0.05),
+        )
+        # 100文字中10文字がufffd = 10% > 5%
+        text = "\ufffd" * 10 + "a" * 90
+        doc = self._make_mock_doc(
+            metadata={},
+            pages=[{"text": text, "fonts": []}],
+        )
+        result = ingester._run_assessment(doc)
+        assert result.backend == "mineru"
+        assert result.mineru_mode == "ocr"
+        assert "ufffd" in result.reason
+
+    def test_low_cjk_high_greek(self) -> None:
+        """CJK 低・ギリシャ高で MinerU OCR が選択されること."""
+        ingester = DocumentIngester(
+            pdf_config=PdfBackendConfig(
+                quality_cjk_min_threshold=0.05,
+                quality_greek_threshold=0.10,
+            ),
+        )
+        # ギリシャ文字20%, CJK 0%
+        text = "αβγδε" * 4 + "a" * 80
+        doc = self._make_mock_doc(
+            metadata={},
+            pages=[{"text": text, "fonts": []}],
+        )
+        result = ingester._run_assessment(doc)
+        assert result.backend == "mineru"
+        assert result.mineru_mode == "ocr"
+        assert "Greek" in result.reason
+
+    def test_low_text_amount(self) -> None:
+        """テキスト量が少ない PDF で MinerU OCR が選択されること."""
+        ingester = DocumentIngester(
+            pdf_config=PdfBackendConfig(quality_min_chars_per_page=50),
+        )
+        doc = self._make_mock_doc(
+            metadata={},
+            pages=[{"text": "ab", "fonts": []}],
+        )
+        result = ingester._run_assessment(doc)
+        assert result.backend == "mineru"
+        assert result.mineru_mode == "ocr"
+        assert "chars/page" in result.reason
+
+    def test_assess_pdf_pymupdf_not_available(self, tmp_path: Path) -> None:
+        """pymupdf が利用不可の場合に pymupdf4llm にフォールバックすること."""
+        ingester = DocumentIngester()
+        f = _create_binary_file(tmp_path, "doc.pdf", b"%PDF-1.4 dummy")
+
+        with patch.dict("sys.modules", {"pymupdf": None}):
+            result = ingester._assess_pdf(f)
+
+        assert result.backend == "pymupdf4llm"
+
+
+# --- MinerU バックエンド抽出テスト ---
+
+
+class TestExtractPdfMineru:
+    """_extract_pdf_mineru のテスト（MinerU をモック）."""
+
+    def test_mineru_import_error(self, tmp_path: Path) -> None:
+        """MinerU 未インストール時に None を返すこと."""
+        ingester = DocumentIngester()
+        f = _create_binary_file(tmp_path, "doc.pdf", b"%PDF-1.4 dummy")
+
+        with patch.dict("sys.modules", {"mineru.pdf_parser": None}):
+            result = ingester._extract_pdf_mineru(f, mode="ocr")
+
+        assert result is None
+
+    def test_mineru_via_extract_pdf_integration(self, tmp_path: Path) -> None:
+        """backend=auto + MinerU 推奨時に _extract_pdf_mineru が呼ばれること."""
+        ingester = DocumentIngester(
+            pdf_config=PdfBackendConfig(backend="auto"),
+        )
+        f = _create_binary_file(tmp_path, "doc.pdf", b"%PDF-1.4 dummy")
+
+        assessment = _PdfAssessment(
+            backend="mineru", mineru_mode="ocr", reason="ToUnicode CMap missing"
+        )
+        with patch.object(ingester, "_assess_pdf", return_value=assessment):
+            with patch.object(ingester, "_is_mineru_available", return_value=True):
+                with patch.object(
+                    ingester, "_extract_pdf_mineru", return_value="MinerU output"
+                ) as mock:
+                    result = ingester._extract_pdf(f)
+
+        mock.assert_called_once_with(f, mode="ocr")
+        assert result == "MinerU output"
+
+    def test_mineru_forced_mode_is_ocr(self, tmp_path: Path) -> None:
+        """backend=mineru 強制時に OCR モードで呼ばれること."""
+        ingester = DocumentIngester(
+            pdf_config=PdfBackendConfig(backend="mineru"),
+        )
+        f = _create_binary_file(tmp_path, "doc.pdf", b"%PDF-1.4 dummy")
+
+        with patch.object(ingester, "_is_mineru_available", return_value=True):
+            with patch.object(
+                ingester, "_extract_pdf_mineru", return_value="forced output"
+            ) as mock:
+                result = ingester._extract_pdf(f)
+
+        mock.assert_called_once_with(f, mode="ocr")
+        assert result == "forced output"
