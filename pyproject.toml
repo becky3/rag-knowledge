@@ -23,7 +23,7 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-mineru = ["mineru[pipeline]", "torch>=2.6", "torchvision"]
+mineru = ["mineru[pipeline]", "torch>=2.6", "torchvision>=0.21"]
 
 [build-system]
 requires = ["hatchling"]
