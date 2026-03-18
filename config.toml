@@ -49,7 +49,8 @@ rag_zenn_request_interval = 0.1
 # ドキュメントインジェスター
 rag_document_supported_extensions = ".md,.txt,.pdf,.adoc"
 
-# PDF バックエンド
+# PDF バックエンド (auto / mineru / pymupdf4llm)
+rag_pdf_backend = "auto"
 rag_pdf_mineru_mfd_conf_thres = 0.6
 rag_pdf_quality_ufffd_threshold = 0.10
 rag_pdf_quality_greek_threshold = 0.15

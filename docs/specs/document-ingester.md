@@ -110,7 +110,7 @@ MinerU はオプショナル依存。未インストール時は pymupdf4llm に
 
 #### バックエンド選択方式
 
-`RAG_PDF_BACKEND` 設定で選択方式を制御する:
+`rag_pdf_backend` 設定で選択方式を制御する:
 
 | 値 | 振る舞い |
 |----|---------|
@@ -120,7 +120,7 @@ MinerU はオプショナル依存。未インストール時は pymupdf4llm に
 
 #### 事前判定フロー
 
-`RAG_PDF_BACKEND=auto` の場合、PDF 抽出の前に 3 フェーズの軽量検査を実行し、バックエンドを自動選択する。全ページ抽出前に判定するため、「抽出→品質不良→やり直し」の無駄が発生しない。
+`rag_pdf_backend=auto` の場合、PDF 抽出の前に 3 フェーズの軽量検査を実行し、バックエンドを自動選択する。全ページ抽出前に判定するため、「抽出→品質不良→やり直し」の無駄が発生しない。
 
 ```mermaid
 flowchart TD
@@ -177,9 +177,21 @@ PDF メタデータの `producer` / `creator` に TeX/LaTeX 系キーワード�
 | TeX 由来メタデータ | MinerU | txt | 数式の LaTeX 変換が目的 |
 | 上記すべて非該当 | pymupdf4llm | — | 通常の PDF |
 
+#### MinerU の API 呼び出しフロー
+
+MinerU pipeline バックエンドは以下の 3 ステップで PDF を Markdown に変換する:
+
+1. `pipeline_doc_analyze`: PDF bytes からモデル推論を実行し、レイアウト・数式・テーブルを検出する
+2. `pipeline_result_to_middle_json`: 推論結果を中間 JSON に変換する（画像は一時ディレクトリに書き出し）
+3. `pipeline_union_make`: 中間 JSON から NLP 向け Markdown（画像参照なし）を生成する
+
+言語コードは MinerU の PaddleOCR 準拠で `"japan"` を使用する（ISO 639-1 の `"ja"` は未対応）。
+
 #### MinerU のデバイス選択
 
-CUDA が利用可能なら GPU、なければ CPU を自動選択する。
+環境変数 `MINERU_DEVICE_MODE` で制御する。未設定の場合は `torch.cuda.is_available()` で自動検出し、CUDA 利用可能なら `"cuda"` を設定する。
+
+CUDA 版 torch を使用するには、`pyproject.toml` に PyTorch CUDA index の設定が必要（CPU 版がデフォルトで解決されるため）。
 
 #### MinerU の MFD 信頼度閾値
 
@@ -187,17 +199,12 @@ MinerU の数式検出（MFD: Math Formula Detection）は YOLOv8 ベースで�
 
 ### 設定項目
 
-#### 環境依存値（.env）
-
-| 環境変数 | 型 | デフォルト | 許容範囲 | 説明 |
-|---------|-----|-----------|---------|------|
-| `RAG_PDF_BACKEND` | 文字列 | `"auto"` | `auto` / `mineru` / `pymupdf4llm` | PDF 抽出バックエンド選択 |
-
 #### 共通設定値（config.toml）
 
 | 設定キー | 型 | デフォルト | 許容範囲 | 説明 |
 |---------|-----|-----------|---------|------|
 | `rag_document_supported_extensions` | 文字列 | `".md,.txt,.pdf,.adoc"` | ドット始まりのカンマ区切り文字列 | 対応ファイル拡張子のカンマ区切りリスト |
+| `rag_pdf_backend` | 文字列 | `"auto"` | `auto` / `mineru` / `pymupdf4llm` | PDF 抽出バックエンド選択 |
 | `rag_pdf_mineru_mfd_conf_thres` | float | 0.6 | 0.0〜1.0 | MinerU MFD の信頼度閾値 |
 | `rag_pdf_quality_ufffd_threshold` | float | 0.10 | 0.0〜1.0 | ufffd 率の閾値（超過で MinerU OCR 選択） |
 | `rag_pdf_quality_greek_threshold` | float | 0.15 | 0.0〜1.0 | ギリシャ文字比率の閾値 |
@@ -345,10 +352,10 @@ flowchart TD
 | ファイルサイズが 0 バイト | 該当ファイルをスキップする。空テキストの取り込みは行わない |
 | テキストエンコーディングが UTF-8 以外 | `UnicodeDecodeError` をキャッチし、該当ファイルをスキップする。エラーをログ出力する |
 | PDF の変換に失敗 | 該当ファイルをスキップし、エラーをログ出力する |
-| MinerU が未インストール（`RAG_PDF_BACKEND=auto`） | pymupdf4llm にフォールバックし、警告ログを出力する |
-| MinerU が未インストール（`RAG_PDF_BACKEND=mineru`） | エラーを返す（強制指定のためフォールバックしない） |
+| MinerU が未インストール（`rag_pdf_backend=auto`） | pymupdf4llm にフォールバックし、警告ログを出力する |
+| MinerU が未インストール（`rag_pdf_backend=mineru`） | エラーを返す（強制指定のためフォールバックしない） |
 | PDF 事前判定で検査が失敗 | pymupdf4llm にフォールバックし、警告ログを出力する |
-| `RAG_PDF_BACKEND` に無効な値が設定 | pydantic のバリデーションエラー（起動時に検出） |
+| `rag_pdf_backend` に無効な値が設定 | pydantic のバリデーションエラー（起動時に検出） |
 | glob パターンがファイル数上限を超過 | パスの辞書順でソートした上で先頭 100 件にクランプし、警告ログを出力する。超過分は処理しない |
 | glob パターンに一致するファイルが 0 件 | 0 件処理として正常終了する |
 | 同一ファイルの再取り込み | `source_id`（file URI）の一致で検出し、既存データを最新に置き換える |

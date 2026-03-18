@@ -39,7 +39,7 @@
 | Embedding | OpenAI SDK / LM Studio (OpenAI 互換 API) |
 | HTML 解析 | BeautifulSoup4 |
 | HTML→Markdown 変換 | markdownify |
-| PDF テキスト抽出 | pymupdf4llm / MinerU (optional) |
+| PDF テキスト抽出 | pymupdf4llm / MinerU (optional, PyTorch CUDA 推奨) |
 
 ## セットアップ
 
