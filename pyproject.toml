@@ -23,7 +23,7 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-mineru = ["mineru[pipeline]"]
+mineru = ["mineru[pipeline]", "torch>=2.6", "torchvision"]
 
 [build-system]
 requires = ["hatchling"]
@@ -54,8 +54,16 @@ follow_imports = "skip"
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
 
+# PyTorch CUDA index（MinerU の GPU 推論に必要。CUDA 12.4 環境向け）
+[[tool.uv.index]]
+name = "pytorch-cu124"
+url = "https://download.pytorch.org/whl/cu124"
+explicit = true
+
 [tool.uv.sources]
 py-common-lib = { git = "https://github.com/becky3/py-common-lib" }
+torch = { index = "pytorch-cu124" }
+torchvision = { index = "pytorch-cu124" }
 
 [dependency-groups]
 dev = [
