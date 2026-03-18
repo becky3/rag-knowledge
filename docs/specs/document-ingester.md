@@ -115,7 +115,7 @@ MinerU はオプショナル依存。未インストール時は pymupdf4llm に
 | 値 | 振る舞い |
 |----|---------|
 | `auto` | 事前判定フローで自動選択（デフォルト） |
-| `mineru` | MinerU を強制使用 |
+| `mineru` | MinerU を強制使用（未インストール時はエラー） |
 | `pymupdf4llm` | pymupdf4llm を強制使用 |
 
 #### 事前判定フロー
@@ -346,7 +346,7 @@ flowchart TD
 | テキストエンコーディングが UTF-8 以外 | `UnicodeDecodeError` をキャッチし、該当ファイルをスキップする。エラーをログ出力する |
 | PDF の変換に失敗 | 該当ファイルをスキップし、エラーをログ出力する |
 | MinerU が未インストール（`RAG_PDF_BACKEND=auto`） | pymupdf4llm にフォールバックし、警告ログを出力する |
-| MinerU が未インストール（`RAG_PDF_BACKEND=mineru`） | pymupdf4llm にフォールバックし、警告ログを出力する |
+| MinerU が未インストール（`RAG_PDF_BACKEND=mineru`） | エラーを返す（強制指定のためフォールバックしない） |
 | PDF 事前判定で検査が失敗 | pymupdf4llm にフォールバックし、警告ログを出力する |
 | `RAG_PDF_BACKEND` に無効な値が設定 | pydantic のバリデーションエラー（起動時に検出） |
 | glob パターンがファイル数上限を超過 | パスの辞書順でソートした上で先頭 100 件にクランプし、警告ログを出力する。超過分は処理しない |
