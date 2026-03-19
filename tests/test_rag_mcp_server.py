@@ -9,6 +9,7 @@ MCPサーバーとして公開されていることを検証する。
 
 from __future__ import annotations
 
+import contextlib
 from importlib import import_module
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -19,14 +20,14 @@ from rag.rag_knowledge import (
     RawSearchResults,
     VectorSearchItem,
 )
-from rag.server import _configure_and_run, _reset_rag_service
-from rag.web_crawler import CrawlPreviewPage
+from rag.server import _configure_and_run, _reset_pipeline_controller, _reset_rag_service
 
 
 @pytest.fixture(autouse=True)
 def _reset_rag_global_state() -> None:
     """各テスト前にRAGサービスのグローバル状態をリセットする."""
     _reset_rag_service()
+    _reset_pipeline_controller()
 
 
 @pytest.mark.asyncio
@@ -556,19 +557,53 @@ class TestRagGetDocumentTool:
 class TestRagCrawlPreviewTool:
     """rag_crawl_preview ツールのテスト（Issue #45）."""
 
+    def _mock_preview_context(
+        self,
+        mod: object,
+        preview_return: list[dict[str, str]] | None = None,
+        preview_side_effect: Exception | None = None,
+    ) -> contextlib.AbstractContextManager[AsyncMock]:
+        """crawl_preview の新アーキテクチャ用モックコンテキストを生成する."""
+        from contextlib import contextmanager
+
+        mock_controller = AsyncMock()
+        mock_controller.source_store = MagicMock()
+
+        mock_ingester_instance = AsyncMock()
+        if preview_side_effect:
+            mock_ingester_instance.crawl_preview = AsyncMock(
+                side_effect=preview_side_effect,
+            )
+        else:
+            mock_ingester_instance.crawl_preview = AsyncMock(
+                return_value=preview_return if preview_return is not None else [],
+            )
+
+        mock_client = AsyncMock()
+        mock_client.__aenter__ = AsyncMock(return_value=mock_client)
+        mock_client.__aexit__ = AsyncMock(return_value=False)
+
+        @contextmanager
+        def ctx():
+            with (
+                patch.object(mod, "_get_pipeline_controller", return_value=mock_controller),
+                patch.object(mod, "PipelineWebIngester", return_value=mock_ingester_instance),
+                patch.object(mod, "ConstrainedClient", return_value=mock_client),
+            ):
+                yield mock_ingester_instance
+
+        return ctx()
+
     @pytest.mark.asyncio
     async def test_crawl_preview_returns_page_list(self) -> None:
         """クロール対象ページの一覧テキストが返ること."""
         mod = import_module("rag.server")
-        mock_service = AsyncMock()
-        mock_service.crawl_preview = AsyncMock(
-            return_value=[
-                CrawlPreviewPage(url="https://example.com/page1", title="ページ1"),
-                CrawlPreviewPage(url="https://example.com/page2", title="ページ2"),
-            ]
-        )
+        pages = [
+            {"url": "https://example.com/page1", "title": "ページ1"},
+            {"url": "https://example.com/page2", "title": "ページ2"},
+        ]
 
-        with patch.object(mod, "_get_rag_service", return_value=mock_service):
+        with self._mock_preview_context(mod, preview_return=pages):
             result = await mod.rag_crawl_preview("https://example.com/index")
 
         assert "クロール対象: 2ページ" in result
@@ -581,10 +616,8 @@ class TestRagCrawlPreviewTool:
     async def test_crawl_preview_empty_result(self) -> None:
         """対象ページが見つからない場合のメッセージが返ること."""
         mod = import_module("rag.server")
-        mock_service = AsyncMock()
-        mock_service.crawl_preview = AsyncMock(return_value=[])
 
-        with patch.object(mod, "_get_rag_service", return_value=mock_service):
+        with self._mock_preview_context(mod, preview_return=[]):
             result = await mod.rag_crawl_preview("https://example.com/empty")
 
         assert result == "対象ページが見つかりませんでした"
@@ -593,44 +626,35 @@ class TestRagCrawlPreviewTool:
     async def test_crawl_preview_shows_fallback_title(self) -> None:
         """タイトル取得不可の場合にフォールバックテキストが表示されること."""
         mod = import_module("rag.server")
-        mock_service = AsyncMock()
-        mock_service.crawl_preview = AsyncMock(
-            return_value=[
-                CrawlPreviewPage(url="https://example.com/page1", title=""),
-            ]
-        )
+        pages = [{"url": "https://example.com/page1", "title": ""}]
 
-        with patch.object(mod, "_get_rag_service", return_value=mock_service):
+        with self._mock_preview_context(mod, preview_return=pages):
             result = await mod.rag_crawl_preview("https://example.com/index")
 
         assert "(タイトル取得不可)" in result
 
     @pytest.mark.asyncio
     async def test_crawl_preview_with_pattern(self) -> None:
-        """patternパラメータがservice.crawl_previewに渡されること."""
+        """patternパラメータがcrawl_previewに渡されること."""
         mod = import_module("rag.server")
-        mock_service = AsyncMock()
-        mock_service.crawl_preview = AsyncMock(return_value=[])
 
-        with patch.object(mod, "_get_rag_service", return_value=mock_service):
+        with self._mock_preview_context(mod, preview_return=[]) as mock_ingester:
             await mod.rag_crawl_preview(
                 "https://example.com/index", pattern=r"\.html$"
             )
 
-        mock_service.crawl_preview.assert_called_once_with(
-            "https://example.com/index", url_pattern=r"\.html$"
-        )
+        mock_ingester.crawl_preview.assert_called_once()
+        call_kwargs = mock_ingester.crawl_preview.call_args
+        assert call_kwargs[1].get("pattern") == r"\.html$"
 
     @pytest.mark.asyncio
     async def test_crawl_preview_value_error(self) -> None:
         """URL検証エラー時にエラーメッセージが返ること."""
         mod = import_module("rag.server")
-        mock_service = AsyncMock()
-        mock_service.crawl_preview = AsyncMock(
-            side_effect=ValueError("許可されていないスキームです")
-        )
 
-        with patch.object(mod, "_get_rag_service", return_value=mock_service):
+        with self._mock_preview_context(
+            mod, preview_side_effect=ValueError("許可されていないスキームです"),
+        ):
             result = await mod.rag_crawl_preview("ftp://example.com")
 
         assert "エラー:" in result
@@ -640,12 +664,10 @@ class TestRagCrawlPreviewTool:
     async def test_crawl_preview_unexpected_error(self) -> None:
         """予期しないエラー時にエラーメッセージが返ること."""
         mod = import_module("rag.server")
-        mock_service = AsyncMock()
-        mock_service.crawl_preview = AsyncMock(
-            side_effect=RuntimeError("Unexpected")
-        )
 
-        with patch.object(mod, "_get_rag_service", return_value=mock_service):
+        with self._mock_preview_context(
+            mod, preview_side_effect=RuntimeError("Unexpected"),
+        ):
             result = await mod.rag_crawl_preview("https://example.com/index")
 
         assert "エラー: プレビューに失敗しました" in result
@@ -803,20 +825,23 @@ class TestRagCrawlZennTool:
     async def test_constrained_client_receives_settings(self) -> None:
         """ConstrainedClient に設定値が正しく渡されること."""
         mod = import_module("rag.server")
-        mock_service = AsyncMock()
-        mock_service.ingest_content = AsyncMock(return_value=5)
+        mock_controller = AsyncMock()
+        mock_controller.source_store = MagicMock()
+        mock_controller.ingest_and_index = MagicMock(
+            return_value=MagicMock(processed=0, errors=[]),
+        )
+
         mock_settings = MagicMock()
         mock_settings.rag_zenn_max_articles = 50
         mock_settings.rag_zenn_request_timeout = 15
         mock_settings.rag_zenn_request_interval = 0.3
 
-        mock_client_instance = AsyncMock()
-        mock_client_instance.get = AsyncMock(
-            return_value=MagicMock(
-                status_code=200,
-                json=MagicMock(return_value={"articles": [], "next_page": None}),
-            )
+        mock_ingester = AsyncMock()
+        mock_ingester.crawl_zenn = AsyncMock(
+            return_value=MagicMock(placed=0, skipped=0, errors=0, error_details=[], summary=MagicMock(return_value="完了: 0件配置")),
         )
+
+        mock_client_instance = AsyncMock()
         mock_client_cls = MagicMock()
         mock_client_cls.return_value.__aenter__ = AsyncMock(
             return_value=mock_client_instance
@@ -824,9 +849,11 @@ class TestRagCrawlZennTool:
         mock_client_cls.return_value.__aexit__ = AsyncMock(return_value=False)
 
         with (
-            patch.object(mod, "_get_rag_service", return_value=mock_service),
+            patch.object(mod, "_get_pipeline_controller", return_value=mock_controller),
             patch.object(mod, "get_settings", return_value=mock_settings),
+            patch.object(mod, "PipelineZennIngester", return_value=mock_ingester),
             patch.object(mod, "ConstrainedClient", mock_client_cls),
+            patch.object(mod, "_reset_rag_service"),
         ):
             await mod.rag_crawl_zenn("testuser")
 

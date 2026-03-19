@@ -258,10 +258,12 @@ class SourceStore:
                 full = Path(dirpath) / fname
                 rel = full.relative_to(self._root)
                 rel_str = rel.as_posix()
-                # 除外: .meta, metadata.db 関連
+                # 除外: .meta, metadata.db 関連, .gitignore
                 if rel_str.endswith(".meta"):
                     continue
                 if rel_str == "metadata.db" or rel_str.startswith("metadata.db"):
+                    continue
+                if fname == ".gitignore":
                     continue
                 result.append(rel)
 
