@@ -253,6 +253,34 @@ class VectorStore:
         chunks.sort(key=lambda c: int(c.metadata.get("chunk_index", 0)))
         return chunks
 
+    async def get_metadata_by_ids(
+        self,
+        ids: list[str],
+    ) -> dict[str, dict[str, str | int | float | bool]]:
+        """チャンクIDのリストからメタデータを一括取得する.
+
+        Args:
+            ids: チャンクIDのリスト
+
+        Returns:
+            チャンクID → メタデータ辞書のマッピング
+        """
+        if not ids:
+            return {}
+
+        results = await asyncio.to_thread(
+            self._collection.get,
+            ids=ids,
+            include=["metadatas"],
+        )
+
+        meta_map: dict[str, dict[str, str | int | float | bool]] = {}
+        metadatas = results["metadatas"] or []
+        for chunk_id, meta in zip(results["ids"], metadatas):
+            meta_map[chunk_id] = meta or {}  # type: ignore[assignment]
+
+        return meta_map
+
     async def source_exists(self, source_url: str) -> bool:
         """ソースURLに対応するチャンクが存在するか確認する（軽量版）.
 

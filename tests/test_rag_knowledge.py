@@ -41,6 +41,7 @@ def mock_vector_store(mock_embedding_provider: MagicMock) -> MagicMock:
     mock.search = AsyncMock(return_value=[])
     mock.delete_by_source = AsyncMock(return_value=0)
     mock.delete_stale_chunks = AsyncMock(return_value=0)
+    mock.get_metadata_by_ids = AsyncMock(return_value={})
     mock.get_stats = MagicMock(return_value={
         "total_chunks": 10,
         "source_count": 2,

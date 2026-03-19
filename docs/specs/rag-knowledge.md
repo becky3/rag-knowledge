@@ -5,7 +5,7 @@
 外部 Web ページから収集した知識をベクトル DB に蓄積し、
 MCP クライアントからのクエリに対して関連情報を検索・提供する
 RAG（Retrieval-Augmented Generation）基盤。
-MCP サーバーとして独立動作し、10 個のツールを提供する。
+MCP サーバーとして独立動作し、11 個のツールを提供する。
 
 スコープ:
 
@@ -55,7 +55,7 @@ MCP サーバーとして独立動作し、10 個のツールを提供する。
 | クロール | `rag_max_crawl_pages`, `rag_crawl_delay_sec` |
 | robots.txt | `rag_respect_robots_txt`, `rag_robots_txt_cache_ttl` |
 | URL 安全性 | `rag_url_safety_check`, `rag_url_safety_cache_ttl`, `rag_url_safety_fail_open`, `rag_url_safety_timeout` |
-| レスポンス制御 | `rag_max_response_chars`, `rag_stats_max_sources` |
+| レスポンス制御 | `rag_max_response_chars`（rag_get_document のトランケーション）, `rag_stats_max_sources` |
 | Zenn インジェスター | `rag_zenn_max_articles`, `rag_zenn_request_timeout`, `rag_zenn_request_interval` |
 | BlueSky インジェスター | `rag_bluesky_appview_url`, `rag_bluesky_max_posts`, `rag_bluesky_request_timeout`, `rag_bluesky_request_interval`, `rag_bluesky_include_reposts` |
 | ドキュメントインジェスター | `rag_document_supported_extensions` |
@@ -116,11 +116,12 @@ MCP サーバーとして独立動作し、10 個のツールを提供する。
 
 ### MCP ツール
 
-MCP サーバーが公開する 10 個のツール。
+MCP サーバーが公開する 11 個のツール。
 
 | ツール | 入力 | 振る舞い |
 | --- | --- | --- |
-| rag_search | クエリ、件数、source_type（任意） | ベクトル検索と BM25 の生結果を個別に返す。ページ全文を返却し、同一 URL は省略する。`source_type` 指定時はそのソース種別のチャンクのみを検索対象とする。レスポンス文字数上限（`RAG_MAX_RESPONSE_CHARS`）設定時は累積文字数を追跡し、上限到達後はページ全文取得を早期打ち切りして末尾に通知を付記する |
+| rag_search | クエリ、件数、source_type（任意） | ベクトル検索と BM25 の生結果をチャンク単位で返す。各結果にスコア・Source・Title・Chunk位置・Typeのメタデータを含める。`source_type` 指定時はそのソース種別のチャンクのみを検索対象とする。詳細は [search-response.md](search-response.md) を参照 |
+| rag_get_document | source_id、format（任意） | ソース全文を取得する。`format=text` で変換済みテキスト（converted_store）、`format=original` でオリジナル（source_store）を返す。MCP 経由では `rag_max_response_chars` でトランケーションを行う。詳細は [search-response.md](search-response.md) を参照 |
 | rag_add | URL | 単一ページをクロールして取り込む。同一 URL の再取り込み時は既存の知識を最新に置き換える |
 | rag_crawl | URL、パターン | リンク集ページから一括クロールして取り込む。同一ドメインのみ対象 |
 | rag_crawl_preview | URL、パターン | リンク集ページからクロール対象ページのタイトルと URL の一覧を返す。取り込みは行わない |
@@ -133,7 +134,7 @@ MCP サーバーが公開する 10 個のツール。
 
 ### 検索結果の設計
 
-rag_search はベクトル検索と BM25 検索の生結果を個別に返す。
+rag_search はベクトル検索と BM25 検索の生結果をチャンク単位で個別に返す。全文が必要な場合は rag_get_document で取得する。詳細は [search-response.md](search-response.md) を参照。
 
 <!-- How追加理由: 統合パイプライン(CC)を迂回する設計判断の根拠 -->
 統合パイプライン（正規化・スコア結合）を迂回し、
@@ -151,6 +152,7 @@ rag_search はベクトル検索と BM25 検索の生結果を個別に返す。
 | evaluate | 評価データセットで検索精度を計測しレポートを出力する。ベースライン比較でリグレッションを検出できる |
 | init-test-db | テスト用のベクトル DB と BM25 インデックスを初期化する |
 | crawl-preview | 指定 URL からクロール対象ページのタイトルと URL の一覧を表示する。`--format json` で JSON 出力に対応 |
+| get-document | ソース全文を取得する。`--format text\|original`、`--output` でファイル出力（トランケーションなし） |
 
 評価指標: Precision、Recall、F1、NDCG@K、MRR
 
@@ -308,11 +310,13 @@ flowchart LR
     Q["ユーザー質問"] --> LLM["LLM が検索要否を判断"]
     LLM -->|検索必要| SEARCH["rag_search"]
     LLM -->|検索不要| ANS
-    SEARCH --> VR["ベクトル検索の生結果"]
-    SEARCH --> BR["BM25 検索の生結果"]
+    SEARCH --> VR["ベクトル検索: チャンク単位結果"]
+    SEARCH --> BR["BM25 検索: チャンク単位結果"]
     VR --> JUDGE["LLM が両結果を総合判断"]
     BR --> JUDGE
-    JUDGE --> ANS["応答生成"]
+    JUDGE -->|詳細が必要| GET["rag_get_document"]
+    JUDGE -->|十分| ANS["応答生成"]
+    GET --> ANS
 ```
 
 ### クロールプレビューフロー
@@ -375,7 +379,7 @@ flowchart LR
 | `OPENAI_API_KEY` が未登録 | オンライン Embedding プロバイダーの初期化に失敗し、エラーを返す |
 | `GOOGLE_SAFE_BROWSING_API_KEY` が未登録 | URL 安全性チェックを無効化し、警告ログを出力して処理を続行する |
 | クロールプレビュー時のタイトル取得失敗 | タイトルを空文字列とし、URL のみ返す。他のページの処理は続行する |
-| rag_search レスポンスサイズ超過 | `RAG_MAX_RESPONSE_CHARS` 超過時はレスポンス構築中に累積文字数を追跡し、上限到達後は以降のページ全文取得を打ち切る（早期打ち切り）。末尾にトランケート通知を付記する。未設定時はトランケーションなし（検索結果をそのまま返す） |
+| rag_get_document レスポンスサイズ超過 | MCP 経由で `RAG_MAX_RESPONSE_CHARS` 超過時はトランケーションし、末尾に CLI `--output` オプションでの全文取得を案内する。CLI の `--output` 指定時はトランケーションなし |
 | バジェット上限到達 | 取得済みデータを返し、上限到達の旨をログ出力する |
 | サーキットブレーカー発動 | 操作を中断し、取得済みデータを返す。エラーの詳細をログ出力する |
 | 操作全体タイムアウト | 操作を中断し、取得済みデータを返す |

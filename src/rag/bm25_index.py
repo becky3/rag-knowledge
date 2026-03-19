@@ -251,6 +251,17 @@ class BM25Index:
         """
         return self._doc_source_map.get(doc_id)
 
+    def get_source_type(self, doc_id: str) -> str | None:
+        """ドキュメントIDからソース種別を取得する.
+
+        Args:
+            doc_id: ドキュメントID
+
+        Returns:
+            ソース種別、見つからない場合はNone
+        """
+        return self._doc_source_type_map.get(doc_id)
+
     def _rebuild_index(self) -> None:
         """BM25インデックスを再構築する."""
         try:
