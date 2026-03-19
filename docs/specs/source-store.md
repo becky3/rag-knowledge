@@ -120,7 +120,7 @@ flowchart TD
     W_DOMAIN --> W_PATH["docs/"]
     W_PATH --> W_FILE["guide.html"]
     W_PATH --> W_META["guide.html.meta"]
-    BS --> BS_DID["did:plc:xxx/"]
+    BS --> BS_DID["did：plc：xxx/"]
     BS_DID --> BS_YEAR["2026/"]
     BS_YEAR --> BS_MONTH["03/"]
     BS_MONTH --> BS_POST["rkey.json"]
