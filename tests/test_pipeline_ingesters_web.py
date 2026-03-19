@@ -15,7 +15,7 @@
 from __future__ import annotations
 
 from pathlib import Path
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
@@ -89,11 +89,12 @@ class TestCheckSsrf:
         with pytest.raises(ValueError, match="プライベート"):
             _check_ssrf("http://127.0.0.1/api")
 
-    def test_public_ip_allowed(self) -> None:
-        """パブリック IP が許可されること（DNS 解決不要なテスト）."""
-        # 実際の DNS 解決が必要なため、既知のパブリックサイトでテスト
-        # このテストは外部依存があるためスキップ可能
-        # _check_ssrf("https://example.com")  # DNS 解決が必要
+    @patch("socket.getaddrinfo")
+    def test_public_ip_allowed(self, mock_getaddr: MagicMock) -> None:
+        """パブリック IP が許可されること."""
+        mock_getaddr.return_value = [(2, 1, 6, "", ("93.184.216.34", 80))]
+        # パブリック IP は SSRF ブロックされない（例外が発生しないことを確認）
+        _check_ssrf("http://example.com/")
 
 
 class TestExtractTitle:

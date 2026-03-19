@@ -238,6 +238,8 @@ class WebIngester:
             raise ValueError("client (ConstrainedClient) が必要です")
 
         # Safe Browsing チェック
+        if self._url_safety_check and not safe_browsing_api_key:
+            logger.warning("Safe Browsing が有効ですが API キーが未指定です。チェックをスキップします")
         if self._url_safety_check and safe_browsing_api_key:
             is_safe = await self._check_safe_browsing(
                 [url], safe_browsing_api_key, client
@@ -336,7 +338,12 @@ class WebIngester:
 
         # パターンフィルタ
         if pattern:
-            regex = re.compile(pattern)
+            try:
+                regex = re.compile(pattern)
+            except re.error as e:
+                result.errors = 1
+                result.error_details.append(f"無効な正規表現パターン: {e}")
+                return result
             links = [link for link in links if regex.search(link)]
 
         # robots.txt フィルタ
@@ -350,6 +357,8 @@ class WebIngester:
             links = filtered
 
         # Safe Browsing 一括チェック
+        if self._url_safety_check and not safe_browsing_api_key:
+            logger.warning("Safe Browsing が有効ですが API キーが未指定です。チェックをスキップします")
         if self._url_safety_check and safe_browsing_api_key and links:
             safety_results = await self._check_safe_browsing(
                 links, safe_browsing_api_key, client
@@ -517,7 +526,15 @@ class WebIngester:
         # robots.txt 取得
         robots_url = f"{key}/robots.txt"
         try:
-            resp = await client.get(robots_url, timeout=self._crawl_request_timeout)
+            resp = await client.get(
+                robots_url, timeout=self._crawl_request_timeout,
+                follow_redirects=False,
+            )
+            if 300 <= resp.status_code < 400:
+                # リダイレクトはフェイルオープン
+                logger.debug("robots.txt リダイレクト（フェイルオープン）: %s", robots_url)
+                self._robots_cache[key] = (None, now)
+                return True
             rp = RobotFileParser()
             rp.parse(resp.text.splitlines())
             self._robots_cache[key] = (rp, now)
