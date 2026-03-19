@@ -48,13 +48,42 @@ class TestInitRepo:
         ops.init_repo()
         assert (git_repo / ".git").exists()
 
-    def test_preserves_existing_gitignore(self, git_repo: Path) -> None:
+    def test_preserves_existing_gitignore_and_appends(
+        self, git_repo: Path,
+    ) -> None:
         ops = GitOperations(git_repo)
         gitignore = git_repo / ".gitignore"
         gitignore.write_text("custom\n", encoding="utf-8")
-        # .git がない状態で init → .gitignore は上書きしない
         ops.init_repo()
-        assert gitignore.read_text(encoding="utf-8") == "custom\n"
+        content = gitignore.read_text(encoding="utf-8")
+        # 既存内容を保持しつつ metadata.db を追記
+        assert content.startswith("custom\n")
+        assert "metadata.db" in content
+
+    def test_existing_repo_gets_gitignore_fixed(
+        self, git_repo: Path,
+    ) -> None:
+        ops = GitOperations(git_repo)
+        ops.init_repo()
+        # .gitignore から metadata.db を除去
+        gitignore = git_repo / ".gitignore"
+        gitignore.write_text("*.tmp\n", encoding="utf-8")
+        # 再度 init_repo → 補正される
+        ops.init_repo()
+        content = gitignore.read_text(encoding="utf-8")
+        assert "*.tmp" in content
+        assert "metadata.db" in content
+
+    def test_existing_repo_with_valid_gitignore_unchanged(
+        self, git_repo: Path,
+    ) -> None:
+        ops = GitOperations(git_repo)
+        ops.init_repo()
+        gitignore = git_repo / ".gitignore"
+        original = gitignore.read_text(encoding="utf-8")
+        # 再度 init → 変更なし
+        ops.init_repo()
+        assert gitignore.read_text(encoding="utf-8") == original
 
 
 class TestCommit:

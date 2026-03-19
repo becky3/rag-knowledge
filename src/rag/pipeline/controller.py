@@ -461,11 +461,12 @@ class PipelineController:
 
     def _handle_added(self, entry: ChangeEntry) -> None:
         """追加ファイルを処理する."""
-        # deleted ステータスのファイルはインデックスに追加しない
-        # （register_source が status=active に上書きする前にチェック）
+        # 論理削除済みファイルは処理をスキップ
+        # （DB=active / インデックス未登録の不整合を防止）
         source_id = self._resolve_source_id(entry.file_path)
         existing = self.db.get_source(source_id)
-        skip_index = existing is not None and existing.status == "deleted"
+        if existing is not None and existing.status == "deleted":
+            return
 
         self._register_in_db(entry.file_path)
         converted_path = self._converter.convert(
@@ -473,9 +474,6 @@ class PipelineController:
             self._source_store.root_dir,
             self._converted_store_dir,
         )
-
-        if skip_index:
-            return
         metadata = self._build_metadata(entry.file_path)
         self._indexer.add(source_id, converted_path, metadata)
 
@@ -534,10 +532,15 @@ class PipelineController:
             self._register_in_db(entry.file_path)
         else:
             now = datetime.now(timezone.utc).isoformat()
+            full_path = self._source_store.root_dir / entry.file_path
+            data = full_path.read_bytes()
+            content_hash = hashlib.sha256(data).hexdigest()
             try:
                 self.db.update_source(
                     old_source_id,
                     file_path=entry.file_path,
+                    content_hash=content_hash,
+                    file_size=len(data),
                     updated_at=now,
                 )
             except KeyError:

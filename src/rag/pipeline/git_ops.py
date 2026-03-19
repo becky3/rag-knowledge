@@ -31,17 +31,16 @@ class GitOperations:
     def init_repo(self) -> None:
         """git リポジトリを初期化する.
 
-        既に初期化済みの場合は何もしない。
+        既に初期化済みの場合も .gitignore と user 設定を補正する。
         .gitignore で metadata.db を除外する。
         """
         git_dir = self._repo_dir / ".git"
-        if git_dir.exists():
-            return
-        self._run(["git", "init"])
-        # .gitignore 設定
-        gitignore = self._repo_dir / ".gitignore"
-        if not gitignore.exists():
-            gitignore.write_text(_GITIGNORE_CONTENT, encoding="utf-8")
+        if not git_dir.exists():
+            self._run(["git", "init"])
+        # .gitignore 設定（既存リポジトリでも補正）
+        self._ensure_gitignore()
+        # パイプライン用のローカル git user 設定
+        self._ensure_git_user()
 
     def commit(self, message: str) -> str | None:
         """ステージング + コミット.
@@ -146,6 +145,30 @@ class GitOperations:
             else:
                 entries.append((status[0], parts[1], ""))
         return entries
+
+    def _ensure_gitignore(self) -> None:
+        """metadata.db を .gitignore に含めることを保証する."""
+        gitignore = self._repo_dir / ".gitignore"
+        if not gitignore.exists():
+            gitignore.write_text(_GITIGNORE_CONTENT, encoding="utf-8")
+            return
+        content = gitignore.read_text(encoding="utf-8")
+        if "metadata.db" not in content:
+            if not content.endswith("\n"):
+                content += "\n"
+            content += _GITIGNORE_CONTENT
+            gitignore.write_text(content, encoding="utf-8")
+
+    def _ensure_git_user(self) -> None:
+        """パイプライン用のローカル git user 設定を保証する."""
+        try:
+            self._run(["git", "config", "user.name"])
+        except subprocess.CalledProcessError:
+            self._run(["git", "config", "user.name", "rag-pipeline"])
+        try:
+            self._run(["git", "config", "user.email"])
+        except subprocess.CalledProcessError:
+            self._run(["git", "config", "user.email", "rag-pipeline@localhost"])
 
     def _run(self, cmd: list[str]) -> subprocess.CompletedProcess[str]:
         """git コマンドを実行する."""
