@@ -97,6 +97,12 @@ class MetadataDB:
         （再取り込み時の更新動作。deleted → active への復帰を含む）。
         異なる source_id で同一 file_path のレコードが存在する場合は
         旧レコードを削除してから登録する。
+
+        Note:
+            created_at は新規 INSERT 時のみ使用される。既存レコードの
+            更新時は元の created_at が保持される（ON CONFLICT で更新対象外）。
+            local 媒体の git 由来時刻への補正は、パイプライン制御層が
+            update_source() で後から実施する。
         """
         # file_path UNIQUE 競合の防止: 異なる source_id で同じ file_path を持つ旧レコードを削除
         self._connection.execute(

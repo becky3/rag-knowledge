@@ -91,6 +91,15 @@ class SourceStore:
         # パストラバーサル防止
         self._validate_rel_path(rel_path)
 
+        # source_type と rel_path プレフィックスの整合性チェック
+        expected_prefix = f"{source_type}/"
+        if not rel_path.startswith(expected_prefix):
+            msg = (
+                f"source_type '{source_type}' と rel_path '{rel_path}' の"
+                f"プレフィックスが一致しません（期待: '{expected_prefix}'）"
+            )
+            raise ValueError(msg)
+
         # 非 local 媒体は metadata 必須
         if source_type not in _NO_META_TYPES and metadata is None:
             msg = f"metadata は {source_type} 媒体で必須です (rel_path={rel_path})"
@@ -238,20 +247,22 @@ class SourceStore:
         if not search_dir.exists():
             return []
 
+        import os
+
         result: list[Path] = []
-        for p in search_dir.rglob("*"):
-            if not p.is_file():
-                continue
-            rel = p.relative_to(self._root)
-            rel_str = rel.as_posix()
-            # 除外: .meta, metadata.db, .git/
-            if rel_str.endswith(".meta"):
-                continue
-            if rel_str == "metadata.db" or rel_str.startswith("metadata.db"):
-                continue
-            if rel_str.startswith(".git"):
-                continue
-            result.append(rel)
+        for dirpath, dirnames, filenames in os.walk(search_dir):
+            # .git ディレクトリを走査段階で除外（性能最適化）
+            dirnames[:] = [d for d in dirnames if d != ".git"]
+            for fname in filenames:
+                full = Path(dirpath) / fname
+                rel = full.relative_to(self._root)
+                rel_str = rel.as_posix()
+                # 除外: .meta, metadata.db 関連
+                if rel_str.endswith(".meta"):
+                    continue
+                if rel_str == "metadata.db" or rel_str.startswith("metadata.db"):
+                    continue
+                result.append(rel)
 
         return sorted(result)
 
