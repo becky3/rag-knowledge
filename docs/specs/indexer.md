@@ -100,7 +100,7 @@
 | 操作 | 入力 | 出力 | 振る舞い |
 |------|------|------|---------|
 | インデックス追加 | converted_store のファイルパス、source_id | なし | ファイルをチャンキングし、Embedding を生成して ChromaDB と BM25 に追加する。metadata.db からメタデータを取得してチャンクに付与する |
-| インデックス更新 | converted_store のファイルパス、source_id | なし | 既存チャンクを削除し、再チャンキング・再 Embedding で上書きする。チャンク数の増減に対応するため、旧チャンクの削除 + 新チャンクの追加で処理する |
+| インデックス更新 | converted_store のファイルパス、source_id | なし | 再チャンキング・再 Embedding で新チャンクを upsert し、旧チャンクのうち新チャンクに含まれないもの（stale chunks）を削除する。チャンク数の増減に自動対応する |
 | インデックス削除 | source_id | なし | 指定 source_id に紐づく全チャンクを ChromaDB と BM25 から削除する |
 | メタデータ更新 | source_id、更新メタデータ | なし | チャンクの再生成は行わず、ChromaDB 内の既存チャンクのメタデータのみを upsert する。BM25 はメタデータを保持しないため更新不要 |
 | インデックス全再構築 | source_type フィルタ（任意） | 処理結果サマリ | converted_store の全ファイルからインデックスを再構築する。source_type 指定時は該当 source_type のチャンクのみ削除して再構築する（他の source_type のインデックスは維持）。フィルタなしの場合は ChromaDB と BM25 を全クリアして再構築する |
