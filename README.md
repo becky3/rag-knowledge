@@ -40,6 +40,7 @@
 | HTML 解析 | BeautifulSoup4 |
 | HTML→Markdown 変換 | markdownify |
 | PDF テキスト抽出 | pymupdf4llm / MinerU (optional, PyTorch CUDA 推奨) |
+| YAML パーサー | PyYAML |
 
 ## セットアップ
 
@@ -133,6 +134,7 @@ git-flow ベースのブランチ戦略を採用。詳細は `~/.claude/docs/spe
 - [Zenn インジェスター](docs/specs/zenn-ingester.md)
 - [BlueSky インジェスター](docs/specs/bluesky-ingester.md)
 - [ドキュメントインジェスター](docs/specs/document-ingester.md)
+- [source_store](docs/specs/source-store.md)
 
 ### Claude Code 拡張（agentic）
 

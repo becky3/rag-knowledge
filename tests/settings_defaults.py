@@ -13,6 +13,7 @@ TEST_SETTINGS_DEFAULTS: dict[str, object] = {
     "lmstudio_base_url": "http://localhost:1234",
     "chromadb_persist_dir": "./chroma_db",
     "bm25_persist_dir": "./bm25_index",
+    "source_store_dir": "./source_store",
     "rag_transport": "stdio",
     "rag_http_host": "127.0.0.1",
     "rag_http_port": 8081,
