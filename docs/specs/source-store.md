@@ -51,7 +51,12 @@ metadata.db、converted_store、検索インデックスは全て source_store �
 ### .meta サイドカーファイル
 
 - 自動取り込み媒体（web、bluesky、zenn）のファイルには `.meta` サイドカーファイルを同階層に配置する
-- local 媒体は `.meta` 不要（パスと git 履歴から全て導出可能）
+- local 媒体は `.meta` 不要。sources テーブルの各フィールドは以下から導出する:
+  - `title`: ファイル名（拡張子除去）
+  - `created_at`: git の初回コミット日時
+  - `updated_at`: git の最終コミット日時
+  - `content_hash`: ファイル内容から算出
+  - `file_size`: ファイルシステムから取得
 - `.meta` ファイルの形式は YAML とする
 
 ### metadata.db
@@ -337,11 +342,13 @@ source_store 内の全ファイルのメタデータ索引。
 |---------|-----|--------|------|-----------|
 | `SOURCE_STORE_DIR` | str | `.env` | source_store のディレクトリパス | なし（必須） |
 
+> **TODO:#239** 実装時に `rag-knowledge.md` の `.env`（環境依存値）一覧にも `SOURCE_STORE_DIR` を追記すること。
+
 ## エッジケース
 
 | ケース | 振る舞い |
 |--------|---------|
-| metadata.db が破損・消失した場合 | source_store のファイルと .meta をスキャンして再構築する |
+| metadata.db が破損・消失した場合 | source_store のファイルと .meta をスキャンして再構築する。pipeline_history も消失するため、再構築後の初回パイプライン実行は null commit hash（初回扱い）となり、全ファイルが処理対象になる |
 | .meta ファイルが欠落している場合（自動取り込み媒体） | 警告ログを出力し、ファイルパスから導出可能な情報で metadata.db に登録する。導出不可能なフィールドは空とする |
 | local ファイルが source_store 外から参照された場合 | source_store 内の相対パスのみを受け付ける。外部パスはエラーとする |
 | URL の大文字小文字が異なる同一パスへのアクセス | Windows は大文字小文字を区別しないため、先に配置されたファイルのケースが保持される。URL の逆算時はファイルシステム上のケースを使用する |
