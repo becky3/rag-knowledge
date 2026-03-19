@@ -217,7 +217,7 @@ URL: `http://localhost:8080/api/docs`
 | フィールド | 型 | 内容 |
 |-----------|-----|------|
 | `source_id` | str | ソース識別子 |
-| `source_type` | str | 媒体種別（`web`, `bluesky`, `zenn`） |
+| `source_type` | str | 媒体種別（`web`, `bluesky`, `zenn`）。`local` は .meta を持たないため含まない |
 | `title` | str | コンテンツのタイトル |
 | `collected_at` | str | 取り込みタイムスタンプ（ISO 8601） |
 
@@ -312,7 +312,7 @@ source_store 内の全ファイルのメタデータ索引。
 | カラム | 型 | 制約 | 内容 |
 |--------|-----|------|------|
 | `source_id` | TEXT | PRIMARY KEY | ソース識別子 |
-| `source_type` | TEXT | NOT NULL | 媒体種別 |
+| `source_type` | TEXT | NOT NULL | 媒体種別（`web`, `bluesky`, `zenn`, `local`） |
 | `file_path` | TEXT | NOT NULL, UNIQUE | source_store 内の相対パス |
 | `title` | TEXT | NOT NULL | コンテンツのタイトル |
 | `status` | TEXT | NOT NULL, DEFAULT 'active' | `active` または `deleted` |

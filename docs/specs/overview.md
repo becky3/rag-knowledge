@@ -16,9 +16,9 @@ RAG Knowledge は、外部 Web ページから収集した知識をベクトル 
 | 6 | 評価 CLI | 検索精度の評価パイプライン | [rag-knowledge.md](rag-knowledge.md) |
 | 7 | URL 安全性チェック | Google Safe Browsing API による URL 検証 | [rag-knowledge.md](rag-knowledge.md) |
 | 8 | クロールプレビュー | クロール対象ページのタイトル・URL 一覧を事前確認 | [rag-knowledge.md](rag-knowledge.md) |
-| 9 | Zenn インジェスター | Zenn 記事を API 経由で取得・ナレッジベースに取り込み | [zenn-ingester.md](zenn-ingester.md) |
-| 10 | BlueSky インジェスター | BlueSky 投稿を AT Protocol API 経由で取得・ナレッジベースに取り込み | [bluesky-ingester.md](bluesky-ingester.md) |
-| 11 | ドキュメントインジェスター | テキストドキュメントをナレッジベースに取り込み | [document-ingester.md](document-ingester.md) |
+| 9 | Zenn インジェスター | Zenn 記事を API 経由で取得・ナレッジベースに取り込み（新アーキテクチャ移行後は [ingester.md](ingester.md) に統合予定） | [zenn-ingester.md](zenn-ingester.md) |
+| 10 | BlueSky インジェスター | BlueSky 投稿を AT Protocol API 経由で取得・ナレッジベースに取り込み（新アーキテクチャ移行後は [ingester.md](ingester.md) に統合予定） | [bluesky-ingester.md](bluesky-ingester.md) |
+| 11 | ドキュメントインジェスター | テキストドキュメントをナレッジベースに取り込み（新アーキテクチャ移行後は [ingester.md](ingester.md) に統合予定） | [document-ingester.md](document-ingester.md) |
 | 12 | source_store | 全データの根源ストレージ（git 管理、.meta サイドカー） | [source-store.md](source-store.md) |
 | 13 | パイプライン制御 | 3段パイプラインのステージ間連携・差分更新制御 | [pipeline-controller.md](pipeline-controller.md) |
 | 14 | コンバーター | source_store のファイルを converted_store のテキストに変換 | [converter.md](converter.md) |
@@ -41,7 +41,7 @@ RAG Knowledge は、外部 Web ページから収集した知識をベクトル 
 | Embedding | OpenAI SDK / LM Studio (OpenAI 互換 API) |
 | HTML 解析 | BeautifulSoup4 |
 | HTML→Markdown 変換 | markdownify |
-| PDF テキスト抽出 | pymupdf4llm |
+| PDF テキスト抽出 | pymupdf4llm / MinerU (optional, PyTorch CUDA 推奨) |
 | 設定管理 | pydantic-settings (.env + config.toml) |
 
 ## 4. 開発方針
