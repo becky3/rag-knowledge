@@ -129,8 +129,12 @@ MCP サーバーが公開する 11 個のツール。
 | rag_crawl_bluesky | handle、max_posts（任意）、include_reposts（任意） | 指定ユーザーの BlueSky 投稿を AT Protocol API 経由で取得し、ナレッジベースに取り込む。max_posts はタイムライン全体（リポスト含む）に適用。BlueSky は投稿編集不可のため、既存 `source_id` と一致する投稿はスキップする（上書き不要） |
 | rag_add_document | file_path | 単一ドキュメントファイルを読み取り、ナレッジベースに取り込む。同一ファイルの再取り込み時は `source_id`（file URI）の一致で検出し、既存の知識を最新に置き換える |
 | rag_crawl_documents | dir_path、pattern（任意） | 指定ディレクトリ内のドキュメントファイルを glob パターンで検索し、一括でナレッジベースに取り込む。同一ファイルの再取り込み時は `source_id`（file URI）の一致で検出し、既存の知識を最新に置き換える |
-| rag_delete | URL | ソース URL 指定でナレッジを削除する |
+| rag_delete | URL | ソース URL 指定でナレッジを論理削除する。metadata.db のステータスを `deleted` に変更し、検索インデックスから該当チャンクを削除する。source_store 内のファイルは削除しない |
 | rag_stats | なし | 統計情報（総チャンク数、ソース URL 数）と蓄積データ概要（ドメイン別ソース URL 一覧・タイトル）を返す。表示件数上限は `RAG_STATS_MAX_SOURCES` で制御する |
+
+### 取り込みツールの出力形式
+
+取り込みツール（rag_add、rag_crawl、rag_crawl_zenn、rag_crawl_bluesky、rag_add_document、rag_crawl_documents）は、source_store への配置結果とパイプライン処理結果を統合したサマリーを返す。配置結果には配置ファイル数・スキップ数・エラー数を含み、パイプライン処理結果にはコンバート・インデックス構築の処理件数を含む。
 
 ### 検索結果の設計
 
@@ -232,7 +236,7 @@ flowchart LR
 | `title` | str | コンテンツのタイトル |
 | `chunk_index` | int | チャンクの連番（0 始まり） |
 | `crawled_at` | str | 取り込みタイムスタンプ（ISO 8601） |
-| `source_type` | str | データソース種別（`"web"`, `"zenn"`, `"bluesky"`, `"document"`） |
+| `source_type` | str | データソース種別（`"web"`, `"zenn"`, `"bluesky"`, `"local"`） |
 
 #### カスタムフィールド
 

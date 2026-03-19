@@ -187,7 +187,7 @@ flowchart LR
 | フィールド | 型 | 内容 |
 |-----------|-----|------|
 | `source_id` | str | ソース識別子。[source-store.md](source-store.md) の source_id 決定方式に準拠。既存の rag-knowledge.md では `source_url` として定義されているフィールドに相当する |
-| `source_type` | str | 媒体種別（`web`, `bluesky`, `zenn`, `local`）。既存の rag-knowledge.md の `document` は `local` に統合される |
+| `source_type` | str | 媒体種別（`web`, `bluesky`, `zenn`, `local`） |
 | `title` | str | コンテンツのタイトル。metadata.db の `title` から取得 |
 | `chunk_index` | int | チャンクの連番（0 始まり） |
 | `total_chunks` | int | 当該ソースのチャンク総数（新規フィールド。既存の rag-knowledge.md には未定義） |

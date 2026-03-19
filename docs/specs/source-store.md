@@ -77,7 +77,7 @@ metadata.db、converted_store、検索インデックスは全て source_store �
 | ファイル配置 | source_type、ファイルデータ、メタデータ | 配置先パス | source_type に応じたディレクトリにファイルを配置し、.meta を生成する（local 以外） |
 | .meta 読み取り | ファイルパス | メタデータ辞書 | 指定ファイルの .meta サイドカーを YAML として読み取る |
 | .meta 書き込み | ファイルパス、メタデータ辞書 | なし | 指定ファイルの .meta サイドカーを YAML として書き込む |
-| ファイル一覧 | source_type（任意） | ファイルパスのリスト | source_store 内のファイルを列挙する。source_type 指定時はそのディレクトリのみ |
+| ファイル一覧 | source_type（任意） | ファイルパスのリスト | source_store 内のファイルを列挙する。source_type 指定時はそのディレクトリのみ。`.meta`、`metadata.db`、`.git/`、`.gitignore` は除外する |
 | 論理削除 | source_id | なし | metadata.db のステータスを `deleted` に変更する。ファイル自体は削除しない |
 | 論理削除解除 | source_id | なし | metadata.db のステータスを `active` に戻す |
 | ファイル取得 | source_id | ファイルデータ + メタデータ | source_id に対応するファイルと .meta を返す。論理削除済みのファイルも取得可能（全文取得ツール等で使用） |
