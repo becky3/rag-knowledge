@@ -14,6 +14,7 @@ TEST_SETTINGS_DEFAULTS: dict[str, object] = {
     "chromadb_persist_dir": "./chroma_db",
     "bm25_persist_dir": "./bm25_index",
     "source_store_dir": "./source_store",
+    "converted_store_dir": "./converted_store",
     "rag_transport": "stdio",
     "rag_http_host": "127.0.0.1",
     "rag_http_port": 8081,

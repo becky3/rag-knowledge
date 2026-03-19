@@ -210,6 +210,7 @@ rag_pdf_quality_sample_pages = 10
             "CHROMADB_PERSIST_DIR": "./chroma_db",
             "BM25_PERSIST_DIR": "./bm25_index",
             "SOURCE_STORE_DIR": "./source_store",
+            "CONVERTED_STORE_DIR": "./converted_store",
             "RAG_TRANSPORT": "stdio",
             "RAG_HTTP_HOST": "127.0.0.1",
             "RAG_HTTP_PORT": "8081",
