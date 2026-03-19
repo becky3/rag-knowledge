@@ -268,6 +268,24 @@ def main() -> None:
         help="出力先ファイルパス（未指定時は標準出力）",
     )
 
+    # rebuild サブコマンド
+    rebuild_parser = subparsers.add_parser(
+        "rebuild",
+        help="ナレッジベースを再構築（注意: full/index は Embedding API コストが発生）",
+    )
+    rebuild_parser.add_argument(
+        "--mode",
+        required=True,
+        choices=["full", "convert", "index", "incremental"],
+        help="再構築モード",
+    )
+    rebuild_parser.add_argument(
+        "--source-type",
+        choices=["web", "bluesky", "zenn", "local"],
+        default=None,
+        help="対象媒体フィルタ（incremental では指定不可）",
+    )
+
     args = parser.parse_args()
 
     if args.command == "evaluate":
@@ -278,6 +296,8 @@ def main() -> None:
         asyncio.run(run_crawl_preview(args))
     elif args.command == "get-document":
         run_get_document(args)
+    elif args.command == "rebuild":
+        run_rebuild(args)
 
 
 async def create_rag_service(
@@ -839,6 +859,129 @@ def run_get_document(args: argparse.Namespace) -> None:
         print(f"出力しました: {args.output}")
     else:
         print(response)
+
+
+def run_rebuild(args: argparse.Namespace) -> None:
+    """再構築を実行する.
+
+    仕様: docs/specs/rebuild-stats.md
+
+    Args:
+        args: コマンドライン引数
+    """
+    import contextlib
+    import io
+    import time
+
+    from .bm25_index import BM25Index
+    from .config import get_settings
+    from .converter import Converter
+    from .embedding.factory import get_embedding_provider
+    from .indexer import Indexer
+    from .ingesters.document_ingester import PdfBackendConfig
+    from .pipeline.controller import PipelineController
+    from .store.models import SourceType
+    from .store.source_store import SourceStore
+    from .vector_store import VectorStore
+
+    mode: str = args.mode
+    source_type: SourceType | None = args.source_type
+
+    # incremental + source_type のバリデーション
+    if mode == "incremental" and source_type is not None:
+        logger.error(
+            "incremental モードでは source_type を指定できません"
+        )
+        sys.exit(1)
+
+    settings = get_settings()
+
+    if not settings.source_store_dir:
+        logger.error("SOURCE_STORE_DIR が設定されていません")
+        sys.exit(1)
+    if not settings.converted_store_dir:
+        logger.error("CONVERTED_STORE_DIR が設定されていません")
+        sys.exit(1)
+
+    source_store_dir = Path(settings.source_store_dir)
+    if not source_store_dir.exists():
+        logger.error(
+            "source_store ディレクトリが存在しません: %s", source_store_dir,
+        )
+        sys.exit(1)
+
+    converted_store_dir = Path(settings.converted_store_dir)
+    converted_store_dir.mkdir(parents=True, exist_ok=True)
+
+    source_store = SourceStore(source_store_dir)
+    source_store.db.initialize()
+
+    pdf_config = PdfBackendConfig(
+        backend=settings.rag_pdf_backend,
+        mineru_mfd_conf_thres=settings.rag_pdf_mineru_mfd_conf_thres,
+        quality_ufffd_threshold=settings.rag_pdf_quality_ufffd_threshold,
+        quality_greek_threshold=settings.rag_pdf_quality_greek_threshold,
+        quality_cjk_min_threshold=settings.rag_pdf_quality_cjk_min_threshold,
+        quality_min_chars_per_page=settings.rag_pdf_quality_min_chars_per_page,
+        quality_sample_pages=settings.rag_pdf_quality_sample_pages,
+    )
+    converter = Converter(regen_option="force", pdf_config=pdf_config)
+
+    embedding_provider = get_embedding_provider(settings, settings.embedding_provider)
+
+    with contextlib.redirect_stdout(io.StringIO()):
+        vector_store = VectorStore(
+            embedding_provider=embedding_provider,
+            persist_directory=settings.chromadb_persist_dir,
+        )
+        bm25_index = BM25Index(
+            k1=settings.rag_bm25_k1,
+            b=settings.rag_bm25_b,
+            persist_dir=settings.bm25_persist_dir,
+        )
+
+    indexer = Indexer(
+        vector_store=vector_store,
+        bm25_index=bm25_index,
+        metadata_db=source_store.db,
+        chunk_size=settings.rag_chunk_size,
+        chunk_overlap=settings.rag_chunk_overlap,
+    )
+
+    controller = PipelineController(
+        source_store=source_store,
+        converted_store_dir=converted_store_dir,
+        converter=converter,
+        indexer=indexer,
+    )
+
+    logger.info("再構築を開始します（モード: %s）", mode)
+    if source_type:
+        logger.info("対象媒体: %s", source_type)
+
+    start = time.monotonic()
+
+    if mode == "full":
+        summary = controller.run_full_rebuild(source_type=source_type)
+    elif mode == "convert":
+        summary = controller.run_convert_only(source_type=source_type)
+    elif mode == "index":
+        summary = controller.run_index_only(source_type=source_type)
+    else:
+        summary = controller.run_incremental()
+
+    elapsed = time.monotonic() - start
+
+    logger.info(
+        "再構築完了: %d 処理 / %d スキップ / %d エラー / %.1f 秒",
+        summary.processed,
+        summary.skipped,
+        len(summary.errors),
+        elapsed,
+    )
+    if summary.errors:
+        for err_file in summary.errors:
+            logger.error("  エラーファイル: %s", err_file)
 
 
 if __name__ == "__main__":

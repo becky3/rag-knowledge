@@ -3,7 +3,7 @@
 仕様: docs/specs/rag-knowledge.md, docs/specs/search-response.md
 独立リポジトリとして動作する。
 
-FastMCP を使用して 11 個の RAG ツールを公開する:
+FastMCP を使用して 12 個の RAG ツールを公開する:
 - rag_search: ナレッジベース検索（チャンク単位返却）
 - rag_get_document: ソース全文取得
 - rag_add: 単一ページをナレッジベースに取り込み
@@ -14,6 +14,7 @@ FastMCP を使用して 11 個の RAG ツールを公開する:
 - rag_add_document: ドキュメントファイルをナレッジベースに取り込み
 - rag_crawl_documents: ディレクトリ内ドキュメントを一括取り込み
 - rag_delete: ソースURL指定でナレッジから削除
+- rag_rebuild: ナレッジベースの再構築
 - rag_stats: ナレッジベースの統計情報を表示
 """
 
@@ -24,6 +25,10 @@ import contextlib
 import io
 import logging
 import os
+import threading
+import time
+from pathlib import Path
+from typing import Any
 
 # ChromaDB テレメトリを無効化（import 前に設定する必要がある）
 os.environ.setdefault("ANONYMIZED_TELEMETRY", "False")
@@ -41,7 +46,7 @@ with contextlib.redirect_stdout(io.StringIO()):
     from .config import get_settings
     from .embedding.factory import get_embedding_provider
     from .ingesters.bluesky_ingester import BlueskyIngester
-    from .ingesters.document_ingester import DocumentIngester
+    from .ingesters.document_ingester import DocumentIngester, PdfBackendConfig
     from .ingesters.web_ingester import WebIngester
     from .ingesters.zenn_ingester import ZennIngester
     from .rag_knowledge import (
@@ -52,6 +57,15 @@ with contextlib.redirect_stdout(io.StringIO()):
     from .safe_browsing import create_safe_browsing_client
     from .vector_store import VectorStore
     from .web_crawler import WebCrawler
+
+    # パイプライン関連
+    from .converter import Converter
+    from .indexer import Indexer
+    from .pipeline.controller import PipelineController
+    from .pipeline.models import PipelineMode, PipelineSummary, detect_source_type
+    from .store.metadata_db import MetadataDB
+    from .store.models import NULL_COMMIT_HASH, SourceType
+    from .store.source_store import SourceStore
 
 from py_common_lib.httpx import ConstrainedClient  # safety:allowed
 
@@ -712,39 +726,361 @@ async def rag_delete(url: str) -> str:
         return f"エラー: 削除に失敗しました。URL: {url}"
 
 
+# --- 再構築 ---
+
+_VALID_REBUILD_MODES: frozenset[str] = frozenset({
+    "full", "convert", "index", "incremental",
+})
+_VALID_PIPELINE_SOURCE_TYPES: frozenset[str] = frozenset({
+    "web", "bluesky", "zenn", "local",
+})
+_rebuild_lock = threading.Lock()
+
+
+def _format_size(size_bytes: int) -> str:
+    """バイト数を人間が読みやすい単位に変換する."""
+    if size_bytes < 1024:
+        return f"{size_bytes} B"
+    if size_bytes < 1024 * 1024:
+        return f"{size_bytes / 1024:.1f} KB"
+    if size_bytes < 1024 * 1024 * 1024:
+        return f"{size_bytes / (1024 * 1024):.1f} MB"
+    return f"{size_bytes / (1024 * 1024 * 1024):.1f} GB"
+
+
+def _build_pipeline_controller() -> PipelineController:
+    """パイプライン制御コントローラを構築する（ワーカースレッド用）."""
+    settings = get_settings()
+    source_store_dir = Path(settings.source_store_dir)
+    converted_store_dir = Path(settings.converted_store_dir)
+    converted_store_dir.mkdir(parents=True, exist_ok=True)
+
+    source_store = SourceStore(source_store_dir)
+    source_store.db.initialize()
+
+    pdf_config = PdfBackendConfig(
+        backend=settings.rag_pdf_backend,
+        mineru_mfd_conf_thres=settings.rag_pdf_mineru_mfd_conf_thres,
+        quality_ufffd_threshold=settings.rag_pdf_quality_ufffd_threshold,
+        quality_greek_threshold=settings.rag_pdf_quality_greek_threshold,
+        quality_cjk_min_threshold=settings.rag_pdf_quality_cjk_min_threshold,
+        quality_min_chars_per_page=settings.rag_pdf_quality_min_chars_per_page,
+        quality_sample_pages=settings.rag_pdf_quality_sample_pages,
+    )
+    converter = Converter(regen_option="force", pdf_config=pdf_config)
+
+    embedding_provider = get_embedding_provider(settings, settings.embedding_provider)
+
+    with contextlib.redirect_stdout(io.StringIO()):
+        vector_store = VectorStore(
+            embedding_provider=embedding_provider,
+            persist_directory=settings.chromadb_persist_dir,
+        )
+        bm25_index = BM25Index(
+            k1=settings.rag_bm25_k1,
+            b=settings.rag_bm25_b,
+            persist_dir=settings.bm25_persist_dir,
+        )
+
+    indexer = Indexer(
+        vector_store=vector_store,
+        bm25_index=bm25_index,
+        metadata_db=source_store.db,
+        chunk_size=settings.rag_chunk_size,
+        chunk_overlap=settings.rag_chunk_overlap,
+    )
+
+    return PipelineController(
+        source_store=source_store,
+        converted_store_dir=converted_store_dir,
+        converter=converter,
+        indexer=indexer,
+    )
+
+
+def _format_rebuild_summary(summary: PipelineSummary, elapsed: float) -> str:
+    """PipelineSummary をテキストに変換する."""
+    mode_names = {
+        PipelineMode.FULL_REBUILD: "全再構築",
+        PipelineMode.CONVERT_ONLY: "コンバートのみ再実行",
+        PipelineMode.INDEX_ONLY: "インデックスのみ再構築",
+        PipelineMode.INCREMENTAL: "差分更新",
+    }
+    mode_name = mode_names.get(summary.mode, str(summary.mode.value))
+
+    parts = [
+        f"再構築完了 ({mode_name})",
+        f"  処理件数: {summary.processed}",
+        f"  スキップ: {summary.skipped}",
+        f"  エラー: {len(summary.errors)}",
+        f"  所要時間: {elapsed:.1f} 秒",
+    ]
+    if summary.errors:
+        parts.append("  エラーファイル:")
+        for err_file in summary.errors[:10]:
+            parts.append(f"    - {err_file}")
+        if len(summary.errors) > 10:
+            parts.append(f"    ... 他 {len(summary.errors) - 10} 件")
+
+    return "\n".join(parts)
+
+
+def _collect_source_store_stats(
+    source_store_dir: Path,
+) -> dict[str, Any]:
+    """source_store のファイル統計を収集する."""
+    if not source_store_dir.exists():
+        return {"total_files": 0, "total_size": 0, "by_type": {}}
+
+    total_files = 0
+    total_size = 0
+    by_type: dict[str, dict[str, int]] = {}
+
+    for file in source_store_dir.rglob("*"):
+        if not file.is_file():
+            continue
+
+        rel = file.relative_to(source_store_dir)
+        rel_posix = rel.as_posix()
+
+        # 除外: .git (ディレクトリ/ファイル), .meta, metadata.db*, .gitignore
+        if (
+            rel_posix == ".git"
+            or rel_posix.startswith(".git/")
+            or rel_posix == ".gitignore"
+        ):
+            continue
+        name = file.name
+        if name.endswith(".meta") or name.startswith("metadata.db"):
+            continue
+
+        size = file.stat().st_size
+        total_files += 1
+        total_size += size
+
+        st = detect_source_type(rel_posix)
+        if st not in by_type:
+            by_type[st] = {"files": 0, "size": 0}
+        by_type[st]["files"] += 1
+        by_type[st]["size"] += size
+
+    return {"total_files": total_files, "total_size": total_size, "by_type": by_type}
+
+
+def _collect_converted_store_stats(
+    converted_store_dir: Path,
+) -> dict[str, Any]:
+    """converted_store のファイル統計を収集する."""
+    if not converted_store_dir.exists():
+        return {"total_files": 0, "total_size": 0}
+
+    total_files = 0
+    total_size = 0
+
+    for file in converted_store_dir.rglob("*"):
+        if not file.is_file():
+            continue
+        total_files += 1
+        total_size += file.stat().st_size
+
+    return {"total_files": total_files, "total_size": total_size}
+
+
+def _collect_pipeline_stats(
+    source_store_dir: Path,
+) -> dict[str, Any] | None:
+    """metadata.db からパイプライン統計を収集する."""
+    db_path = source_store_dir / "metadata.db"
+    if not db_path.exists():
+        return None
+
+    db = MetadataDB(db_path)
+    try:
+        db.initialize()
+        history = db.get_pipeline_history()
+        last_commit_id = db.get_last_commit_id()
+        deleted_count = db.source_count(status="deleted")
+        last_processed_at = history[-1].processed_at if history else None
+
+        return {
+            "last_processed_at": last_processed_at,
+            "execution_count": len(history),
+            "last_commit_id": last_commit_id,
+            "deleted_count": deleted_count,
+        }
+    finally:
+        db.close()
+
+
+@mcp.tool()
+async def rag_rebuild(mode: str, source_type: str | None = None) -> str:
+    """[rag-knowledge] RAG rebuild - ナレッジベースの再構築を実行する.
+
+    knowledge base, rebuild, pipeline, reindex, convert.
+    パイプラインの再構築を指定モードで実行する。
+    注意: full / index モードは Embedding API を呼び出すため、
+    データ量に比例したコスト（API 利用料）が発生します。
+
+    Args:
+        mode: 再構築モード。
+            "full" — 全再構築（データ破損時・大規模設計変更時）
+            "convert" — コンバートのみ再実行（変換ロジック改修時）
+            "index" — インデックスのみ再構築（Embedding モデル変更時）
+            "incremental" — 差分更新（通常運用）
+        source_type: 対象媒体フィルタ: "web", "bluesky", "zenn", "local"。
+            未指定時は全媒体。incremental モードでは指定不可。
+
+    Returns:
+        処理結果サマリ（処理件数、スキップ件数、エラー件数、所要時間）
+    """
+    # パラメータ検証
+    if mode not in _VALID_REBUILD_MODES:
+        valid = ", ".join(sorted(_VALID_REBUILD_MODES))
+        return f"エラー: 無効なモード: {mode!r}（有効値: {valid}）"
+
+    if source_type is not None and source_type not in _VALID_PIPELINE_SOURCE_TYPES:
+        valid = ", ".join(sorted(_VALID_PIPELINE_SOURCE_TYPES))
+        return f"エラー: 無効な source_type: {source_type!r}（有効値: {valid}）"
+
+    if mode == "incremental" and source_type is not None:
+        return (
+            "エラー: incremental モードでは source_type を指定できません"
+            "（git diff に従います）"
+        )
+
+    # 設定の検証
+    settings = get_settings()
+    if not settings.source_store_dir:
+        return "エラー: SOURCE_STORE_DIR が設定されていません"
+    if not settings.converted_store_dir:
+        return "エラー: CONVERTED_STORE_DIR が設定されていません"
+
+    source_dir = Path(settings.source_store_dir)
+    if not source_dir.exists():
+        return f"エラー: source_store ディレクトリが存在しません: {source_dir}"
+
+    # 排他制御
+    if not _rebuild_lock.acquire(blocking=False):
+        return "エラー: 別の再構築が実行中です"
+
+    # バリデーション済みの source_type を SourceType にキャスト
+    st: SourceType | None = source_type  # type: ignore[assignment]
+
+    try:
+        def _run_rebuild() -> PipelineSummary:
+            controller = _build_pipeline_controller()
+            if mode == "full":
+                return controller.run_full_rebuild(source_type=st)
+            if mode == "convert":
+                return controller.run_convert_only(source_type=st)
+            if mode == "index":
+                return controller.run_index_only(source_type=st)
+            # mode == "incremental"
+            return controller.run_incremental()
+
+        start = time.monotonic()
+        task = asyncio.ensure_future(asyncio.to_thread(_run_rebuild))
+        try:
+            summary = await asyncio.shield(task)
+        except asyncio.CancelledError:
+            # キャンセルされてもスレッド完了を待ってからロック解放
+            await task
+            raise
+        elapsed = time.monotonic() - start
+
+        # RAG サービスをリセット（インデックスが変更されたため）
+        _reset_rag_service()
+
+        return _format_rebuild_summary(summary, elapsed)
+    except Exception:
+        logger.exception("再構築中にエラーが発生しました")
+        return "エラー: 再構築中にエラーが発生しました"
+    finally:
+        _rebuild_lock.release()
+
+
 @mcp.tool()
 async def rag_stats() -> str:
     """[rag-knowledge] RAG stats - ナレッジベースの統計情報と蓄積データ概要を表示.
 
     knowledge base, statistics, chunk count, source count, source list.
-    蓄積されているナレッジの概要（ソースURL一覧とタイトル）を返す。
+    蓄積されているナレッジの概要を4セクション
+    （source_store / converted_store / インデックス / パイプライン）で返す。
     検索前にこのツールを呼ぶことで、ナレッジベースの内容を把握し
     適切な検索キーワードを構成できる。
 
     Returns:
-        統計情報と蓄積データ概要のテキスト
+        統計情報のテキスト
     """
-    service = await _get_rag_service()
-    try:
-        stats = await service.get_stats()
-        total_chunks = stats.get("total_chunks", 0)
-        source_count = stats.get("source_count", 0)
-        sources = stats.get("sources", [])
+    settings = get_settings()
 
-        parts: list[str] = [
-            "ナレッジベース統計:",
-            f"  総チャンク数: {total_chunks}",
-            f"  ソースURL数: {source_count}",
-        ]
+    parts: list[str] = ["📊 RAG Knowledge 統計"]
+
+    # --- source_store セクション ---
+    parts.append("")
+    parts.append("■ source_store")
+    if not settings.source_store_dir:
+        parts.append("  未設定")
+    else:
+        try:
+            ss_stats = await asyncio.to_thread(
+                _collect_source_store_stats, Path(settings.source_store_dir),
+            )
+            parts.append(f"  総ファイル数: {ss_stats['total_files']:,}")
+            parts.append(f"  総サイズ: {_format_size(ss_stats['total_size'])}")
+            by_type = ss_stats.get("by_type", {})
+            if by_type:
+                parts.append("  媒体別:")
+                for st in sorted(by_type.keys()):
+                    info = by_type[st]
+                    parts.append(
+                        f"    {st}: {info['files']} files"
+                        f" ({_format_size(info['size'])})"
+                    )
+        except Exception:
+            logger.exception("source_store 統計の取得に失敗")
+            parts.append("  エラー: 統計の取得に失敗しました")
+
+    # --- converted_store セクション ---
+    parts.append("")
+    parts.append("■ converted_store")
+    if not settings.converted_store_dir:
+        parts.append("  未設定")
+    else:
+        try:
+            cs_stats = await asyncio.to_thread(
+                _collect_converted_store_stats,
+                Path(settings.converted_store_dir),
+            )
+            parts.append(f"  総ファイル数: {cs_stats['total_files']:,}")
+            parts.append(f"  総サイズ: {_format_size(cs_stats['total_size'])}")
+        except Exception:
+            logger.exception("converted_store 統計の取得に失敗")
+            parts.append("  エラー: 統計の取得に失敗しました")
+
+    # --- インデックスセクション ---
+    parts.append("")
+    parts.append("■ インデックス")
+    try:
+        service = await _get_rag_service()
+        index_stats = await service.get_stats()
+        total_chunks = index_stats.get("total_chunks", 0)
+        source_count = index_stats.get("source_count", 0)
+        sources = index_stats.get("sources", [])
+
+        parts.append(f"  総チャンク数: {total_chunks:,}")
+        parts.append(f"  ソース数: {source_count:,}")
 
         if sources and isinstance(sources, list):
-            max_sources = get_settings().rag_stats_max_sources
-            parts.append("")
-            parts.append("蓄積データ概要:")
+            max_sources = settings.rag_stats_max_sources
+            parts.append("  ドメイン別:")
 
             displayed = 0
-            hit_limit = False
+            truncated = False
             for group in sources:
+                if displayed >= max_sources:
+                    truncated = True
+                    break
                 if not isinstance(group, dict):
                     continue
                 domain = group.get("domain", "unknown")
@@ -752,43 +1088,53 @@ async def rag_stats() -> str:
                 if not isinstance(pages, list):
                     continue
 
-                if displayed >= max_sources:
-                    hit_limit = True
-                    break
-
                 page_count = len(pages)
-                parts.append("")
-                parts.append(f"[{domain}] ({page_count}ページ)")
-
-                shown_in_domain = 0
-                for page in pages:
-                    if displayed >= max_sources:
-                        hit_limit = True
-                        remaining = page_count - shown_in_domain
-                        if remaining > 0:
-                            parts.append(f"  ... 他 {remaining} ページ")
-                        break
-                    if not isinstance(page, dict):
-                        continue
-                    title = page.get("title", "") or "(タイトル取得不可)"
-                    url = page.get("url", "")
-                    parts.append(f"  - {title} ({url})")
-                    displayed += 1
-                    shown_in_domain += 1
-
-                if hit_limit:
-                    break
-
-            if hit_limit:
-                parts.append("")
-                parts.append(
-                    f"(表示上限 {max_sources} 件に達したため省略されたソースがあります)"
+                domain_chunks = sum(
+                    int(p.get("chunks", 0))
+                    for p in pages
+                    if isinstance(p, dict)
                 )
+                parts.append(
+                    f"    {domain}: {page_count} pages"
+                    f" ({domain_chunks:,} chunks)"
+                )
+                displayed += 1
 
-        return "\n".join(parts)
+            if truncated:
+                parts.append(
+                    f"  (以下省略、{max_sources}件まで表示)"
+                )
     except Exception:
-        logger.exception("Failed to get stats")
-        return "エラー: 統計情報の取得に失敗しました。"
+        logger.exception("インデックス統計の取得に失敗")
+        parts.append("  エラー: 統計の取得に失敗しました")
+
+    # --- パイプラインセクション ---
+    parts.append("")
+    parts.append("■ パイプライン")
+    if not settings.source_store_dir:
+        parts.append("  未設定")
+    else:
+        try:
+            pl_stats = await asyncio.to_thread(
+                _collect_pipeline_stats, Path(settings.source_store_dir),
+            )
+            if pl_stats is None:
+                parts.append("  未初期化")
+            else:
+                last_at = pl_stats["last_processed_at"] or "（未実行）"
+                parts.append(f"  最終処理: {last_at}")
+                parts.append(f"  実行回数: {pl_stats['execution_count']}")
+                commit_id = str(pl_stats["last_commit_id"])
+                if commit_id == NULL_COMMIT_HASH:
+                    parts.append("  last_commit_id: （未実行）")
+                else:
+                    parts.append(f"  last_commit_id: {commit_id[:7]}")
+                parts.append(f"  論理削除: {pl_stats['deleted_count']} 件")
+        except Exception:
+            logger.exception("パイプライン統計の取得に失敗")
+            parts.append("  エラー: 統計の取得に失敗しました")
+
+    return "\n".join(parts)
 
 
 def _configure_and_run() -> None:

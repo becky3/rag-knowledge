@@ -1,8 +1,9 @@
 """RAG MCPサーバーのテスト.
 
-仕様: docs/specs/rag-knowledge.md, docs/specs/search-response.md
-11個のRAGツール（rag_search, rag_get_document, rag_add, rag_crawl, rag_crawl_preview,
-rag_crawl_zenn, rag_crawl_bluesky, rag_add_document, rag_crawl_documents, rag_delete, rag_stats）が
+仕様: docs/specs/rag-knowledge.md, docs/specs/search-response.md, docs/specs/rebuild-stats.md
+12個のRAGツール（rag_search, rag_get_document, rag_add, rag_crawl, rag_crawl_preview,
+rag_crawl_zenn, rag_crawl_bluesky, rag_add_document, rag_crawl_documents,
+rag_delete, rag_rebuild, rag_stats）が
 MCPサーバーとして公開されていることを検証する。
 """
 
@@ -29,8 +30,8 @@ def _reset_rag_global_state() -> None:
 
 
 @pytest.mark.asyncio
-async def test_rag_server_exposes_eleven_tools() -> None:
-    """RAG MCPサーバーが11個のツールを公開すること."""
+async def test_rag_server_exposes_twelve_tools() -> None:
+    """RAG MCPサーバーが12個のツールを公開すること."""
     mod = import_module("rag.server")
     server = mod.mcp
 
@@ -40,7 +41,8 @@ async def test_rag_server_exposes_eleven_tools() -> None:
     expected = {
         "rag_search", "rag_get_document", "rag_add", "rag_crawl",
         "rag_crawl_preview", "rag_crawl_zenn", "rag_crawl_bluesky",
-        "rag_add_document", "rag_crawl_documents", "rag_delete", "rag_stats",
+        "rag_add_document", "rag_crawl_documents", "rag_delete",
+        "rag_rebuild", "rag_stats",
     }
     assert tool_names == expected, f"Expected {expected}, got {tool_names}"
 
@@ -52,7 +54,7 @@ async def test_rag_server_tool_count() -> None:
     server = mod.mcp
 
     tools = await server.list_tools()
-    assert len(tools) == 11
+    assert len(tools) == 12
 
 
 class TestRagSearchOutput:
@@ -658,9 +660,11 @@ class TestRagStatsOutput:
         self.mock_service = AsyncMock()
         self.mock_settings = MagicMock()
         self.mock_settings.rag_stats_max_sources = 100
+        self.mock_settings.source_store_dir = ""
+        self.mock_settings.converted_store_dir = ""
 
-    async def test_stats_contains_sources_section(self) -> None:
-        """蓄積データ概要セクションが出力に含まれること（#25）."""
+    async def test_stats_contains_domain_summary(self) -> None:
+        """インデックスセクションにドメイン別サマリが含まれること."""
         mod = import_module("rag.server")
 
         self.mock_service.get_stats = AsyncMock(
@@ -673,12 +677,12 @@ class TestRagStatsOutput:
                         "pages": [
                             {
                                 "url": "https://example.com/page1",
-                                "title": "テストページ1",
+                                "title": "Page1",
                                 "chunks": 5,
                             },
                             {
                                 "url": "https://example.com/page2",
-                                "title": "テストページ2",
+                                "title": "Page2",
                                 "chunks": 3,
                             },
                         ],
@@ -688,7 +692,7 @@ class TestRagStatsOutput:
                         "pages": [
                             {
                                 "url": "https://other.com/doc",
-                                "title": "ドキュメント",
+                                "title": "Doc",
                                 "chunks": 10,
                             },
                         ],
@@ -703,18 +707,14 @@ class TestRagStatsOutput:
         ):
             result = await mod.rag_stats()
 
-        assert "ナレッジベース統計:" in result
+        assert "📊 RAG Knowledge 統計" in result
         assert "総チャンク数: 150" in result
-        assert "ソースURL数: 3" in result
-        assert "蓄積データ概要:" in result
-        assert "[example.com] (2ページ)" in result
-        assert "テストページ1 (https://example.com/page1)" in result
-        assert "テストページ2 (https://example.com/page2)" in result
-        assert "[other.com] (1ページ)" in result
-        assert "ドキュメント (https://other.com/doc)" in result
+        assert "ソース数: 3" in result
+        assert "example.com: 2 pages (8 chunks)" in result
+        assert "other.com: 1 pages (10 chunks)" in result
 
     async def test_stats_empty_sources(self) -> None:
-        """ソースが空の場合は蓄積データ概要セクションが含まれないこと（#25）."""
+        """ソースが空の場合はドメイン別が含まれないこと."""
         mod = import_module("rag.server")
 
         self.mock_service.get_stats = AsyncMock(
@@ -731,15 +731,15 @@ class TestRagStatsOutput:
         ):
             result = await mod.rag_stats()
 
-        assert "ナレッジベース統計:" in result
+        assert "📊 RAG Knowledge 統計" in result
         assert "総チャンク数: 0" in result
-        assert "蓄積データ概要:" not in result
+        assert "ドメイン別:" not in result
 
-    async def test_stats_truncation_when_exceeds_limit(self) -> None:
-        """表示上限を超える場合に省略メッセージが出ること（#25）."""
+    async def test_stats_domain_truncation_when_exceeds_limit(self) -> None:
+        """ドメイン表示上限を超える場合に省略メッセージが出ること."""
         mod = import_module("rag.server")
 
-        # 3ページ分のデータを用意し、上限を2に設定
+        # 3ドメイン分のデータを用意し、上限を2に設定
         self.mock_settings.rag_stats_max_sources = 2
         self.mock_service.get_stats = AsyncMock(
             return_value={
@@ -747,25 +747,16 @@ class TestRagStatsOutput:
                 "source_count": 3,
                 "sources": [
                     {
-                        "domain": "example.com",
+                        "domain": f"domain{i}.com",
                         "pages": [
                             {
-                                "url": "https://example.com/page1",
-                                "title": "ページ1",
-                                "chunks": 10,
-                            },
-                            {
-                                "url": "https://example.com/page2",
-                                "title": "ページ2",
-                                "chunks": 10,
-                            },
-                            {
-                                "url": "https://example.com/page3",
-                                "title": "ページ3",
+                                "url": f"https://domain{i}.com/p",
+                                "title": "P",
                                 "chunks": 10,
                             },
                         ],
-                    },
+                    }
+                    for i in range(3)
                 ],
             }
         )
@@ -776,33 +767,20 @@ class TestRagStatsOutput:
         ):
             result = await mod.rag_stats()
 
-        # 最初の2ページは表示される
-        assert "ページ1" in result
-        assert "ページ2" in result
-        # 3ページ目は省略される
-        assert "ページ3" not in result
-        assert "表示上限 2 件に達したため省略されたソースがあります" in result
+        assert "domain0.com" in result
+        assert "domain1.com" in result
+        assert "domain2.com" not in result
+        assert "以下省略" in result
 
-    async def test_stats_fallback_title(self) -> None:
-        """タイトルが空の場合にフォールバックテキストが表示されること（#25）."""
+    async def test_stats_four_sections(self) -> None:
+        """4セクション構成の出力フォーマット."""
         mod = import_module("rag.server")
 
         self.mock_service.get_stats = AsyncMock(
             return_value={
                 "total_chunks": 5,
                 "source_count": 1,
-                "sources": [
-                    {
-                        "domain": "example.com",
-                        "pages": [
-                            {
-                                "url": "https://example.com/page1",
-                                "title": "",
-                                "chunks": 5,
-                            },
-                        ],
-                    },
-                ],
+                "sources": [],
             }
         )
 
@@ -812,7 +790,10 @@ class TestRagStatsOutput:
         ):
             result = await mod.rag_stats()
 
-        assert "(タイトル取得不可)" in result
+        assert "■ source_store" in result
+        assert "■ converted_store" in result
+        assert "■ インデックス" in result
+        assert "■ パイプライン" in result
 
 
 class TestRagCrawlZennTool:
