@@ -374,76 +374,13 @@ BlueSky 上で削除された投稿は source_store に残り続ける。削除�
 
 スレッド（連続投稿）は個別投稿として取り込む（結合しない）。各投稿が独立した JSON ファイルとして source_store に配置される。
 
-### テキスト抽出フィールドパス（コンバーター向け参照情報）
+### テキスト抽出（コンバーター向け参照情報）
 
-コンバーターが source_store 内の JSON ファイルからテキストを抽出する際に参照するフィールドパスを定義する。投稿は最大 300 文字（grapheme 単位）の短文であり、Markdown 変換は不要。プレーンテキストとして抽出する。
+BlueSky 投稿の JSON からのテキスト抽出仕様（フィールドパス、recordWithMedia 対応、引用元テキスト、テキスト構造）は [converter.md](../converter.md) の「JSON → テキスト抽出 > BlueSky 投稿」セクションで定義されている。converter.md が正本であり、本セクションでは概要のみ記載する。
 
-テキスト抽出は `post.record`（raw record）から行う。`post.record` の embed の `$type` に `#view` サフィックスは付かない。
-
-#### 基本フィールド
-
-| フィールド | パス | 説明 |
-|-----------|------|------|
-| 投稿テキスト | `post.record.text` | 投稿本文 |
-| 画像 ALT テキスト | `post.record.embed.images[].alt` | 画像の代替テキスト |
-| 動画 ALT テキスト | `post.record.embed.alt` | 動画の代替テキスト |
-| リンクカードタイトル | `post.record.embed.external.title` | 外部リンクのタイトル |
-| リンクカード URL | `post.record.embed.external.uri` | 外部リンクの URL |
-| リンクカード説明 | `post.record.embed.external.description` | 外部リンクの説明文 |
-
-#### recordWithMedia 時のフィールド
-
-embed の `$type` が `app.bsky.embed.recordWithMedia`（メディア + 引用の複合型）の場合、メディア部分は `embed.media` 配下にネストされる:
-
-| フィールド | パス（recordWithMedia 時） | 説明 |
-|-----------|--------------------------|------|
-| 画像 ALT テキスト | `post.record.embed.media.images[].alt` | recordWithMedia 時の画像 ALT |
-| 動画 ALT テキスト | `post.record.embed.media.alt` | recordWithMedia 時の動画 ALT |
-| リンクカードタイトル | `post.record.embed.media.external.title` | recordWithMedia 時のリンクタイトル |
-| リンクカード URL | `post.record.embed.media.external.uri` | recordWithMedia 時のリンク URL |
-| リンクカード説明 | `post.record.embed.media.external.description` | recordWithMedia 時のリンク説明 |
-
-#### 引用元投稿テキスト
-
-引用リポスト（`post.record.embed.$type` が `app.bsky.embed.record` または `app.bsky.embed.recordWithMedia`）を検出した場合、引用元テキストを `post.embed`（view 版、API レスポンスに展開済み）から取得する:
-
-| embed の $type | 引用元テキストのパス |
-|----------------|-------------------|
-| `app.bsky.embed.record` | `post.embed.record.value.text` |
-| `app.bsky.embed.recordWithMedia` | `post.embed.record.record.value.text` |
-
-引用元が投稿以外（スターターパック、フィードジェネレーター等）の場合は `value` キーが存在しない。この場合は引用元テキストなしとして扱う。
-
-#### 抽出対象外
-
-- 動画キャプション（VTT）
-
-#### テキスト構造
-
-コンバーターが抽出したテキストは以下の構造で構築する。各セクションは空行で区切る。該当するセクションがない場合は省略する。
-
-```
-[Repost: @元投稿者ハンドル]
-投稿テキスト
-
-[Image ALT] 画像の代替テキスト（複数ある場合は改行で連結）
-[Video ALT] 動画の代替テキスト
-
-[Link Card]
-Title: 外部リンクのタイトル
-URL: 外部リンクの URL
-Description: 外部リンクの説明文
-
-[Quote]
-引用元の投稿テキスト
-```
-
-- リポストの場合、先頭に `[Repost: @元投稿者ハンドル]` ヘッダーを付与する。元投稿者のハンドルは `post.author.handle` から取得する
-- 投稿テキストを先頭に配置する（検索ヒット時に最も重要な情報が先頭に来る）
-- 画像/動画 ALT テキストは `[Image ALT]` / `[Video ALT]` プレフィックスで区別する
-- リンクカードは `[Link Card]` セクション内に構造化する
-- 引用元テキストは `[Quote]` セクションに配置する
-- セクションラベルは英語表記とする（LLM による検索・解釈の精度向上のため）
+- 投稿テキスト、画像/動画 ALT、リンクカード、引用元テキストを構造化プレーンテキストとして抽出する
+- Markdown 変換は不要（投稿は最大 300 文字の短文）
+- リポスト時は `[Repost: @handle]` ヘッダーを付与する
 
 ### チャンキング方針（インデクサー向け参照情報）
 

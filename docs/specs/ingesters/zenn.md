@@ -4,23 +4,22 @@
 
 > **Note**: 本仕様書は設計先行（`docs(pre-impl)`）で作成している。後続の実装フェーズで既存インジェスターを本仕様に基づき再実装する。現行コードとの不整合は意図的である。
 
-Zenn（zenn.dev）の記事を API 経由で取得し、source_store にファイルを配置するインジェスター。記事一覧の走査と個別記事の取得の 2 段階で動作する。
+Zenn（zenn.dev）の記事およびスクラップを API 経由で取得し、source_store にファイルを配置するインジェスター。コンテンツ一覧の走査と個別コンテンツの取得の 2 段階で動作する。
 
 新アーキテクチャでは、本インジェスターの責務は「Zenn API からのデータ取得 → source_store へのファイル配置 + .meta サイドカーファイルの生成」に限定される。テキスト変換・チャンキング・インデックス構築はパイプライン後段（コンバーター・インデクサー）が担当する。
 
 スコープ:
 
-- 指定ユーザーの公開記事一覧の取得
-- 個別記事の本文（HTML）取得と source_store への配置
+- 指定ユーザーの公開記事一覧の取得と source_store への配置
+- 指定ユーザーのスクラップ一覧の取得と source_store への配置
 - .meta サイドカーファイルの生成
-- MCP ツールとしての記事取り込みインターフェースの提供
+- MCP ツールとしての取り込みインターフェースの提供
 - パイプライン制御への取り込み完了通知
 
 スコープ外:
 
 - Zenn Books（本）の取得
-- Zenn Scraps（スクラップ）の取得
-- 記事の投稿・編集・削除（読み取り専用）
+- 記事・スクラップの投稿・編集・削除（読み取り専用）
 - テキスト変換・チャンキング・インデックス構築（コンバーター・インデクサーの範疇）
 - metadata.db への直接アクセス（パイプライン制御の範疇）
 - git 操作（パイプライン制御の範疇）
@@ -42,7 +41,7 @@ Zenn（zenn.dev）の記事を API 経由で取得し、source_store にファ�
 
 - **metadata.db アクセス禁止**: metadata.db に直接アクセスしない。DB 登録はパイプライン制御が .meta を読んで実行する
 - **git 操作禁止**: git 操作はパイプライン制御のみが実行する
-- **オリジナルデータの無加工保存**: Zenn API から取得した `body_html` をそのまま source_store に配置する
+- **オリジナルデータの無加工保存**: 記事は Zenn API の `body_html` をそのまま HTML ファイルとして保存する。スクラップは API レスポンスの `scrap` オブジェクト（`comments` 配列を含む）をそのまま JSON ファイルとして保存する。コメントの結合・テキスト抽出はコンバーターの範疇
 - **ファイル削除禁止**: source_store 内のファイルの物理削除は一切行わない
 
 ### 外部 HTTP リクエスト
@@ -106,26 +105,27 @@ Zenn（zenn.dev）の記事を API 経由で取得し、source_store にファ�
 
 | ツール | 入力 | 振る舞い |
 |--------|------|---------|
-| `rag_crawl_zenn` | username、max_articles（任意） | 指定ユーザーの Zenn 記事を API 経由で取得し、source_store にファイルを配置する。取り込み完了後、パイプライン制御に通知する |
+| `rag_crawl_zenn` | username、max_articles（任意）、content_type（任意） | 指定ユーザーの Zenn コンテンツを API 経由で取得し、source_store にファイルを配置する。取り込み完了後、パイプライン制御に通知する |
 
 ツール入力パラメータ:
 
 | パラメータ | 型 | 必須 | 説明 |
 |-----------|-----|------|------|
 | `username` | 文字列 | はい | Zenn ユーザー名 |
-| `max_articles` | 整数 | いいえ | 取得する最大記事数。デフォルト: 50、許容範囲: 1〜100 |
+| `max_articles` | 整数 | いいえ | 取得する最大コンテンツ数。デフォルト: 50、許容範囲: 1〜100 |
+| `content_type` | 文字列 | いいえ | 取得対象のフィルタ: `articles`（記事のみ）、`scraps`（スクラップのみ）、`all`（両方）。デフォルト: `all`。ツール入力では複数形（`articles`/`scraps`）、.meta の `content_type` フィールドでは単数形（`article`/`scrap`）を使用する |
 
-ツール出力: source_store への配置結果（配置ファイル数、スキップ数、エラー数）のサマリーテキスト。
+ツール出力: source_store への配置結果（配置ファイル数、スキップ数、エラー数）のサマリーテキスト。記事とスクラップの内訳も含む。
 
-プレビュー機能は提供しない。Zenn の記事一覧は公開情報（`https://zenn.dev/{username}` で閲覧可能）であり、取り込み前の確認は Zenn サイト上で直接行える。記事一覧走査自体が軽量な操作であり、Web クロールのように未知のリンク先を探索する性質がないため、専用のプレビューツールは不要と判断した。
+プレビュー機能は提供しない。Zenn のコンテンツ一覧は公開情報（`https://zenn.dev/{username}` で閲覧可能）であり、取り込み前の確認は Zenn サイト上で直接行える。
 
 ### 設定項目
 
 | 設定項目 | 型 | 保管先 | 内容 | デフォルト | 許容範囲 |
 |---------|-----|--------|------|-----------|---------|
-| `zenn.max_articles` | 整数 | `config.toml` | 取得する最大記事数 | 50 | 1〜100 |
-| `zenn.request_timeout` | 整数 | `config.toml` | 記事取得時のリクエストタイムアウト（秒） | 30 | 1〜120 |
-| `zenn.request_interval` | 小数 | `config.toml` | リクエスト間の最低間隔（秒） | 1.0 | 0.1〜60 |
+| `rag_zenn_max_articles` | 整数 | `config.toml` | 取得する最大コンテンツ数（記事・スクラップそれぞれに適用） | 50 | 1〜100 |
+| `rag_zenn_request_timeout` | 整数 | `config.toml` | Zenn API リクエストのタイムアウト（秒。記事・スクラップ両方に適用） | 30 | 1〜120 |
+| `rag_zenn_request_interval` | 小数 | `config.toml` | Zenn API リクエスト間の最低間隔（秒。記事・スクラップ両方に適用） | 1.0 | 0.1〜60 |
 
 ## コンポーネント構成
 
@@ -140,20 +140,23 @@ source_store/
       articles/
         {slug}.html
         {slug}.html.meta
+      scraps/
+        {slug}.json
+        {slug}.json.meta
 ```
 
-- ファイル形式: Zenn API の `body_html` をそのまま保存する（HTML ファイル）
-- ファイル名: 記事スラッグに `.html` 拡張子を付与
+- ファイル形式: 記事は Zenn API の `body_html` を HTML ファイルとして保存。スクラップは API レスポンスの `scrap` オブジェクトを JSON ファイルとして保存
+- ファイル名: 記事はスラッグに `.html`、スクラップはスラッグに `.json` 拡張子を付与
 - .meta: データファイルと同階層に配置
 
 ### source_id とファイルパスの対応
 
-| 項目 | 値 |
-|------|-----|
-| source_id | `https://zenn.dev/{username}/articles/{slug}` |
-| ファイルパス | `zenn/{username}/articles/{slug}.html` |
+| コンテンツ種別 | source_id | ファイルパス |
+|--------------|-----------|------------|
+| 記事 | `https://zenn.dev/{username}/articles/{slug}` | `zenn/{username}/articles/{slug}.html` |
+| スクラップ | `https://zenn.dev/{username}/scraps/{slug}` | `zenn/{username}/scraps/{slug}.json` |
 
-source_id は記事の公開 URL であり、安定した識別子として機能する。
+source_id はコンテンツの公開 URL であり、安定した識別子として機能する。
 
 ### .meta サイドカーファイル
 
@@ -172,14 +175,17 @@ Zenn 固有フィールド:
 
 | フィールド | 型 | 内容 | 値の取得元 |
 |-----------|-----|------|-----------|
-| `slug` | str | 記事スラッグ | API レスポンスの `slug` フィールド |
-| `article_type` | str | 記事種別 | API レスポンスの `article_type` フィールド（`tech`, `idea` 等） |
-| `published_at` | str | 公開日時（ISO 8601） | API レスポンスの `published_at` フィールド |
+| `slug` | str | コンテンツスラッグ | API レスポンスの `slug` フィールド |
+| `content_type` | str | コンテンツ種別 | `article` または `scrap` |
+| `article_type` | str | 記事種別（記事のみ） | API レスポンスの `article_type` フィールド（`tech`, `idea` 等）。スクラップでは空文字列 |
+| `published_at` | str | 公開日時（ISO 8601）（記事のみ） | API レスポンスの `published_at` フィールド。スクラップでは `created_at` を使用 |
 | `liked_count` | int | いいね数 | API レスポンスの `liked_count` フィールド |
 | `topics` | list | トピックタグのリスト | API レスポンスの `topics` フィールド |
+| `comments_count` | int | コメント数（スクラップのみ） | API レスポンスの `comments_count` フィールド。記事では 0 |
+| `closed` | bool | クローズ状態（スクラップのみ） | API レスポンスの `closed` フィールド。記事では `false` |
 | `username` | str | 著者のユーザー名 | MCP ツール入力の `username` パラメータ |
 
-.meta ファイルの形式例:
+.meta ファイルの形式例（記事）:
 
 ```yaml
 source_id: "https://zenn.dev/alice/articles/sample-article"
@@ -187,22 +193,43 @@ source_type: zenn
 title: "Sample Article Title"
 collected_at: "2026-01-15T10:30:00+09:00"
 slug: "sample-article"
+content_type: "article"
 article_type: "tech"
 published_at: "2026-01-10T12:00:00+09:00"
 liked_count: 42
 topics:
   - "Python"
   - "FastAPI"
+comments_count: 0
+closed: false
 username: "alice"
 ```
 
-### 記事一括取り込みフロー
+.meta ファイルの形式例（スクラップ）:
+
+```yaml
+source_id: "https://zenn.dev/alice/scraps/f0b53bc3944bb3"
+source_type: zenn
+title: "Sample Scrap Title"
+collected_at: "2026-01-15T10:30:00+09:00"
+slug: "f0b53bc3944bb3"
+content_type: "scrap"
+article_type: ""
+published_at: "2026-02-14T20:48:17+09:00"
+liked_count: 0
+topics: []
+comments_count: 3
+closed: false
+username: "alice"
+```
+
+### コンテンツ一括取り込みフロー
 
 ```mermaid
 flowchart TD
-    START["rag_crawl_zenn(username, max_articles)"]
+    START["rag_crawl_zenn(username, max_articles, content_type)"]
     VALIDATE["入力バリデーション"]
-    DISCOVER["記事一覧 API を走査"]
+    DISCOVER["コンテンツ一覧 API を走査（content_type に応じて記事/スクラップ/両方）"]
     PAGE["ページ取得"]
     CHECK_NEXT{"next_page が null?"}
     CHECK_LIMIT{"走査上限 or 記事数上限?"}
@@ -224,7 +251,11 @@ flowchart TD
     NOTIFY --> RESULT
 ```
 
-### 記事一覧走査の処理手順
+### コンテンツ一覧走査の処理手順
+
+`content_type` に応じて記事一覧 API（`/api/articles`）、スクラップ一覧 API（`/api/scraps`）、または両方を走査する。`all` の場合は記事 → スクラップの順に実行する。以下は各 API 共通の走査手順:
+
+#### 一覧走査の共通手順
 
 1. ページ番号を 1 に初期化する
 2. 記事一覧 API にリクエストを送信する
@@ -246,9 +277,18 @@ flowchart TD
 4. .meta サイドカーファイルを同階層に生成する（配置先: `zenn/{username}/articles/{slug}.html.meta`）
 5. 重複検出: 配置先パスにファイルが既に存在する場合は上書きする
 
+### スクラップ取得とファイル配置の処理手順
+
+1. スクラップ一覧 API（`/api/scraps?username={username}&order=latest&page={page}`）を走査する。走査手順は記事一覧走査と同様（ページネーション上限・コンテンツ数上限で終了）
+2. 各スクラップの `slug` を収集する
+3. スクラップ詳細 API（`/api/scraps/{slug}`）にリクエストを送信する
+4. レスポンスの `scrap` オブジェクト（`comments` 配列を含む）をそのまま JSON として source_store に配置する（配置先: `zenn/{username}/scraps/{slug}.json`）
+5. .meta サイドカーファイルを同階層に生成する（配置先: `zenn/{username}/scraps/{slug}.json.meta`）
+6. 重複検出: 配置先パスにファイルが既に存在する場合は上書きする
+
 ### パイプライン制御との連携
 
-全記事のファイル配置が完了した後、パイプライン制御に取り込み完了を通知する。パイプライン制御は通知を受けて以下を実行する:
+全コンテンツ（記事 + スクラップ）のファイル配置が完了した後、パイプライン制御に取り込み完了を通知する。パイプライン制御は通知を受けて以下を実行する:
 
 1. source_store で `git add -A` + `git commit` を実行
 2. `git diff` で変更ファイルを特定
@@ -264,7 +304,7 @@ Zenn は公式の API ドキュメントを公開していない。以下は観�
 
 | 連携先 | 用途 | 接続方式 |
 |--------|------|---------|
-| Zenn API | 記事一覧・記事詳細の取得 | REST API（ConstrainedClient 経由） |
+| Zenn API | 記事一覧・記事詳細・スクラップ一覧・スクラップ詳細の取得 | REST API（ConstrainedClient 経由） |
 
 #### 記事一覧エンドポイント
 
@@ -311,12 +351,63 @@ Zenn は公式の API ドキュメントを公開していない。以下は観�
 | `body_html` | 文字列 | 記事本文（HTML 形式） |
 | `topics` | 配列 | トピックタグの配列 |
 
+#### スクラップ一覧エンドポイント
+
+| 項目 | 内容 |
+|------|------|
+| URL | `https://zenn.dev/api/scraps?username={username}&order=latest&page={page}` |
+| メソッド | GET |
+| 認証 | 不要 |
+| ページネーション | レスポンスの `next_page` フィールド。`null` の場合は最終ページ |
+
+レスポンス構造:
+
+| フィールド | 型 | 説明 |
+|-----------|-----|------|
+| `scraps` | 配列 | スクラップオブジェクトの配列 |
+| `next_page` | 整数 or null | 次のページ番号。最終ページでは `null` |
+
+スクラップオブジェクトの主要フィールド:
+
+| フィールド | 型 | 説明 |
+|-----------|-----|------|
+| `slug` | 文字列 | スクラップの識別子（URL の一部） |
+| `title` | 文字列 | スクラップタイトル |
+| `path` | 文字列 | スクラップパス（例: `/username/scraps/slug`） |
+| `closed` | 真偽値 | クローズ状態 |
+| `comments_count` | 整数 | コメント数 |
+| `created_at` | 文字列 | 作成日時（ISO 8601） |
+| `liked_count` | 整数 | いいね数 |
+| `topics` | 配列 | トピックタグの配列 |
+
+#### スクラップ詳細エンドポイント
+
+| 項目 | 内容 |
+|------|------|
+| URL | `https://zenn.dev/api/scraps/{slug}` |
+| メソッド | GET |
+| 認証 | 不要 |
+
+レスポンスのトップレベルは `scrap` オブジェクトであり、スクラップ一覧の全フィールドに加え以下が含まれる:
+
+| フィールド | 型 | 説明 |
+|-----------|-----|------|
+| `scrap.comments` | 配列 | コメントオブジェクトの配列（`scrap` オブジェクト配下） |
+
+コメントオブジェクトの主要フィールド:
+
+| フィールド | 型 | 説明 |
+|-----------|-----|------|
+| `body_html` | 文字列 | コメント本文（HTML 形式） |
+| `created_at` | 文字列 | コメント作成日時（ISO 8601） |
+| `body_updated_at` | 文字列 | コメント更新日時（ISO 8601） |
+
 ## エッジケース
 
 | ケース | 振る舞い |
 |--------|---------|
-| ユーザーが存在しない | API が空の `articles` 配列を返す。0 件取得として正常終了する |
-| ユーザーの記事が 0 件 | 空の `articles` 配列。0 件取得として正常終了する |
+| ユーザーが存在しない | API が `articles` / `scraps` 配列が空のレスポンスを返す。0 件取得として正常終了する |
+| ユーザーの記事・スクラップが 0 件 | `articles` / `scraps` 配列が空。0 件取得として正常終了する |
 | 記事詳細取得に失敗（404 等） | 該当記事をスキップし、他の記事の処理を続行する。エラーをログ出力する |
 | 記事一覧 API のレスポンス形式変更 | JSON パースエラーまたは必須フィールド欠落として処理を中断する。エラーの詳細をログ出力する |
 | 記事詳細 API のレスポンス形式変更 | 該当記事をスキップし、他の記事の処理を続行する。エラーの詳細をログ出力する |
@@ -330,6 +421,10 @@ Zenn は公式の API ドキュメントを公開していない。以下は観�
 | 設定値がハードリミット超過（正の整数） | ハードリミット値にクランプし、警告ログを出力する |
 | `max_articles` に 0 や負数を指定 | バリデーションエラーとして拒否する（クランプ対象外） |
 | `username` が空文字列 | バリデーションエラーとして拒否する |
+| `content_type` に無効な値を指定 | バリデーションエラーとして拒否する。有効値: `articles`, `scraps`, `all` |
+| スクラップのコメントが 0 件 | raw JSON をそのまま source_store に保存する（インジェスターは無加工保存）。コンバーターが空テキストとして変換をスキップする |
+| スクラップのコメント `body_html` が全て空 | raw JSON をそのまま source_store に保存する。コンバーターが空テキストとして変換をスキップする |
+| 同一スクラップの再取り込み | source_id（スクラップの公開 URL）からファイルパスを導出し、既存ファイルを上書きする |
 | Zenn API のレート制限（429） | ConstrainedClient のサーキットブレーカーで検出される。連続失敗として計上し、閾値超過で操作を中断する |
 | .meta ファイルの書き込みに失敗した場合 | ファイル物理削除禁止制約により、配置済みデータファイルのロールバックは行わない。エラーログを出力して処理を続行する |
 

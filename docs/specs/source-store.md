@@ -248,11 +248,14 @@ URL: `http://localhost:8080/api/docs`
 
 | フィールド | 型 | 内容 |
 |-----------|-----|------|
-| `slug` | str | 記事スラッグ |
-| `article_type` | str | 記事種別（`tech`, `idea` 等） |
-| `published_at` | str | 公開日時（ISO 8601） |
+| `slug` | str | コンテンツスラッグ |
+| `content_type` | str | コンテンツ種別（`article` または `scrap`） |
+| `article_type` | str | 記事種別（`tech`, `idea` 等）。スクラップでは空文字列 |
+| `published_at` | str | 公開日時（ISO 8601）。スクラップでは `created_at` を使用 |
 | `liked_count` | int | いいね数 |
 | `topics` | list | トピックタグのリスト |
+| `comments_count` | int | コメント数（スクラップのみ。記事では 0） |
+| `closed` | bool | クローズ状態（スクラップのみ。記事では `false`） |
 | `username` | str | 著者のユーザー名 |
 
 #### .meta ファイルの形式例
@@ -286,7 +289,7 @@ is_reply: false
 is_repost: false
 ```
 
-**zenn:**
+**zenn（記事）:**
 
 ```yaml
 source_id: "https://zenn.dev/alice/articles/sample-article"
@@ -294,12 +297,33 @@ source_type: zenn
 title: "Sample Article Title"
 collected_at: "2026-01-15T10:30:00+09:00"
 slug: "sample-article"
+content_type: "article"
 article_type: "tech"
 published_at: "2026-01-10T12:00:00+09:00"
 liked_count: 42
 topics:
   - "Python"
   - "FastAPI"
+comments_count: 0
+closed: false
+username: "alice"
+```
+
+**zenn（スクラップ）:**
+
+```yaml
+source_id: "https://zenn.dev/alice/scraps/f0b53bc3944bb3"
+source_type: zenn
+title: "Sample Scrap Title"
+collected_at: "2026-01-15T10:30:00+09:00"
+slug: "f0b53bc3944bb3"
+content_type: "scrap"
+article_type: ""
+published_at: "2026-02-14T20:48:17+09:00"
+liked_count: 0
+topics: []
+comments_count: 3
+closed: false
 username: "alice"
 ```
 
