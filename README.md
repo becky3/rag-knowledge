@@ -10,6 +10,7 @@
 | **チャンキング** | テキストを適切なサイズに分割（見出し・テーブル対応） |
 | **ベクトル検索** | ChromaDB による類似度検索 |
 | **ハイブリッド検索** | ベクトル検索 + BM25 のスコア統合 |
+| **全文取得** | ソースドキュメントの全文取得（変換済みテキスト/オリジナル） |
 | **MCP サーバー** | FastMCP による stdio/HTTP インターフェース |
 | **評価 CLI** | 検索精度の評価パイプライン |
 | **URL 安全性チェック** | Google Safe Browsing API による URL 検証 |
@@ -131,6 +132,7 @@ git-flow ベースのブランチ戦略を採用。詳細は `~/.claude/docs/spe
 ### 基盤仕様
 
 - [RAG ナレッジ](docs/specs/rag-knowledge.md)
+- [検索レスポンス + 全文取得](docs/specs/search-response.md)
 - [Zenn インジェスター](docs/specs/zenn-ingester.md)
 - [BlueSky インジェスター](docs/specs/bluesky-ingester.md)
 - [ドキュメントインジェスター](docs/specs/document-ingester.md)

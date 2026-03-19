@@ -154,8 +154,13 @@ class RAGSettings(BaseModel):
     rag_zenn_request_timeout: int = Field(ge=1, le=120)
     rag_zenn_request_interval: float = Field(ge=0.1, le=60.0)
 
+    # クロール per-request タイムアウト
+    rag_crawl_request_timeout: int = Field(ge=1, le=120)
+
     # ドキュメントインジェスター
     rag_document_supported_extensions: str
+    rag_document_http_mode_enabled: bool
+    rag_document_allowed_dirs: str
 
     # PDF バックエンド
     rag_pdf_backend: Literal["auto", "mineru", "pymupdf4llm"]

@@ -1,7 +1,7 @@
 """RAG MCPサーバーのテスト.
 
-仕様: docs/specs/rag-knowledge.md
-11個のRAGツール（rag_search, rag_add, rag_crawl, rag_crawl_preview,
+仕様: docs/specs/rag-knowledge.md, docs/specs/search-response.md, docs/specs/rebuild-stats.md
+12個のRAGツール（rag_search, rag_get_document, rag_add, rag_crawl, rag_crawl_preview,
 rag_crawl_zenn, rag_crawl_bluesky, rag_add_document, rag_crawl_documents,
 rag_delete, rag_rebuild, rag_stats）が
 MCPサーバーとして公開されていることを検証する。
@@ -30,8 +30,8 @@ def _reset_rag_global_state() -> None:
 
 
 @pytest.mark.asyncio
-async def test_rag_server_exposes_eleven_tools() -> None:
-    """RAG MCPサーバーが11個のツールを公開すること."""
+async def test_rag_server_exposes_twelve_tools() -> None:
+    """RAG MCPサーバーが12個のツールを公開すること."""
     mod = import_module("rag.server")
     server = mod.mcp
 
@@ -39,9 +39,10 @@ async def test_rag_server_exposes_eleven_tools() -> None:
     tool_names = {t.name for t in tools}
 
     expected = {
-        "rag_search", "rag_add", "rag_crawl", "rag_crawl_preview",
-        "rag_crawl_zenn", "rag_crawl_bluesky", "rag_add_document",
-        "rag_crawl_documents", "rag_delete", "rag_rebuild", "rag_stats",
+        "rag_search", "rag_get_document", "rag_add", "rag_crawl",
+        "rag_crawl_preview", "rag_crawl_zenn", "rag_crawl_bluesky",
+        "rag_add_document", "rag_crawl_documents", "rag_delete",
+        "rag_rebuild", "rag_stats",
     }
     assert tool_names == expected, f"Expected {expected}, got {tool_names}"
 
@@ -53,25 +54,21 @@ async def test_rag_server_tool_count() -> None:
     server = mod.mcp
 
     tools = await server.list_tools()
-    assert len(tools) == 11
+    assert len(tools) == 12
 
 
 class TestRagSearchOutput:
-    """rag_search ツールの出力フォーマットテスト（準Agentic Search, Issue #548）."""
+    """rag_search ツールのチャンク単位出力フォーマットテスト（#251）."""
 
     @pytest.fixture(autouse=True)
     def _patch_rag_service(self) -> None:
         """rag_search のテスト用に RAGKnowledgeService をモックする."""
         self.mock_service = AsyncMock()
-        self.mock_service.get_full_page_text = AsyncMock(
-            return_value="ページ全文テキスト"
-        )
         self.mock_settings = MagicMock()
         self.mock_settings.rag_retrieval_count = 3
-        self.mock_settings.rag_max_response_chars = None
 
     async def test_output_contains_vector_and_bm25_sections(self) -> None:
-        """出力にベクトル検索結果とBM25検索結果のセクションが含まれること（#548）."""
+        """出力にベクトル検索結果とBM25検索結果のセクションが含まれること."""
         mod = import_module("rag.server")
 
         self.mock_service.retrieve_raw_results = AsyncMock(
@@ -81,7 +78,10 @@ class TestRagSearchOutput:
                         text="ベクトルの結果テキスト",
                         source_url="https://example.com/vec1",
                         distance=0.234,
-                        chunk_index=0,
+                        chunk_index=2,
+                        title="ガイドページ",
+                        source_type="web",
+                        total_chunks=15,
                     ),
                 ],
                 bm25_results=[
@@ -90,12 +90,13 @@ class TestRagSearchOutput:
                         source_url="https://example.com/bm25_1",
                         score=4.521,
                         doc_id="doc1",
+                        chunk_index=4,
+                        title="サンプル記事",
+                        source_type="zenn",
+                        total_chunks=20,
                     ),
                 ],
             )
-        )
-        self.mock_service.get_full_page_text = AsyncMock(
-            side_effect=lambda url: f"{url} のページ全文"
         )
 
         with (
@@ -105,20 +106,23 @@ class TestRagSearchOutput:
             result = await mod.rag_search("テストクエリ")
 
         assert "## ベクトル検索結果 (意味的類似度)" in result
-        assert "## BM25検索結果 (キーワード一致)" in result
+        assert "## BM25 検索結果 (キーワード一致)" in result
 
-    async def test_output_contains_source_urls(self) -> None:
-        """出力に Source: URL 行が含まれること（#548）."""
+    async def test_output_contains_chunk_metadata(self) -> None:
+        """各結果にSource/Title/Chunk/Typeメタデータが含まれること."""
         mod = import_module("rag.server")
 
         self.mock_service.retrieve_raw_results = AsyncMock(
             return_value=RawSearchResults(
                 vector_results=[
                     VectorSearchItem(
-                        text="テキスト",
-                        source_url="https://example.com/page1",
-                        distance=0.1,
-                        chunk_index=0,
+                        text="チャンクテキスト",
+                        source_url="https://example.com/docs/guide",
+                        distance=0.234,
+                        chunk_index=2,
+                        title="ガイドページ",
+                        source_type="web",
+                        total_chunks=15,
                     ),
                 ],
                 bm25_results=[],
@@ -131,10 +135,41 @@ class TestRagSearchOutput:
         ):
             result = await mod.rag_search("テスト")
 
-        assert "Source: https://example.com/page1" in result
+        assert "Source: https://example.com/docs/guide" in result
+        assert "Title: ガイドページ" in result
+        assert "Chunk: 3/15" in result
+        assert "Type: web" in result
+        assert "チャンクテキスト" in result
+
+    async def test_chunk_position_with_unknown_total(self) -> None:
+        """total_chunks=0（レガシーデータ）のとき Chunk: N/? と表示されること."""
+        mod = import_module("rag.server")
+
+        self.mock_service.retrieve_raw_results = AsyncMock(
+            return_value=RawSearchResults(
+                vector_results=[
+                    VectorSearchItem(
+                        text="テキスト",
+                        source_url="https://example.com/page1",
+                        distance=0.1,
+                        chunk_index=4,
+                        total_chunks=0,
+                    ),
+                ],
+                bm25_results=[],
+            )
+        )
+
+        with (
+            patch.object(mod, "_get_rag_service", return_value=self.mock_service),
+            patch.object(mod, "get_settings", return_value=self.mock_settings),
+        ):
+            result = await mod.rag_search("テスト")
+
+        assert "Chunk: 5/?" in result
 
     async def test_output_contains_raw_scores(self) -> None:
-        """出力に生スコアが含まれること（#548）."""
+        """出力に生スコアが含まれること."""
         mod = import_module("rag.server")
 
         self.mock_service.retrieve_raw_results = AsyncMock(
@@ -186,26 +221,26 @@ class TestRagSearchOutput:
 
         assert result == "該当する情報が見つかりませんでした"
 
-    async def test_output_contains_full_page_text(self) -> None:
-        """チャンクテキストの代わりにページ全文が返ること（#575）."""
+    async def test_chunk_text_returned_directly(self) -> None:
+        """チャンクテキストがそのまま返却されること（ページ全文ではない）."""
         mod = import_module("rag.server")
 
         self.mock_service.retrieve_raw_results = AsyncMock(
             return_value=RawSearchResults(
                 vector_results=[
                     VectorSearchItem(
-                        text="チャンク断片",
+                        text="これはチャンクテキストです",
                         source_url="https://example.com/page1",
                         distance=0.1,
                         chunk_index=0,
+                        title="ページ1",
+                        source_type="web",
+                        total_chunks=5,
                     ),
                 ],
                 bm25_results=[],
             )
         )
-        self.mock_service.get_full_page_text = AsyncMock(
-            return_value="これはページ全文のテキストです。複数チャンクが結合されています。"
-        )
 
         with (
             patch.object(mod, "_get_rag_service", return_value=self.mock_service),
@@ -213,75 +248,36 @@ class TestRagSearchOutput:
         ):
             result = await mod.rag_search("テスト")
 
-        assert "これはページ全文のテキストです。複数チャンクが結合されています。" in result
-        assert "チャンク断片" not in result
+        assert "これはチャンクテキストです" in result
 
-    async def test_duplicate_url_cross_engine_shows_reference(self) -> None:
-        """ベクトル→BM25で同一URLが重複した場合、参照テキストが出ること（#575）."""
+    async def test_same_source_different_chunks_shown_individually(self) -> None:
+        """同一ソースの異なるチャンクが個別に表示されること."""
         mod = import_module("rag.server")
 
-        same_url = "https://example.com/same-page"
         self.mock_service.retrieve_raw_results = AsyncMock(
             return_value=RawSearchResults(
                 vector_results=[
                     VectorSearchItem(
-                        text="ベクトルチャンク",
-                        source_url=same_url,
+                        text="チャンク1のテキスト",
+                        source_url="https://example.com/page",
                         distance=0.1,
                         chunk_index=0,
-                    ),
-                ],
-                bm25_results=[
-                    BM25SearchItem(
-                        text="BM25チャンク",
-                        source_url=same_url,
-                        score=5.0,
-                        doc_id="doc1",
-                    ),
-                ],
-            )
-        )
-        self.mock_service.get_full_page_text = AsyncMock(
-            return_value="ページ全文テキスト"
-        )
-
-        with (
-            patch.object(mod, "_get_rag_service", return_value=self.mock_service),
-            patch.object(mod, "get_settings", return_value=self.mock_settings),
-        ):
-            result = await mod.rag_search("テスト")
-
-        # ベクトル検索結果にはページ全文が出る
-        assert "ページ全文テキスト" in result
-        # BM25検索結果には参照テキストが出る
-        assert "ベクトル検索結果 Result 1 に掲載済み" in result
-
-    async def test_duplicate_url_within_same_engine(self) -> None:
-        """同一エンジン内で同一URLが重複した場合、2回目以降は参照テキストが出ること（#575）."""
-        mod = import_module("rag.server")
-
-        same_url = "https://example.com/same-page"
-        self.mock_service.retrieve_raw_results = AsyncMock(
-            return_value=RawSearchResults(
-                vector_results=[
-                    VectorSearchItem(
-                        text="チャンク1",
-                        source_url=same_url,
-                        distance=0.1,
-                        chunk_index=0,
+                        title="ページ",
+                        source_type="web",
+                        total_chunks=3,
                     ),
                     VectorSearchItem(
-                        text="チャンク2",
-                        source_url=same_url,
+                        text="チャンク2のテキスト",
+                        source_url="https://example.com/page",
                         distance=0.2,
-                        chunk_index=1,
+                        chunk_index=2,
+                        title="ページ",
+                        source_type="web",
+                        total_chunks=3,
                     ),
                 ],
                 bm25_results=[],
             )
-        )
-        self.mock_service.get_full_page_text = AsyncMock(
-            return_value="全文テキスト"
         )
 
         with (
@@ -290,10 +286,10 @@ class TestRagSearchOutput:
         ):
             result = await mod.rag_search("テスト")
 
-        # Result 1 にはページ全文が出る
-        assert "全文テキスト" in result
-        # Result 2 には参照テキストが出る
-        assert "ベクトル検索結果 Result 1 に掲載済み" in result
+        assert "チャンク1のテキスト" in result
+        assert "チャンク2のテキスト" in result
+        assert "Chunk: 1/3" in result
+        assert "Chunk: 3/3" in result
 
 
 class TestConfigureAndRun:
@@ -387,343 +383,174 @@ class TestConfigureAndRun:
         mock_log.assert_called_once_with("MCP server shut down")
 
 
-class TestRagSearchResponseTruncation:
-    """rag_search レスポンスサイズ上限ガードのテスト（#26）."""
+class TestRagGetDocumentTool:
+    """rag_get_document ツールのテスト（#251）."""
 
     @pytest.fixture(autouse=True)
-    def _patch_rag_service(self) -> None:
-        """rag_search のテスト用に RAGKnowledgeService をモックする."""
-        self.mock_service = AsyncMock()
+    def _patch_settings(self) -> None:
+        """テスト用の設定をモックする."""
         self.mock_settings = MagicMock()
-        self.mock_settings.rag_retrieval_count = 3
-
-    async def test_response_not_truncated_when_limit_is_none(self) -> None:
-        """上限未設定時はレスポンスがそのまま返ること（#26）."""
-        mod = import_module("rag.server")
-
-        self.mock_service.retrieve_raw_results = AsyncMock(
-            return_value=RawSearchResults(
-                vector_results=[
-                    VectorSearchItem(
-                        text="テキスト",
-                        source_url="https://example.com/page1",
-                        distance=0.1,
-                        chunk_index=0,
-                    ),
-                ],
-                bm25_results=[],
-            )
-        )
-        self.mock_service.get_full_page_text = AsyncMock(
-            return_value="ページ全文テキスト"
-        )
+        self.mock_settings.source_store_dir = "/tmp/source_store"
+        self.mock_settings.converted_store_dir = "/tmp/converted_store"
         self.mock_settings.rag_max_response_chars = None
 
-        with (
-            patch.object(mod, "_get_rag_service", return_value=self.mock_service),
-            patch.object(mod, "get_settings", return_value=self.mock_settings),
-        ):
-            result = await mod.rag_search("テスト")
+    async def test_format_text_returns_document(self) -> None:
+        """format=text でドキュメントが返ること."""
+        from rag.rag_knowledge import DocumentResult
 
-        assert "切り詰めました" not in result
-        assert "ページ全文テキスト" in result
-
-    async def test_response_not_truncated_when_within_limit(self) -> None:
-        """レスポンスが上限以下の場合はそのまま返ること（#26）."""
         mod = import_module("rag.server")
-
-        self.mock_service.retrieve_raw_results = AsyncMock(
-            return_value=RawSearchResults(
-                vector_results=[
-                    VectorSearchItem(
-                        text="テキスト",
-                        source_url="https://example.com/page1",
-                        distance=0.1,
-                        chunk_index=0,
-                    ),
-                ],
-                bm25_results=[],
-            )
+        mock_result = DocumentResult(
+            source_id="https://example.com/docs/guide",
+            title="ガイドページ",
+            source_type="web",
+            format="text",
+            content="これはドキュメント全文です。",
         )
-        self.mock_service.get_full_page_text = AsyncMock(
-            return_value="短いテキスト"
-        )
-        self.mock_settings.rag_max_response_chars = 100000
 
         with (
-            patch.object(mod, "_get_rag_service", return_value=self.mock_service),
             patch.object(mod, "get_settings", return_value=self.mock_settings),
+            patch.object(mod, "get_document", return_value=mock_result),
         ):
-            result = await mod.rag_search("テスト")
+            result = await mod.rag_get_document("https://example.com/docs/guide")
 
-        assert "切り詰めました" not in result
-        assert "短いテキスト" in result
+        assert "Source: https://example.com/docs/guide" in result
+        assert "Title: ガイドページ" in result
+        assert "Type: web" in result
+        assert "Format: text" in result
+        assert "これはドキュメント全文です。" in result
 
-    async def test_response_truncated_when_exceeds_limit(self) -> None:
-        """レスポンスが上限を超えた場合にトランケートされること（#26）."""
+    async def test_format_original_returns_document(self) -> None:
+        """format=original でドキュメントが返ること."""
+        from rag.rag_knowledge import DocumentResult
+
         mod = import_module("rag.server")
-
-        long_text = "あ" * 500
-        self.mock_service.retrieve_raw_results = AsyncMock(
-            return_value=RawSearchResults(
-                vector_results=[
-                    VectorSearchItem(
-                        text="テキスト",
-                        source_url="https://example.com/page1",
-                        distance=0.1,
-                        chunk_index=0,
-                    ),
-                ],
-                bm25_results=[],
-            )
+        mock_result = DocumentResult(
+            source_id="https://example.com/page.html",
+            title="HTMLページ",
+            source_type="web",
+            format="original",
+            content="<html>...</html>",
         )
-        self.mock_service.get_full_page_text = AsyncMock(
-            return_value=long_text
-        )
-        self.mock_settings.rag_max_response_chars = 100
 
         with (
-            patch.object(mod, "_get_rag_service", return_value=self.mock_service),
             patch.object(mod, "get_settings", return_value=self.mock_settings),
+            patch.object(mod, "get_document", return_value=mock_result),
         ):
-            result = await mod.rag_search("テスト")
-
-        assert "切り詰めました" in result
-        assert "100" in result
-
-    async def test_truncated_response_starts_with_original_content(self) -> None:
-        """トランケートされたレスポンスが元の内容の先頭部分を含むこと（#26）."""
-        mod = import_module("rag.server")
-
-        self.mock_service.retrieve_raw_results = AsyncMock(
-            return_value=RawSearchResults(
-                vector_results=[
-                    VectorSearchItem(
-                        text="テキスト",
-                        source_url="https://example.com/page1",
-                        distance=0.1,
-                        chunk_index=0,
-                    ),
-                ],
-                bm25_results=[],
+            result = await mod.rag_get_document(
+                "https://example.com/page.html", format="original"
             )
+
+        assert "Format: original" in result
+        assert "<html>...</html>" in result
+
+    async def test_missing_source_returns_error(self) -> None:
+        """存在しない source_id でエラーが返ること."""
+        from rag.rag_knowledge import DocumentResult
+
+        mod = import_module("rag.server")
+        mock_result = DocumentResult(
+            source_id="nonexistent",
+            title="",
+            source_type="",
+            format="text",
+            content="",
+            error="ソースが見つかりません: nonexistent",
         )
-        self.mock_service.get_full_page_text = AsyncMock(
-            return_value="あ" * 1000
-        )
-        self.mock_settings.rag_max_response_chars = 50
 
         with (
-            patch.object(mod, "_get_rag_service", return_value=self.mock_service),
             patch.object(mod, "get_settings", return_value=self.mock_settings),
+            patch.object(mod, "get_document", return_value=mock_result),
         ):
-            result = await mod.rag_search("テスト")
+            result = await mod.rag_get_document("nonexistent")
 
-        # トランケート通知の前の部分が正確に50文字であること
-        truncation_marker = "\n\n…（レスポンスが上限の"
-        marker_pos = result.index(truncation_marker)
-        assert marker_pos == 50
+        assert "エラー:" in result
+        assert "ソースが見つかりません" in result
 
-    async def test_early_termination_skips_later_page_fetches(self) -> None:
-        """上限到達後は後続Resultのページ全文取得が呼ばれないこと（#56）."""
+    async def test_truncation_with_max_response_chars(self) -> None:
+        """rag_max_response_chars でトランケーションされ、通知文込みで上限内に収まること."""
+        from rag.rag_knowledge import DocumentResult
+
         mod = import_module("rag.server")
+        max_chars = 200
+        self.mock_settings.rag_max_response_chars = max_chars
 
-        # 3つの結果を用意し、上限を小さく設定
-        self.mock_service.retrieve_raw_results = AsyncMock(
-            return_value=RawSearchResults(
-                vector_results=[
-                    VectorSearchItem(
-                        text="テキスト1",
-                        source_url="https://example.com/page1",
-                        distance=0.1,
-                        chunk_index=0,
-                    ),
-                    VectorSearchItem(
-                        text="テキスト2",
-                        source_url="https://example.com/page2",
-                        distance=0.2,
-                        chunk_index=0,
-                    ),
-                    VectorSearchItem(
-                        text="テキスト3",
-                        source_url="https://example.com/page3",
-                        distance=0.3,
-                        chunk_index=0,
-                    ),
-                ],
-                bm25_results=[],
-            )
+        long_content = "あ" * 1000
+        mock_result = DocumentResult(
+            source_id="https://example.com/long",
+            title="Long Page",
+            source_type="web",
+            format="text",
+            content=long_content,
         )
-        call_log: list[str] = []
-
-        async def _mock_get_full_page_text(url: str) -> str:
-            call_log.append(url)
-            return "あ" * 500
-
-        self.mock_service.get_full_page_text = _mock_get_full_page_text
-        # 最初の Result のヘッダー + ページ全文で超過する程度の上限
-        self.mock_settings.rag_max_response_chars = 100
 
         with (
-            patch.object(mod, "_get_rag_service", return_value=self.mock_service),
             patch.object(mod, "get_settings", return_value=self.mock_settings),
+            patch.object(mod, "get_document", return_value=mock_result),
         ):
-            result = await mod.rag_search("テスト")
+            result = await mod.rag_get_document("https://example.com/long")
 
-        # page1 の全文は取得されるが、page2, page3 は取得されない
-        assert "https://example.com/page1" in call_log
-        assert "https://example.com/page2" not in call_log
-        assert "https://example.com/page3" not in call_log
-        assert "切り詰めました" in result
+        assert "トランケートされました" in result
+        assert "--output" in result
+        # 通知文込みで上限以内に収まること
+        assert len(result) <= max_chars
 
-    async def test_early_termination_skips_bm25_when_vector_exhausts_budget(
-        self,
-    ) -> None:
-        """ベクトル検索結果で上限到達時、BM25のページ全文取得が呼ばれないこと（#56）."""
+    async def test_no_truncation_when_limit_is_none(self) -> None:
+        """rag_max_response_chars=None のときトランケーションされないこと."""
+        from rag.rag_knowledge import DocumentResult
+
         mod = import_module("rag.server")
-
-        self.mock_service.retrieve_raw_results = AsyncMock(
-            return_value=RawSearchResults(
-                vector_results=[
-                    VectorSearchItem(
-                        text="テキスト",
-                        source_url="https://example.com/vec1",
-                        distance=0.1,
-                        chunk_index=0,
-                    ),
-                ],
-                bm25_results=[
-                    BM25SearchItem(
-                        text="テキスト",
-                        source_url="https://example.com/bm25_1",
-                        score=5.0,
-                        doc_id="doc1",
-                    ),
-                ],
-            )
-        )
-        call_log: list[str] = []
-
-        async def _mock_get_full_page_text(url: str) -> str:
-            call_log.append(url)
-            return "あ" * 500
-
-        self.mock_service.get_full_page_text = _mock_get_full_page_text
-        self.mock_settings.rag_max_response_chars = 100
-
-        with (
-            patch.object(mod, "_get_rag_service", return_value=self.mock_service),
-            patch.object(mod, "get_settings", return_value=self.mock_settings),
-        ):
-            result = await mod.rag_search("テスト")
-
-        # BM25側のページ全文は取得されない
-        assert "https://example.com/bm25_1" not in call_log
-        assert "切り詰めました" in result
-
-    async def test_no_early_termination_when_limit_is_none(self) -> None:
-        """上限未設定時は全Resultのページ全文が取得されること（#56）."""
-        mod = import_module("rag.server")
-
-        self.mock_service.retrieve_raw_results = AsyncMock(
-            return_value=RawSearchResults(
-                vector_results=[
-                    VectorSearchItem(
-                        text="テキスト1",
-                        source_url="https://example.com/page1",
-                        distance=0.1,
-                        chunk_index=0,
-                    ),
-                    VectorSearchItem(
-                        text="テキスト2",
-                        source_url="https://example.com/page2",
-                        distance=0.2,
-                        chunk_index=0,
-                    ),
-                ],
-                bm25_results=[],
-            )
-        )
-        call_log: list[str] = []
-
-        async def _mock_get_full_page_text(url: str) -> str:
-            call_log.append(url)
-            return "あ" * 500
-
-        self.mock_service.get_full_page_text = _mock_get_full_page_text
         self.mock_settings.rag_max_response_chars = None
 
+        long_content = "あ" * 1000
+        mock_result = DocumentResult(
+            source_id="https://example.com/long",
+            title="Long Page",
+            source_type="web",
+            format="text",
+            content=long_content,
+        )
+
         with (
-            patch.object(mod, "_get_rag_service", return_value=self.mock_service),
             patch.object(mod, "get_settings", return_value=self.mock_settings),
+            patch.object(mod, "get_document", return_value=mock_result),
         ):
-            result = await mod.rag_search("テスト")
+            result = await mod.rag_get_document("https://example.com/long")
 
-        # 全てのページ全文が取得される
-        assert "https://example.com/page1" in call_log
-        assert "https://example.com/page2" in call_log
-        assert "切り詰めました" not in result
+        assert "トランケートされました" not in result
+        assert long_content in result
 
-    async def test_exact_fit_separator_does_not_trigger_truncation(self) -> None:
-        """内容が上限ちょうどに収まった時、空セパレータで誤って打ち切り通知が出ないこと."""
+    async def test_binary_file_returns_info(self) -> None:
+        """format=original でバイナリファイルの場合、MIME情報が返ること."""
+        from rag.rag_knowledge import DocumentResult
+
+        mod = import_module("rag.server")
+        mock_result = DocumentResult(
+            source_id="https://example.com/doc.pdf",
+            title="PDF Doc",
+            source_type="web",
+            format="original",
+            content="バイナリファイルです（MIME: application/pdf, サイズ: 1,234 bytes）。\nテキスト形式で取得するには format=text を指定してください。",
+            is_binary=True,
+        )
+
+        with (
+            patch.object(mod, "get_settings", return_value=self.mock_settings),
+            patch.object(mod, "get_document", return_value=mock_result),
+        ):
+            result = await mod.rag_get_document(
+                "https://example.com/doc.pdf", format="original"
+            )
+
+        assert "application/pdf" in result
+        assert "format=text" in result
+
+    async def test_invalid_format_returns_error(self) -> None:
+        """無効な format 値でエラーが返ること."""
         mod = import_module("rag.server")
 
-        page_text = "テスト内容"
-        self.mock_service.retrieve_raw_results = AsyncMock(
-            return_value=RawSearchResults(
-                vector_results=[
-                    VectorSearchItem(
-                        text="テキスト",
-                        source_url="https://example.com/page1",
-                        distance=0.1,
-                        chunk_index=0,
-                    ),
-                ],
-                bm25_results=[],
-            )
-        )
-        self.mock_service.get_full_page_text = AsyncMock(return_value=page_text)
+        result = await mod.rag_get_document("source", format="invalid")
 
-        # まず上限なしで実行し、実際のレスポンス長を取得
-        self.mock_settings.rag_max_response_chars = None
-        with (
-            patch.object(mod, "_get_rag_service", return_value=self.mock_service),
-            patch.object(mod, "get_settings", return_value=self.mock_settings),
-        ):
-            unlimited_result = await mod.rag_search("テスト")
-
-        # rstrip 後のレスポンス長をちょうど上限に設定
-        # （空セパレータが上限超過の原因にならないことを確認）
-        exact_limit = len(unlimited_result.rstrip())
-        self.mock_settings.rag_max_response_chars = exact_limit
-
-        with (
-            patch.object(mod, "_get_rag_service", return_value=self.mock_service),
-            patch.object(mod, "get_settings", return_value=self.mock_settings),
-        ):
-            result = await mod.rag_search("テスト")
-
-        assert "切り詰めました" not in result
-
-    async def test_empty_results_not_affected_by_limit(self) -> None:
-        """0件結果は上限設定に影響されないこと（#26）."""
-        mod = import_module("rag.server")
-
-        self.mock_service.retrieve_raw_results = AsyncMock(
-            return_value=RawSearchResults(
-                vector_results=[],
-                bm25_results=[],
-            )
-        )
-        self.mock_settings.rag_max_response_chars = 10
-
-        with (
-            patch.object(mod, "_get_rag_service", return_value=self.mock_service),
-            patch.object(mod, "get_settings", return_value=self.mock_settings),
-        ):
-            result = await mod.rag_search("テスト")
-
-        assert result == "該当する情報が見つかりませんでした"
+        assert "無効な format" in result
 
 
 class TestRagCrawlPreviewTool:

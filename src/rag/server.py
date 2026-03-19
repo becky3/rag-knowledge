@@ -1,10 +1,11 @@
 """RAG MCP サーバー
 
-仕様: docs/specs/rag-knowledge.md
+仕様: docs/specs/rag-knowledge.md, docs/specs/search-response.md
 独立リポジトリとして動作する。
 
-FastMCP を使用して 11 個の RAG ツールを公開する:
-- rag_search: ナレッジベースから関連情報を検索
+FastMCP を使用して 12 個の RAG ツールを公開する:
+- rag_search: ナレッジベース検索（チャンク単位返却）
+- rag_get_document: ソース全文取得
 - rag_add: 単一ページをナレッジベースに取り込み
 - rag_crawl: リンク集ページからクロール＆一括取り込み
 - rag_crawl_preview: クロール対象ページのプレビュー（タイトル・URL一覧）
@@ -48,7 +49,11 @@ with contextlib.redirect_stdout(io.StringIO()):
     from .ingesters.document_ingester import DocumentIngester, PdfBackendConfig
     from .ingesters.web_ingester import WebIngester
     from .ingesters.zenn_ingester import ZennIngester
-    from .rag_knowledge import RAGKnowledgeService
+    from .rag_knowledge import (
+        RAGKnowledgeService,
+        format_document_response,
+        get_document,
+    )
     from .safe_browsing import create_safe_browsing_client
     from .vector_store import VectorStore
     from .web_crawler import WebCrawler
@@ -162,6 +167,22 @@ def _build_rag_service() -> RAGKnowledgeService:
 _VALID_SOURCE_TYPES: frozenset[str] = frozenset({"web", "zenn", "bluesky", "document"})
 
 
+def _format_chunk_position(chunk_index: int, total_chunks: int) -> str:
+    """チャンク位置を表示用文字列にフォーマットする.
+
+    Args:
+        chunk_index: 0始まりチャンクインデックス
+        total_chunks: チャンク総数（0はレガシーデータ＝不明）
+
+    Returns:
+        "3/15" 形式、total_chunks 不明時は "3/?"
+    """
+    pos = chunk_index + 1
+    if total_chunks > 0:
+        return f"{pos}/{total_chunks}"
+    return f"{pos}/?"
+
+
 @mcp.tool()
 async def rag_search(
     query: str,
@@ -183,11 +204,9 @@ async def rag_search(
 
     Returns:
         検索結果テキスト。ベクトル検索結果とBM25検索結果をセクション分けして返す。
-        ヒットしたチャンクのページ全文を返却し、同一URLの重複は参照テキストで省略する。
+        各結果はチャンク単位で返却される。
+        詳細が必要な場合は rag_get_document でソースの全文を取得できる。
         結果が0件の場合は「該当する情報が見つかりませんでした」を返す。
-        RAG_MAX_RESPONSE_CHARS 設定時、累積文字数を追跡し上限到達後はページ全文取得を
-        早期打ち切りする。末尾にトランケート通知が付記される。
-        未設定時はトランケーションなし（検索結果をそのまま返す）。
     """
     if source_type is not None and source_type not in _VALID_SOURCE_TYPES:
         valid = ", ".join(sorted(_VALID_SOURCE_TYPES))
@@ -204,103 +223,86 @@ async def rag_search(
     if not raw.vector_results and not raw.bm25_results:
         return "該当する情報が見つかりませんでした"
 
-    max_chars = get_settings().rag_max_response_chars
-
-    # ページ全文キャッシュ（同一URLの多重DB問い合わせ防止）
-    page_cache: dict[str, str] = {}
-    # URL初出記録: url -> (セクション名, Result番号)
-    url_first_seen: dict[str, tuple[str, int]] = {}
-
-    async def _get_page_text(url: str) -> str:
-        if url not in page_cache:
-            page_cache[url] = await service.get_full_page_text(url)
-        return page_cache[url]
-
     parts: list[str] = []
-    # 累積文字数を追跡（改行セパレータ分も含む）
-    current_chars = 0
-    budget_exceeded = False
-
-    def _append_part(text: str) -> None:
-        """parts にテキストを追加し、累積文字数を更新する."""
-        nonlocal current_chars, budget_exceeded
-        # 改行セパレータ分を加算（最初の要素以外）
-        sep_len = 1 if parts else 0
-        new_chars = sep_len + len(text)
-
-        if max_chars is not None and current_chars + new_chars > max_chars:
-            # 空セパレータは装飾目的なので、超過しても打ち切りとみなさずスキップ
-            if not text:
-                return
-            # 残り文字数分だけ追加してトランケート
-            remaining = max_chars - current_chars - sep_len
-            if remaining > 0:
-                parts.append(text[:remaining])
-                current_chars = max_chars
-            budget_exceeded = True
-            return
-
-        parts.append(text)
-        current_chars += new_chars
 
     # ベクトル検索結果
     if raw.vector_results:
-        _append_part("## ベクトル検索結果 (意味的類似度)\n")
-        for i, vec_item in enumerate(raw.vector_results, start=1):
-            if budget_exceeded:
-                break
-            _append_part(f"### Result {i} [distance={vec_item.distance:.3f}]")
-            if budget_exceeded:
-                break
-            _append_part(f"Source: {vec_item.source_url}")
-            if budget_exceeded:
-                break
-
-            if vec_item.source_url not in url_first_seen:
-                url_first_seen[vec_item.source_url] = ("ベクトル検索結果", i)
-                full_text = await _get_page_text(vec_item.source_url)
-                _append_part(full_text)
-            else:
-                section, num = url_first_seen[vec_item.source_url]
-                _append_part(
-                    f"（この URL のページ全文は{section} Result {num} に掲載済み）"
-                )
-            if budget_exceeded:
-                break
-            _append_part("")
+        parts.append("## ベクトル検索結果 (意味的類似度)\n")
+        for i, item in enumerate(raw.vector_results, start=1):
+            chunk_pos = _format_chunk_position(item.chunk_index, item.total_chunks)
+            parts.append(f"### Result {i} [distance={item.distance:.3f}]")
+            parts.append(f"Source: {item.source_url}")
+            parts.append(f"Title: {item.title}")
+            parts.append(f"Chunk: {chunk_pos}")
+            parts.append(f"Type: {item.source_type}")
+            parts.append("")
+            parts.append(item.text)
+            parts.append("")
 
     # BM25検索結果
-    if raw.bm25_results and not budget_exceeded:
-        _append_part("## BM25検索結果 (キーワード一致)\n")
+    if raw.bm25_results:
+        parts.append("## BM25 検索結果 (キーワード一致)\n")
         for i, bm25_item in enumerate(raw.bm25_results, start=1):
-            if budget_exceeded:
-                break
-            _append_part(f"### Result {i} [score={bm25_item.score:.3f}]")
-            if budget_exceeded:
-                break
-            _append_part(f"Source: {bm25_item.source_url}")
-            if budget_exceeded:
-                break
+            chunk_pos = _format_chunk_position(bm25_item.chunk_index, bm25_item.total_chunks)
+            parts.append(f"### Result {i} [score={bm25_item.score:.3f}]")
+            parts.append(f"Source: {bm25_item.source_url}")
+            parts.append(f"Title: {bm25_item.title}")
+            parts.append(f"Chunk: {chunk_pos}")
+            parts.append(f"Type: {bm25_item.source_type}")
+            parts.append("")
+            parts.append(bm25_item.text)
+            parts.append("")
 
-            if bm25_item.source_url not in url_first_seen:
-                url_first_seen[bm25_item.source_url] = ("BM25検索結果", i)
-                full_text = await _get_page_text(bm25_item.source_url)
-                _append_part(full_text)
-            else:
-                section, num = url_first_seen[bm25_item.source_url]
-                _append_part(
-                    f"（この URL のページ全文は{section} Result {num} に掲載済み）"
-                )
-            if budget_exceeded:
-                break
-            _append_part("")
+    return "\n".join(parts).rstrip()
 
-    response = "\n".join(parts).rstrip()
 
-    if budget_exceeded:
-        response += "\n\n…（レスポンスが上限の{:,}文字を超えたため切り詰めました）".format(
-            max_chars
-        )
+_VALID_DOCUMENT_FORMATS: frozenset[str] = frozenset({"text", "original"})
+
+
+@mcp.tool()
+async def rag_get_document(
+    source_id: str,
+    format: str = "text",
+) -> str:
+    """[rag-knowledge] RAG get document - ソース全文取得。rag_search で見つけたソースの全文を取得する。
+
+    knowledge base, full text, document retrieval, get source.
+    rag_search の結果に含まれる Source 値をそのまま source_id に指定する。
+    format=text で変換済みテキスト、format=original でオリジナルデータを取得できる。
+
+    Args:
+        source_id: ソース識別子（rag_search の Source 値）
+        format: 取得形式。"text"（変換済みテキスト、デフォルト）または "original"（オリジナル）
+
+    Returns:
+        メタデータヘッダー + ドキュメント全文。
+        大規模ドキュメントはトランケーションされる場合がある。
+        その場合は CLI の --output オプションで全文取得可能。
+    """
+    if format not in _VALID_DOCUMENT_FORMATS:
+        valid = ", ".join(sorted(_VALID_DOCUMENT_FORMATS))
+        return f"無効な format: {format!r}（有効値: {valid}）"
+
+    settings = get_settings()
+    result = await asyncio.to_thread(
+        get_document,
+        source_id=source_id,
+        format=format,
+        source_store_dir=settings.source_store_dir,
+        converted_store_dir=settings.converted_store_dir,
+    )
+
+    response = format_document_response(result)
+
+    # MCP 経由の場合、rag_max_response_chars でトランケーション（通知文込みで上限内に収める）
+    max_chars = settings.rag_max_response_chars
+    if max_chars is not None and not result.error and len(response) > max_chars:
+        truncation_notice = (
+            "\n\n…（レスポンスが上限の{:,}文字を超えたためトランケートされました。"
+            "CLI の --output オプションで全文取得できます）"
+        ).format(max_chars)
+        truncate_at = max(0, max_chars - len(truncation_notice))
+        response = response[:truncate_at] + truncation_notice
 
     return response
 

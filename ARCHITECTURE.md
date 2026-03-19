@@ -23,6 +23,7 @@
 | `src/rag/embedding/` | Embedding プロバイダー抽象化（ローカル / OpenAI）とファクトリ |
 | `src/rag/ingesters/` | インジェスタープラグイン（BaseIngester 抽象基底・IngestedContent 共通モデル・WebIngester・ZennIngester・DocumentIngester・BlueskyIngester） |
 | `src/rag/pipeline/` | パイプライン制御（git 操作・差分検知・ステージ間連携・4モード実行） |
+| `src/rag/pipeline/ingesters/` | 新アーキテクチャ用インジェスター（source_store へのファイル配置 + .meta 生成） |
 | `src/rag/store/` | source_store 管理（ファイル配置・.meta 読み書き・metadata.db 操作・URL パス変換） |
 
 ### ルートレベルファイル
@@ -55,6 +56,11 @@
 | `bluesky-ingester.md` | `src/rag/ingesters/bluesky_ingester.py` |
 | `source-store.md` | `src/rag/store/` |
 | `pipeline-controller.md` | `src/rag/pipeline/` |
+| `ingesters/common.md` | `src/rag/pipeline/ingesters/_common.py` |
+| `ingesters/web.md` | `src/rag/pipeline/ingesters/web.py` |
+| `ingesters/bluesky.md` | `src/rag/pipeline/ingesters/bluesky.py` |
+| `ingesters/zenn.md` | `src/rag/pipeline/ingesters/zenn.py` |
+| `ingesters/local.md` | `src/rag/pipeline/ingesters/local.py` |
 
 ### Claude Code 拡張
 

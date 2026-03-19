@@ -250,6 +250,24 @@ def main() -> None:
         help="出力フォーマット（text/json）",
     )
 
+    # get-document サブコマンド
+    doc_parser = subparsers.add_parser("get-document", help="ソースの全文を取得")
+    doc_parser.add_argument(
+        "source_id",
+        help="ソース識別子（rag_search の Source 値）",
+    )
+    doc_parser.add_argument(
+        "--format",
+        choices=["text", "original"],
+        default="text",
+        help="取得形式（text: 変換済みテキスト、original: オリジナル、デフォルト: text）",
+    )
+    doc_parser.add_argument(
+        "--output",
+        default=None,
+        help="出力先ファイルパス（未指定時は標準出力）",
+    )
+
     # rebuild サブコマンド
     rebuild_parser = subparsers.add_parser(
         "rebuild",
@@ -276,6 +294,8 @@ def main() -> None:
         asyncio.run(init_test_db(args))
     elif args.command == "crawl-preview":
         asyncio.run(run_crawl_preview(args))
+    elif args.command == "get-document":
+        run_get_document(args)
     elif args.command == "rebuild":
         run_rebuild(args)
 
@@ -808,6 +828,39 @@ async def run_crawl_preview(args: argparse.Namespace) -> None:
             print(f"   {page.url}")
 
 
+def run_get_document(args: argparse.Namespace) -> None:
+    """ドキュメント全文を取得して出力する.
+
+    Args:
+        args: コマンドライン引数
+    """
+    from .config import get_settings
+    from .rag_knowledge import format_document_response, get_document
+
+    settings = get_settings()
+
+    result = get_document(
+        source_id=args.source_id,
+        format=args.format,
+        source_store_dir=settings.source_store_dir,
+        converted_store_dir=settings.converted_store_dir,
+    )
+
+    if result.error:
+        print(f"エラー: {result.error}", file=sys.stderr)
+        sys.exit(1)
+
+    response = format_document_response(result)
+
+    if args.output:
+        output_path = Path(args.output)
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+        output_path.write_text(response, encoding="utf-8")
+        print(f"出力しました: {args.output}")
+    else:
+        print(response)
+
+
 def run_rebuild(args: argparse.Namespace) -> None:
     """再構築を実行する.
 
@@ -827,10 +880,9 @@ def run_rebuild(args: argparse.Namespace) -> None:
     from .indexer import Indexer
     from .ingesters.document_ingester import PdfBackendConfig
     from .pipeline.controller import PipelineController
+    from .store.models import SourceType
     from .store.source_store import SourceStore
     from .vector_store import VectorStore
-
-    from .store.models import SourceType
 
     mode: str = args.mode
     source_type: SourceType | None = args.source_type
