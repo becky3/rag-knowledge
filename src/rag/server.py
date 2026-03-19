@@ -841,8 +841,12 @@ def _collect_source_store_stats(
         rel = file.relative_to(source_store_dir)
         rel_posix = rel.as_posix()
 
-        # 除外: .git/ (.git ファイル含む), .meta, metadata.db*, .gitignore
-        if rel_posix.startswith(".git") or rel_posix == ".gitignore":
+        # 除外: .git (ディレクトリ/ファイル), .meta, metadata.db*, .gitignore
+        if (
+            rel_posix == ".git"
+            or rel_posix.startswith(".git/")
+            or rel_posix == ".gitignore"
+        ):
             continue
         name = file.name
         if name.endswith(".meta") or name.startswith("metadata.db"):
@@ -973,7 +977,13 @@ async def rag_rebuild(mode: str, source_type: str | None = None) -> str:
             return controller.run_incremental()
 
         start = time.monotonic()
-        summary = await asyncio.to_thread(_run_rebuild)
+        task = asyncio.ensure_future(asyncio.to_thread(_run_rebuild))
+        try:
+            summary = await asyncio.shield(task)
+        except asyncio.CancelledError:
+            # キャンセルされてもスレッド完了を待ってからロック解放
+            await task
+            raise
         elapsed = time.monotonic() - start
 
         # RAG サービスをリセット（インデックスが変更されたため）
