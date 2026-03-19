@@ -72,7 +72,7 @@
 既存の `rag_stats` ツールを拡張し、source_store・converted_store・metadata.db の統計情報を追加する。
 
 - パラメータの追加なし（既存インターフェースと後方互換）
-- source_store / converted_store が未設定の場合は該当セクションを「未設定」と表示し、エラーにはしない
+- `SOURCE_STORE_DIR` / `CONVERTED_STORE_DIR` の検証はツール実行時に行う（サーバー起動時のバリデーション対象外）。未設定の場合は該当セクションを「未設定」と表示し、エラーにはしない
 
 ### CLI
 
@@ -130,7 +130,7 @@ flowchart TD
 | 総ファイル数 | converted_store 内のファイル数 |
 | 総サイズ | 全ファイルの合計サイズ |
 
-#### インデックス統計（既存維持）
+#### インデックス統計（既存データ項目を維持）
 
 | 項目 | 内容 |
 |------|------|
@@ -138,7 +138,7 @@ flowchart TD
 | ソース数 | ユニークなソース URL 数 |
 | ドメイン別ソース一覧 | ドメインごとのページ数・チャンク数（表示上限: `rag_stats_max_sources` 設定値） |
 
-既存の `rag_stats` 出力をそのまま維持する。
+既存の `rag_stats` が提供するデータ項目を維持する。出力テキストの形式は新セクション（source_store / converted_store / metadata.db）の追加に伴い統合フォーマットに変更する。
 
 #### metadata.db 統計
 
@@ -200,6 +200,8 @@ flowchart TD
 
 #### バックアップ手順
 
+前提条件: パイプライン処理が実行中でないこと。バックアップ中に metadata.db への書き込みが発生すると整合性が崩れる可能性がある。
+
 1. metadata.db の WAL をフラッシュする
 
    ```
@@ -213,7 +215,11 @@ WAL フラッシュを行わないと、WAL ファイルと DB ファイルの�
 #### リストア手順
 
 1. source_store ディレクトリをリストア先に配置する
-2. パイプライン制御の「全再構築」（`rag_rebuild --mode full`）を実行して converted_store とインデックスを再生成する
+2. パイプライン制御の「全再構築」を実行して converted_store とインデックスを再生成する
+
+   ```
+   uv run python -m rag.cli rebuild --mode full
+   ```
 
 metadata.db が破損・消失している場合は、パイプライン制御の DB 再構築機能が source_store のファイルと `.meta` から metadata.db を再構築する（[source-store.md](source-store.md) のエッジケース参照）。
 
