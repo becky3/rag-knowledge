@@ -10,7 +10,7 @@
 
 | 媒体 | 仕様書 | 状態 |
 |------|--------|------|
-| Web | web.md | 作成予定（#265） |
+| Web | [web.md](web.md) | 作成済み |
 | BlueSky | bluesky.md | 作成予定（#266） |
 | Zenn | zenn.md | 作成予定（#268） |
 | Local | local.md | 作成予定（#267） |
