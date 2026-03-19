@@ -22,6 +22,7 @@ RAG Knowledge は、外部 Web ページから収集した知識をベクトル 
 | 12 | source_store | 全データの根源ストレージ（git 管理、.meta サイドカー） | [source-store.md](source-store.md) |
 | 13 | パイプライン制御 | 3段パイプラインのステージ間連携・差分更新制御 | [pipeline-controller.md](pipeline-controller.md) |
 | 14 | コンバーター | source_store のファイルを converted_store のテキストに変換 | [converter.md](converter.md) |
+| 15 | 再構築・統計・バックアップ | パイプライン再構築の MCP/CLI 公開・統計拡張・バックアップ手順 | [rebuild-stats.md](rebuild-stats.md) |
 
 ## 3. 技術スタック
 
