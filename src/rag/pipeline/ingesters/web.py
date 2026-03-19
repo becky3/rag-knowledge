@@ -279,7 +279,6 @@ class WebIngester:
         # ページ取得（リダイレクトブロック）
         resp = await client.get(
             url,
-            timeout=self._crawl_request_timeout,
             follow_redirects=False,
         )
         if 300 <= resp.status_code < 400:
@@ -343,7 +342,6 @@ class WebIngester:
         # インデックスページ取得
         resp = await client.get(
             url,
-            timeout=self._crawl_request_timeout,
             follow_redirects=False,
         )
         if 300 <= resp.status_code < 400:
@@ -409,7 +407,6 @@ class WebIngester:
 
                 page_resp = await client.get(
                     link,
-                    timeout=self._crawl_request_timeout,
                     follow_redirects=False,
                 )
                 if 300 <= page_resp.status_code < 400:
@@ -477,7 +474,6 @@ class WebIngester:
         # インデックスページ取得
         resp = await client.get(
             url,
-            timeout=self._crawl_request_timeout,
             follow_redirects=False,
         )
         if 300 <= resp.status_code < 400:
@@ -515,7 +511,6 @@ class WebIngester:
             try:
                 page_resp = await client.get(
                     link,
-                    timeout=self._crawl_request_timeout,
                     follow_redirects=False,
                 )
                 if page_resp.status_code < 300:
@@ -550,7 +545,7 @@ class WebIngester:
         robots_url = f"{key}/robots.txt"
         try:
             resp = await client.get(
-                robots_url, timeout=self._crawl_request_timeout,
+                robots_url,
                 follow_redirects=False,
             )
             if 300 <= resp.status_code < 400:
