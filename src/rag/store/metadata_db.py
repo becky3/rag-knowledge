@@ -95,7 +95,14 @@ class MetadataDB:
 
         同一 source_id が既に存在する場合は上書きする
         （再取り込み時の更新動作。deleted → active への復帰を含む）。
+        異なる source_id で同一 file_path のレコードが存在する場合は
+        旧レコードを削除してから登録する。
         """
+        # file_path UNIQUE 競合の防止: 異なる source_id で同じ file_path を持つ旧レコードを削除
+        self._connection.execute(
+            "DELETE FROM sources WHERE file_path = ? AND source_id != ?",
+            (file_path, source_id),
+        )
         self._connection.execute(
             """\
             INSERT INTO sources
@@ -279,6 +286,7 @@ class MetadataDB:
 
     def checkpoint(self) -> None:
         """WAL をフラッシュする（バックアップ前に実行）."""
+        self._connection.commit()
         self._connection.execute("PRAGMA wal_checkpoint(TRUNCATE)")
 
     def source_count(self, *, status: SourceStatus | None = None) -> int:

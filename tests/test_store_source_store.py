@@ -70,6 +70,29 @@ class TestPlaceFile:
         assert record is not None
         assert record.title == "Test Page"
 
+    def test_place_rejects_absolute_path(self, store: SourceStore) -> None:
+        """絶対パスは拒否される."""
+        with pytest.raises(ValueError, match="絶対パス"):
+            store.place_file(
+                source_type="local", data=b"x", rel_path="/etc/passwd"
+            )
+
+    def test_place_rejects_path_traversal(self, store: SourceStore) -> None:
+        """パストラバーサルは拒否される."""
+        with pytest.raises(ValueError, match="パストラバーサル"):
+            store.place_file(
+                source_type="local", data=b"x", rel_path="local/../../etc/passwd"
+            )
+
+    def test_place_web_without_metadata_raises(self, store: SourceStore) -> None:
+        """非 local 媒体で metadata=None は ValueError."""
+        with pytest.raises(ValueError, match="metadata は web 媒体で必須"):
+            store.place_file(
+                source_type="web",
+                data=b"<html></html>",
+                rel_path="web/https/example.com/page.html",
+            )
+
     def test_place_overwrites_existing(self, store: SourceStore) -> None:
         """既存ファイルを上書きする."""
         store.place_file(

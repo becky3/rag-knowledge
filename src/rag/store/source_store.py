@@ -83,21 +83,26 @@ class SourceStore:
 
         Returns:
             配置先のフルパス
+
+        Raises:
+            ValueError: rel_path が不正（絶対パス、パストラバーサル等）、
+                        または非 local 媒体で metadata が未指定の場合
         """
+        # パストラバーサル防止
+        self._validate_rel_path(rel_path)
+
+        # 非 local 媒体は metadata 必須
+        if source_type not in _NO_META_TYPES and metadata is None:
+            msg = f"metadata は {source_type} 媒体で必須です (rel_path={rel_path})"
+            raise ValueError(msg)
+
         dest = self._root / rel_path
         dest.parent.mkdir(parents=True, exist_ok=True)
         dest.write_bytes(data)
 
         # .meta 生成（local 以外）
-        if source_type not in _NO_META_TYPES:
-            if metadata is not None:
-                write_meta(dest, metadata)
-            else:
-                logger.warning(
-                    "metadata が指定されていません (source_type=%s, rel_path=%s)",
-                    source_type,
-                    rel_path,
-                )
+        if source_type not in _NO_META_TYPES and metadata is not None:
+            write_meta(dest, metadata)
 
         # metadata.db 登録
         content_hash = hashlib.sha256(data).hexdigest()
@@ -106,7 +111,15 @@ class SourceStore:
         source_id = self._resolve_source_id(source_type, rel_path, metadata)
         title = self._resolve_title(source_type, rel_path, metadata)
 
+        # created_at: 既存レコード > metadata['collected_at'] > now の優先順
         existing = self._db.get_source(source_id)
+        if existing:
+            created_at = existing.created_at
+        elif metadata and "collected_at" in metadata:
+            created_at = str(metadata["collected_at"])
+        else:
+            created_at = now
+
         self._db.register_source(
             source_id=source_id,
             source_type=source_type,
@@ -114,7 +127,7 @@ class SourceStore:
             title=title,
             content_hash=content_hash,
             file_size=len(data),
-            created_at=existing.created_at if existing else now,
+            created_at=created_at,
             updated_at=now,
         )
 
@@ -173,14 +186,16 @@ class SourceStore:
 
         content = file_path.read_bytes()
 
-        # メタデータ構築
+        # メタデータ構築: .meta の collected_at を優先、なければ DB の created_at
         extra: dict[str, Any] = {}
+        collected_at = record.created_at
         if record.source_type not in _NO_META_TYPES:
             meta_file = meta_path_for(file_path)
             if meta_file.exists():
                 meta_data = read_meta(file_path)
+                collected_at = str(meta_data.pop("collected_at", collected_at))
                 # 共通フィールドを除いた残りが extra
-                for key in ("source_id", "source_type", "title", "collected_at"):
+                for key in ("source_id", "source_type", "title"):
                     meta_data.pop(key, None)
                 extra = meta_data
 
@@ -188,7 +203,7 @@ class SourceStore:
             source_id=record.source_id,
             source_type=record.source_type,
             title=record.title,
-            collected_at=record.created_at,
+            collected_at=collected_at,
             extra=extra,
         )
 
@@ -310,6 +325,28 @@ class SourceStore:
         return count
 
     # --- 内部ユーティリティ ---
+
+    def _validate_rel_path(self, rel_path: str) -> None:
+        """相対パスの安全性を検証する.
+
+        Raises:
+            ValueError: 絶対パス、パストラバーサル、source_store 外への脱出の場合
+        """
+        from pathlib import PurePosixPath
+
+        pure = PurePosixPath(rel_path)
+        if pure.is_absolute():
+            msg = f"絶対パスは許可されていません: {rel_path}"
+            raise ValueError(msg)
+        if ".." in pure.parts:
+            msg = f"パストラバーサルは許可されていません: {rel_path}"
+            raise ValueError(msg)
+        # resolve 後に root_dir 配下に収まることを確認
+        resolved = (self._root / rel_path).resolve()
+        root_resolved = self._root.resolve()
+        if not str(resolved).startswith(str(root_resolved)):
+            msg = f"source_store 外へのパスは許可されていません: {rel_path}"
+            raise ValueError(msg)
 
     @staticmethod
     def _detect_source_type(rel_path: str) -> SourceType:

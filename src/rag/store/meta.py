@@ -43,9 +43,12 @@ def read_meta(file_path: Path) -> dict[str, Any]:
     """
     mp = meta_path_for(file_path)
     with open(mp, encoding="utf-8") as f:
-        data: dict[str, Any] = yaml.safe_load(f)
+        data = yaml.safe_load(f)
     if data is None:
         return {}
+    if not isinstance(data, dict):
+        msg = f".meta ファイルの内容が辞書ではありません: {mp}"
+        raise ValueError(msg)
     return data
 
 
@@ -58,7 +61,7 @@ def write_meta(file_path: Path, metadata: dict[str, Any]) -> None:
     """
     mp = meta_path_for(file_path)
     with open(mp, "w", encoding="utf-8") as f:
-        yaml.dump(
+        yaml.safe_dump(
             metadata,
             f,
             default_flow_style=False,
