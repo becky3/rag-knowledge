@@ -56,6 +56,7 @@ class Indexer:
         self._metadata_db = metadata_db
         self._chunk_size = chunk_size
         self._chunk_overlap = chunk_overlap
+        self._embedding_checked = False
 
     def add(
         self,
@@ -197,13 +198,19 @@ class Indexer:
     def _check_embedding_available(self) -> None:
         """Embedding プロバイダーの疎通を確認する.
 
+        初回呼び出し時のみ実際にチェックし、結果をキャッシュする。
+        バッチ処理（run_index_only 等）での重複チェックを回避する。
+
         Raises:
             ConnectionError: プロバイダーに接続できない場合
         """
+        if self._embedding_checked:
+            return
         available = _run_async(self._vector_store._embedding.is_available())
         if not available:
             msg = "Embedding プロバイダーに接続できません"
             raise ConnectionError(msg)
+        self._embedding_checked = True
 
     def _read_file(self, path: Path) -> str:
         """ファイルの内容を読み取る."""

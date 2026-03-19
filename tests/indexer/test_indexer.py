@@ -630,6 +630,19 @@ class TestEmbeddingAvailability:
         """clear は Embedding チェックを行わないこと（エラーにならない）."""
         indexer.clear()
 
+    def test_check_cached_after_first_success(
+        self, indexer: Indexer, tmp_path: Path,
+    ) -> None:
+        """疎通確認は初回成功後にキャッシュされ、2回目以降はスキップされること."""
+        assert indexer._embedding_checked is False
+        path = _write_text_file(tmp_path, "doc.txt", "Content for cache test.")
+        meta = _make_metadata(source_id="src-cache")
+
+        indexer.add("src-cache", path, meta)
+
+        # 初回 add 後にキャッシュされている
+        assert indexer._embedding_checked is True
+
 
 # --- テスト: IndexerProtocol 適合性 ---
 
