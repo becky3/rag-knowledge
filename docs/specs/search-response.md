@@ -30,6 +30,7 @@ rag_search のレスポンスをチャンク単位の返却に変更し、全文
 - **レスポンス形式**: MCP ツールのレスポンスはプレーンテキスト形式を維持する（JSON 等の構造化形式には変更しない）
 - **全文取得の論理削除対応**: `status` が `deleted` のソースも全文取得可能とする（[source-store.md](source-store.md) の「ファイル取得」インターフェースの設計意図を踏襲）
 - **MCP + CLI 両提供**: rag_get_document は MCP ツールと CLI サブコマンドの両方で提供する。内部ロジックは共通関数とする
+- **レスポンスサイズ制御**: rag_get_document は大規模ドキュメントに対して `rag_max_response_chars`（既存設定項目を継続利用）でトランケーションを行う。上限超過時は末尾にトランケート通知（CLI の `--output` オプションでの全文取得を案内）を付記し、CLI の `--output` オプションによるファイル出力ではトランケーションを適用しない（全文出力）
 
 本コンポーネントは外部 API 通信を行わないため、想定プロファイル・安全制約セクションは省略する。
 
@@ -87,7 +88,8 @@ MCP クライアントからの rag_search ツール呼び出し。入力パラ�
 
 メタデータの後に空行を挟み、チャンクテキストを出力する。
 
-レスポンスの Source 値は、既存のチャンクメタデータフィールド `source_url` の値に対応する。この値をそのまま rag_get_document の `source_id` パラメータとして使用できる。
+レスポンスの Source 値は、[source-store.md](source-store.md) で定義された `source_id` を使用する。既存のチャンクメタデータフィールド `source_url` は新アーキテクチャでは `source_id` に読み替える（web は URL、bluesky は AT URI、zenn は記事 URL、local は source_store 内の相対パス）。
+この値をそのまま rag_get_document の `source_id` パラメータとして使用できる。
 
 **レスポンス形式例（ベクトル検索結果 2 件 + BM25 検索結果 1 件）:**
 
@@ -110,7 +112,7 @@ Type: bluesky
 
 チャンクテキストがここに入る...
 
-## BM25検索結果 (キーワード一致)
+## BM25 検索結果 (キーワード一致)
 
 ### Result 1 [score=4.521]
 Source: https://zenn.dev/alice/articles/sample
@@ -131,7 +133,7 @@ Type: zenn
 |---------|------|
 | ページ全文の結合・返却 | チャンク単位返却に置き換え。全文が必要な場合は rag_get_document を使用する |
 | 同一 URL の重複省略表示 | チャンク単位のため不要。同一ソースの異なるチャンクは個別に表示する |
-| `rag_max_response_chars` によるトランケーション | チャンク単位返却により自然にレスポンスがコンパクトになるため不要。設定項目を廃止する |
+| rag_search での `rag_max_response_chars` トランケーション | チャンク単位返却により rag_search では不要。設定項目は rag_get_document のレスポンスサイズ制御に転用する |
 
 ### rag_get_document（新規）
 
@@ -195,8 +197,10 @@ uv run python -m rag.cli get-document <source_id> [--format text|original] [--ou
 | rag_get_document で存在しない source_id を指定 | エラーメッセージを返す |
 | rag_get_document で論理削除済みのソースを指定 | ドキュメントを返す（論理削除済みでも全文取得可能） |
 | rag_get_document で converted_store にファイルが存在しない場合（format=text） | エラーメッセージを返す。source_store にオリジナルが存在する旨を通知し、`format=original` での取得を提案する |
-| rag_search で `total_chunks` が未設定または 0 のチャンク（レガシーデータ等） | Chunk 位置を `?/?` と表示する |
+| rag_search で `total_chunks` が未設定または 0 のチャンク（レガシーデータ等） | Chunk 位置を `{chunk_index+1}/?` と表示する（現在位置は既知のため保持し、総数のみ不明とする） |
 | rag_get_document で format=original 指定時にバイナリファイル（PDF 等）の場合 | ファイルの MIME タイプとファイルサイズを返し、テキスト形式での取得（format=text）を提案する。バイナリデータ自体は返さない |
+| rag_get_document で大規模ドキュメントの場合（MCP 経由） | `rag_max_response_chars` でトランケーションし、末尾に「トランケートされました。CLI の `--output` オプションで全文取得できます」と付記する |
+| rag_get_document で大規模ドキュメントの場合（CLI `--output` 指定） | トランケーションを適用せず全文をファイルに出力する |
 
 ## コンポーネント構成
 
@@ -251,17 +255,17 @@ rag_search のレスポンス形式変更は破壊的変更だが、以下の理
 |------|---------|-----|
 | rag_search レスポンス | ページ全文 | チャンクテキスト |
 | 全文取得 | rag_search 内で自動取得 | rag_get_document で明示的に取得 |
-| レスポンスサイズ制御 | `rag_max_response_chars` でトランケーション | チャンク単位返却で自然にコンパクト |
+| レスポンスサイズ制御 | `rag_max_response_chars` で rag_search をトランケーション | rag_search は不要。rag_get_document に転用 |
 | 同一ソースの重複 | 全文を省略表示 | チャンク単位のため不要 |
 
-**廃止する設定項目:**
+**用途変更する設定項目:**
 
 | 設定項目 | 理由 |
 |---------|------|
-| `rag_max_response_chars` | チャンク単位返却により不要 |
+| `rag_max_response_chars` | rag_search では不要。rag_get_document のレスポンスサイズ制御に転用するため、設定項目自体は維持する |
 
 ## 関連ドキュメント
 
-- [rag-knowledge.md](rag-knowledge.md) — RAG ナレッジ仕様（rag_search の現行仕様、MCP ツール一覧）。本仕様の実装時に MCP ツール一覧（ツール数・rag_search の説明）と `config.toml` 設定項目（`rag_max_response_chars` の削除）の更新が必要
+- [rag-knowledge.md](rag-knowledge.md) — RAG ナレッジ仕様（rag_search の現行仕様、MCP ツール一覧）。本仕様の実装時に MCP ツール一覧（ツール数・rag_search の説明）と `config.toml` 設定項目（`rag_max_response_chars` の用途変更）の更新が必要
 - [source-store.md](source-store.md) — source_store 仕様（ファイル取得インターフェース）
 - [pipeline-controller.md](pipeline-controller.md) — パイプライン制御仕様（converted_store）
