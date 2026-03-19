@@ -809,19 +809,22 @@ async def run_crawl_preview(args: argparse.Namespace) -> None:
     logger.info("Starting crawl preview for: %s", args.url)
 
     settings = get_settings()
-    source_store = SourceStore(Path(settings.source_store_dir))
-    source_store.initialize()
+    # crawl_preview は配置を行わないため、ディレクトリ作成のみ（DB 初期化不要）
+    source_store_dir = Path(settings.source_store_dir)
+    source_store_dir.mkdir(parents=True, exist_ok=True)
+    source_store = SourceStore(source_store_dir)
 
     web_ingester = WebIngester(
         source_store,
         max_crawl_pages=settings.rag_max_crawl_pages,
+        crawl_request_timeout=settings.rag_crawl_request_timeout,
         respect_robots_txt=settings.rag_respect_robots_txt,
         robots_txt_cache_ttl=settings.rag_robots_txt_cache_ttl,
     )
 
     try:
         async with ConstrainedClient(
-            request_timeout=30,
+            request_timeout=settings.rag_crawl_request_timeout,
             request_interval=settings.rag_crawl_delay_sec,
         ) as client:
             pages = await web_ingester.crawl_preview(

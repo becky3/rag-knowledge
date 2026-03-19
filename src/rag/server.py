@@ -186,7 +186,7 @@ def _build_pipeline_controller() -> PipelineController:
     converted_store_dir.mkdir(parents=True, exist_ok=True)
 
     source_store = SourceStore(source_store_dir)
-    source_store.db.initialize()
+    source_store.initialize()
 
     pdf_config = PdfBackendConfig(
         backend=settings.rag_pdf_backend,
@@ -228,23 +228,32 @@ def _build_pipeline_controller() -> PipelineController:
     )
 
 
+_safe_browsing_api_key_cache: str | None = None
+
+
 def _get_safe_browsing_api_key() -> str:
-    """Safe Browsing API キーを取得する.
+    """Safe Browsing API キーを取得する（プロセス内キャッシュ）.
 
     Returns:
         API キー。取得できない場合は空文字列。
     """
+    global _safe_browsing_api_key_cache
+    if _safe_browsing_api_key_cache is not None:
+        return _safe_browsing_api_key_cache
+
     settings = get_settings()
     if not settings.rag_url_safety_check:
+        _safe_browsing_api_key_cache = ""
         return ""
     try:
         key = get_secret(
             "GOOGLE_SAFE_BROWSING_API_KEY", service=_SECRET_SERVICE_NAME,
         )
-        return key or ""
+        _safe_browsing_api_key_cache = key or ""
     except (SecretNotFoundError, SecretStoreError):
         logger.warning("Safe Browsing API key not available")
-        return ""
+        _safe_browsing_api_key_cache = ""
+    return _safe_browsing_api_key_cache
 
 
 # --- レスポンスフォーマッタ ---
@@ -458,7 +467,7 @@ async def rag_add(url: str) -> str:
     try:
         api_key = _get_safe_browsing_api_key()
         async with ConstrainedClient(
-            request_timeout=30,
+            request_timeout=settings.rag_crawl_request_timeout,
             request_interval=settings.rag_crawl_delay_sec,
         ) as client:
             ingest_result = await web_ingester.add(
@@ -501,7 +510,7 @@ async def rag_crawl(url: str, pattern: str = "") -> str:
     try:
         api_key = _get_safe_browsing_api_key()
         async with ConstrainedClient(
-            request_timeout=30,
+            request_timeout=settings.rag_crawl_request_timeout,
             request_interval=settings.rag_crawl_delay_sec,
         ) as client:
             ingest_result = await web_ingester.crawl(
@@ -540,13 +549,16 @@ async def rag_crawl_preview(url: str, pattern: str = "") -> str:
     Returns:
         クロール対象ページの一覧テキスト
     """
-    controller = await _get_pipeline_controller()
-    web_ingester = _create_web_ingester(controller.source_store)
     settings = get_settings()
+    # crawl_preview は配置を行わないため、PipelineController の重い初期化を避ける
+    source_store_dir = Path(settings.source_store_dir)
+    source_store_dir.mkdir(parents=True, exist_ok=True)
+    source_store = SourceStore(source_store_dir)
+    web_ingester = _create_web_ingester(source_store)
 
     try:
         async with ConstrainedClient(
-            request_timeout=30,
+            request_timeout=settings.rag_crawl_request_timeout,
             request_interval=settings.rag_crawl_delay_sec,
         ) as client:
             pages = await web_ingester.crawl_preview(
