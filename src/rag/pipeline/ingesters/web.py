@@ -20,7 +20,15 @@ from typing import TYPE_CHECKING, Any
 
 from bs4 import BeautifulSoup
 
+from pathlib import PurePosixPath
+
 from rag.pipeline.ingesters._common import IngestResult, now_iso
+
+# converter が認識する拡張子（変換対象 + パススルー対象）
+# この拡張子を持つ URL は .html を付与しない
+_KNOWN_WEB_EXTENSIONS: frozenset[str] = frozenset(
+    {".html", ".htm", ".pdf", ".json", ".md", ".txt", ".adoc"},
+)
 
 if TYPE_CHECKING:
 
@@ -176,6 +184,17 @@ def _extract_links(html_text: str, base_url: str) -> list[str]:
     return links
 
 
+def _needs_html_extension(url: str) -> bool:
+    """URL パスが既知の拡張子を持たない場合に True を返す.
+
+    converter が認識する拡張子（.html, .pdf 等）を既に持つ URL には
+    .html を付与しない。拡張子がないか未知の場合のみ .html を付与する。
+    """
+    path = urlparse(url).path
+    ext = PurePosixPath(path).suffix.lower()
+    return ext not in _KNOWN_WEB_EXTENSIONS
+
+
 class WebIngester:
     """Web インジェスター.
 
@@ -283,10 +302,12 @@ class WebIngester:
             "url": url,
         }
 
+        ext = ".html" if _needs_html_extension(url) else ""
         self._store.place_file_from_url(
             url=url,
             data=data,
             metadata=metadata,
+            extension=ext,
         )
         result.placed += 1
 
@@ -408,10 +429,12 @@ class WebIngester:
                     "url": link,
                 }
 
+                ext = ".html" if _needs_html_extension(link) else ""
                 self._store.place_file_from_url(
                     url=link,
                     data=page_data,
                     metadata=metadata,
+                    extension=ext,
                 )
                 result.placed += 1
 

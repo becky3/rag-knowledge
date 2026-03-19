@@ -547,6 +547,68 @@ class TestRunIndexOnly:
         assert indexer.cleared == [None]
         assert "local/a.txt" in indexer.added
 
+    def test_html_source_maps_to_md_converted(
+        self,
+        controller: tuple[PipelineController, StubConverter, StubIndexer],
+        workspace: dict[str, Path],
+    ) -> None:
+        """HTML ソースの run_index_only は .md に変換されたパスを探す."""
+        ctrl, _, indexer = controller
+        _place_web_file(
+            workspace["source"],
+            "web/example.com/page.html",
+            source_id="https://example.com/page",
+        )
+        ctrl.commit("initial")
+        ctrl.run_incremental()
+
+        indexer.added.clear()
+
+        # converted_store に .md ファイルを配置（実際の converter が作るパス）
+        converted_md = workspace["converted"] / "web" / "example.com" / "page.md"
+        converted_md.parent.mkdir(parents=True, exist_ok=True)
+        converted_md.write_text("converted content", encoding="utf-8")
+
+        summary = ctrl.run_index_only()
+
+        assert summary.processed == 1
+        assert "https://example.com/page" in indexer.added
+
+    def test_json_source_maps_to_md_converted(
+        self,
+        controller: tuple[PipelineController, StubConverter, StubIndexer],
+        workspace: dict[str, Path],
+    ) -> None:
+        """JSON ソースの run_index_only は .md に変換されたパスを探す."""
+        ctrl, _, indexer = controller
+        # Zenn JSON ソースを配置
+        full = workspace["source"] / "zenn" / "articles" / "article1.json"
+        full.parent.mkdir(parents=True, exist_ok=True)
+        full.write_text('{"title": "test"}', encoding="utf-8")
+        meta = {
+            "source_id": "zenn/articles/article1",
+            "source_type": "zenn",
+            "title": "Test Article",
+            "collected_at": "2026-01-01T00:00:00+00:00",
+        }
+        meta_path = full.with_name(full.name + ".meta")
+        with open(meta_path, "w", encoding="utf-8") as f:
+            yaml.safe_dump(meta, f, allow_unicode=True)
+        ctrl.commit("initial")
+        ctrl.run_incremental()
+
+        indexer.added.clear()
+
+        # converted_store に .md ファイルを配置
+        converted_md = workspace["converted"] / "zenn" / "articles" / "article1.md"
+        converted_md.parent.mkdir(parents=True, exist_ok=True)
+        converted_md.write_text("converted content", encoding="utf-8")
+
+        summary = ctrl.run_index_only()
+
+        assert summary.processed == 1
+        assert "zenn/articles/article1" in indexer.added
+
     def test_skips_missing_converted(
         self,
         controller: tuple[PipelineController, StubConverter, StubIndexer],

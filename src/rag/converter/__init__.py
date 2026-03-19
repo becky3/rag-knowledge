@@ -9,6 +9,7 @@ from rag.converter.converter import (
     ConvertBatchResult,
     Converter,
     RegenOption,
+    get_converted_rel_path,
 )
 
 __all__ = [
@@ -16,4 +17,5 @@ __all__ = [
     "ConvertBatchResult",
     "Converter",
     "RegenOption",
+    "get_converted_rel_path",
 ]

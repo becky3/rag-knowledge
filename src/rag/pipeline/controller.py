@@ -13,6 +13,7 @@ import logging
 from datetime import datetime, timezone
 from pathlib import Path
 
+from rag.converter.converter import get_converted_rel_path
 from rag.pipeline.git_ops import GitOperations
 from rag.pipeline.models import (
     ChangeEntry,
@@ -30,6 +31,7 @@ from rag.store.models import (
     SourceRecord,
     SourceType,
 )
+from rag.store.resolve import resolve_source_id, resolve_title
 from rag.store.source_store import SourceStore
 
 logger = logging.getLogger(__name__)
@@ -322,7 +324,8 @@ class PipelineController:
 
         for record in records:
             try:
-                converted_path = self._converted_store_dir / record.file_path
+                converted_rel = get_converted_rel_path(record.file_path)
+                converted_path = self._converted_store_dir / converted_rel
                 if not converted_path.exists():
                     logger.warning(
                         "converted_store にファイルがありません: %s",
@@ -589,10 +592,10 @@ class PipelineController:
         source_type = detect_source_type(file_path)
         meta_dict = self._read_meta_dict(file_path)
 
-        source_id = _resolve_source_id_from_meta(
+        source_id = resolve_source_id(
             source_type, file_path, meta_dict,
         )
-        title = _resolve_title_from_meta(
+        title = resolve_title(
             source_type, file_path, meta_dict,
         )
 
@@ -644,7 +647,7 @@ class PipelineController:
             return record.source_id
         source_type = detect_source_type(file_path)
         meta_dict = self._read_meta_dict(file_path)
-        return _resolve_source_id_from_meta(source_type, file_path, meta_dict)
+        return resolve_source_id(source_type, file_path, meta_dict)
 
     def _read_meta_dict(self, file_path: str) -> dict[str, str] | None:
         """ファイルの .meta を読み込む."""
@@ -666,10 +669,10 @@ class PipelineController:
         source_type = detect_source_type(file_path)
         meta_dict = self._read_meta_dict(file_path) or {}
 
-        source_id = _resolve_source_id_from_meta(
+        source_id = resolve_source_id(
             source_type, file_path, meta_dict,
         )
-        title = _resolve_title_from_meta(
+        title = resolve_title(
             source_type, file_path, meta_dict,
         )
         collected_at = str(meta_dict.get(
@@ -717,30 +720,4 @@ class PipelineController:
 
 
 # --- モジュールレベルユーティリティ ---
-
-
-def _resolve_source_id_from_meta(
-    source_type: SourceType,
-    rel_path: str,
-    meta: dict[str, str] | None,
-) -> str:
-    """source_id を決定する.
-
-    .meta に source_id があればそれを使用し、
-    なければ相対パスをフォールバックとして使用する。
-    SourceStore._resolve_source_id と同一ロジック。
-    """
-    if meta and "source_id" in meta:
-        return str(meta["source_id"])
-    return rel_path
-
-
-def _resolve_title_from_meta(
-    source_type: SourceType,
-    rel_path: str,
-    meta: dict[str, str] | None,
-) -> str:
-    """タイトルを決定する."""
-    if meta and "title" in meta:
-        return str(meta["title"])
-    return Path(rel_path).stem
+# resolve_source_id / resolve_title は rag.store.resolve に一元化

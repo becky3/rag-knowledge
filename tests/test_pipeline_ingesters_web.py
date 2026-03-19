@@ -25,6 +25,7 @@ from rag.pipeline.ingesters.web import (
     _check_ssrf,
     _extract_links,
     _extract_title,
+    _needs_html_extension,
     _validate_url,
 )
 from rag.store.source_store import SourceStore
@@ -168,6 +169,34 @@ def _make_mock_response(
     return resp
 
 
+class TestNeedsHtmlExtension:
+    """_needs_html_extension のテスト."""
+
+    def test_extensionless_url_needs_html(self) -> None:
+        """拡張子なし URL は .html が必要."""
+        assert _needs_html_extension("https://example.com/docs/guide") is True
+
+    def test_html_url_does_not_need_html(self) -> None:
+        """.html URL は .html 不要."""
+        assert _needs_html_extension("https://example.com/page.html") is False
+
+    def test_pdf_url_does_not_need_html(self) -> None:
+        """.pdf URL は .html 不要."""
+        assert _needs_html_extension("https://example.com/doc.pdf") is False
+
+    def test_json_url_does_not_need_html(self) -> None:
+        """.json URL は .html 不要."""
+        assert _needs_html_extension("https://example.com/data.json") is False
+
+    def test_unknown_extension_needs_html(self) -> None:
+        """未知の拡張子は .html が必要."""
+        assert _needs_html_extension("https://example.com/file.xyz") is True
+
+    def test_trailing_slash_needs_html(self) -> None:
+        """末尾スラッシュは .html が必要."""
+        assert _needs_html_extension("https://example.com/docs/") is True
+
+
 @pytest.mark.asyncio()
 class TestAdd:
     """add のテスト."""
@@ -217,6 +246,138 @@ class TestAdd:
         )
         with pytest.raises(ValueError, match="リダイレクト"):
             await ingester.add("https://example.com/redirect", client=client)
+
+
+@pytest.mark.asyncio()
+class TestAddExtension:
+    """add の拡張子付与テスト."""
+
+    async def test_extensionless_url_gets_html_extension(
+        self, source_store: SourceStore,
+    ) -> None:
+        """拡張子なし URL のファイルが .html 拡張子付きで配置されること."""
+        html_content = b"<html><head><title>Guide</title></head><body>guide</body></html>"
+        resp = _make_mock_response(content=html_content)
+        client = AsyncMock()
+        client.get = AsyncMock(return_value=resp)
+
+        ingester = WebIngester(
+            source_store,
+            url_safety_check=False,
+            respect_robots_txt=False,
+        )
+        result = await ingester.add(
+            "https://example.com/docs/guide",
+            client=client,
+        )
+
+        assert result.placed == 1
+
+        # source_store 内に .html 拡張子付きでファイルが存在するか確認
+        files = source_store.list_files(source_type="web")
+        file_paths = [f.as_posix() for f in files]
+        assert any(p.endswith(".html") for p in file_paths), (
+            f"Expected .html file, got: {file_paths}"
+        )
+
+    async def test_url_with_html_extension_no_double(
+        self, source_store: SourceStore,
+    ) -> None:
+        """既に .html 拡張子がある URL では二重付加されないこと."""
+        html_content = b"<html><head><title>Page</title></head><body>page</body></html>"
+        resp = _make_mock_response(content=html_content)
+        client = AsyncMock()
+        client.get = AsyncMock(return_value=resp)
+
+        ingester = WebIngester(
+            source_store,
+            url_safety_check=False,
+            respect_robots_txt=False,
+        )
+        result = await ingester.add(
+            "https://example.com/page.html",
+            client=client,
+        )
+
+        assert result.placed == 1
+
+        files = source_store.list_files(source_type="web")
+        file_paths = [f.as_posix() for f in files]
+        # .html.html にならないことを確認
+        assert not any(p.endswith(".html.html") for p in file_paths), (
+            f"Double .html detected: {file_paths}"
+        )
+
+
+    async def test_pdf_url_no_html_extension(
+        self, source_store: SourceStore,
+    ) -> None:
+        """PDF URL には .html が付かず .pdf のまま配置されること."""
+        pdf_content = b"%PDF-1.4 fake pdf"
+        resp = _make_mock_response(content=pdf_content)
+        client = AsyncMock()
+        client.get = AsyncMock(return_value=resp)
+
+        ingester = WebIngester(
+            source_store,
+            url_safety_check=False,
+            respect_robots_txt=False,
+        )
+        result = await ingester.add(
+            "https://example.com/report.pdf",
+            client=client,
+        )
+
+        assert result.placed == 1
+
+        files = source_store.list_files(source_type="web")
+        file_paths = [f.as_posix() for f in files]
+        # .pdf.html にならないことを確認
+        assert not any(p.endswith(".pdf.html") for p in file_paths), (
+            f"Unexpected .pdf.html: {file_paths}"
+        )
+        assert any(p.endswith(".pdf") for p in file_paths), (
+            f"Expected .pdf file, got: {file_paths}"
+        )
+
+
+@pytest.mark.asyncio()
+class TestCrawlExtension:
+    """crawl の拡張子付与テスト."""
+
+    async def test_crawl_extensionless_urls(
+        self, source_store: SourceStore,
+    ) -> None:
+        """crawl で拡張子なし URL のファイルが .html 拡張子付きで配置されること."""
+        index_html = b"""
+        <html><body>
+        <a href="https://example.com/docs/page1">Page 1</a>
+        </body></html>
+        """
+        page_html = b"<html><head><title>Page</title></head><body>content</body></html>"
+
+        index_resp = _make_mock_response(content=index_html)
+        page_resp = _make_mock_response(content=page_html)
+        client = AsyncMock()
+        client.get = AsyncMock(side_effect=[index_resp, page_resp])
+
+        ingester = WebIngester(
+            source_store,
+            url_safety_check=False,
+            respect_robots_txt=False,
+        )
+        result = await ingester.crawl(
+            "https://example.com/index",
+            client=client,
+        )
+
+        assert result.placed == 1
+
+        files = source_store.list_files(source_type="web")
+        file_paths = [f.as_posix() for f in files]
+        assert any(p.endswith(".html") for p in file_paths), (
+            f"Expected .html file, got: {file_paths}"
+        )
 
 
 @pytest.mark.asyncio()

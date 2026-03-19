@@ -133,7 +133,7 @@ class Converter:
             raise ConversionSkippedError(f"Unsupported extension: {ext}")
 
         # 出力パス算出
-        converted_rel_path = _get_converted_rel_path(file_path)
+        converted_rel_path = get_converted_rel_path(file_path)
         converted_path = converted_store_dir / converted_rel_path
 
         # パススルー判定
@@ -191,7 +191,7 @@ class Converter:
             file_path: source_store 内の相対パス
             converted_store_dir: converted_store のルートディレクトリ
         """
-        converted_rel_path = _get_converted_rel_path(file_path)
+        converted_rel_path = get_converted_rel_path(file_path)
         converted_path = converted_store_dir / converted_rel_path
         if converted_path.exists():
             converted_path.unlink()
@@ -342,8 +342,11 @@ class Converter:
         return None
 
 
-def _get_converted_rel_path(file_path: str) -> str:
+def get_converted_rel_path(file_path: str) -> str:
     """source_store 相対パスから converted_store の相対パスを算出する.
+
+    拡張子マッピング（_EXTENSION_OUTPUT_MAP）に基づいて、
+    source_store の拡張子を converted_store の拡張子に変換する。
 
     Args:
         file_path: source_store 内の相対パス

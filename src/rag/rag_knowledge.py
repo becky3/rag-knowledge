@@ -17,6 +17,7 @@ from urllib.parse import urldefrag
 
 from .chunker import chunk_text
 from .content_detector import ContentType, detect_content_type
+from .converter.converter import get_converted_rel_path
 from .heading_chunker import chunk_by_headings
 from .ingesters.base_ingester import IngestedContent
 from .table_chunker import chunk_table_data
@@ -1005,28 +1006,10 @@ class RAGKnowledgeService:
 
 # --- ドキュメント全文取得（rag_get_document 共通ロジック） ---
 
-# converted_store 出力拡張子マッピング
-# converter/converter.py の _EXTENSION_OUTPUT_MAP と同期が必要
-_CONVERTED_EXT_MAP: dict[str, str] = {
-    ".html": ".md",
-    ".pdf": ".md",
-    ".json": ".md",
-}
-
 # テキストファイルとして扱う拡張子
 _TEXT_EXTENSIONS: frozenset[str] = frozenset(
     {".md", ".txt", ".adoc", ".html", ".json"}
 )
-
-
-def _get_converted_rel_path(file_path: str) -> str:
-    """source_store 相対パスから converted_store の相対パスを算出する."""
-    p = PurePosixPath(file_path)
-    ext = p.suffix.lower()
-    new_ext = _CONVERTED_EXT_MAP.get(ext)
-    if new_ext is not None:
-        return str(p.with_suffix(new_ext))
-    return file_path
 
 
 @dataclass
@@ -1154,7 +1137,7 @@ def get_document(
             )
 
     # format == "text": converted_store から読み取り
-    converted_rel = _get_converted_rel_path(file_path)
+    converted_rel = get_converted_rel_path(file_path)
     converted_path = Path(converted_store_dir) / converted_rel
 
     if not converted_path.exists():
