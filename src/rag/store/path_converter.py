@@ -60,10 +60,12 @@ def url_to_path(url: str) -> str:
         msg = f"サポートされていない URL スキーム: {scheme}"
         raise ValueError(msg)
 
-    # ホスト名 + ポート（ポートありの場合 : を全角に）
-    host = parsed.hostname or ""
-    if parsed.port:
-        host = f"{host}{_HALF_TO_FULL[':']}{parsed.port}"
+    # ホスト名 + ポート（netloc でケースを保持。urlparse.hostname は小文字化するため使用しない）
+    netloc = parsed.netloc
+    # netloc からユーザー情報を除去（user:pass@host の場合）
+    if "@" in netloc:
+        netloc = netloc.split("@", 1)[1]
+    host = _escape_path(netloc)
 
     # パス部分（先頭の / を除去）
     path = parsed.path.lstrip("/")
@@ -75,9 +77,8 @@ def url_to_path(url: str) -> str:
 
     # フラグメントは除去（仕様: フラグメント違いは同一ファイル）
 
-    # Windows 禁止文字をエスケープ
+    # Windows 禁止文字をエスケープ（host は既にエスケープ済み）
     path = _escape_path(path)
-    host = _escape_path(host)
 
     # web/{scheme}/{host}/{path}
     parts = [p for p in [host, path] if p]

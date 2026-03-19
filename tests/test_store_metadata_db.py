@@ -160,7 +160,7 @@ class TestSourcesCRUD:
             updated_at="2026-01-01T00:00:00Z",
         )
         with pytest.raises(ValueError, match="不正なフィールド"):
-            db.update_source("test", created_at="2026-01-01T00:00:00Z")
+            db.update_source("test", id=999)
 
     def test_search_by_type(self, db: MetadataDB) -> None:
         db.register_source(

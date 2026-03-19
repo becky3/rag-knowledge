@@ -84,6 +84,13 @@ class TestPlaceFile:
                 source_type="local", data=b"x", rel_path="local/../../etc/passwd"
             )
 
+    def test_place_rejects_backslash(self, store: SourceStore) -> None:
+        """バックスラッシュは拒否される."""
+        with pytest.raises(ValueError, match="バックスラッシュ"):
+            store.place_file(
+                source_type="local", data=b"x", rel_path="local\\..\\..\\etc\\passwd"
+            )
+
     def test_place_web_without_metadata_raises(self, store: SourceStore) -> None:
         """非 local 媒体で metadata=None は ValueError."""
         with pytest.raises(ValueError, match="metadata は web 媒体で必須"):

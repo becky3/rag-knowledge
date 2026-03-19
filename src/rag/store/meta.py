@@ -8,6 +8,7 @@ local 媒体は .meta を持たない。
 
 from __future__ import annotations
 
+import datetime
 import logging
 from pathlib import Path
 from typing import Any
@@ -49,7 +50,8 @@ def read_meta(file_path: Path) -> dict[str, Any]:
     if not isinstance(data, dict):
         msg = f".meta ファイルの内容が辞書ではありません: {mp}"
         raise ValueError(msg)
-    return data
+    # PyYAML が datetime/date に暗黙変換した値を ISO 8601 文字列に正規化
+    return _normalize_timestamps(data)
 
 
 def write_meta(file_path: Path, metadata: dict[str, Any]) -> None:
@@ -68,3 +70,13 @@ def write_meta(file_path: Path, metadata: dict[str, Any]) -> None:
             allow_unicode=True,
             sort_keys=False,
         )
+
+
+def _normalize_timestamps(data: dict[str, Any]) -> dict[str, Any]:
+    """PyYAML が暗黙変換した datetime/date 値を ISO 8601 文字列に戻す."""
+    for key, value in data.items():
+        if isinstance(value, datetime.datetime):
+            data[key] = value.isoformat()
+        elif isinstance(value, datetime.date):
+            data[key] = value.isoformat()
+    return data

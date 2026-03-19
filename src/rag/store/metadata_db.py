@@ -153,6 +153,7 @@ class MetadataDB:
             "status",
             "content_hash",
             "file_size",
+            "created_at",
             "updated_at",
         }
         invalid = set(fields.keys()) - allowed

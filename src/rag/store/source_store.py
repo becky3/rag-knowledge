@@ -332,6 +332,11 @@ class SourceStore:
         Raises:
             ValueError: 絶対パス、パストラバーサル、source_store 外への脱出の場合
         """
+        # バックスラッシュを拒否（Windows パストラバーサル防止）
+        if "\\" in rel_path:
+            msg = f"バックスラッシュは許可されていません: {rel_path}"
+            raise ValueError(msg)
+
         from pathlib import PurePosixPath
 
         pure = PurePosixPath(rel_path)
@@ -344,7 +349,7 @@ class SourceStore:
         # resolve 後に root_dir 配下に収まることを確認
         resolved = (self._root / rel_path).resolve()
         root_resolved = self._root.resolve()
-        if not str(resolved).startswith(str(root_resolved)):
+        if not resolved.is_relative_to(root_resolved):
             msg = f"source_store 外へのパスは許可されていません: {rel_path}"
             raise ValueError(msg)
 
