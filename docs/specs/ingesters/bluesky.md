@@ -68,7 +68,7 @@ BlueSky（AT Protocol）の投稿を API 経由で取得し、source_store に�
 |------|------|
 | 最悪ケースリクエスト数 | ceil(1000/100) = 10。引用元テキストは `getAuthorFeed` のレスポンスに展開済みのため追加リクエスト不要。バジェットトラッカー上限 500 の範囲内 |
 | 最悪ケース所要時間 | 10 × 0.1 秒（ハードリミット最小間隔での理論最短）= 1 秒。デフォルト設定（1.0 秒間隔）で 10 秒。操作全体タイムアウト 600 秒の範囲内 |
-| 想定エラー率 | AT Protocol API 依存。リトライ機構なし（失敗ページはエラーとして処理中断）。5 回連続失敗でサーキットブレーカーが発動し操作中断 |
+| 想定エラー率 | AT Protocol API 依存。リトライ機構なし（失敗したリクエストは再試行しない）。ConstrainedClient が連続失敗を監視し、5 回連続失敗でサーキットブレーカーが発動して操作を中断する。中断時は取得済みデータを処理する |
 
 ## 安全制約
 
@@ -297,32 +297,30 @@ is_repost: false
 flowchart TD
     START["rag_crawl_bluesky(handle, max_posts, include_reposts)"]
     VALIDATE["入力バリデーション"]
-    FEED["タイムライン API を走査"]
     PAGE["ページ取得（getAuthorFeed）"]
-    CHECK_CURSOR{"cursor が存在する?"}
-    CHECK_LIMIT{"投稿数上限到達?"}
-    EACH_ITEM{"未処理のアイテムがある?"}
+    EACH_ITEM{"ページ内に未処理アイテムがある?"}
     REPOST_FILTER{"リポスト除外?"}
     DUP_CHECK{"ファイルが既に存在する?"}
     SAVE["JSON ファイル配置 + .meta 生成"]
+    CHECK_CURSOR{"cursor が存在する?"}
+    CHECK_LIMIT{"投稿数上限到達?"}
     NOTIFY["パイプライン制御に完了通知"]
     RESULT["結果サマリーを返却"]
 
     START --> VALIDATE
-    VALIDATE --> FEED
-    FEED --> PAGE
-    PAGE --> CHECK_CURSOR
-    CHECK_CURSOR -->|"いいえ（最終ページ）"| EACH_ITEM
-    CHECK_CURSOR -->|"はい"| CHECK_LIMIT
-    CHECK_LIMIT -->|"はい（上限到達）"| EACH_ITEM
-    CHECK_LIMIT -->|"いいえ"| PAGE
+    VALIDATE --> PAGE
+    PAGE --> EACH_ITEM
     EACH_ITEM -->|"はい"| REPOST_FILTER
-    EACH_ITEM -->|"いいえ（全件処理済み）"| NOTIFY
+    EACH_ITEM -->|"いいえ（全件処理済み）"| CHECK_CURSOR
     REPOST_FILTER -->|"はい（スキップ）"| EACH_ITEM
     REPOST_FILTER -->|"いいえ（処理する）"| DUP_CHECK
     DUP_CHECK -->|"はい（スキップ）"| EACH_ITEM
     DUP_CHECK -->|"いいえ（新規）"| SAVE
     SAVE --> EACH_ITEM
+    CHECK_CURSOR -->|"いいえ（最終ページ）"| NOTIFY
+    CHECK_CURSOR -->|"はい"| CHECK_LIMIT
+    CHECK_LIMIT -->|"はい（上限到達）"| NOTIFY
+    CHECK_LIMIT -->|"いいえ"| PAGE
     NOTIFY --> RESULT
 ```
 
