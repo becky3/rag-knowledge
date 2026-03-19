@@ -61,6 +61,7 @@ class _EnvLoader(BaseSettings):
     chromadb_persist_dir: str
     bm25_persist_dir: str
     source_store_dir: str
+    converted_store_dir: str
 
     # トランスポート
     rag_transport: Literal["stdio", "http"]
@@ -95,6 +96,7 @@ class RAGSettings(BaseModel):
     chromadb_persist_dir: str
     bm25_persist_dir: str
     source_store_dir: str
+    converted_store_dir: str
     rag_transport: Literal["stdio", "http"]
     rag_http_host: str
     rag_http_port: int = Field(ge=1, le=65535)

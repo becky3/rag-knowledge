@@ -40,7 +40,7 @@ MCP サーバーとして独立動作し、10 個のツールを提供する。
 | カテゴリ | 設定項目 |
 |---------|---------|
 | Embedding 接続 | `EMBEDDING_PROVIDER`, `LMSTUDIO_BASE_URL` |
-| ストレージ | `CHROMADB_PERSIST_DIR`, `BM25_PERSIST_DIR`, `SOURCE_STORE_DIR` |
+| ストレージ | `CHROMADB_PERSIST_DIR`, `BM25_PERSIST_DIR`, `SOURCE_STORE_DIR`, `CONVERTED_STORE_DIR` |
 | トランスポート | `RAG_TRANSPORT`, `RAG_HTTP_HOST`, `RAG_HTTP_PORT`, `RAG_DNS_REBINDING_PROTECTION` |
 | デバッグ | `RAG_DEBUG_LOG_ENABLED` |
 

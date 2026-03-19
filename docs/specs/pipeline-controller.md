@@ -208,8 +208,6 @@ sequenceDiagram
 
 source_store のパスや metadata.db の参照は [source-store.md](source-store.md) の設定項目を使用する。
 
-> **TODO:#240** 実装時に `rag-knowledge.md` の `.env`（環境依存値）一覧にも `CONVERTED_STORE_DIR` を追記すること。
-
 ## 関連ドキュメント
 
 - [source-store.md](source-store.md) — source_store 仕様
