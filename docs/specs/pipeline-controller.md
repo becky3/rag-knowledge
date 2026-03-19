@@ -65,7 +65,7 @@ git diff から取得する変更ファイルリストの各エントリが持�
 
 | フィールド | 内容 |
 |-----------|------|
-| `status` | 変更種別: `added`（追加）、`modified`（変更）、`deleted`（削除）、`renamed`（リネーム） |
+| `status` | 変更種別: `added`（追加）、`modified`（変更）、`deleted`（削除）、`renamed`（リネーム）、`meta_only`（メタデータのみ変更） |
 | `file_path` | source_store 内の相対パス |
 | `old_path` | リネーム時の旧パス（リネーム以外では空） |
 
@@ -174,6 +174,7 @@ sequenceDiagram
 | `M`（変更） | 内容更新 | 再変換 | インデックス更新 | ソース更新（日時・ハッシュ） |
 | `D`（削除） | ファイル削除 | converted_store から削除 | インデックス削除 | 論理削除 |
 | `R`（リネーム） | パス変更 | 新パスで変換 | 旧パス削除 + 新パス追加 | `file_path` を更新。local 媒体は `source_id` も変わるため metadata.db の旧レコードを DELETE + 新規 INSERT する（ファイルの物理削除ではない） |
+| `.meta` のみ変更 | メタデータ更新 | 再処理不要 | メタデータ upsert のみ | メタデータ更新 |
 
 ### コミットメッセージ規則
 
