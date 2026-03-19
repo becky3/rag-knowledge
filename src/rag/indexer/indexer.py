@@ -69,7 +69,11 @@ class Indexer:
             source_id: ソース識別子
             converted_path: converted_store 内の変換済みファイルパス
             metadata: ソースメタデータ
+
+        Raises:
+            ValueError: source_id と metadata.source_id が一致しない場合
         """
+        _validate_source_id(source_id, metadata)
         text = self._read_file(converted_path)
         if not text.strip():
             logger.info("空ファイルのためスキップ: %s", converted_path)
@@ -99,7 +103,11 @@ class Indexer:
             source_id: ソース識別子
             converted_path: converted_store 内の変換済みファイルパス
             metadata: ソースメタデータ
+
+        Raises:
+            ValueError: source_id と metadata.source_id が一致しない場合
         """
+        _validate_source_id(source_id, metadata)
         text = self._read_file(converted_path)
 
         if not text.strip():
@@ -344,6 +352,16 @@ class Indexer:
             "source_type=%s のインデックスをクリア (%d 件)",
             source_type, len(records),
         )
+
+
+def _validate_source_id(source_id: str, metadata: SourceMetadata) -> None:
+    """source_id と metadata.source_id の一致を検証する."""
+    if source_id != metadata.source_id:
+        msg = (
+            f"source_id の不一致: 引数={source_id}, "
+            f"metadata.source_id={metadata.source_id}"
+        )
+        raise ValueError(msg)
 
 
 def _run_async(coro: Any) -> Any:

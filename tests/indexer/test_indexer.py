@@ -534,6 +534,38 @@ class TestClear:
         assert len(result["ids"]) >= 1
 
 
+# --- テスト: source_id バリデーション ---
+
+
+class TestSourceIdValidation:
+    """source_id と metadata.source_id の一致バリデーションテスト."""
+
+    def test_add_raises_on_mismatch(
+        self, indexer: Indexer, tmp_path: Path,
+    ) -> None:
+        path = _write_text_file(tmp_path, "doc.txt", "Content.")
+        meta = _make_metadata(source_id="different-id")
+
+        with pytest.raises(ValueError, match="source_id の不一致"):
+            indexer.add("src-mismatch", path, meta)
+
+    def test_update_raises_on_mismatch(
+        self, indexer: Indexer, tmp_path: Path,
+    ) -> None:
+        path = _write_text_file(tmp_path, "doc.txt", "Content.")
+        meta = _make_metadata(source_id="different-id")
+
+        with pytest.raises(ValueError, match="source_id の不一致"):
+            indexer.update("src-mismatch", path, meta)
+
+    def test_matching_ids_no_error(
+        self, indexer: Indexer, tmp_path: Path,
+    ) -> None:
+        path = _write_text_file(tmp_path, "doc.txt", "Content.")
+        meta = _make_metadata(source_id="src-ok")
+        indexer.add("src-ok", path, meta)
+
+
 # --- テスト: IndexerProtocol 適合性 ---
 
 
