@@ -117,8 +117,13 @@ class Converter:
         source_path = source_store_dir / file_path
         ext = PurePosixPath(file_path).suffix.lower()
 
+        # ソースファイル存在チェック
+        if not source_path.exists():
+            logger.warning("Source file not found: %s", file_path)
+            raise ConversionSkippedError(f"Source not found: {file_path}")
+
         # 0 バイトチェック
-        if source_path.exists() and source_path.stat().st_size == 0:
+        if source_path.stat().st_size == 0:
             logger.warning("Skipping 0-byte file: %s", file_path)
             raise ConversionSkippedError(f"0-byte file: {file_path}")
 
@@ -307,10 +312,20 @@ class Converter:
 
         try:
             raw = source_path.read_text(encoding="utf-8")
-            data: dict[str, object] = json.loads(raw)
-        except (json.JSONDecodeError, OSError):
+            parsed = json.loads(raw)
+        except (json.JSONDecodeError, OSError, UnicodeDecodeError):
             logger.exception("Failed to read JSON: %s", file_path)
             return None
+
+        if not isinstance(parsed, dict):
+            logger.warning(
+                "JSON root is not an object: %s (%s)",
+                type(parsed).__name__,
+                file_path,
+            )
+            return None
+
+        data: dict[str, object] = parsed
 
         if source_type == "bluesky":
             return convert_json_bluesky(data)

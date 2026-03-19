@@ -175,6 +175,8 @@ def convert_json_zenn_scrap(data: dict[str, Any]) -> str | None:
     """
     # scrap オブジェクトの取得
     scrap = data.get("scrap", data)
+    if not isinstance(scrap, dict):
+        return None
     comments = scrap.get("comments")
     if not isinstance(comments, list) or not comments:
         return None

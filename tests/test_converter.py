@@ -428,6 +428,11 @@ class TestConvertJsonZennScrap:
         result = convert_json_zenn_scrap(data)
         assert result is None
 
+    def test_scrap_value_not_dict(self) -> None:
+        data = {"scrap": "not a dict"}
+        result = convert_json_zenn_scrap(data)
+        assert result is None
+
     def test_html_tags_removed_in_comments(self) -> None:
         data = {
             "comments": [
@@ -734,6 +739,22 @@ class TestConverterClear:
 
 class TestConverterEdgeCases:
     """Converter のエッジケーステスト."""
+
+    def test_source_file_not_found(self, tmp_path: Path) -> None:
+        source_dir = tmp_path / "source_store"
+        source_dir.mkdir()
+        converted_dir = tmp_path / "converted_store"
+        converter = Converter()
+        with pytest.raises(ConversionSkippedError, match="Source not found"):
+            converter.convert("web/missing.html", source_dir, converted_dir)
+
+    def test_json_root_is_array(self, tmp_path: Path) -> None:
+        source_dir, converted_dir = _setup_source(
+            tmp_path, "bluesky/did/post.json", json.dumps([1, 2, 3]),
+        )
+        converter = Converter()
+        with pytest.raises(ConversionSkippedError, match="Empty conversion"):
+            converter.convert("bluesky/did/post.json", source_dir, converted_dir)
 
     def test_zero_byte_file(self, tmp_path: Path) -> None:
         source_dir, converted_dir = _setup_source(
