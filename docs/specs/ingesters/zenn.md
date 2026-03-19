@@ -41,7 +41,7 @@ Zenn（zenn.dev）の記事およびスクラップを API 経由で取得し、
 
 - **metadata.db アクセス禁止**: metadata.db に直接アクセスしない。DB 登録はパイプライン制御が .meta を読んで実行する
 - **git 操作禁止**: git 操作はパイプライン制御のみが実行する
-- **オリジナルデータの無加工保存**: Zenn API から取得した `body_html` をそのまま source_store に配置する
+- **オリジナルデータの無加工保存**: 記事は Zenn API から取得した `body_html` をそのまま source_store に配置する。スクラップは `comments[].body_html` を順序保持で `<hr>` 区切りで結合した HTML を保存する（API が単一の本文フィールドを提供しないため、インジェスター段階での結合が必要）
 - **ファイル削除禁止**: source_store 内のファイルの物理削除は一切行わない
 
 ### 外部 HTTP リクエスト
@@ -113,7 +113,7 @@ Zenn（zenn.dev）の記事およびスクラップを API 経由で取得し、
 |-----------|-----|------|------|
 | `username` | 文字列 | はい | Zenn ユーザー名 |
 | `max_articles` | 整数 | いいえ | 取得する最大コンテンツ数。デフォルト: 50、許容範囲: 1〜100 |
-| `content_type` | 文字列 | いいえ | 取得対象: `articles`（記事のみ）、`scraps`（スクラップのみ）、`all`（両方）。デフォルト: `all` |
+| `content_type` | 文字列 | いいえ | 取得対象のフィルタ: `articles`（記事のみ）、`scraps`（スクラップのみ）、`all`（両方）。デフォルト: `all`。ツール入力では複数形（`articles`/`scraps`）、.meta の `content_type` フィールドでは単数形（`article`/`scrap`）を使用する |
 
 ツール出力: source_store への配置結果（配置ファイル数、スキップ数、エラー数）のサマリーテキスト。記事とスクラップの内訳も含む。
 
@@ -123,7 +123,7 @@ Zenn（zenn.dev）の記事およびスクラップを API 経由で取得し、
 
 | 設定項目 | 型 | 保管先 | 内容 | デフォルト | 許容範囲 |
 |---------|-----|--------|------|-----------|---------|
-| `rag_zenn_max_articles` | 整数 | `config.toml` | 取得する最大記事数 | 50 | 1〜100 |
+| `rag_zenn_max_articles` | 整数 | `config.toml` | 取得する最大コンテンツ数（記事・スクラップそれぞれに適用） | 50 | 1〜100 |
 | `rag_zenn_request_timeout` | 整数 | `config.toml` | 記事取得時のリクエストタイムアウト（秒） | 30 | 1〜120 |
 | `rag_zenn_request_interval` | 小数 | `config.toml` | リクエスト間の最低間隔（秒） | 1.0 | 0.1〜60 |
 
@@ -185,7 +185,7 @@ Zenn 固有フィールド:
 | `closed` | bool | クローズ状態（スクラップのみ） | API レスポンスの `closed` フィールド。記事では `false` |
 | `username` | str | 著者のユーザー名 | MCP ツール入力の `username` パラメータ |
 
-.meta ファイルの形式例:
+.meta ファイルの形式例（記事）:
 
 ```yaml
 source_id: "https://zenn.dev/alice/articles/sample-article"
@@ -193,22 +193,43 @@ source_type: zenn
 title: "Sample Article Title"
 collected_at: "2026-01-15T10:30:00+09:00"
 slug: "sample-article"
+content_type: "article"
 article_type: "tech"
 published_at: "2026-01-10T12:00:00+09:00"
 liked_count: 42
 topics:
   - "Python"
   - "FastAPI"
+comments_count: 0
+closed: false
 username: "alice"
 ```
 
-### 記事一括取り込みフロー
+.meta ファイルの形式例（スクラップ）:
+
+```yaml
+source_id: "https://zenn.dev/alice/scraps/f0b53bc3944bb3"
+source_type: zenn
+title: "Sample Scrap Title"
+collected_at: "2026-01-15T10:30:00+09:00"
+slug: "f0b53bc3944bb3"
+content_type: "scrap"
+article_type: ""
+published_at: "2026-02-14T20:48:17+09:00"
+liked_count: 0
+topics: []
+comments_count: 3
+closed: false
+username: "alice"
+```
+
+### コンテンツ一括取り込みフロー
 
 ```mermaid
 flowchart TD
-    START["rag_crawl_zenn(username, max_articles)"]
+    START["rag_crawl_zenn(username, max_articles, content_type)"]
     VALIDATE["入力バリデーション"]
-    DISCOVER["記事一覧 API を走査"]
+    DISCOVER["コンテンツ一覧 API を走査（content_type に応じて記事/スクラップ/両方）"]
     PAGE["ページ取得"]
     CHECK_NEXT{"next_page が null?"}
     CHECK_LIMIT{"走査上限 or 記事数上限?"}
@@ -230,7 +251,11 @@ flowchart TD
     NOTIFY --> RESULT
 ```
 
-### 記事一覧走査の処理手順
+### コンテンツ一覧走査の処理手順
+
+`content_type` に応じて記事一覧 API（`/api/articles`）、スクラップ一覧 API（`/api/scraps`）、または両方を走査する。`all` の場合は記事 → スクラップの順に実行する。以下は各 API 共通の走査手順:
+
+### 一覧走査の処理手順
 
 1. ページ番号を 1 に初期化する
 2. 記事一覧 API にリクエストを送信する
