@@ -19,6 +19,8 @@ RAG Knowledge は、外部 Web ページから収集した知識をベクトル 
 | 9 | Zenn インジェスター | Zenn 記事を API 経由で取得・ナレッジベースに取り込み | [zenn-ingester.md](zenn-ingester.md) |
 | 10 | BlueSky インジェスター | BlueSky 投稿を AT Protocol API 経由で取得・ナレッジベースに取り込み | [bluesky-ingester.md](bluesky-ingester.md) |
 | 11 | ドキュメントインジェスター | テキストドキュメントをナレッジベースに取り込み | [document-ingester.md](document-ingester.md) |
+| 12 | source_store | 全データの根源ストレージ（git 管理、.meta サイドカー） | [source-store.md](source-store.md) |
+| 13 | パイプライン制御 | 3段パイプラインのステージ間連携・差分更新制御 | [pipeline-controller.md](pipeline-controller.md) |
 
 ## 3. 技術スタック
 
