@@ -178,7 +178,7 @@ PDF の特性を 3 段階で評価し、バックエンドと処理モードを�
 
 ### JSON → テキスト抽出
 
-JSON ファイルから構造化テキストを抽出する。現在、source_store に JSON 形式で保存されるのは BlueSky 投稿のみ（Zenn 記事は `.html` で保存されるため HTML → Markdown 変換パスで処理される）。
+JSON ファイルから構造化テキストを抽出する。source_store に JSON 形式で保存されるのは BlueSky 投稿と Zenn スクラップ（Zenn 記事は `.html` で保存されるため HTML → Markdown 変換パスで処理される）。
 
 #### BlueSky 投稿（source_type: bluesky）
 
@@ -245,6 +245,16 @@ Description: 外部リンクの説明文
 - リポストの場合、先頭に `[Repost: @元投稿者ハンドル]` ヘッダーを付与する。元投稿者のハンドルは `post.author.handle` から取得する
 - 投稿テキストを先頭に配置する（検索ヒット時に最も重要な情報が先頭に来る）
 - セクションラベルは英語表記とする（LLM による検索・解釈の精度向上のため）
+
+#### Zenn スクラップ（source_type: zenn、scraps/ 配下の JSON）
+
+Zenn スクラップの JSON（`scrap` オブジェクト）から `comments` 配列の各コメントの `body_html` を順序保持で結合し、Markdown に変換する。
+
+1. `scrap.comments` 配列をインデックス順に走査する
+2. 各コメントの `body_html` を HTML → Markdown 変換する（HTML → Markdown 変換の共通ルールを適用）
+3. 変換後の各コメントを `---`（水平線）で区切って結合する
+
+コメントが 0 件の場合は空テキストとして扱い、変換をスキップする。
 
 ### パススルー
 

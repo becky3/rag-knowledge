@@ -41,7 +41,7 @@ Zenn（zenn.dev）の記事およびスクラップを API 経由で取得し、
 
 - **metadata.db アクセス禁止**: metadata.db に直接アクセスしない。DB 登録はパイプライン制御が .meta を読んで実行する
 - **git 操作禁止**: git 操作はパイプライン制御のみが実行する
-- **オリジナルデータの無加工保存**: 記事は Zenn API から取得した `body_html` をそのまま source_store に配置する。スクラップは `comments[].body_html` を順序保持で `<hr>` 区切りで結合した HTML を保存する（API が単一の本文フィールドを提供しないため、インジェスター段階での結合が必要）
+- **オリジナルデータの無加工保存**: 記事は Zenn API の `body_html` をそのまま HTML ファイルとして保存する。スクラップは API レスポンスの `scrap` オブジェクト（`comments` 配列を含む）をそのまま JSON ファイルとして保存する。コメントの結合・テキスト抽出はコンバーターの範疇
 - **ファイル削除禁止**: source_store 内のファイルの物理削除は一切行わない
 
 ### 外部 HTTP リクエスト
@@ -124,8 +124,8 @@ Zenn（zenn.dev）の記事およびスクラップを API 経由で取得し、
 | 設定項目 | 型 | 保管先 | 内容 | デフォルト | 許容範囲 |
 |---------|-----|--------|------|-----------|---------|
 | `rag_zenn_max_articles` | 整数 | `config.toml` | 取得する最大コンテンツ数（記事・スクラップそれぞれに適用） | 50 | 1〜100 |
-| `rag_zenn_request_timeout` | 整数 | `config.toml` | 記事取得時のリクエストタイムアウト（秒） | 30 | 1〜120 |
-| `rag_zenn_request_interval` | 小数 | `config.toml` | リクエスト間の最低間隔（秒） | 1.0 | 0.1〜60 |
+| `rag_zenn_request_timeout` | 整数 | `config.toml` | Zenn API リクエストのタイムアウト（秒。記事・スクラップ両方に適用） | 30 | 1〜120 |
+| `rag_zenn_request_interval` | 小数 | `config.toml` | Zenn API リクエスト間の最低間隔（秒。記事・スクラップ両方に適用） | 1.0 | 0.1〜60 |
 
 ## コンポーネント構成
 
@@ -141,11 +141,11 @@ source_store/
         {slug}.html
         {slug}.html.meta
       scraps/
-        {slug}.html
-        {slug}.html.meta
+        {slug}.json
+        {slug}.json.meta
 ```
 
-- ファイル形式: 記事は Zenn API の `body_html`、スクラップは `comments[].body_html` を結合して保存する（HTML ファイル）
+- ファイル形式: 記事は Zenn API の `body_html` を HTML ファイルとして保存。スクラップは API レスポンスの `scrap` オブジェクトを JSON ファイルとして保存
 - ファイル名: スラッグに `.html` 拡張子を付与
 - .meta: データファイルと同階層に配置
 
@@ -154,7 +154,7 @@ source_store/
 | コンテンツ種別 | source_id | ファイルパス |
 |--------------|-----------|------------|
 | 記事 | `https://zenn.dev/{username}/articles/{slug}` | `zenn/{username}/articles/{slug}.html` |
-| スクラップ | `https://zenn.dev/{username}/scraps/{slug}` | `zenn/{username}/scraps/{slug}.html` |
+| スクラップ | `https://zenn.dev/{username}/scraps/{slug}` | `zenn/{username}/scraps/{slug}.json` |
 
 source_id はコンテンツの公開 URL であり、安定した識別子として機能する。
 
@@ -255,7 +255,7 @@ flowchart TD
 
 `content_type` に応じて記事一覧 API（`/api/articles`）、スクラップ一覧 API（`/api/scraps`）、または両方を走査する。`all` の場合は記事 → スクラップの順に実行する。以下は各 API 共通の走査手順:
 
-### 一覧走査の処理手順
+#### 一覧走査の共通手順
 
 1. ページ番号を 1 に初期化する
 2. 記事一覧 API にリクエストを送信する
@@ -282,9 +282,8 @@ flowchart TD
 1. スクラップ一覧 API（`/api/scraps?username={username}&order=latest&page={page}`）を走査する。走査手順は記事一覧走査と同様（ページネーション上限・コンテンツ数上限で終了）
 2. 各スクラップの `slug` を収集する
 3. スクラップ詳細 API（`/api/scraps/{slug}`）にリクエストを送信する
-4. レスポンスの `comments` 配列から各コメントの `body_html` を取得し、順序を保持して結合する。コメント間は `<hr>` タグで区切る
-5. 結合した HTML を source_store に配置する（配置先: `zenn/{username}/scraps/{slug}.html`）
-6. .meta サイドカーファイルを同階層に生成する（配置先: `zenn/{username}/scraps/{slug}.html.meta`）
+4. レスポンスの `scrap` オブジェクト（`comments` 配列を含む）をそのまま JSON として source_store に配置する（配置先: `zenn/{username}/scraps/{slug}.json`）
+5. .meta サイドカーファイルを同階層に生成する（配置先: `zenn/{username}/scraps/{slug}.json.meta`）
 7. 重複検出: 配置先パスにファイルが既に存在する場合は上書きする
 
 ### パイプライン制御との連携

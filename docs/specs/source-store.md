@@ -248,11 +248,14 @@ URL: `http://localhost:8080/api/docs`
 
 | フィールド | 型 | 内容 |
 |-----------|-----|------|
-| `slug` | str | 記事スラッグ |
-| `article_type` | str | 記事種別（`tech`, `idea` 等） |
-| `published_at` | str | 公開日時（ISO 8601） |
+| `slug` | str | コンテンツスラッグ |
+| `content_type` | str | コンテンツ種別（`article` または `scrap`） |
+| `article_type` | str | 記事種別（`tech`, `idea` 等）。スクラップでは空文字列 |
+| `published_at` | str | 公開日時（ISO 8601）。スクラップでは `created_at` を使用 |
 | `liked_count` | int | いいね数 |
 | `topics` | list | トピックタグのリスト |
+| `comments_count` | int | コメント数（スクラップのみ。記事では 0） |
+| `closed` | bool | クローズ状態（スクラップのみ。記事では `false`） |
 | `username` | str | 著者のユーザー名 |
 
 #### .meta ファイルの形式例
