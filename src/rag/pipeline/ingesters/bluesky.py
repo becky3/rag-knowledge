@@ -88,15 +88,11 @@ class BlueskyIngester:
         *,
         appview_url: str = "https://public.api.bsky.app",
         max_posts: int = 200,
-        request_timeout: int = 30,
-        request_interval: float = 1.0,
         include_reposts: bool = True,
     ) -> None:
         self._store = source_store
         self._appview_url = appview_url.rstrip("/")
         self._max_posts = max_posts
-        self._request_timeout = request_timeout
-        self._request_interval = request_interval
         self._include_reposts = include_reposts
 
     async def crawl_bluesky(
@@ -193,7 +189,7 @@ class BlueskyIngester:
                 # 年月の導出
                 created_at_str = record.get("createdAt", "")
                 try:
-                    dt = datetime.fromisoformat(created_at_str)
+                    dt = datetime.fromisoformat(created_at_str.replace("Z", "+00:00"))
                     year = str(dt.year)
                     month = f"{dt.month:02d}"
                 except (ValueError, TypeError):

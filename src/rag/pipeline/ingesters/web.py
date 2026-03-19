@@ -188,7 +188,6 @@ class WebIngester:
         source_store: SourceStore,
         *,
         max_crawl_pages: int = 50,
-        crawl_delay_sec: float = 1.0,
         crawl_request_timeout: int = 30,
         respect_robots_txt: bool = True,
         robots_txt_cache_ttl: int = 3600,
@@ -199,7 +198,6 @@ class WebIngester:
     ) -> None:
         self._store = source_store
         self._max_crawl_pages = min(max_crawl_pages, MAX_CRAWL_PAGES_HARD_LIMIT)
-        self._crawl_delay_sec = crawl_delay_sec
         self._crawl_request_timeout = crawl_request_timeout
         self._respect_robots_txt = respect_robots_txt
         self._robots_txt_cache_ttl = robots_txt_cache_ttl
@@ -385,8 +383,9 @@ class WebIngester:
                     follow_redirects=False,
                 )
                 if 300 <= page_resp.status_code < 400:
-                    logger.warning("リダイレクトをスキップ: %s", link)
-                    result.skipped += 1
+                    logger.warning("リダイレクト（SSRF 防止）: %s", link)
+                    result.errors += 1
+                    result.error_details.append(f"Redirect blocked: {link}")
                     continue
 
                 page_data = page_resp.content
@@ -593,7 +592,14 @@ class WebIngester:
             for u in unchecked:
                 is_safe = u not in threat_urls
                 results[u] = is_safe
-                # キャッシュ更新（上限チェック）
+                # キャッシュ更新（TTL 切れエントリを先に削除してから追加）
+                if len(self._safety_cache) >= SAFE_BROWSING_CACHE_MAX_ENTRIES:
+                    expired = [
+                        k for k, (_, ts) in self._safety_cache.items()
+                        if now - ts >= self._url_safety_cache_ttl
+                    ]
+                    for k in expired:
+                        del self._safety_cache[k]
                 if len(self._safety_cache) < SAFE_BROWSING_CACHE_MAX_ENTRIES:
                     self._safety_cache[u] = (is_safe, now)
 

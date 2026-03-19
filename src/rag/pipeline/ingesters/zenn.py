@@ -42,13 +42,9 @@ class ZennIngester:
         source_store: SourceStore,
         *,
         max_articles: int = 50,
-        request_timeout: int = 30,
-        request_interval: float = 1.0,
     ) -> None:
         self._store = source_store
         self._max_articles = max_articles
-        self._request_timeout = request_timeout
-        self._request_interval = request_interval
 
     async def crawl_zenn(
         self,
@@ -116,7 +112,7 @@ class ZennIngester:
             try:
                 # 記事詳細取得
                 url = f"{ZENN_API_BASE}/articles/{slug}"
-                resp = await client.get(url, timeout=self._request_timeout)
+                resp = await client.get(url)
                 data = resp.json()
                 article = data.get("article", data)
 
@@ -181,7 +177,7 @@ class ZennIngester:
             try:
                 # スクラップ詳細取得
                 url = f"{ZENN_API_BASE}/scraps/{slug}"
-                resp = await client.get(url, timeout=self._request_timeout)
+                resp = await client.get(url)
                 data = resp.json()
                 scrap = data.get("scrap", data)
 
@@ -247,7 +243,7 @@ class ZennIngester:
 
         while page <= MAX_PAGINATION_PAGES and len(slugs) < max_count:
             url = f"{ZENN_API_BASE}/{kind}?username={username}&order=latest&page={page}"
-            resp = await client.get(url, timeout=self._request_timeout)
+            resp = await client.get(url)
             data = resp.json()
 
             items = data.get(kind, [])
