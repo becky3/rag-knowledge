@@ -115,7 +115,7 @@ source_store のディレクトリ構成をミラーする。source_store 内の
 |--------------------|----------------------|
 | `web/https/example.com/docs/guide.html` | `web/https/example.com/docs/guide.md` |
 | `web/https/example.com/docs/report.pdf` | `web/https/example.com/docs/report.md` |
-| `bluesky/did:plc:xxx/2026/03/rkey.json` | `bluesky/did:plc:xxx/2026/03/rkey.md` |
+| `bluesky/did：plc：xxx/2026/03/rkey.json` | `bluesky/did：plc：xxx/2026/03/rkey.md` |
 | `zenn/alice/articles/slug.html` | `zenn/alice/articles/slug.md` |
 | `local/my-notes/memo.md` | `local/my-notes/memo.md` |
 | `local/my-notes/note.txt` | `local/my-notes/note.txt` |

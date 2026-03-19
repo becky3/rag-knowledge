@@ -8,12 +8,12 @@
 
 本仕様書はインジェスター共通の設計・制約を定義する。各媒体固有の仕様は媒体別仕様書を参照。
 
-| 媒体 | 仕様書 | 状態 |
-|------|--------|------|
-| Web | [web.md](web.md) | 作成済み |
-| BlueSky | bluesky.md | 作成予定（#266） |
-| Zenn | zenn.md | 作成予定（#268） |
-| Local | local.md | 作成予定（#267） |
+| 媒体 | 仕様書 |
+|------|--------|
+| Web | [web.md](web.md) |
+| BlueSky | [bluesky.md](bluesky.md) |
+| Zenn | [zenn.md](zenn.md) |
+| Local | [local.md](local.md) |
 
 スコープ:
 
@@ -88,7 +88,7 @@
 | 一括クロール | web | `rag_crawl` | リンク集から一括取得して配置 |
 | クロールプレビュー | web | `rag_crawl_preview` | クロール対象のタイトル・URL 一覧を返す（配置なし） |
 | BlueSky 投稿取り込み | bluesky | `rag_crawl_bluesky` | タイムラインから投稿を取得して配置 |
-| Zenn 記事取り込み | zenn | `rag_crawl_zenn` | Zenn API から記事を取得して配置 |
+| Zenn コンテンツ取り込み | zenn | `rag_crawl_zenn` | Zenn API から記事・スクラップを取得して配置 |
 | 単一ドキュメント取り込み | local | `rag_add_document` | 指定ファイルを local/ にコピー |
 | ディレクトリ一括取り込み | local | `rag_crawl_documents` | glob パターンで検索してコピー |
 
