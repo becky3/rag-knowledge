@@ -8,8 +8,10 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import logging
+import mimetypes
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
+from pathlib import Path, PurePosixPath
 from typing import TYPE_CHECKING
 from urllib.parse import urldefrag
 
@@ -88,38 +90,52 @@ class RAGRetrievalResult:
 class VectorSearchItem:
     """ベクトル検索の生結果アイテム.
 
-    仕様: docs/specs/rag-knowledge.md
+    仕様: docs/specs/search-response.md
 
     Attributes:
         text: チャンクテキスト
-        source_url: ソースURL
+        source_url: ソースURL（source_id）
         distance: cosine距離（0に近いほど類似）
-        chunk_index: チャンクインデックス
+        chunk_index: チャンクインデックス（0始まり）
+        title: コンテンツのタイトル
+        source_type: ソース種別
+        total_chunks: 当該ソースのチャンク総数（0はレガシーデータ）
     """
 
     text: str
     source_url: str
     distance: float
     chunk_index: int
+    title: str = ""
+    source_type: str = ""
+    total_chunks: int = 0
 
 
 @dataclass
 class BM25SearchItem:
     """BM25検索の生結果アイテム.
 
-    仕様: docs/specs/rag-knowledge.md
+    仕様: docs/specs/search-response.md
 
     Attributes:
         text: チャンクテキスト
-        source_url: ソースURL
+        source_url: ソースURL（source_id）
         score: BM25スコア（高いほどキーワード一致）
         doc_id: ドキュメントID
+        chunk_index: チャンクインデックス（0始まり）
+        title: コンテンツのタイトル
+        source_type: ソース種別
+        total_chunks: 当該ソースのチャンク総数（0はレガシーデータ）
     """
 
     text: str
     source_url: str
     score: float
     doc_id: str
+    chunk_index: int = 0
+    title: str = ""
+    source_type: str = ""
+    total_chunks: int = 0
 
 
 @dataclass
@@ -834,12 +850,18 @@ class RAGKnowledgeService:
         for result in vector_results_raw:
             source_url = str(result.metadata.get("source_url", ""))
             chunk_index = int(result.metadata.get("chunk_index", 0))
+            title = str(result.metadata.get("title", ""))
+            source_type_val = str(result.metadata.get("source_type", ""))
+            total_chunks = int(result.metadata.get("total_chunks", 0))
             vector_items.append(
                 VectorSearchItem(
                     text=result.text,
                     source_url=source_url,
                     distance=result.distance,
                     chunk_index=chunk_index,
+                    title=title,
+                    source_type=source_type_val,
+                    total_chunks=total_chunks,
                 )
             )
 
@@ -849,14 +871,33 @@ class RAGKnowledgeService:
             bm25_results_raw = self._bm25_index.search(
                 query, n_results=n_results, source_type=source_type,
             )
+
+            # BM25結果のメタデータをChromaDBから一括取得
+            bm25_doc_ids = [r.doc_id for r in bm25_results_raw]
+            bm25_meta_map = await self._vector_store.get_metadata_by_ids(
+                bm25_doc_ids
+            )
+
             for bm25_result in bm25_results_raw:
                 source_url = self._bm25_index.get_source_url(bm25_result.doc_id) or ""
+                meta = bm25_meta_map.get(bm25_result.doc_id, {})
+                title = str(meta.get("title", ""))
+                bm25_source_type = (
+                    self._bm25_index.get_source_type(bm25_result.doc_id)
+                    or str(meta.get("source_type", ""))
+                )
+                total_chunks = int(meta.get("total_chunks", 0))
+                chunk_index = int(meta.get("chunk_index", 0))
                 bm25_items.append(
                     BM25SearchItem(
                         text=bm25_result.text,
                         source_url=source_url,
                         score=bm25_result.score,
                         doc_id=bm25_result.doc_id,
+                        chunk_index=chunk_index,
+                        title=title,
+                        source_type=bm25_source_type,
+                        total_chunks=total_chunks,
                     )
                 )
 
@@ -960,3 +1001,180 @@ class RAGKnowledgeService:
         """
         # VectorStore.get_stats()は同期APIを呼ぶため、to_threadでラップ
         return await asyncio.to_thread(self._vector_store.get_stats)
+
+
+# --- ドキュメント全文取得（rag_get_document 共通ロジック） ---
+
+# converted_store 出力拡張子マッピング
+# converter/converter.py の _EXTENSION_OUTPUT_MAP と同期が必要
+_CONVERTED_EXT_MAP: dict[str, str] = {
+    ".html": ".md",
+    ".pdf": ".md",
+    ".json": ".md",
+}
+
+# テキストファイルとして扱う拡張子
+_TEXT_EXTENSIONS: frozenset[str] = frozenset(
+    {".md", ".txt", ".adoc", ".html", ".json"}
+)
+
+
+def _get_converted_rel_path(file_path: str) -> str:
+    """source_store 相対パスから converted_store の相対パスを算出する."""
+    p = PurePosixPath(file_path)
+    ext = p.suffix.lower()
+    new_ext = _CONVERTED_EXT_MAP.get(ext)
+    if new_ext is not None:
+        return str(p.with_suffix(new_ext))
+    return file_path
+
+
+@dataclass
+class DocumentResult:
+    """ドキュメント全文取得の結果.
+
+    仕様: docs/specs/search-response.md
+
+    Attributes:
+        source_id: ソース識別子
+        title: コンテンツのタイトル
+        source_type: ソース種別
+        format: 取得形式（"text" または "original"）
+        content: ドキュメントテキスト（バイナリの場合は情報文字列）
+        is_binary: バイナリファイルか否か
+        error: エラーメッセージ（エラー時のみ）
+    """
+
+    source_id: str
+    title: str
+    source_type: str
+    format: str
+    content: str
+    is_binary: bool = False
+    error: str | None = None
+
+
+def get_document(
+    source_id: str,
+    format: str,
+    source_store_dir: str,
+    converted_store_dir: str,
+) -> DocumentResult:
+    """ドキュメント全文を取得する（MCP/CLI 共通ロジック）.
+
+    仕様: docs/specs/search-response.md
+
+    Args:
+        source_id: ソース識別子
+        format: 取得形式（"text" または "original"）
+        source_store_dir: source_store のルートディレクトリパス
+        converted_store_dir: converted_store のルートディレクトリパス
+
+    Returns:
+        DocumentResult
+    """
+    from .store.source_store import SourceStore
+
+    with SourceStore(root_dir=Path(source_store_dir)) as store:
+        file_data = store.get_file(source_id)
+
+    if file_data is None:
+        return DocumentResult(
+            source_id=source_id,
+            title="",
+            source_type="",
+            format=format,
+            content="",
+            error=f"ソースが見つかりません: {source_id}",
+        )
+
+    meta = file_data.metadata
+    title = meta.title
+    source_type = meta.source_type
+
+    if format == "original":
+        # バイナリ判定: テキスト拡張子以外はバイナリとして扱う
+        ext = PurePosixPath(file_data.file_path).suffix.lower()
+        if ext not in _TEXT_EXTENSIONS:
+            mime_type = mimetypes.guess_type(file_data.file_path)[0] or "application/octet-stream"
+            file_size = len(file_data.content)
+            info = (
+                f"バイナリファイルです（MIME: {mime_type}, サイズ: {file_size:,} bytes）。\n"
+                "テキスト形式で取得するには format=text を指定してください。"
+            )
+            return DocumentResult(
+                source_id=source_id,
+                title=title,
+                source_type=source_type,
+                format=format,
+                content=info,
+                is_binary=True,
+            )
+
+        # テキストとして読み取り
+        try:
+            content = file_data.content.decode("utf-8")
+        except UnicodeDecodeError:
+            content = file_data.content.decode("utf-8", errors="replace")
+
+        return DocumentResult(
+            source_id=source_id,
+            title=title,
+            source_type=source_type,
+            format=format,
+            content=content,
+        )
+
+    # format == "text": converted_store から読み取り
+    converted_rel = _get_converted_rel_path(file_data.file_path)
+    converted_path = Path(converted_store_dir) / converted_rel
+
+    if not converted_path.exists():
+        return DocumentResult(
+            source_id=source_id,
+            title=title,
+            source_type=source_type,
+            format=format,
+            content="",
+            error=(
+                f"変換済みファイルが見つかりません: {converted_rel}\n"
+                "source_store にオリジナルが存在します。"
+                "format=original で取得できます。"
+            ),
+        )
+
+    try:
+        content = converted_path.read_text(encoding="utf-8")
+    except UnicodeDecodeError:
+        content = converted_path.read_bytes().decode("utf-8", errors="replace")
+
+    return DocumentResult(
+        source_id=source_id,
+        title=title,
+        source_type=source_type,
+        format=format,
+        content=content,
+    )
+
+
+def format_document_response(result: DocumentResult) -> str:
+    """DocumentResult をプレーンテキストレスポンスにフォーマットする.
+
+    Args:
+        result: ドキュメント取得結果
+
+    Returns:
+        フォーマット済みレスポンステキスト
+    """
+    if result.error:
+        return f"エラー: {result.error}"
+
+    lines = [
+        f"Source: {result.source_id}",
+        f"Title: {result.title}",
+        f"Type: {result.source_type}",
+        f"Format: {result.format}",
+        "",
+        result.content,
+    ]
+    return "\n".join(lines)
