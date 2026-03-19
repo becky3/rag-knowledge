@@ -21,6 +21,8 @@ RAG Knowledge は、外部 Web ページから収集した知識をベクトル 
 | 11 | ドキュメントインジェスター | テキストドキュメントをナレッジベースに取り込み | [document-ingester.md](document-ingester.md) |
 | 12 | source_store | 全データの根源ストレージ（git 管理、.meta サイドカー） | [source-store.md](source-store.md) |
 | 13 | パイプライン制御 | 3段パイプラインのステージ間連携・差分更新制御 | [pipeline-controller.md](pipeline-controller.md) |
+| 14 | コンバーター | source_store のファイルを converted_store のテキストに変換 | [converter.md](converter.md) |
+| 15 | インデクサー | converted_store からチャンキング・Embedding・インデックス構築 | [indexer.md](indexer.md) |
 
 ## 3. 技術スタック
 
