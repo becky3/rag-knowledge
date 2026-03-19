@@ -60,6 +60,7 @@ class _EnvLoader(BaseSettings):
     # ストレージ（MCP サーバー起動 cwd からの相対パス）
     chromadb_persist_dir: str
     bm25_persist_dir: str
+    source_store_dir: str
 
     # トランスポート
     rag_transport: Literal["stdio", "http"]
@@ -93,6 +94,7 @@ class RAGSettings(BaseModel):
     lmstudio_base_url: str
     chromadb_persist_dir: str
     bm25_persist_dir: str
+    source_store_dir: str
     rag_transport: Literal["stdio", "http"]
     rag_http_host: str
     rag_http_port: int = Field(ge=1, le=65535)

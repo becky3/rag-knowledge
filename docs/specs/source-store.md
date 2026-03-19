@@ -366,8 +366,6 @@ source_store 内の全ファイルのメタデータ索引。
 |---------|-----|--------|------|-----------|
 | `SOURCE_STORE_DIR` | str | `.env` | source_store のディレクトリパス | なし（必須） |
 
-> **TODO:#239** 実装時に `rag-knowledge.md` の `.env`（環境依存値）一覧にも `SOURCE_STORE_DIR` を追記すること。
-
 ## エッジケース
 
 | ケース | 振る舞い |

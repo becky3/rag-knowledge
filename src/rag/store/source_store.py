@@ -1,0 +1,358 @@
+"""SourceStore — source_store の統合管理.
+
+仕様: docs/specs/source-store.md
+
+ファイル配置、.meta 読み書き、metadata.db 操作、URL↔パス変換を統合する。
+git 操作はパイプライン制御層の責務であり、このモジュールでは行わない。
+"""
+
+from __future__ import annotations
+
+import hashlib
+import logging
+from datetime import datetime, timezone
+from pathlib import Path
+from typing import Any
+
+from rag.store.meta import meta_path_for, read_meta, write_meta
+from rag.store.metadata_db import MetadataDB
+from rag.store.models import (
+    FileData,
+    SourceMetadata,
+    SourceType,
+)
+from rag.store.path_converter import url_to_path
+
+logger = logging.getLogger(__name__)
+
+# .meta を持たない媒体
+_NO_META_TYPES: frozenset[SourceType] = frozenset({"local"})
+
+
+class SourceStore:
+    """source_store の統合管理クラス."""
+
+    def __init__(self, root_dir: Path) -> None:
+        """初期化.
+
+        Args:
+            root_dir: source_store のルートディレクトリパス
+        """
+        self._root = root_dir
+        self._db = MetadataDB(root_dir / "metadata.db")
+
+    @property
+    def root_dir(self) -> Path:
+        """source_store のルートディレクトリ."""
+        return self._root
+
+    @property
+    def db(self) -> MetadataDB:
+        """metadata.db への直接アクセス."""
+        return self._db
+
+    def initialize(self) -> None:
+        """source_store を初期化する.
+
+        ルートディレクトリと metadata.db スキーマを作成する。
+        """
+        self._root.mkdir(parents=True, exist_ok=True)
+        self._db.initialize()
+
+    def close(self) -> None:
+        """リソースを解放する."""
+        self._db.close()
+
+    # --- ファイル配置 ---
+
+    def place_file(
+        self,
+        *,
+        source_type: SourceType,
+        data: bytes,
+        rel_path: str,
+        metadata: dict[str, Any] | None = None,
+    ) -> Path:
+        """ファイルを source_store に配置する.
+
+        Args:
+            source_type: 媒体種別
+            data: ファイルデータ
+            rel_path: source_store 内の相対パス
+            metadata: .meta に書き込むメタデータ（local 以外で必須）
+
+        Returns:
+            配置先のフルパス
+        """
+        dest = self._root / rel_path
+        dest.parent.mkdir(parents=True, exist_ok=True)
+        dest.write_bytes(data)
+
+        # .meta 生成（local 以外）
+        if source_type not in _NO_META_TYPES:
+            if metadata is not None:
+                write_meta(dest, metadata)
+            else:
+                logger.warning(
+                    "metadata が指定されていません (source_type=%s, rel_path=%s)",
+                    source_type,
+                    rel_path,
+                )
+
+        # metadata.db 登録
+        content_hash = hashlib.sha256(data).hexdigest()
+        now = datetime.now(timezone.utc).isoformat()
+
+        source_id = self._resolve_source_id(source_type, rel_path, metadata)
+        title = self._resolve_title(source_type, rel_path, metadata)
+
+        existing = self._db.get_source(source_id)
+        self._db.register_source(
+            source_id=source_id,
+            source_type=source_type,
+            file_path=rel_path,
+            title=title,
+            content_hash=content_hash,
+            file_size=len(data),
+            created_at=existing.created_at if existing else now,
+            updated_at=now,
+        )
+
+        return dest
+
+    def place_file_from_url(
+        self,
+        *,
+        url: str,
+        data: bytes,
+        metadata: dict[str, Any],
+        extension: str = "",
+    ) -> Path:
+        """URL ベースでファイルを配置する（web 媒体用）.
+
+        Args:
+            url: 元の URL
+            data: ファイルデータ
+            metadata: .meta に書き込むメタデータ
+            extension: ファイル拡張子（例: ``.html``）
+
+        Returns:
+            配置先のフルパス
+        """
+        rel_path = url_to_path(url)
+        if extension and not rel_path.endswith(extension):
+            rel_path += extension
+        return self.place_file(
+            source_type="web",
+            data=data,
+            rel_path=rel_path,
+            metadata=metadata,
+        )
+
+    # --- ファイル取得 ---
+
+    def get_file(self, source_id: str) -> FileData | None:
+        """source_id でファイルを取得する.
+
+        論理削除済みのファイルも取得可能。
+
+        Args:
+            source_id: ソース識別子
+
+        Returns:
+            ファイルデータとメタデータ。存在しない場合は None。
+        """
+        record = self._db.get_source(source_id)
+        if record is None:
+            return None
+
+        file_path = self._root / record.file_path
+        if not file_path.exists():
+            logger.warning("DB にレコードがあるがファイルが見つかりません: %s", file_path)
+            return None
+
+        content = file_path.read_bytes()
+
+        # メタデータ構築
+        extra: dict[str, Any] = {}
+        if record.source_type not in _NO_META_TYPES:
+            meta_file = meta_path_for(file_path)
+            if meta_file.exists():
+                meta_data = read_meta(file_path)
+                # 共通フィールドを除いた残りが extra
+                for key in ("source_id", "source_type", "title", "collected_at"):
+                    meta_data.pop(key, None)
+                extra = meta_data
+
+        source_meta = SourceMetadata(
+            source_id=record.source_id,
+            source_type=record.source_type,
+            title=record.title,
+            collected_at=record.created_at,
+            extra=extra,
+        )
+
+        return FileData(
+            content=content,
+            file_path=record.file_path,
+            metadata=source_meta,
+        )
+
+    # --- ファイル一覧 ---
+
+    def list_files(
+        self,
+        *,
+        source_type: SourceType | None = None,
+    ) -> list[Path]:
+        """source_store 内のファイルを列挙する.
+
+        .meta ファイル、metadata.db、.git 配下は除外する。
+
+        Args:
+            source_type: 指定時はそのディレクトリのみ
+
+        Returns:
+            ファイルパスのリスト（source_store ルートからの相対パス）
+        """
+        if source_type:
+            search_dir = self._root / source_type
+        else:
+            search_dir = self._root
+
+        if not search_dir.exists():
+            return []
+
+        result: list[Path] = []
+        for p in search_dir.rglob("*"):
+            if not p.is_file():
+                continue
+            rel = p.relative_to(self._root)
+            rel_str = rel.as_posix()
+            # 除外: .meta, metadata.db, .git/
+            if rel_str.endswith(".meta"):
+                continue
+            if rel_str == "metadata.db" or rel_str.startswith("metadata.db"):
+                continue
+            if rel_str.startswith(".git"):
+                continue
+            result.append(rel)
+
+        return sorted(result)
+
+    # --- 論理削除 ---
+
+    def soft_delete(self, source_id: str) -> None:
+        """ソースを論理削除する.
+
+        Raises:
+            KeyError: source_id が存在しない場合
+        """
+        self._db.set_status(source_id, "deleted")
+
+    def restore(self, source_id: str) -> None:
+        """論理削除を解除する.
+
+        Raises:
+            KeyError: source_id が存在しない場合
+        """
+        self._db.set_status(source_id, "active")
+
+    # --- DB 再構築 ---
+
+    def rebuild_db(self) -> int:
+        """source_store のファイルと .meta から metadata.db を再構築する.
+
+        Returns:
+            登録されたソース数
+        """
+        self._db.delete_all_sources()
+
+        files = self.list_files()
+        count = 0
+        now = datetime.now(timezone.utc).isoformat()
+
+        for rel_path in files:
+            full_path = self._root / rel_path
+            rel_str = rel_path.as_posix()
+            data = full_path.read_bytes()
+            content_hash = hashlib.sha256(data).hexdigest()
+
+            source_type = self._detect_source_type(rel_str)
+            meta_dict: dict[str, Any] = {}
+
+            if source_type not in _NO_META_TYPES:
+                meta_file = meta_path_for(full_path)
+                if meta_file.exists():
+                    meta_dict = read_meta(full_path)
+                else:
+                    logger.warning(
+                        ".meta ファイルが欠落しています: %s", full_path
+                    )
+
+            source_id = self._resolve_source_id(source_type, rel_str, meta_dict or None)
+            title = self._resolve_title(source_type, rel_str, meta_dict or None)
+            collected_at = meta_dict.get("collected_at", now)
+
+            self._db.register_source(
+                source_id=source_id,
+                source_type=source_type,
+                file_path=rel_str,
+                title=title,
+                content_hash=content_hash,
+                file_size=len(data),
+                created_at=collected_at,
+                updated_at=now,
+            )
+            count += 1
+
+        logger.info("metadata.db 再構築完了: %d 件", count)
+        return count
+
+    # --- 内部ユーティリティ ---
+
+    @staticmethod
+    def _detect_source_type(rel_path: str) -> SourceType:
+        """相対パスから source_type を判定する."""
+        if rel_path.startswith("web/"):
+            return "web"
+        if rel_path.startswith("bluesky/"):
+            return "bluesky"
+        if rel_path.startswith("zenn/"):
+            return "zenn"
+        return "local"
+
+    @staticmethod
+    def _resolve_source_id(
+        source_type: SourceType,
+        rel_path: str,
+        metadata: dict[str, Any] | None,
+    ) -> str:
+        """source_id を決定する."""
+        if metadata and "source_id" in metadata:
+            return str(metadata["source_id"])
+        # local 媒体: 相対パスが source_id
+        if source_type == "local":
+            return rel_path
+        # .meta がない場合のフォールバック: 相対パスを使用
+        return rel_path
+
+    @staticmethod
+    def _resolve_title(
+        source_type: SourceType,
+        rel_path: str,
+        metadata: dict[str, Any] | None,
+    ) -> str:
+        """タイトルを決定する."""
+        if metadata and "title" in metadata:
+            return str(metadata["title"])
+        # local 媒体: ファイル名（拡張子除去）
+        return Path(rel_path).stem
+
+    # --- コンテキストマネージャ ---
+
+    def __enter__(self) -> SourceStore:
+        return self
+
+    def __exit__(self, *args: object) -> None:
+        self.close()
