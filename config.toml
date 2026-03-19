@@ -46,8 +46,13 @@ rag_zenn_max_articles = 100
 rag_zenn_request_timeout = 30
 rag_zenn_request_interval = 0.1
 
+# クロール per-request タイムアウト（秒）
+rag_crawl_request_timeout = 30
+
 # ドキュメントインジェスター
 rag_document_supported_extensions = ".md,.txt,.pdf,.adoc"
+rag_document_http_mode_enabled = false
+rag_document_allowed_dirs = ""
 
 # PDF バックエンド (auto / mineru / pymupdf4llm)
 rag_pdf_backend = "auto"
