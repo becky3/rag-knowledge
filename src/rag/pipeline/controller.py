@@ -64,6 +64,16 @@ class PipelineController:
         """metadata.db への直接アクセス."""
         return self._source_store.db
 
+    @property
+    def source_store(self) -> SourceStore:
+        """source_store への直接アクセス."""
+        return self._source_store
+
+    @property
+    def indexer(self) -> IndexerProtocol:
+        """インデクサーへの直接アクセス."""
+        return self._indexer
+
     # --- git 操作 ---
 
     def init_repo(self) -> None:
@@ -81,6 +91,20 @@ class PipelineController:
         """
         self._git.init_repo()
         return self._git.commit(message)
+
+    def ingest_and_index(self, message: str) -> PipelineSummary:
+        """インジェスター実行後の後処理を一括実行する.
+
+        source_store の変更を git commit し、差分更新を実行する。
+
+        Args:
+            message: コミットメッセージ
+
+        Returns:
+            パイプライン処理結果サマリ
+        """
+        self.commit(message)
+        return self.run_incremental()
 
     # --- パイプライン実行 ---
 

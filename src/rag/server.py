@@ -13,7 +13,7 @@ FastMCP を使用して 12 個の RAG ツールを公開する:
 - rag_crawl_bluesky: BlueSky 投稿の一括取り込み
 - rag_add_document: ドキュメントファイルをナレッジベースに取り込み
 - rag_crawl_documents: ディレクトリ内ドキュメントを一括取り込み
-- rag_delete: ソースURL指定でナレッジから削除
+- rag_delete: ソースURL指定でナレッジから論理削除
 - rag_rebuild: ナレッジベースの再構築
 - rag_stats: ナレッジベースの統計情報を表示
 """
@@ -45,16 +45,12 @@ with contextlib.redirect_stdout(io.StringIO()):
     from .bm25_index import BM25Index
     from .config import get_settings
     from .embedding.factory import get_embedding_provider
-    from .ingesters.bluesky_ingester import BlueskyIngester
-    from .ingesters.document_ingester import DocumentIngester, PdfBackendConfig
-    from .ingesters.web_ingester import WebIngester
-    from .ingesters.zenn_ingester import ZennIngester
+    from .ingesters.document_ingester import PdfBackendConfig
     from .rag_knowledge import (
         RAGKnowledgeService,
         format_document_response,
         get_document,
     )
-    from .safe_browsing import create_safe_browsing_client
     from .vector_store import VectorStore
     from .web_crawler import WebCrawler
 
@@ -62,12 +58,18 @@ with contextlib.redirect_stdout(io.StringIO()):
     from .converter import Converter
     from .indexer import Indexer
     from .pipeline.controller import PipelineController
+    from .pipeline.ingesters._common import IngestResult
+    from .pipeline.ingesters.bluesky import BlueskyIngester as PipelineBlueskyIngester
+    from .pipeline.ingesters.local import LocalIngester as PipelineLocalIngester
+    from .pipeline.ingesters.web import WebIngester as PipelineWebIngester
+    from .pipeline.ingesters.zenn import ZennIngester as PipelineZennIngester
     from .pipeline.models import PipelineMode, PipelineSummary, detect_source_type
     from .store.metadata_db import MetadataDB
     from .store.models import NULL_COMMIT_HASH, SourceType
     from .store.source_store import SourceStore
 
 from py_common_lib.httpx import ConstrainedClient  # safety:allowed
+from py_common_lib.secrets import SecretNotFoundError, SecretStoreError, get_secret
 
 from mcp.server.fastmcp import FastMCP
 
@@ -79,14 +81,17 @@ logger = logging.getLogger(__name__)
 
 mcp = FastMCP("rag")
 
-# --- 遅延初期化 ---
+# シークレットサービス名
+_SECRET_SERVICE_NAME = "rag-knowledge"
 
-_rag_service = None
+# --- 遅延初期化: RAGKnowledgeService（検索用） ---
+
+_rag_service: RAGKnowledgeService | None = None
 _init_lock = asyncio.Lock()
 
 
 def _reset_rag_service() -> None:
-    """グローバルな RAGKnowledgeService をリセットする（テスト用）."""
+    """グローバルな RAGKnowledgeService をリセットする."""
     global _rag_service
     _rag_service = None
 
@@ -98,15 +103,9 @@ async def _get_rag_service() -> RAGKnowledgeService:
         return _rag_service
 
     async with _init_lock:
-        # ダブルチェック: Lock 待ちの間に別タスクが初期化済みの場合
         if _rag_service is not None:
             return _rag_service
 
-        # ChromaDB / BM25 のオブジェクト構築は同期的でブロッキング。
-        # イベントループをブロックすると MCP stdio 通信が途絶えるため、
-        # ワーカースレッドで実行する。
-        # 注意: import は全てモジュールレベルで完了済み。ワーカースレッド内で
-        # import するとデッドロックする（anyio イベントループとの import lock 競合）。
         _rag_service = await asyncio.to_thread(_build_rag_service)
         logger.info("RAG service initialized")
         return _rag_service
@@ -118,7 +117,6 @@ def _build_rag_service() -> RAGKnowledgeService:
 
     embedding_provider = get_embedding_provider(settings, settings.embedding_provider)
 
-    # bm25s が stdout に直接 print する問題への対策（MCP stdio プロトコル保護）
     with contextlib.redirect_stdout(io.StringIO()):
         vector_store = VectorStore(
             embedding_provider=embedding_provider,
@@ -130,21 +128,12 @@ def _build_rag_service() -> RAGKnowledgeService:
             respect_robots_txt=settings.rag_respect_robots_txt,
             robots_txt_cache_ttl=settings.rag_robots_txt_cache_ttl,
         )
-        safe_browsing_client = create_safe_browsing_client(settings)
 
-        # BM25は準Agentic Search（生結果個別返却）で常時使用するため、
-        # rag_hybrid_search_enabled に関係なく常時初期化する。
-        # 既存の hybrid_search_enabled フラグと HybridSearchEngine は従来のまま保持。
         bm25_index = BM25Index(
             k1=settings.rag_bm25_k1,
             b=settings.rag_bm25_b,
             persist_dir=settings.bm25_persist_dir,
         )
-
-    web_ingester = WebIngester(
-        web_crawler=web_crawler,
-        safe_browsing_client=safe_browsing_client,
-    )
 
     return RAGKnowledgeService(
         vector_store=vector_store,
@@ -152,19 +141,171 @@ def _build_rag_service() -> RAGKnowledgeService:
         chunk_size=settings.rag_chunk_size,
         chunk_overlap=settings.rag_chunk_overlap,
         similarity_threshold=settings.rag_similarity_threshold,
-        safe_browsing_client=safe_browsing_client,
+        safe_browsing_client=None,
         bm25_index=bm25_index,
         hybrid_search_enabled=settings.rag_hybrid_search_enabled,
         vector_weight=settings.rag_vector_weight,
         min_combined_score=settings.rag_min_combined_score,
         debug_log_enabled=settings.rag_debug_log_enabled,
-        web_ingester=web_ingester,
+        web_ingester=None,
     )
+
+
+# --- 遅延初期化: PipelineController（取り込み・再構築用） ---
+
+_pipeline_controller: PipelineController | None = None
+_pipeline_lock = asyncio.Lock()
+
+
+def _reset_pipeline_controller() -> None:
+    """グローバルな PipelineController をリセットする."""
+    global _pipeline_controller
+    _pipeline_controller = None
+
+
+async def _get_pipeline_controller() -> PipelineController:
+    """PipelineController を遅延初期化して返す."""
+    global _pipeline_controller
+    if _pipeline_controller is not None:
+        return _pipeline_controller
+
+    async with _pipeline_lock:
+        if _pipeline_controller is not None:
+            return _pipeline_controller
+
+        _pipeline_controller = await asyncio.to_thread(_build_pipeline_controller)
+        logger.info("Pipeline controller initialized")
+        return _pipeline_controller
+
+
+def _build_pipeline_controller() -> PipelineController:
+    """パイプライン制御コントローラを構築する（ワーカースレッド用）."""
+    settings = get_settings()
+    source_store_dir = Path(settings.source_store_dir)
+    converted_store_dir = Path(settings.converted_store_dir)
+    converted_store_dir.mkdir(parents=True, exist_ok=True)
+
+    source_store = SourceStore(source_store_dir)
+    source_store.initialize()
+
+    pdf_config = PdfBackendConfig(
+        backend=settings.rag_pdf_backend,
+        mineru_mfd_conf_thres=settings.rag_pdf_mineru_mfd_conf_thres,
+        quality_ufffd_threshold=settings.rag_pdf_quality_ufffd_threshold,
+        quality_greek_threshold=settings.rag_pdf_quality_greek_threshold,
+        quality_cjk_min_threshold=settings.rag_pdf_quality_cjk_min_threshold,
+        quality_min_chars_per_page=settings.rag_pdf_quality_min_chars_per_page,
+        quality_sample_pages=settings.rag_pdf_quality_sample_pages,
+    )
+    converter = Converter(regen_option="force", pdf_config=pdf_config)
+
+    embedding_provider = get_embedding_provider(settings, settings.embedding_provider)
+
+    with contextlib.redirect_stdout(io.StringIO()):
+        vector_store = VectorStore(
+            embedding_provider=embedding_provider,
+            persist_directory=settings.chromadb_persist_dir,
+        )
+        bm25_index = BM25Index(
+            k1=settings.rag_bm25_k1,
+            b=settings.rag_bm25_b,
+            persist_dir=settings.bm25_persist_dir,
+        )
+
+    indexer = Indexer(
+        vector_store=vector_store,
+        bm25_index=bm25_index,
+        metadata_db=source_store.db,
+        chunk_size=settings.rag_chunk_size,
+        chunk_overlap=settings.rag_chunk_overlap,
+    )
+
+    return PipelineController(
+        source_store=source_store,
+        converted_store_dir=converted_store_dir,
+        converter=converter,
+        indexer=indexer,
+    )
+
+
+_safe_browsing_api_key_cache: str | None = None
+
+
+def _get_safe_browsing_api_key() -> str:
+    """Safe Browsing API キーを取得する（プロセス内キャッシュ）.
+
+    Returns:
+        API キー。取得できない場合は空文字列。
+    """
+    global _safe_browsing_api_key_cache
+    if _safe_browsing_api_key_cache is not None:
+        return _safe_browsing_api_key_cache
+
+    settings = get_settings()
+    if not settings.rag_url_safety_check:
+        _safe_browsing_api_key_cache = ""
+        return ""
+    try:
+        key = get_secret(
+            "GOOGLE_SAFE_BROWSING_API_KEY", service=_SECRET_SERVICE_NAME,
+        )
+        _safe_browsing_api_key_cache = key or ""
+    except (SecretNotFoundError, SecretStoreError):
+        logger.warning("Safe Browsing API key not available")
+        _safe_browsing_api_key_cache = ""
+    return _safe_browsing_api_key_cache
+
+
+# --- レスポンスフォーマッタ ---
+
+
+def _format_ingest_response(
+    ingest_result: IngestResult,
+    pipeline_summary: PipelineSummary | None,
+    *,
+    context: str = "",
+) -> str:
+    """IngestResult + PipelineSummary を統合レスポンスに変換する."""
+    parts = [ingest_result.summary(context=context)]
+    if pipeline_summary is not None:
+        parts.append(f"パイプライン: {pipeline_summary.processed}件処理")
+        if pipeline_summary.errors:
+            parts.append(f"パイプラインエラー: {len(pipeline_summary.errors)}件")
+    return " / ".join(parts)
+
+
+# --- ファクトリヘルパー ---
+
+
+def _create_web_ingester(source_store: SourceStore) -> PipelineWebIngester:
+    """設定に基づいて PipelineWebIngester を生成する."""
+    settings = get_settings()
+    return PipelineWebIngester(
+        source_store,
+        max_crawl_pages=settings.rag_max_crawl_pages,
+        crawl_request_timeout=settings.rag_crawl_request_timeout,
+        respect_robots_txt=settings.rag_respect_robots_txt,
+        robots_txt_cache_ttl=settings.rag_robots_txt_cache_ttl,
+        url_safety_check=settings.rag_url_safety_check,
+        url_safety_cache_ttl=settings.rag_url_safety_cache_ttl,
+        url_safety_fail_open=settings.rag_url_safety_fail_open,
+        url_safety_timeout=settings.rag_url_safety_timeout,
+    )
+
+
+def _get_supported_extensions() -> list[str]:
+    """設定からサポート拡張子リストを取得する."""
+    settings = get_settings()
+    return [
+        ext.strip() if ext.strip().startswith(".") else f".{ext.strip()}"
+        for ext in settings.rag_document_supported_extensions.split(",")
+        if ext.strip()
+    ]
 
 
 # --- MCP ツール定義 ---
 
-_VALID_SOURCE_TYPES: frozenset[str] = frozenset({"web", "zenn", "bluesky", "document"})
+_VALID_SOURCE_TYPES: frozenset[str] = frozenset({"web", "zenn", "bluesky", "local"})
 
 
 def _format_chunk_position(chunk_index: int, total_chunks: int) -> str:
@@ -199,7 +340,7 @@ async def rag_search(
     Args:
         query: 検索クエリ（ユーザーの質問からキーワードを抽出して構成する）
         n_results: 各エンジンから取得する結果数（未指定時は設定値を使用）
-        source_type: ソース種別フィルタ（"web", "zenn", "bluesky", "document"）。
+        source_type: ソース種別フィルタ（"web", "zenn", "bluesky", "local"）。
             指定時はそのソース種別のチャンクのみを検索対象とする。未指定時は全種別を検索。
 
     Returns:
@@ -319,12 +460,29 @@ async def rag_add(url: str) -> str:
     Returns:
         取り込み結果のメッセージ
     """
-    service = await _get_rag_service()
+    controller = await _get_pipeline_controller()
+    web_ingester = _create_web_ingester(controller.source_store)
+    settings = get_settings()
+
     try:
-        chunks = await service.ingest_page(url)
-        if chunks <= 0:
-            return f"エラー: ページの取り込みに失敗しました。URL: {url}"
-        return f"ページを取り込みました: {url} ({chunks}チャンク)"
+        api_key = _get_safe_browsing_api_key()
+        async with ConstrainedClient(
+            request_timeout=settings.rag_crawl_request_timeout,
+            request_interval=settings.rag_crawl_delay_sec,
+        ) as client:
+            ingest_result = await web_ingester.add(
+                url, client=client, safe_browsing_api_key=api_key,
+            )
+
+        if ingest_result.placed == 0 and ingest_result.errors == 0:
+            return f"取り込み対象がありませんでした: {url}"
+
+        pipeline_summary = await asyncio.to_thread(
+            controller.ingest_and_index, f"ingest(web): add {url}",
+        )
+        _reset_rag_service()
+
+        return _format_ingest_response(ingest_result, pipeline_summary, context=url)
     except ValueError as e:
         return f"エラー: {e}"
     except Exception:
@@ -345,13 +503,30 @@ async def rag_crawl(url: str, pattern: str = "") -> str:
     Returns:
         クロール結果のサマリー
     """
-    service = await _get_rag_service()
+    controller = await _get_pipeline_controller()
+    web_ingester = _create_web_ingester(controller.source_store)
+    settings = get_settings()
+
     try:
-        result = await service.ingest_from_index(url, url_pattern=pattern)
-        pages = result["pages_crawled"]
-        chunks = result["chunks_stored"]
-        errors = result["errors"]
-        return f"完了: {pages}ページ / {chunks}チャンク / エラー: {errors}件"
+        api_key = _get_safe_browsing_api_key()
+        async with ConstrainedClient(
+            request_timeout=settings.rag_crawl_request_timeout,
+            request_interval=settings.rag_crawl_delay_sec,
+        ) as client:
+            ingest_result = await web_ingester.crawl(
+                url, pattern=pattern, client=client,
+                safe_browsing_api_key=api_key,
+            )
+
+        if ingest_result.placed == 0 and ingest_result.errors == 0:
+            return f"対象ページが見つかりませんでした: {url}"
+
+        pipeline_summary = await asyncio.to_thread(
+            controller.ingest_and_index, f"ingest(web): crawl {url}",
+        )
+        _reset_rag_service()
+
+        return _format_ingest_response(ingest_result, pipeline_summary, context=url)
     except ValueError as e:
         return f"エラー: {e}"
     except Exception:
@@ -374,17 +549,31 @@ async def rag_crawl_preview(url: str, pattern: str = "") -> str:
     Returns:
         クロール対象ページの一覧テキスト
     """
-    service = await _get_rag_service()
+    settings = get_settings()
+    # crawl_preview は配置を行わないため、PipelineController の重い初期化を避ける
+    source_store_dir = Path(settings.source_store_dir)
+    source_store_dir.mkdir(parents=True, exist_ok=True)
+    source_store = SourceStore(source_store_dir)
+    web_ingester = _create_web_ingester(source_store)
+
     try:
-        pages = await service.crawl_preview(url, url_pattern=pattern)
+        async with ConstrainedClient(
+            request_timeout=settings.rag_crawl_request_timeout,
+            request_interval=settings.rag_crawl_delay_sec,
+        ) as client:
+            pages = await web_ingester.crawl_preview(
+                url, pattern=pattern, client=client,
+            )
+
         if not pages:
             return "対象ページが見つかりませんでした"
 
         lines: list[str] = [f"クロール対象: {len(pages)}ページ", ""]
         for i, page in enumerate(pages, start=1):
-            title = page.title or "(タイトル取得不可)"
+            title = page.get("title", "") or "(タイトル取得不可)"
+            page_url = page.get("url", "")
             lines.append(f"{i}. {title}")
-            lines.append(f"   {page.url}")
+            lines.append(f"   {page_url}")
         return "\n".join(lines)
     except ValueError as e:
         return f"エラー: {e}"
@@ -406,16 +595,13 @@ async def rag_crawl_zenn(username: str, max_articles: int | None = None) -> str:
         max_articles: 取得する最大記事数（未指定時は設定値を使用、許容範囲: 1〜100）
 
     Returns:
-        取り込み結果のサマリーテキスト（取得記事数、チャンク数、エラー数）
+        取り込み結果のサマリーテキスト
     """
-    service = await _get_rag_service()
     settings = get_settings()
 
-    # max_articles のデフォルト解決: 未指定時は設定値を使用
     if max_articles is None:
         max_articles = settings.rag_zenn_max_articles
 
-    # max_articles のバリデーション（MCP ツール入力として）
     if not isinstance(max_articles, int) or isinstance(max_articles, bool):
         return f"エラー: max_articles は整数で指定してください（入力値: {max_articles!r}）"
     if max_articles <= 0:
@@ -424,50 +610,35 @@ async def rag_crawl_zenn(username: str, max_articles: int | None = None) -> str:
     if not username or not username.strip():
         return "エラー: username を指定してください"
 
+    controller = await _get_pipeline_controller()
+    zenn_ingester = PipelineZennIngester(
+        controller.source_store,
+        max_articles=max_articles,
+    )
+
     try:
         async with ConstrainedClient(
             request_timeout=settings.rag_zenn_request_timeout,
             request_interval=settings.rag_zenn_request_interval,
         ) as client:
-            ingester = ZennIngester(
-                client=client,
+            ingest_result = await zenn_ingester.crawl_zenn(
+                username.strip(),
                 max_articles=max_articles,
+                client=client,
             )
 
-            # 記事一覧を走査
-            slugs = await ingester.discover(username.strip())
-            if not slugs:
-                return f"記事が見つかりませんでした（ユーザー: {username}）"
+        if ingest_result.placed == 0 and ingest_result.errors == 0:
+            return f"記事が見つかりませんでした（ユーザー: {username}）"
 
-            # 各記事を取得してナレッジベースに取り込む
-            total_chunks = 0
-            errors = 0
-            skipped = 0
-            ingested_count = 0
+        pipeline_summary = await asyncio.to_thread(
+            controller.ingest_and_index,
+            f"ingest(zenn): {username.strip()}",
+        )
+        _reset_rag_service()
 
-            for slug in slugs:
-                try:
-                    content = await ingester.fetch_single(slug)
-                    if content is None:
-                        skipped += 1
-                        continue
-                    chunks = await service.ingest_content(content)
-                    total_chunks += chunks
-                    ingested_count += 1
-                except Exception:
-                    logger.exception("Failed to ingest Zenn article: %s", slug)
-                    errors += 1
-
-            parts = [
-                f"完了: {ingested_count}記事 / {total_chunks}チャンク",
-            ]
-            if skipped > 0:
-                parts.append(f"スキップ: {skipped}件")
-            if errors > 0:
-                parts.append(f"エラー: {errors}件")
-            parts.append(f"（ユーザー: {username}）")
-
-            return " / ".join(parts)
+        return _format_ingest_response(
+            ingest_result, pipeline_summary, context=f"ユーザー: {username}",
+        )
     except (ValueError, TypeError) as e:
         return f"エラー: {e}"
     except Exception:
@@ -493,20 +664,15 @@ async def rag_crawl_bluesky(
         include_reposts: タイムラインにリポストを含めるか（未指定時は設定値を使用）
 
     Returns:
-        取り込み結果のサマリーテキスト（取得投稿数、スキップ数、チャンク数、エラー数）
+        取り込み結果のサマリーテキスト
     """
-    service = await _get_rag_service()
     settings = get_settings()
 
-    # max_posts のデフォルト解決: 未指定時は設定値を使用
     if max_posts is None:
         max_posts = settings.rag_bluesky_max_posts
-
-    # include_reposts のデフォルト解決
     if include_reposts is None:
         include_reposts = settings.rag_bluesky_include_reposts
 
-    # max_posts のバリデーション（MCP ツール入力として）
     if not isinstance(max_posts, int) or isinstance(max_posts, bool):
         return f"エラー: max_posts は整数で指定してください（入力値: {max_posts!r}）"
     if max_posts <= 0:
@@ -522,59 +688,38 @@ async def rag_crawl_bluesky(
             "ハンドル（例: user.bsky.social）を指定してください"
         )
 
+    controller = await _get_pipeline_controller()
+    bluesky_ingester = PipelineBlueskyIngester(
+        controller.source_store,
+        appview_url=settings.rag_bluesky_appview_url,
+        max_posts=max_posts,
+        include_reposts=include_reposts,
+    )
+
     try:
         async with ConstrainedClient(
             request_timeout=settings.rag_bluesky_request_timeout,
             request_interval=settings.rag_bluesky_request_interval,
         ) as client:
-            ingester = BlueskyIngester(
-                client=client,
-                appview_url=settings.rag_bluesky_appview_url,
-                max_posts=max_posts,
-            )
-
-            # 投稿を一括取得
-            contents = await ingester.crawl(
+            ingest_result = await bluesky_ingester.crawl_bluesky(
                 handle,
+                max_posts=max_posts,
                 include_reposts=include_reposts,
+                client=client,
             )
 
-            if not contents:
-                return f"投稿が見つかりませんでした（ハンドル: {handle}）"
+        if ingest_result.placed == 0 and ingest_result.errors == 0:
+            return f"投稿が見つかりませんでした（ハンドル: {handle}）"
 
-            # 各投稿をナレッジベースに取り込む
-            total_chunks = 0
-            errors = 0
-            skipped = 0
-            ingested_count = 0
+        pipeline_summary = await asyncio.to_thread(
+            controller.ingest_and_index,
+            f"ingest(bluesky): {handle}",
+        )
+        _reset_rag_service()
 
-            for content in contents:
-                # 既存 source_id チェック（スキップ判定）
-                # BlueSky は投稿編集不可のため、既存投稿はスキップする
-                if await service.source_exists(content.source_id):
-                    skipped += 1
-                    continue
-
-                try:
-                    chunks = await service.ingest_content(content)
-                    total_chunks += chunks
-                    ingested_count += 1
-                except Exception:
-                    logger.exception(
-                        "Failed to ingest BlueSky post: %s", content.source_id
-                    )
-                    errors += 1
-
-            parts = [
-                f"完了: {ingested_count}投稿 / {total_chunks}チャンク",
-            ]
-            if skipped > 0:
-                parts.append(f"スキップ: {skipped}件")
-            if errors > 0:
-                parts.append(f"エラー: {errors}件")
-            parts.append(f"（ハンドル: {handle}）")
-
-            return " / ".join(parts)
+        return _format_ingest_response(
+            ingest_result, pipeline_summary, context=f"ハンドル: {handle}",
+        )
     except (ValueError, TypeError) as e:
         return f"エラー: {e}"
     except Exception:
@@ -582,28 +727,6 @@ async def rag_crawl_bluesky(
             "Failed to crawl BlueSky posts for handle: %s", handle
         )
         return f"エラー: BlueSky 投稿の取り込みに失敗しました（ハンドル: {handle}）"
-
-
-def _create_document_ingester() -> DocumentIngester:
-    """設定に基づいて DocumentIngester を生成する."""
-    from .ingesters.document_ingester import PdfBackendConfig
-
-    settings = get_settings()
-    extensions = [
-        ext.strip() if ext.strip().startswith(".") else f".{ext.strip()}"
-        for ext in settings.rag_document_supported_extensions.split(",")
-        if ext.strip()
-    ]
-    pdf_config = PdfBackendConfig(
-        backend=settings.rag_pdf_backend,
-        mineru_mfd_conf_thres=settings.rag_pdf_mineru_mfd_conf_thres,
-        quality_ufffd_threshold=settings.rag_pdf_quality_ufffd_threshold,
-        quality_greek_threshold=settings.rag_pdf_quality_greek_threshold,
-        quality_cjk_min_threshold=settings.rag_pdf_quality_cjk_min_threshold,
-        quality_min_chars_per_page=settings.rag_pdf_quality_min_chars_per_page,
-        quality_sample_pages=settings.rag_pdf_quality_sample_pages,
-    )
-    return DocumentIngester(supported_extensions=extensions, pdf_config=pdf_config)
 
 
 @mcp.tool()
@@ -619,22 +742,36 @@ async def rag_add_document(file_path: str) -> str:
         file_path: 取り込み対象ファイルのパス（絶対パスまたは相対パス）
 
     Returns:
-        取り込み結果のメッセージ（ファイル名、チャンク数）
+        取り込み結果のメッセージ
     """
     if get_settings().rag_transport == "http":
         return "エラー: rag_add_document は HTTP モードでは無効です（セキュリティ上の制約）"
 
-    service = await _get_rag_service()
-    ingester = _create_document_ingester()
+    controller = await _get_pipeline_controller()
+    local_ingester = PipelineLocalIngester(
+        controller.source_store,
+        supported_extensions=_get_supported_extensions(),
+    )
 
     try:
-        content = await ingester.fetch_single(file_path)
-        if content is None:
+        ingest_result = await asyncio.to_thread(
+            local_ingester.add_document, file_path,
+        )
+
+        if ingest_result.placed == 0 and ingest_result.errors == 0:
             return f"エラー: ファイルの取り込みに失敗しました。パス: {file_path}"
-        chunks = await service.ingest_content(content)
-        if chunks <= 0:
-            return f"エラー: ファイルの取り込みに失敗しました。パス: {file_path}"
-        return f"ファイルを取り込みました: {file_path} ({chunks}チャンク)"
+
+        if ingest_result.errors > 0:
+            return f"エラー: {ingest_result.error_details[0]}"
+
+        pipeline_summary = await asyncio.to_thread(
+            controller.ingest_and_index, f"ingest(local): add {file_path}",
+        )
+        _reset_rag_service()
+
+        return _format_ingest_response(
+            ingest_result, pipeline_summary, context=file_path,
+        )
     except ValueError as e:
         return f"エラー: {e}"
     except Exception:
@@ -657,70 +794,75 @@ async def rag_crawl_documents(dir_path: str, pattern: str = "**/*") -> str:
         pattern: glob パターン（デフォルト: ``**/*`` で再帰的に全対応ファイルを検索）
 
     Returns:
-        取り込み結果のサマリーテキスト（処理ファイル数、総チャンク数、スキップ数、エラー数）
+        取り込み結果のサマリーテキスト
     """
     if get_settings().rag_transport == "http":
         return "エラー: rag_crawl_documents は HTTP モードでは無効です（セキュリティ上の制約）"
 
-    service = await _get_rag_service()
-    ingester = _create_document_ingester()
+    controller = await _get_pipeline_controller()
+    local_ingester = PipelineLocalIngester(
+        controller.source_store,
+        supported_extensions=_get_supported_extensions(),
+    )
 
     try:
-        files = ingester.collect_files(dir_path, pattern)
+        ingest_result = await asyncio.to_thread(
+            local_ingester.crawl_documents, dir_path, pattern,
+        )
+
+        if ingest_result.placed == 0 and ingest_result.errors == 0:
+            return f"対象ファイルが見つかりませんでした（ディレクトリ: {dir_path}）"
+
+        pipeline_summary = await asyncio.to_thread(
+            controller.ingest_and_index, f"ingest(local): crawl {dir_path}",
+        )
+        _reset_rag_service()
+
+        return _format_ingest_response(
+            ingest_result, pipeline_summary, context=f"ディレクトリ: {dir_path}",
+        )
     except ValueError as e:
         return f"エラー: {e}"
-
-    if not files:
-        return f"対象ファイルが見つかりませんでした（ディレクトリ: {dir_path}）"
-
-    total_chunks = 0
-    errors = 0
-    skipped = 0
-    ingested_count = 0
-
-    for file in files:
-        try:
-            content = await ingester.fetch_single(str(file))
-            if content is None:
-                skipped += 1
-                continue
-            chunks = await service.ingest_content(content)
-            total_chunks += chunks
-            ingested_count += 1
-        except Exception:
-            logger.exception("Failed to ingest document file: %s", file)
-            errors += 1
-
-    parts = [
-        f"完了: {ingested_count}ファイル / {total_chunks}チャンク",
-    ]
-    if skipped > 0:
-        parts.append(f"スキップ: {skipped}件")
-    if errors > 0:
-        parts.append(f"エラー: {errors}件")
-    parts.append(f"（ディレクトリ: {dir_path}）")
-
-    return " / ".join(parts)
+    except Exception:
+        logger.exception("Failed to crawl documents: %s", dir_path)
+        return f"エラー: ドキュメントの取り込みに失敗しました（ディレクトリ: {dir_path}）"
 
 
 @mcp.tool()
 async def rag_delete(url: str) -> str:
-    """[rag-knowledge] RAG delete - ソースURL指定でナレッジから削除.
+    """[rag-knowledge] RAG delete - ソースURL指定でナレッジから論理削除.
 
-    knowledge base, remove source, delete document.
+    knowledge base, remove source, delete document, soft delete.
+    source_store 内のファイルは削除せず、metadata.db で論理削除する。
+    検索インデックスからは即座に除去される。
+    復旧は rag_rebuild で全再構築を行えば可能。
 
     Args:
-        url: 削除するソースURL
+        url: 削除するソースURL（source_id）
 
     Returns:
         削除結果のメッセージ
     """
-    service = await _get_rag_service()
+    controller = await _get_pipeline_controller()
+
     try:
-        count = await service.delete_source(url)
-        if count == 0:
+        # source_id として url をそのまま使用
+        source_id = url
+
+        def _do_delete() -> bool:
+            try:
+                controller.source_store.soft_delete(source_id)
+            except KeyError:
+                return False
+            controller.indexer.delete(source_id)
+            return True
+
+        deleted = await asyncio.to_thread(_do_delete)
+        if not deleted:
             return f"該当するソースが見つかりませんでした: {url}"
-        return f"削除しました: {url} ({count}チャンク)"
+
+        _reset_rag_service()
+        return f"論理削除しました: {url}"
     except Exception:
         logger.exception("Failed to delete: %s", url)
         return f"エラー: 削除に失敗しました。URL: {url}"
@@ -746,56 +888,6 @@ def _format_size(size_bytes: int) -> str:
     if size_bytes < 1024 * 1024 * 1024:
         return f"{size_bytes / (1024 * 1024):.1f} MB"
     return f"{size_bytes / (1024 * 1024 * 1024):.1f} GB"
-
-
-def _build_pipeline_controller() -> PipelineController:
-    """パイプライン制御コントローラを構築する（ワーカースレッド用）."""
-    settings = get_settings()
-    source_store_dir = Path(settings.source_store_dir)
-    converted_store_dir = Path(settings.converted_store_dir)
-    converted_store_dir.mkdir(parents=True, exist_ok=True)
-
-    source_store = SourceStore(source_store_dir)
-    source_store.db.initialize()
-
-    pdf_config = PdfBackendConfig(
-        backend=settings.rag_pdf_backend,
-        mineru_mfd_conf_thres=settings.rag_pdf_mineru_mfd_conf_thres,
-        quality_ufffd_threshold=settings.rag_pdf_quality_ufffd_threshold,
-        quality_greek_threshold=settings.rag_pdf_quality_greek_threshold,
-        quality_cjk_min_threshold=settings.rag_pdf_quality_cjk_min_threshold,
-        quality_min_chars_per_page=settings.rag_pdf_quality_min_chars_per_page,
-        quality_sample_pages=settings.rag_pdf_quality_sample_pages,
-    )
-    converter = Converter(regen_option="force", pdf_config=pdf_config)
-
-    embedding_provider = get_embedding_provider(settings, settings.embedding_provider)
-
-    with contextlib.redirect_stdout(io.StringIO()):
-        vector_store = VectorStore(
-            embedding_provider=embedding_provider,
-            persist_directory=settings.chromadb_persist_dir,
-        )
-        bm25_index = BM25Index(
-            k1=settings.rag_bm25_k1,
-            b=settings.rag_bm25_b,
-            persist_dir=settings.bm25_persist_dir,
-        )
-
-    indexer = Indexer(
-        vector_store=vector_store,
-        bm25_index=bm25_index,
-        metadata_db=source_store.db,
-        chunk_size=settings.rag_chunk_size,
-        chunk_overlap=settings.rag_chunk_overlap,
-    )
-
-    return PipelineController(
-        source_store=source_store,
-        converted_store_dir=converted_store_dir,
-        converter=converter,
-        indexer=indexer,
-    )
 
 
 def _format_rebuild_summary(summary: PipelineSummary, elapsed: float) -> str:
@@ -983,12 +1075,12 @@ async def rag_rebuild(mode: str, source_type: str | None = None) -> str:
         try:
             summary = await asyncio.shield(task)
         except asyncio.CancelledError:
-            # キャンセルされてもスレッド完了を待ってからロック解放
             await task
             raise
         elapsed = time.monotonic() - start
 
-        # RAG サービスをリセット（インデックスが変更されたため）
+        # rebuild はインデックスを全操作するため、両方リセット
+        _reset_pipeline_controller()
         _reset_rag_service()
 
         return _format_rebuild_summary(summary, elapsed)

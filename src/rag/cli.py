@@ -800,14 +800,36 @@ async def run_crawl_preview(args: argparse.Namespace) -> None:
     Args:
         args: コマンドライン引数
     """
-    from .web_crawler import WebCrawler
+    from .config import get_settings
+    from .pipeline.ingesters.web import WebIngester
+    from .store.source_store import SourceStore
+
+    from py_common_lib.httpx import ConstrainedClient  # safety:allowed
 
     logger.info("Starting crawl preview for: %s", args.url)
 
-    crawler = WebCrawler()
+    settings = get_settings()
+    # crawl_preview は配置を行わないため、ディレクトリ作成のみ（DB 初期化不要）
+    source_store_dir = Path(settings.source_store_dir)
+    source_store_dir.mkdir(parents=True, exist_ok=True)
+    source_store = SourceStore(source_store_dir)
+
+    web_ingester = WebIngester(
+        source_store,
+        max_crawl_pages=settings.rag_max_crawl_pages,
+        crawl_request_timeout=settings.rag_crawl_request_timeout,
+        respect_robots_txt=settings.rag_respect_robots_txt,
+        robots_txt_cache_ttl=settings.rag_robots_txt_cache_ttl,
+    )
 
     try:
-        pages = await crawler.crawl_preview(args.url, url_pattern=args.pattern)
+        async with ConstrainedClient(
+            request_timeout=settings.rag_crawl_request_timeout,
+            request_interval=settings.rag_crawl_delay_sec,
+        ) as client:
+            pages = await web_ingester.crawl_preview(
+                args.url, pattern=args.pattern, client=client,
+            )
     except ValueError as e:
         logger.error("URL validation failed: %s", e)
         sys.exit(1)
@@ -817,15 +839,15 @@ async def run_crawl_preview(args: argparse.Namespace) -> None:
         return
 
     if args.format == "json":
-        data = [{"title": p.title, "url": p.url} for p in pages]
+        data = [{"title": p.get("title", ""), "url": p.get("url", "")} for p in pages]
         print(json.dumps(data, ensure_ascii=False, indent=2))
     else:
         print(f"クロール対象: {len(pages)}ページ")
         print()
         for i, page in enumerate(pages, start=1):
-            title = page.title or "(タイトル取得不可)"
+            title = page.get("title", "") or "(タイトル取得不可)"
             print(f"{i}. {title}")
-            print(f"   {page.url}")
+            print(f"   {page.get('url', '')}")
 
 
 def run_get_document(args: argparse.Namespace) -> None:
