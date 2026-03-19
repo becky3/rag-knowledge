@@ -23,7 +23,7 @@ RAG Knowledge は、外部 Web ページから収集した知識をベクトル 
 | 13 | パイプライン制御 | 3段パイプラインのステージ間連携・差分更新制御 | [pipeline-controller.md](pipeline-controller.md) |
 | 14 | コンバーター | source_store のファイルを converted_store のテキストに変換 | [converter.md](converter.md) |
 | 15 | インデクサー | converted_store からチャンキング・Embedding・インデックス構築 | [indexer.md](indexer.md) |
-| 16 | インジェスター（新アーキテクチャ） | 各媒体からのデータ取得・source_store 配置の共通仕様 | [ingester.md](ingester.md) |
+| 16 | インジェスター共通仕様 | インジェスターの共通制約・重複検出・パイプライン通知 | [ingesters/common.md](ingesters/common.md) |
 | 17 | 検索レスポンス + 全文取得 | チャンク単位検索レスポンスと全文取得ツール | [search-response.md](search-response.md) |
 | 18 | 再構築・統計・バックアップ | パイプライン再構築の MCP/CLI 公開・統計拡張・バックアップ手順 | [rebuild-stats.md](rebuild-stats.md) |
 
