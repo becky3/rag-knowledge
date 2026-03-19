@@ -182,14 +182,69 @@ JSON ファイルから構造化テキストを抽出する。現在、source_st
 
 #### BlueSky 投稿（source_type: bluesky）
 
-AT Protocol の投稿 JSON から以下の要素を順に結合する:
+AT Protocol の投稿 JSON（`getAuthorFeed` レスポンスのフィードアイテム）からテキストを抽出する。投稿は最大 300 文字の短文であり、Markdown 変換は不要。プレーンテキストとして抽出する。
 
-1. 投稿テキスト（本文）
-2. メディア ALT テキスト（`[Image ALT]`, `[Video ALT]` プレフィックス付き）
-3. リンクカード（`[Link Card]` セクションとして Title/URL/Description を含む）
-4. 引用テキスト（`[Quote]` セクション）
+テキスト抽出は `post.record`（raw record）から行う。`post.record` の embed の `$type` に `#view` サフィックスは付かない。
 
-リポストの場合は `[Repost: handle]` プレフィックスを付与する。
+**基本フィールド:**
+
+| フィールド | パス | 説明 |
+|-----------|------|------|
+| 投稿テキスト | `post.record.text` | 投稿本文 |
+| 画像 ALT テキスト | `post.record.embed.images[].alt` | 画像の代替テキスト |
+| 動画 ALT テキスト | `post.record.embed.alt` | 動画の代替テキスト |
+| リンクカードタイトル | `post.record.embed.external.title` | 外部リンクのタイトル |
+| リンクカード URL | `post.record.embed.external.uri` | 外部リンクの URL |
+| リンクカード説明 | `post.record.embed.external.description` | 外部リンクの説明文 |
+
+**recordWithMedia 時のフィールド:**
+
+embed の `$type` が `app.bsky.embed.recordWithMedia`（メディア + 引用の複合型）の場合、メディア部分は `embed.media` 配下にネストされる:
+
+| フィールド | パス（recordWithMedia 時） | 説明 |
+|-----------|--------------------------|------|
+| 画像 ALT テキスト | `post.record.embed.media.images[].alt` | recordWithMedia 時の画像 ALT |
+| 動画 ALT テキスト | `post.record.embed.media.alt` | recordWithMedia 時の動画 ALT |
+| リンクカードタイトル | `post.record.embed.media.external.title` | recordWithMedia 時のリンクタイトル |
+| リンクカード URL | `post.record.embed.media.external.uri` | recordWithMedia 時のリンク URL |
+| リンクカード説明 | `post.record.embed.media.external.description` | recordWithMedia 時のリンク説明 |
+
+**引用元投稿テキスト:**
+
+引用リポスト（`post.record.embed.$type` が `app.bsky.embed.record` または `app.bsky.embed.recordWithMedia`）を検出した場合、引用元テキストを `post.embed`（view 版、API レスポンスに展開済み）から取得する:
+
+| embed の $type | 引用元テキストのパス |
+|----------------|-------------------|
+| `app.bsky.embed.record` | `post.embed.record.value.text` |
+| `app.bsky.embed.recordWithMedia` | `post.embed.record.record.value.text` |
+
+引用元が投稿以外（スターターパック、フィードジェネレーター等）の場合は `value` キーが存在しない。この場合は引用元テキストなしとして扱う。
+
+**抽出対象外:** 動画キャプション（VTT）
+
+**テキスト構造:**
+
+抽出したテキストは以下の構造で構築する。各セクションは空行で区切る。該当するセクションがない場合は省略する。
+
+```
+[Repost: @元投稿者ハンドル]
+投稿テキスト
+
+[Image ALT] 画像の代替テキスト（複数ある場合は改行で連結）
+[Video ALT] 動画の代替テキスト
+
+[Link Card]
+Title: 外部リンクのタイトル
+URL: 外部リンクの URL
+Description: 外部リンクの説明文
+
+[Quote]
+引用元の投稿テキスト
+```
+
+- リポストの場合、先頭に `[Repost: @元投稿者ハンドル]` ヘッダーを付与する
+- 投稿テキストを先頭に配置する（検索ヒット時に最も重要な情報が先頭に来る）
+- セクションラベルは英語表記とする（LLM による検索・解釈の精度向上のため）
 
 ### パススルー
 
@@ -239,6 +294,4 @@ AT Protocol の投稿 JSON から以下の要素を順に結合する:
 
 - [source-store.md](source-store.md) — source_store 仕様
 - [pipeline-controller.md](pipeline-controller.md) — パイプライン制御仕様
-- [rag-knowledge.md](rag-knowledge.md) — RAG ナレッジ仕様（既存の変換ロジック定義を含む）
-- [bluesky-ingester.md](bluesky-ingester.md) — BlueSky インジェスター仕様（JSON テキスト抽出の元となるロジック）
-- [document-ingester.md](document-ingester.md) — ドキュメントインジェスター仕様（PDF テキスト抽出の元となるロジック）
+- [ingesters/bluesky.md](ingesters/bluesky.md) — BlueSky インジェスター仕様（JSON 保存形式の定義元）
