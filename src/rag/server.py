@@ -280,14 +280,15 @@ async def rag_get_document(
 
     response = format_document_response(result)
 
-    # MCP 経由の場合、rag_max_response_chars でトランケーション
+    # MCP 経由の場合、rag_max_response_chars でトランケーション（通知文込みで上限内に収める）
     max_chars = settings.rag_max_response_chars
     if max_chars is not None and not result.error and len(response) > max_chars:
-        response = response[:max_chars]
-        response += (
+        truncation_notice = (
             "\n\n…（レスポンスが上限の{:,}文字を超えたためトランケートされました。"
             "CLI の --output オプションで全文取得できます）"
         ).format(max_chars)
+        truncate_at = max(0, max_chars - len(truncation_notice))
+        response = response[:truncate_at] + truncation_notice
 
     return response
 

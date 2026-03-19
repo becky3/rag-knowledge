@@ -1054,6 +1054,9 @@ class DocumentResult:
     error: str | None = None
 
 
+_VALID_FORMATS: frozenset[str] = frozenset({"text", "original"})
+
+
 def get_document(
     source_id: str,
     format: str,
@@ -1073,60 +1076,85 @@ def get_document(
     Returns:
         DocumentResult
     """
-    from .store.source_store import SourceStore
-
-    with SourceStore(root_dir=Path(source_store_dir)) as store:
-        file_data = store.get_file(source_id)
-
-    if file_data is None:
+    # format バリデーション
+    if format not in _VALID_FORMATS:
+        valid = ", ".join(sorted(_VALID_FORMATS))
         return DocumentResult(
             source_id=source_id,
             title="",
             source_type="",
             format=format,
             content="",
-            error=f"ソースが見つかりません: {source_id}",
+            error=f"無効な format: {format!r}（有効値: {valid}）",
         )
 
-    meta = file_data.metadata
-    title = meta.title
-    source_type = meta.source_type
+    from .store.source_store import SourceStore
 
-    if format == "original":
-        # バイナリ判定: テキスト拡張子以外はバイナリとして扱う
-        ext = PurePosixPath(file_data.file_path).suffix.lower()
-        if ext not in _TEXT_EXTENSIONS:
-            mime_type = mimetypes.guess_type(file_data.file_path)[0] or "application/octet-stream"
-            file_size = len(file_data.content)
-            info = (
-                f"バイナリファイルです（MIME: {mime_type}, サイズ: {file_size:,} bytes）。\n"
-                "テキスト形式で取得するには format=text を指定してください。"
+    with SourceStore(root_dir=Path(source_store_dir)) as store:
+        # まずメタデータのみ取得（ファイル読み込みなし）
+        record = store.db.get_source(source_id)
+
+        if record is None:
+            return DocumentResult(
+                source_id=source_id,
+                title="",
+                source_type="",
+                format=format,
+                content="",
+                error=f"ソースが見つかりません: {source_id}",
             )
+
+        title = record.title
+        source_type = record.source_type
+        file_path = record.file_path
+
+        if format == "original":
+            # バイナリ判定: テキスト拡張子以外はバイナリとして扱う
+            ext = PurePosixPath(file_path).suffix.lower()
+            if ext not in _TEXT_EXTENSIONS:
+                # バイナリの場合はファイルを読み込まず、DB の file_size と stat で対応
+                mime_type = mimetypes.guess_type(file_path)[0] or "application/octet-stream"
+                file_size = record.file_size
+                info = (
+                    f"バイナリファイルです（MIME: {mime_type}, サイズ: {file_size:,} bytes）。\n"
+                    "テキスト形式で取得するには format=text を指定してください。"
+                )
+                return DocumentResult(
+                    source_id=source_id,
+                    title=title,
+                    source_type=source_type,
+                    format=format,
+                    content=info,
+                    is_binary=True,
+                )
+
+            # テキストファイル: source_store から読み取り
+            file_data = store.get_file(source_id)
+            if file_data is None:
+                return DocumentResult(
+                    source_id=source_id,
+                    title=title,
+                    source_type=source_type,
+                    format=format,
+                    content="",
+                    error=f"ファイルが見つかりません: {file_path}",
+                )
+
+            try:
+                content = file_data.content.decode("utf-8")
+            except UnicodeDecodeError:
+                content = file_data.content.decode("utf-8", errors="replace")
+
             return DocumentResult(
                 source_id=source_id,
                 title=title,
                 source_type=source_type,
                 format=format,
-                content=info,
-                is_binary=True,
+                content=content,
             )
 
-        # テキストとして読み取り
-        try:
-            content = file_data.content.decode("utf-8")
-        except UnicodeDecodeError:
-            content = file_data.content.decode("utf-8", errors="replace")
-
-        return DocumentResult(
-            source_id=source_id,
-            title=title,
-            source_type=source_type,
-            format=format,
-            content=content,
-        )
-
     # format == "text": converted_store から読み取り
-    converted_rel = _get_converted_rel_path(file_data.file_path)
+    converted_rel = _get_converted_rel_path(file_path)
     converted_path = Path(converted_store_dir) / converted_rel
 
     if not converted_path.exists():

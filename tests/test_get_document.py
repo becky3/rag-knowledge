@@ -152,6 +152,22 @@ class TestGetDocumentFormatOriginal:
 class TestGetDocumentEdgeCases:
     """エッジケースのテスト."""
 
+    def test_invalid_format_returns_error(
+        self, stores: tuple[Path, Path],
+    ) -> None:
+        """無効な format でエラーを返すこと."""
+        source_dir, converted_dir = stores
+
+        result = get_document(
+            source_id="any",
+            format="invalid",
+            source_store_dir=str(source_dir),
+            converted_store_dir=str(converted_dir),
+        )
+
+        assert result.error is not None
+        assert "無効な format" in result.error
+
     def test_nonexistent_source_returns_error(
         self, stores: tuple[Path, Path],
     ) -> None:

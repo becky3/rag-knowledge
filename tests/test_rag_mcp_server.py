@@ -465,11 +465,12 @@ class TestRagGetDocumentTool:
         assert "ソースが見つかりません" in result
 
     async def test_truncation_with_max_response_chars(self) -> None:
-        """rag_max_response_chars でトランケーションされること."""
+        """rag_max_response_chars でトランケーションされ、通知文込みで上限内に収まること."""
         from rag.rag_knowledge import DocumentResult
 
         mod = import_module("rag.server")
-        self.mock_settings.rag_max_response_chars = 50
+        max_chars = 200
+        self.mock_settings.rag_max_response_chars = max_chars
 
         long_content = "あ" * 1000
         mock_result = DocumentResult(
@@ -488,6 +489,8 @@ class TestRagGetDocumentTool:
 
         assert "トランケートされました" in result
         assert "--output" in result
+        # 通知文込みで上限以内に収まること
+        assert len(result) <= max_chars
 
     async def test_no_truncation_when_limit_is_none(self) -> None:
         """rag_max_response_chars=None のときトランケーションされないこと."""
