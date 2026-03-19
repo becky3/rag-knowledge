@@ -22,6 +22,7 @@ from rag.store.models import (
     SourceType,
 )
 from rag.store.path_converter import url_to_path
+from rag.store.resolve import resolve_source_id, resolve_title
 
 logger = logging.getLogger(__name__)
 
@@ -382,13 +383,7 @@ class SourceStore:
         metadata: dict[str, Any] | None,
     ) -> str:
         """source_id を決定する."""
-        if metadata and "source_id" in metadata:
-            return str(metadata["source_id"])
-        # local 媒体: 相対パスが source_id
-        if source_type == "local":
-            return rel_path
-        # .meta がない場合のフォールバック: 相対パスを使用
-        return rel_path
+        return resolve_source_id(source_type, rel_path, metadata)
 
     @staticmethod
     def _resolve_title(
@@ -397,10 +392,7 @@ class SourceStore:
         metadata: dict[str, Any] | None,
     ) -> str:
         """タイトルを決定する."""
-        if metadata and "title" in metadata:
-            return str(metadata["title"])
-        # local 媒体: ファイル名（拡張子除去）
-        return Path(rel_path).stem
+        return resolve_title(source_type, rel_path, metadata)
 
     # --- コンテキストマネージャ ---
 

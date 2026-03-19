@@ -72,8 +72,10 @@ class Indexer:
 
         Raises:
             ValueError: source_id と metadata.source_id が一致しない場合
+            ConnectionError: Embedding プロバイダーに接続できない場合
         """
         _validate_source_id(source_id, metadata)
+        self._check_embedding_available()
         text = self._read_file(converted_path)
         if not text.strip():
             logger.info("空ファイルのためスキップ: %s", converted_path)
@@ -106,8 +108,10 @@ class Indexer:
 
         Raises:
             ValueError: source_id と metadata.source_id が一致しない場合
+            ConnectionError: Embedding プロバイダーに接続できない場合
         """
         _validate_source_id(source_id, metadata)
+        self._check_embedding_available()
         text = self._read_file(converted_path)
 
         if not text.strip():
@@ -189,6 +193,17 @@ class Indexer:
             self._clear_by_source_type(source_type)
 
     # --- 内部メソッド ---
+
+    def _check_embedding_available(self) -> None:
+        """Embedding プロバイダーの疎通を確認する.
+
+        Raises:
+            ConnectionError: プロバイダーに接続できない場合
+        """
+        available = _run_async(self._vector_store._embedding.is_available())
+        if not available:
+            msg = "Embedding プロバイダーに接続できません"
+            raise ConnectionError(msg)
 
     def _read_file(self, path: Path) -> str:
         """ファイルの内容を読み取る."""

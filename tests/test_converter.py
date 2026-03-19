@@ -17,7 +17,7 @@ import pytest
 from rag.converter.converter import (
     ConversionSkippedError,
     Converter,
-    _get_converted_rel_path,
+    get_converted_rel_path,
 )
 from rag.converter.handlers import (
     convert_html,
@@ -496,28 +496,28 @@ class TestPassthrough:
 
 
 class TestGetConvertedRelPath:
-    """_get_converted_rel_path のテスト."""
+    """get_converted_rel_path のテスト."""
 
     def test_html_to_md(self) -> None:
-        assert _get_converted_rel_path("web/example/page.html") == "web/example/page.md"
+        assert get_converted_rel_path("web/example/page.html") == "web/example/page.md"
 
     def test_pdf_to_md(self) -> None:
-        assert _get_converted_rel_path("web/doc/report.pdf") == "web/doc/report.md"
+        assert get_converted_rel_path("web/doc/report.pdf") == "web/doc/report.md"
 
     def test_json_to_md(self) -> None:
-        assert _get_converted_rel_path("bluesky/did/post.json") == "bluesky/did/post.md"
+        assert get_converted_rel_path("bluesky/did/post.json") == "bluesky/did/post.md"
 
     def test_md_passthrough(self) -> None:
-        assert _get_converted_rel_path("local/notes/memo.md") == "local/notes/memo.md"
+        assert get_converted_rel_path("local/notes/memo.md") == "local/notes/memo.md"
 
     def test_txt_passthrough(self) -> None:
-        assert _get_converted_rel_path("local/note.txt") == "local/note.txt"
+        assert get_converted_rel_path("local/note.txt") == "local/note.txt"
 
     def test_adoc_passthrough(self) -> None:
-        assert _get_converted_rel_path("local/guide.adoc") == "local/guide.adoc"
+        assert get_converted_rel_path("local/guide.adoc") == "local/guide.adoc"
 
     def test_unknown_extension(self) -> None:
-        assert _get_converted_rel_path("local/file.xyz") == "local/file.xyz"
+        assert get_converted_rel_path("local/file.xyz") == "local/file.xyz"
 
 
 # ============================================================

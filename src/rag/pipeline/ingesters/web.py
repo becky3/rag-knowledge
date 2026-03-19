@@ -287,6 +287,7 @@ class WebIngester:
             url=url,
             data=data,
             metadata=metadata,
+            extension=".html",
         )
         result.placed += 1
 
@@ -412,6 +413,7 @@ class WebIngester:
                     url=link,
                     data=page_data,
                     metadata=metadata,
+                    extension=".html",
                 )
                 result.placed += 1
 

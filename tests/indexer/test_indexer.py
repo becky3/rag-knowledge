@@ -566,6 +566,71 @@ class TestSourceIdValidation:
         indexer.add("src-ok", path, meta)
 
 
+# --- テスト: Embedding 疎通確認 ---
+
+
+class UnavailableEmbeddingProvider(EmbeddingProvider):
+    """疎通不可のモック Embedding プロバイダー."""
+
+    async def embed(self, texts: list[str]) -> list[list[float]]:
+        return [[0.0] * 3 for _ in texts]
+
+    async def is_available(self) -> bool:
+        return False
+
+
+class TestEmbeddingAvailability:
+    """Embedding プロバイダー疎通確認のテスト."""
+
+    def test_add_raises_when_embedding_unavailable(
+        self, bm25_index: BM25Index, metadata_db: MetadataDB, tmp_path: Path,
+    ) -> None:
+        """add 時に Embedding プロバイダーが接続不可ならエラーになること."""
+        provider = UnavailableEmbeddingProvider()
+        collection_name = f"test_{uuid.uuid4().hex[:8]}"
+        vs = VectorStore.create_ephemeral(provider, collection_name)
+        idx = Indexer(
+            vector_store=vs,
+            bm25_index=bm25_index,
+            metadata_db=metadata_db,
+        )
+        path = _write_text_file(tmp_path, "doc.txt", "Some content.")
+        meta = _make_metadata(source_id="src-unavail")
+
+        with pytest.raises(ConnectionError, match="Embedding"):
+            idx.add("src-unavail", path, meta)
+
+    def test_update_raises_when_embedding_unavailable(
+        self, bm25_index: BM25Index, metadata_db: MetadataDB, tmp_path: Path,
+    ) -> None:
+        """update 時に Embedding プロバイダーが接続不可ならエラーになること."""
+        provider = UnavailableEmbeddingProvider()
+        collection_name = f"test_{uuid.uuid4().hex[:8]}"
+        vs = VectorStore.create_ephemeral(provider, collection_name)
+        idx = Indexer(
+            vector_store=vs,
+            bm25_index=bm25_index,
+            metadata_db=metadata_db,
+        )
+        path = _write_text_file(tmp_path, "doc.txt", "Some content.")
+        meta = _make_metadata(source_id="src-unavail-upd")
+
+        with pytest.raises(ConnectionError, match="Embedding"):
+            idx.update("src-unavail-upd", path, meta)
+
+    def test_delete_does_not_check_embedding(
+        self, indexer: Indexer,
+    ) -> None:
+        """delete は Embedding チェックを行わないこと（エラーにならない）."""
+        indexer.delete("nonexistent-source")
+
+    def test_clear_does_not_check_embedding(
+        self, indexer: Indexer,
+    ) -> None:
+        """clear は Embedding チェックを行わないこと（エラーにならない）."""
+        indexer.clear()
+
+
 # --- テスト: IndexerProtocol 適合性 ---
 
 

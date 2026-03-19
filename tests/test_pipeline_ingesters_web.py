@@ -220,6 +220,106 @@ class TestAdd:
 
 
 @pytest.mark.asyncio()
+class TestAddExtension:
+    """add の拡張子付与テスト."""
+
+    async def test_extensionless_url_gets_html_extension(
+        self, source_store: SourceStore,
+    ) -> None:
+        """拡張子なし URL のファイルが .html 拡張子付きで配置されること."""
+        html_content = b"<html><head><title>Guide</title></head><body>guide</body></html>"
+        resp = _make_mock_response(content=html_content)
+        client = AsyncMock()
+        client.get = AsyncMock(return_value=resp)
+
+        ingester = WebIngester(
+            source_store,
+            url_safety_check=False,
+            respect_robots_txt=False,
+        )
+        result = await ingester.add(
+            "https://example.com/docs/guide",
+            client=client,
+        )
+
+        assert result.placed == 1
+
+        # source_store 内に .html 拡張子付きでファイルが存在するか確認
+        files = source_store.list_files(source_type="web")
+        file_paths = [f.as_posix() for f in files]
+        assert any(p.endswith(".html") for p in file_paths), (
+            f"Expected .html file, got: {file_paths}"
+        )
+
+    async def test_url_with_html_extension_no_double(
+        self, source_store: SourceStore,
+    ) -> None:
+        """既に .html 拡張子がある URL では二重付加されないこと."""
+        html_content = b"<html><head><title>Page</title></head><body>page</body></html>"
+        resp = _make_mock_response(content=html_content)
+        client = AsyncMock()
+        client.get = AsyncMock(return_value=resp)
+
+        ingester = WebIngester(
+            source_store,
+            url_safety_check=False,
+            respect_robots_txt=False,
+        )
+        result = await ingester.add(
+            "https://example.com/page.html",
+            client=client,
+        )
+
+        assert result.placed == 1
+
+        files = source_store.list_files(source_type="web")
+        file_paths = [f.as_posix() for f in files]
+        # .html.html にならないことを確認
+        assert not any(p.endswith(".html.html") for p in file_paths), (
+            f"Double .html detected: {file_paths}"
+        )
+
+
+@pytest.mark.asyncio()
+class TestCrawlExtension:
+    """crawl の拡張子付与テスト."""
+
+    async def test_crawl_extensionless_urls(
+        self, source_store: SourceStore,
+    ) -> None:
+        """crawl で拡張子なし URL のファイルが .html 拡張子付きで配置されること."""
+        index_html = b"""
+        <html><body>
+        <a href="https://example.com/docs/page1">Page 1</a>
+        </body></html>
+        """
+        page_html = b"<html><head><title>Page</title></head><body>content</body></html>"
+
+        index_resp = _make_mock_response(content=index_html)
+        page_resp = _make_mock_response(content=page_html)
+        client = AsyncMock()
+        client.get = AsyncMock(side_effect=[index_resp, page_resp])
+
+        ingester = WebIngester(
+            source_store,
+            url_safety_check=False,
+            respect_robots_txt=False,
+        )
+        result = await ingester.crawl(
+            "https://example.com/index",
+            client=client,
+        )
+
+        assert result.placed == 1
+
+        files = source_store.list_files(source_type="web")
+        file_paths = [f.as_posix() for f in files]
+        assert any(p.endswith(".html") for p in file_paths), (
+            f"Expected .html file, got: {file_paths}"
+        )
+
+
+@pytest.mark.asyncio()
 class TestCrawl:
     """crawl のテスト."""
 
