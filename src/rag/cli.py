@@ -1176,13 +1176,17 @@ async def run_add(args: argparse.Namespace) -> None:
     )
     api_key = _get_safe_browsing_api_key_for_cli(settings)
 
-    async with ConstrainedClient(
-        request_timeout=settings.rag_crawl_request_timeout,
-        request_interval=settings.rag_crawl_delay_sec,
-    ) as client:
-        ingest_result = await web_ingester.add(
-            args.url, client=client, safe_browsing_api_key=api_key,
-        )
+    try:
+        async with ConstrainedClient(
+            request_timeout=settings.rag_crawl_request_timeout,
+            request_interval=settings.rag_crawl_delay_sec,
+        ) as client:
+            ingest_result = await web_ingester.add(
+                args.url, client=client, safe_browsing_api_key=api_key,
+            )
+    except ValueError as e:
+        logger.error("エラー: %s", e)
+        sys.exit(1)
 
     pipeline_summary = controller.ingest_and_index(f"ingest(web): add {args.url}")
     _print_ingest_result(ingest_result, pipeline_summary, context=args.url)
@@ -1208,14 +1212,18 @@ async def run_crawl(args: argparse.Namespace) -> None:
     )
     api_key = _get_safe_browsing_api_key_for_cli(settings)
 
-    async with ConstrainedClient(
-        request_timeout=settings.rag_crawl_request_timeout,
-        request_interval=settings.rag_crawl_delay_sec,
-    ) as client:
-        ingest_result = await web_ingester.crawl(
-            args.url, pattern=args.pattern, client=client,
-            safe_browsing_api_key=api_key,
-        )
+    try:
+        async with ConstrainedClient(
+            request_timeout=settings.rag_crawl_request_timeout,
+            request_interval=settings.rag_crawl_delay_sec,
+        ) as client:
+            ingest_result = await web_ingester.crawl(
+                args.url, pattern=args.pattern, client=client,
+                safe_browsing_api_key=api_key,
+            )
+    except ValueError as e:
+        logger.error("エラー: %s", e)
+        sys.exit(1)
 
     pipeline_summary = controller.ingest_and_index(f"ingest(web): crawl {args.url}")
     _print_ingest_result(ingest_result, pipeline_summary, context=args.url)
@@ -1239,16 +1247,20 @@ async def run_crawl_bluesky(args: argparse.Namespace) -> None:
         include_reposts=include_reposts,
     )
 
-    async with ConstrainedClient(
-        request_timeout=settings.rag_bluesky_request_timeout,
-        request_interval=settings.rag_bluesky_request_interval,
-    ) as client:
-        ingest_result = await bluesky_ingester.crawl_bluesky(
-            args.handle,
-            max_posts=max_posts,
-            include_reposts=include_reposts,
-            client=client,
-        )
+    try:
+        async with ConstrainedClient(
+            request_timeout=settings.rag_bluesky_request_timeout,
+            request_interval=settings.rag_bluesky_request_interval,
+        ) as client:
+            ingest_result = await bluesky_ingester.crawl_bluesky(
+                args.handle,
+                max_posts=max_posts,
+                include_reposts=include_reposts,
+                client=client,
+            )
+    except (ValueError, TypeError) as e:
+        logger.error("エラー: %s", e)
+        sys.exit(1)
 
     pipeline_summary = controller.ingest_and_index(f"ingest(bluesky): {args.handle}")
     _print_ingest_result(ingest_result, pipeline_summary, context=f"ハンドル: {args.handle}")
@@ -1269,16 +1281,20 @@ async def run_crawl_zenn(args: argparse.Namespace) -> None:
         max_articles=max_articles,
     )
 
-    async with ConstrainedClient(
-        request_timeout=settings.rag_zenn_request_timeout,
-        request_interval=settings.rag_zenn_request_interval,
-    ) as client:
-        ingest_result = await zenn_ingester.crawl_zenn(
-            args.username,
-            max_articles=max_articles,
-            content_type=args.content_type,
-            client=client,
-        )
+    try:
+        async with ConstrainedClient(
+            request_timeout=settings.rag_zenn_request_timeout,
+            request_interval=settings.rag_zenn_request_interval,
+        ) as client:
+            ingest_result = await zenn_ingester.crawl_zenn(
+                args.username,
+                max_articles=max_articles,
+                content_type=args.content_type,
+                client=client,
+            )
+    except (ValueError, TypeError) as e:
+        logger.error("エラー: %s", e)
+        sys.exit(1)
 
     pipeline_summary = controller.ingest_and_index(f"ingest(zenn): {args.username}")
     _print_ingest_result(ingest_result, pipeline_summary, context=f"ユーザー: {args.username}")
