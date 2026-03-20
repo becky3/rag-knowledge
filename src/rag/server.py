@@ -879,6 +879,10 @@ async def rag_delete(url: str) -> str:
     Returns:
         削除結果のメッセージ
     """
+    # BM25 はインメモリインデックスのため、別プロセス（CLI）が
+    # ディスク上のインデックスを更新していても反映されない。
+    # delete 前にコントローラをリセットし、最新のディスク状態をロードする。
+    _reset_pipeline_controller()
     controller = await _get_pipeline_controller()
 
     try:
@@ -897,6 +901,7 @@ async def rag_delete(url: str) -> str:
         if not deleted:
             return f"該当するソースが見つかりませんでした: {url}"
 
+        _reset_pipeline_controller()
         _reset_rag_service()
         return f"論理削除しました: {url}"
     except Exception:
