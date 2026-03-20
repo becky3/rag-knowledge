@@ -252,6 +252,10 @@ class SourceStore:
         """
         if record is None:
             record = self._db.get_source(source_id)
+        elif record.source_id != source_id:
+            raise ValueError(
+                f"source_id mismatch: {source_id!r} != {record.source_id!r}"
+            )
         if record is None:
             return None
 

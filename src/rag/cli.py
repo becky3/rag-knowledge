@@ -1,4 +1,4 @@
-"""RAG評価CLIモジュール
+"""RAG Knowledge CLIモジュール
 
 仕様: docs/specs/rag-knowledge.md
 """
@@ -92,7 +92,7 @@ def _validate_bm25_b(value: str) -> float:
 
 def main() -> None:
     """CLIエントリポイント."""
-    parser = argparse.ArgumentParser(description="RAG評価CLI")
+    parser = argparse.ArgumentParser(description="RAG Knowledge CLI")
     subparsers = parser.add_subparsers(dest="command", required=True)
 
     # evaluate サブコマンド
@@ -296,8 +296,16 @@ def main() -> None:
     # search サブコマンド
     search_parser = subparsers.add_parser("search", help="ナレッジベースを検索")
     search_parser.add_argument("--query", required=True, help="検索クエリ")
+    def _validate_n_results(value: str) -> int:
+        n = int(value)
+        if n < 1:
+            raise argparse.ArgumentTypeError(
+                f"--n-results must be >= 1 (got {n})"
+            )
+        return n
+
     search_parser.add_argument(
-        "--n-results", type=int, default=None,
+        "--n-results", type=_validate_n_results, default=None,
         help="各エンジンから取得する結果数（未指定時は設定値を使用）",
     )
     search_parser.add_argument(

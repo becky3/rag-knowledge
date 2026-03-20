@@ -1214,7 +1214,11 @@ def format_document_response(result: DocumentResult) -> str:
     if result.collected_at:
         lines.append(f"Collected: {result.collected_at}")
     for key, value in result.extra.items():
-        if value is None or (isinstance(value, str) and value == ""):
+        if (
+            value is None
+            or (isinstance(value, str) and value == "")
+            or (isinstance(value, (list, dict)) and len(value) == 0)
+        ):
             continue
         lines.append(f"{key}: {value}")
     lines.append("")
