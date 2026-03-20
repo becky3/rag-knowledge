@@ -105,7 +105,7 @@ class TestHybridSearchDisabled:
         mock_vector_store.search.return_value = [
             RetrievalResult(
                 text="ベクトル検索結果",
-                metadata={"source_url": "https://example.com/page1"},
+                metadata={"source_id": "https://example.com/page1"},
                 distance=0.2,
             ),
         ]
@@ -159,7 +159,7 @@ class TestHybridSearchEnabled:
         mock_vector_store.search.return_value = [
             RetrievalResult(
                 text="ベクトル検索結果",
-                metadata={"source_url": "https://example.com/page1", "chunk_index": 0},
+                metadata={"source_id": "https://example.com/page1", "chunk_index": 0},
                 distance=0.2,
             ),
         ]
@@ -259,7 +259,7 @@ class TestTableDataSearch:
         mock_vector_store.search.return_value = [
             RetrievalResult(
                 text="名前: 魔王\nHP: 200, MP: 100, 攻撃力: 140",
-                metadata={"source_url": "https://example.com/monsters", "chunk_index": 0},
+                metadata={"source_id": "https://example.com/monsters", "chunk_index": 0},
                 distance=0.7,  # 閾値0.5を超過
             ),
         ]

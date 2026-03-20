@@ -5,9 +5,10 @@
 
 from __future__ import annotations
 
+import datetime
 import logging
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Literal
 
 from rag.pipeline.ingesters._common import IngestResult
 
@@ -18,6 +19,11 @@ logger = logging.getLogger(__name__)
 
 MAX_FILES_HARD_LIMIT = 100
 DEFAULT_SUPPORTED_EXTENSIONS: list[str] = [".md", ".txt", ".pdf", ".adoc"]
+
+# MCP ツール経由アップロードのベースディレクトリ
+_UPLOAD_DIR = ".upload"
+
+UploadMode = Literal["fail", "replace"]
 
 
 class LocalIngester:
@@ -32,13 +38,30 @@ class LocalIngester:
         self._http_mode_enabled = http_mode_enabled
         self._allowed_dirs = [Path(d.strip()).resolve() for d in (allowed_dirs or []) if d.strip()]
 
-    def add_document(self, file_path: str) -> IngestResult:
-        """単一ドキュメントファイルを source_store に配置する."""
+    def add_document(
+        self,
+        file_path: str,
+        *,
+        upload_mode: UploadMode = "fail",
+    ) -> IngestResult:
+        """単一ドキュメントファイルを source_store に配置する.
+
+        Args:
+            file_path: 取り込み対象ファイルのパス
+            upload_mode: 同名ファイル存在時の動作
+                ``fail`` — エラー（デフォルト）、``replace`` — 上書き
+        """
         result = IngestResult()
         try:
             resolved = self._validate_single_file(file_path)
+            rel_path = self._upload_rel_path(resolved.name)
+
+            if upload_mode == "fail" and self._file_exists(rel_path):
+                raise ValueError(
+                    f"同名ファイルが既に存在します: {rel_path}"
+                )
+
             data = resolved.read_bytes()
-            rel_path = f"local/{resolved.name}"
             self._store.place_file(source_type="local", data=data, rel_path=rel_path)
             result.placed = 1
         except ValueError as e:
@@ -50,8 +73,21 @@ class LocalIngester:
             result.error_details.append(str(e))
         return result
 
-    def crawl_documents(self, dir_path: str, pattern: str = "**/*") -> IngestResult:
-        """ディレクトリ内のドキュメントファイルを一括配置する."""
+    def crawl_documents(
+        self,
+        dir_path: str,
+        pattern: str = "**/*",
+        *,
+        upload_mode: UploadMode = "fail",
+    ) -> IngestResult:
+        """ディレクトリ内のドキュメントファイルを一括配置する.
+
+        Args:
+            dir_path: 取り込み対象ディレクトリのパス
+            pattern: glob パターン
+            upload_mode: 同名ファイル存在時の動作
+                ``fail`` — スキップ（個別ファイル）、``replace`` — 上書き
+        """
         result = IngestResult()
         try:
             files = self._collect_files(dir_path, pattern)
@@ -63,15 +99,27 @@ class LocalIngester:
             return result
         resolved_dir = Path(dir_path.strip()).resolve()
         dir_basename = resolved_dir.name
+        date_prefix = self._upload_date_prefix()
         for fp in files:
             try:
                 if fp.stat().st_size == 0:
                     logger.warning("Skipping empty file (0 bytes): %s", fp)
                     result.skipped += 1
                     continue
-                data = fp.read_bytes()
                 relative = fp.relative_to(resolved_dir)
-                rel_path = f"local/{dir_basename}/{relative.as_posix()}"
+                rel_path = (
+                    f"local/{_UPLOAD_DIR}/{date_prefix}"
+                    f"/{dir_basename}/{relative.as_posix()}"
+                )
+
+                if upload_mode == "fail" and self._file_exists(rel_path):
+                    logger.warning(
+                        "File already exists, skipping: %s", rel_path,
+                    )
+                    result.skipped += 1
+                    continue
+
+                data = fp.read_bytes()
                 self._store.place_file(source_type="local", data=data, rel_path=rel_path)
                 result.placed += 1
             except OSError:
@@ -79,6 +127,21 @@ class LocalIngester:
                 result.errors += 1
                 result.error_details.append(str(fp))
         return result
+
+    @staticmethod
+    def _upload_date_prefix() -> str:
+        """アップロード日に基づくディレクトリプレフィックスを返す."""
+        today = datetime.date.today()
+        return f"{today.year}/{today.month:02d}/{today.day:02d}"
+
+    def _upload_rel_path(self, filename: str) -> str:
+        """MCP ツール経由アップロード用の source_store 相対パスを返す."""
+        date_prefix = self._upload_date_prefix()
+        return f"local/{_UPLOAD_DIR}/{date_prefix}/{filename}"
+
+    def _file_exists(self, rel_path: str) -> bool:
+        """source_store 内にファイルが存在するか確認する."""
+        return (self._store.root_dir / rel_path).exists()
 
     def _validate_single_file(self, file_path: str) -> Path:
         if not file_path or not file_path.strip():

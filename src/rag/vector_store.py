@@ -26,7 +26,7 @@ class DocumentChunk:
 
     id: str  # ユニークID（URLハッシュ + chunk_index）
     text: str  # チャンク本文
-    metadata: dict[str, str | int | float | bool]  # source_url, title, chunk_index, crawled_at, source_type, custom:*
+    metadata: dict[str, str | int | float | bool]  # source_id, title, chunk_index, crawled_at / collected_at, source_type, custom:*
 
 
 @dataclass
@@ -218,18 +218,18 @@ class VectorStore:
 
         return retrieval_results
 
-    async def get_chunks_by_source(self, source_url: str) -> list[RetrievalResult]:
-        """ソースURL指定で全チャンクを取得する（chunk_index 昇順）.
+    async def get_chunks_by_source(self, source_id: str) -> list[RetrievalResult]:
+        """ソース識別子指定で全チャンクを取得する（chunk_index 昇順）.
 
         Args:
-            source_url: 取得するソースURL
+            source_id: ソース識別子
 
         Returns:
             チャンクのリスト（chunk_index 昇順）
         """
         results = await asyncio.to_thread(
             self._collection.get,
-            where={"source_url": source_url},
+            where={"source_id": source_id},
             include=["documents", "metadatas"],
         )
 
@@ -281,29 +281,29 @@ class VectorStore:
 
         return meta_map
 
-    async def source_exists(self, source_url: str) -> bool:
-        """ソースURLに対応するチャンクが存在するか確認する（軽量版）.
+    async def source_exists(self, source_id: str) -> bool:
+        """ソース識別子に対応するチャンクが存在するか確認する（軽量版）.
 
         documents / metadatas を取得せず、IDs の有無のみで判定する。
 
         Args:
-            source_url: 確認するソースURL
+            source_id: ソース識別子
 
         Returns:
             チャンクが 1 件以上存在すれば True
         """
         results = await asyncio.to_thread(
             self._collection.get,
-            where={"source_url": source_url},
+            where={"source_id": source_id},
             include=[],
         )
         return bool(results["ids"])
 
-    async def delete_by_source(self, source_url: str) -> int:
-        """ソースURL指定でチャンクを削除.
+    async def delete_by_source(self, source_id: str) -> int:
+        """ソース識別子指定でチャンクを削除.
 
         Args:
-            source_url: 削除するソースURL
+            source_id: ソース識別子
 
         Returns:
             削除件数
@@ -311,7 +311,7 @@ class VectorStore:
         # まず該当するドキュメントを検索
         results = await asyncio.to_thread(
             self._collection.get,
-            where={"source_url": source_url},
+            where={"source_id": source_id},
             include=["metadatas"],
         )
 
@@ -327,25 +327,25 @@ class VectorStore:
             ids=ids_to_delete,
         )
 
-        logger.info("Deleted %d documents from vector store (source: %s)", count, source_url)
+        logger.info("Deleted %d documents from vector store (source: %s)", count, source_id)
         return count
 
-    async def delete_stale_chunks(self, source_url: str, valid_ids: set[str]) -> int:
-        """ソースURLのチャンクのうち、valid_idsに含まれないものを削除.
+    async def delete_stale_chunks(self, source_id: str, valid_ids: set[str]) -> int:
+        """ソースのチャンクのうち、valid_idsに含まれないものを削除.
 
         upsert後に古いチャンクを削除するために使用。
 
         Args:
-            source_url: 対象ソースURL
+            source_id: ソース識別子
             valid_ids: 保持するID（これ以外のIDを削除）
 
         Returns:
             削除件数
         """
-        # ソースURLの全チャンクを取得
+        # ソースの全チャンクを取得
         results = await asyncio.to_thread(
             self._collection.get,
-            where={"source_url": source_url},
+            where={"source_id": source_id},
             include=["metadatas"],
         )
 
@@ -365,7 +365,7 @@ class VectorStore:
         )
 
         logger.info(
-            "Deleted %d stale chunks from vector store (source: %s)", len(stale_ids), source_url
+            "Deleted %d stale chunks from vector store (source: %s)", len(stale_ids), source_id
         )
         return len(stale_ids)
 
@@ -391,8 +391,8 @@ class VectorStore:
         source_details: dict[str, dict[str, str | int]] = {}
         if all_docs["metadatas"]:
             for meta in all_docs["metadatas"]:
-                if meta and "source_url" in meta:
-                    url = str(meta["source_url"])
+                if meta and "source_id" in meta:
+                    url = str(meta["source_id"])
                     source_urls.add(url)
                     if url not in source_details:
                         source_details[url] = {

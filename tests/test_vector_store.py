@@ -56,7 +56,7 @@ class TestAC8AddDocuments:
         chunk = DocumentChunk(
             id="doc1_0",
             text="これはテストテキストです。",
-            metadata={"source_url": "https://example.com/doc1", "chunk_index": 0},
+            metadata={"source_id": "https://example.com/doc1", "chunk_index": 0},
         )
         count = await ephemeral_store.add_documents([chunk])
         assert count == 1
@@ -68,7 +68,7 @@ class TestAC8AddDocuments:
             DocumentChunk(
                 id=f"doc_{i}",
                 text=f"テキスト{i}",
-                metadata={"source_url": "https://example.com", "chunk_index": i},
+                metadata={"source_id": "https://example.com", "chunk_index": i},
             )
             for i in range(5)
         ]
@@ -91,7 +91,7 @@ class TestAC8AddDocuments:
         chunk = DocumentChunk(
             id="doc1_0",
             text="テスト",
-            metadata={"source_url": "https://example.com", "chunk_index": 0},
+            metadata={"source_id": "https://example.com", "chunk_index": 0},
         )
         await ephemeral_store.add_documents([chunk])
         assert mock_embedding._call_count == 1
@@ -108,7 +108,7 @@ class TestAC9SearchSimilarChunks:
             DocumentChunk(
                 id=f"doc_{i}",
                 text=f"テキスト{i}",
-                metadata={"source_url": "https://example.com", "chunk_index": i},
+                metadata={"source_id": "https://example.com", "chunk_index": i},
             )
             for i in range(3)
         ]
@@ -128,14 +128,14 @@ class TestAC9SearchSimilarChunks:
         chunk = DocumentChunk(
             id="doc1_0",
             text="テストテキスト",
-            metadata={"source_url": "https://example.com/test", "chunk_index": 0},
+            metadata={"source_id": "https://example.com/test", "chunk_index": 0},
         )
         await ephemeral_store.add_documents([chunk])
 
         results = await ephemeral_store.search("テスト", n_results=1)
         assert len(results) == 1
         assert results[0].text == "テストテキスト"
-        assert results[0].metadata["source_url"] == "https://example.com/test"
+        assert results[0].metadata["source_id"] == "https://example.com/test"
 
     @pytest.mark.asyncio
     async def test_search_returns_distance(self, ephemeral_store: VectorStore) -> None:
@@ -143,7 +143,7 @@ class TestAC9SearchSimilarChunks:
         chunk = DocumentChunk(
             id="doc1_0",
             text="テスト",
-            metadata={"source_url": "https://example.com", "chunk_index": 0},
+            metadata={"source_id": "https://example.com", "chunk_index": 0},
         )
         await ephemeral_store.add_documents([chunk])
 
@@ -164,7 +164,7 @@ class TestAC9SearchSimilarChunks:
             DocumentChunk(
                 id=f"doc_{i}",
                 text=f"テキスト{i}",
-                metadata={"source_url": "https://example.com", "chunk_index": i},
+                metadata={"source_id": "https://example.com", "chunk_index": i},
             )
             for i in range(10)
         ]
@@ -185,17 +185,17 @@ class TestAC10DeleteBySource:
             DocumentChunk(
                 id="doc1_0",
                 text="テキスト1",
-                metadata={"source_url": "https://example.com/page1", "chunk_index": 0},
+                metadata={"source_id": "https://example.com/page1", "chunk_index": 0},
             ),
             DocumentChunk(
                 id="doc1_1",
                 text="テキスト2",
-                metadata={"source_url": "https://example.com/page1", "chunk_index": 1},
+                metadata={"source_id": "https://example.com/page1", "chunk_index": 1},
             ),
             DocumentChunk(
                 id="doc2_0",
                 text="テキスト3",
-                metadata={"source_url": "https://example.com/page2", "chunk_index": 0},
+                metadata={"source_id": "https://example.com/page2", "chunk_index": 0},
             ),
         ]
         await ephemeral_store.add_documents(chunks)
@@ -214,7 +214,7 @@ class TestAC10DeleteBySource:
         chunk = DocumentChunk(
             id="doc1_0",
             text="テスト",
-            metadata={"source_url": "https://example.com/page1", "chunk_index": 0},
+            metadata={"source_id": "https://example.com/page1", "chunk_index": 0},
         )
         await ephemeral_store.add_documents([chunk])
 
@@ -240,7 +240,7 @@ class TestAC11GetStats:
                 id="doc1_0",
                 text="テキスト1",
                 metadata={
-                    "source_url": "https://example.com/page1",
+                    "source_id": "https://example.com/page1",
                     "title": "ページ1",
                     "chunk_index": 0,
                 },
@@ -249,7 +249,7 @@ class TestAC11GetStats:
                 id="doc1_1",
                 text="テキスト2",
                 metadata={
-                    "source_url": "https://example.com/page1",
+                    "source_id": "https://example.com/page1",
                     "title": "ページ1",
                     "chunk_index": 1,
                 },
@@ -258,7 +258,7 @@ class TestAC11GetStats:
                 id="doc2_0",
                 text="テキスト3",
                 metadata={
-                    "source_url": "https://example.com/page2",
+                    "source_id": "https://example.com/page2",
                     "title": "ページ2",
                     "chunk_index": 0,
                 },
@@ -281,7 +281,7 @@ class TestAC11GetStats:
                 id="a_0",
                 text="テキスト1",
                 metadata={
-                    "source_url": "https://example.com/page1",
+                    "source_id": "https://example.com/page1",
                     "title": "ページA",
                     "chunk_index": 0,
                 },
@@ -290,7 +290,7 @@ class TestAC11GetStats:
                 id="a_1",
                 text="テキスト2",
                 metadata={
-                    "source_url": "https://example.com/page1",
+                    "source_id": "https://example.com/page1",
                     "title": "ページA",
                     "chunk_index": 1,
                 },
@@ -299,7 +299,7 @@ class TestAC11GetStats:
                 id="b_0",
                 text="テキスト3",
                 metadata={
-                    "source_url": "https://other.com/doc",
+                    "source_id": "https://other.com/doc",
                     "title": "ドキュメントB",
                     "chunk_index": 0,
                 },
@@ -343,21 +343,21 @@ class TestVectorStoreDataClasses:
         chunk = DocumentChunk(
             id="test_id",
             text="テストテキスト",
-            metadata={"source_url": "https://example.com", "chunk_index": 0},
+            metadata={"source_id": "https://example.com", "chunk_index": 0},
         )
         assert chunk.id == "test_id"
         assert chunk.text == "テストテキスト"
-        assert chunk.metadata["source_url"] == "https://example.com"
+        assert chunk.metadata["source_id"] == "https://example.com"
 
     def test_retrieval_result_creation(self) -> None:
         """RetrievalResultが正しく作成できる."""
         result = RetrievalResult(
             text="テストテキスト",
-            metadata={"source_url": "https://example.com"},
+            metadata={"source_id": "https://example.com"},
             distance=0.5,
         )
         assert result.text == "テストテキスト"
-        assert result.metadata["source_url"] == "https://example.com"
+        assert result.metadata["source_id"] == "https://example.com"
         assert result.distance == 0.5
 
 
@@ -393,7 +393,7 @@ class TestAC38SimilarityThreshold:
             DocumentChunk(
                 id=f"doc_{i}",
                 text=f"テキスト{i}" * (i + 1),  # 異なる長さで異なるベクトルを生成
-                metadata={"source_url": f"https://example.com/page{i}", "chunk_index": 0},
+                metadata={"source_id": f"https://example.com/page{i}", "chunk_index": 0},
             )
             for i in range(5)
         ]
@@ -422,7 +422,7 @@ class TestAC38SimilarityThreshold:
             DocumentChunk(
                 id=f"doc_{i}",
                 text=f"テキスト{i}",
-                metadata={"source_url": "https://example.com", "chunk_index": i},
+                metadata={"source_id": "https://example.com", "chunk_index": i},
             )
             for i in range(3)
         ]
@@ -445,7 +445,7 @@ class TestAC38SimilarityThreshold:
             DocumentChunk(
                 id=f"doc_{i}",
                 text=f"テキスト{i}",
-                metadata={"source_url": "https://example.com", "chunk_index": i},
+                metadata={"source_id": "https://example.com", "chunk_index": i},
             )
             for i in range(10)
         ]
@@ -470,7 +470,7 @@ class TestAC38SimilarityThreshold:
             DocumentChunk(
                 id="doc_0",
                 text="非常に長いテキスト" * 100,
-                metadata={"source_url": "https://example.com", "chunk_index": 0},
+                metadata={"source_id": "https://example.com", "chunk_index": 0},
             ),
         ]
         await ephemeral_store.add_documents(chunks)
@@ -497,7 +497,7 @@ class TestAC38SimilarityThreshold:
             DocumentChunk(
                 id=f"doc_{i}",
                 text=f"テキスト{i}" * (i + 1),
-                metadata={"source_url": "https://example.com", "chunk_index": i},
+                metadata={"source_id": "https://example.com", "chunk_index": i},
             )
             for i in range(5)
         ]
@@ -531,17 +531,17 @@ class TestGetChunksBySource:
             DocumentChunk(
                 id="page1_0",
                 text="Page1 チャンク0",
-                metadata={"source_url": "https://example.com/page1", "chunk_index": 0},
+                metadata={"source_id": "https://example.com/page1", "chunk_index": 0},
             ),
             DocumentChunk(
                 id="page1_1",
                 text="Page1 チャンク1",
-                metadata={"source_url": "https://example.com/page1", "chunk_index": 1},
+                metadata={"source_id": "https://example.com/page1", "chunk_index": 1},
             ),
             DocumentChunk(
                 id="page2_0",
                 text="Page2 チャンク0",
-                metadata={"source_url": "https://example.com/page2", "chunk_index": 0},
+                metadata={"source_id": "https://example.com/page2", "chunk_index": 0},
             ),
         ]
         await ephemeral_store.add_documents(chunks)
@@ -568,17 +568,17 @@ class TestGetChunksBySource:
             DocumentChunk(
                 id="page_2",
                 text="チャンク2",
-                metadata={"source_url": "https://example.com/page", "chunk_index": 2},
+                metadata={"source_id": "https://example.com/page", "chunk_index": 2},
             ),
             DocumentChunk(
                 id="page_0",
                 text="チャンク0",
-                metadata={"source_url": "https://example.com/page", "chunk_index": 0},
+                metadata={"source_id": "https://example.com/page", "chunk_index": 0},
             ),
             DocumentChunk(
                 id="page_1",
                 text="チャンク1",
-                metadata={"source_url": "https://example.com/page", "chunk_index": 1},
+                metadata={"source_id": "https://example.com/page", "chunk_index": 1},
             ),
         ]
         await ephemeral_store.add_documents(chunks)
@@ -605,7 +605,7 @@ class TestGetChunksBySource:
         chunk = DocumentChunk(
             id="page1_0",
             text="テスト",
-            metadata={"source_url": "https://example.com/page1", "chunk_index": 0},
+            metadata={"source_id": "https://example.com/page1", "chunk_index": 0},
         )
         await ephemeral_store.add_documents([chunk])
 
@@ -634,7 +634,7 @@ class TestEmbeddingMethodDispatch:
         chunk = DocumentChunk(
             id="doc1_0",
             text="テスト",
-            metadata={"source_url": "https://example.com", "chunk_index": 0},
+            metadata={"source_id": "https://example.com", "chunk_index": 0},
         )
         await ephemeral_store.add_documents([chunk])
 
@@ -653,7 +653,7 @@ class TestEmbeddingMethodDispatch:
         chunk = DocumentChunk(
             id="doc1_0",
             text="テスト",
-            metadata={"source_url": "https://example.com", "chunk_index": 0},
+            metadata={"source_id": "https://example.com", "chunk_index": 0},
         )
         await ephemeral_store.add_documents([chunk])
 

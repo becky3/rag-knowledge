@@ -20,7 +20,6 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 
 from rag.pipeline.ingesters.web import (
-    MAX_CRAWL_PAGES_HARD_LIMIT,
     WebIngester,
     _check_ssrf,
     _extract_links,

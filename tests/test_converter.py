@@ -671,6 +671,103 @@ class TestConverterConvert:
 
 
 # ============================================================
+# Zenn 記事タイトル付与
+# ============================================================
+
+
+class TestZennArticleTitlePrepend:
+    """Zenn 記事の .meta からタイトルを先頭付与するテスト."""
+
+    def test_zenn_article_with_meta(self, tmp_path: Path) -> None:
+        """Zenn 記事 HTML の変換時に .meta のタイトルが H1 として先頭付与されること."""
+        html = "<html><body><h2>Section</h2><p>Article body.</p></body></html>"
+        source_dir, converted_dir = _setup_source(
+            tmp_path, "zenn/alice/articles/sample.html", html,
+        )
+        # .meta ファイルを配置
+        meta_content = (
+            'source_id: "https://zenn.dev/alice/articles/sample"\n'
+            "source_type: zenn\n"
+            'title: "Sample Article Title"\n'
+            'collected_at: "2026-01-15T10:30:00+09:00"\n'
+        )
+        meta_path = source_dir / "zenn" / "alice" / "articles" / "sample.html.meta"
+        meta_path.write_text(meta_content, encoding="utf-8")
+
+        converter = Converter()
+        result = converter.convert(
+            "zenn/alice/articles/sample.html", source_dir, converted_dir,
+        )
+        text = result.read_text(encoding="utf-8")
+        assert text.startswith("# Sample Article Title")
+        assert "## Section" in text
+        assert "Article body." in text
+
+    def test_zenn_article_without_meta(self, tmp_path: Path) -> None:
+        """Zenn 記事で .meta が存在しない場合はタイトル付与なしで変換されること."""
+        html = "<html><body><p>Content only.</p></body></html>"
+        source_dir, converted_dir = _setup_source(
+            tmp_path, "zenn/alice/articles/no-meta.html", html,
+        )
+        converter = Converter()
+        result = converter.convert(
+            "zenn/alice/articles/no-meta.html", source_dir, converted_dir,
+        )
+        text = result.read_text(encoding="utf-8")
+        assert not text.startswith("# ")
+        assert "Content only." in text
+
+    def test_non_zenn_html_no_title(self, tmp_path: Path) -> None:
+        """Web HTML にはタイトルが付与されないこと."""
+        html = "<html><body><p>Web content.</p></body></html>"
+        source_dir, converted_dir = _setup_source(
+            tmp_path, "web/https/example.com/page.html", html,
+        )
+        converter = Converter()
+        result = converter.convert(
+            "web/https/example.com/page.html", source_dir, converted_dir,
+        )
+        text = result.read_text(encoding="utf-8")
+        assert not text.startswith("# ")
+
+    def test_zenn_scrap_no_title(self, tmp_path: Path) -> None:
+        """Zenn スクラップ JSON にはタイトルが付与されないこと."""
+        scrap_data = json.dumps({
+            "comments": [{"body_html": "<p>Comment</p>"}],
+        })
+        source_dir, converted_dir = _setup_source(
+            tmp_path, "zenn/alice/scraps/slug.json", scrap_data,
+        )
+        converter = Converter()
+        result = converter.convert(
+            "zenn/alice/scraps/slug.json", source_dir, converted_dir,
+        )
+        text = result.read_text(encoding="utf-8")
+        assert not text.startswith("# ")
+
+    def test_zenn_article_empty_title(self, tmp_path: Path) -> None:
+        """Zenn 記事で .meta のタイトルが空の場合はタイトル付与なしで変換されること."""
+        html = "<html><body><p>Body text.</p></body></html>"
+        source_dir, converted_dir = _setup_source(
+            tmp_path, "zenn/alice/articles/empty-title.html", html,
+        )
+        meta_content = (
+            'source_id: "https://zenn.dev/alice/articles/empty-title"\n'
+            "source_type: zenn\n"
+            'title: ""\n'
+        )
+        meta_path = source_dir / "zenn" / "alice" / "articles" / "empty-title.html.meta"
+        meta_path.write_text(meta_content, encoding="utf-8")
+
+        converter = Converter()
+        result = converter.convert(
+            "zenn/alice/articles/empty-title.html", source_dir, converted_dir,
+        )
+        text = result.read_text(encoding="utf-8")
+        assert not text.startswith("# ")
+
+
+# ============================================================
 # Converter.delete
 # ============================================================
 

@@ -582,17 +582,25 @@ async def rag_crawl_preview(url: str, pattern: str = "") -> str:
         return f"エラー: プレビューに失敗しました。URL: {url}"
 
 
-@mcp.tool()
-async def rag_crawl_zenn(username: str, max_articles: int | None = None) -> str:
-    """[rag-knowledge] RAG crawl Zenn - Zenn 記事を API 経由で取得し一括取り込み.
+_VALID_ZENN_CONTENT_TYPES: frozenset[str] = frozenset({"articles", "scraps", "all"})
 
-    knowledge base, Zenn, ingest, articles, API.
-    指定ユーザーの Zenn 記事を API 経由で取得し、ナレッジベースに取り込む。
-    同一記事の再取り込み時は既存の知識を最新に置き換える。
+
+@mcp.tool()
+async def rag_crawl_zenn(
+    username: str,
+    max_articles: int | None = None,
+    content_type: str = "all",
+) -> str:
+    """[rag-knowledge] RAG crawl Zenn - Zenn コンテンツを API 経由で取得し一括取り込み.
+
+    knowledge base, Zenn, ingest, articles, scraps, API.
+    指定ユーザーの Zenn 記事・スクラップを API 経由で取得し、ナレッジベースに取り込む。
+    同一コンテンツの再取り込み時は既存の知識を最新に置き換える。
 
     Args:
         username: Zenn ユーザー名
-        max_articles: 取得する最大記事数（未指定時は設定値を使用、許容範囲: 1〜100）
+        max_articles: 取得する最大コンテンツ数（未指定時は設定値を使用、許容範囲: 1〜100）
+        content_type: 取得対象（"articles": 記事のみ、"scraps": スクラップのみ、"all": 両方。デフォルト: "all"）
 
     Returns:
         取り込み結果のサマリーテキスト
@@ -610,6 +618,10 @@ async def rag_crawl_zenn(username: str, max_articles: int | None = None) -> str:
     if not username or not username.strip():
         return "エラー: username を指定してください"
 
+    if content_type not in _VALID_ZENN_CONTENT_TYPES:
+        valid = ", ".join(sorted(_VALID_ZENN_CONTENT_TYPES))
+        return f"エラー: 無効な content_type: {content_type!r}（有効値: {valid}）"
+
     controller = await _get_pipeline_controller()
     zenn_ingester = PipelineZennIngester(
         controller.source_store,
@@ -624,11 +636,12 @@ async def rag_crawl_zenn(username: str, max_articles: int | None = None) -> str:
             ingest_result = await zenn_ingester.crawl_zenn(
                 username.strip(),
                 max_articles=max_articles,
+                content_type=content_type,
                 client=client,
             )
 
         if ingest_result.placed == 0 and ingest_result.errors == 0:
-            return f"記事が見つかりませんでした（ユーザー: {username}）"
+            return f"コンテンツが見つかりませんでした（ユーザー: {username}）"
 
         pipeline_summary = await asyncio.to_thread(
             controller.ingest_and_index,
@@ -729,23 +742,34 @@ async def rag_crawl_bluesky(
         return f"エラー: BlueSky 投稿の取り込みに失敗しました（ハンドル: {handle}）"
 
 
+_VALID_UPLOAD_MODES: frozenset[str] = frozenset({"fail", "replace"})
+
+
 @mcp.tool()
-async def rag_add_document(file_path: str) -> str:
+async def rag_add_document(
+    file_path: str,
+    upload_mode: str = "fail",
+) -> str:
     """[rag-knowledge] RAG add document - ドキュメントファイルをナレッジベースに取り込む.
 
     knowledge base, ingest, document, file, text.
     ドキュメントファイル（Markdown、テキスト、PDF、AsciiDoc）を読み取り、
-    ナレッジベースに取り込む。同一ファイルの再取り込み時は既存の知識を最新に置き換える。
+    ナレッジベースに取り込む。
     stdio モード専用。HTTP モードでは無効。
 
     Args:
         file_path: 取り込み対象ファイルのパス（絶対パスまたは相対パス）
+        upload_mode: 同名ファイル存在時の動作。"fail"（エラー、デフォルト）または "replace"（上書き）
 
     Returns:
         取り込み結果のメッセージ
     """
     if get_settings().rag_transport == "http":
         return "エラー: rag_add_document は HTTP モードでは無効です（セキュリティ上の制約）"
+
+    if upload_mode not in _VALID_UPLOAD_MODES:
+        valid = ", ".join(sorted(_VALID_UPLOAD_MODES))
+        return f"エラー: 無効な upload_mode: {upload_mode!r}（有効値: {valid}）"
 
     controller = await _get_pipeline_controller()
     local_ingester = PipelineLocalIngester(
@@ -756,6 +780,7 @@ async def rag_add_document(file_path: str) -> str:
     try:
         ingest_result = await asyncio.to_thread(
             local_ingester.add_document, file_path,
+            upload_mode=upload_mode,  # type: ignore[arg-type]
         )
 
         if ingest_result.placed == 0 and ingest_result.errors == 0:
@@ -780,24 +805,32 @@ async def rag_add_document(file_path: str) -> str:
 
 
 @mcp.tool()
-async def rag_crawl_documents(dir_path: str, pattern: str = "**/*") -> str:
+async def rag_crawl_documents(
+    dir_path: str,
+    pattern: str = "**/*",
+    upload_mode: str = "fail",
+) -> str:
     """[rag-knowledge] RAG crawl documents - ディレクトリ内のドキュメントを一括取り込み.
 
     knowledge base, ingest, document directory, bulk import, glob.
     指定ディレクトリ内のドキュメントファイルを glob パターンで検索し、
-    一括でナレッジベースに取り込む。同一ファイルの再取り込み時は
-    既存の知識を最新に置き換える。
+    一括でナレッジベースに取り込む。
     stdio モード専用。HTTP モードでは無効。
 
     Args:
         dir_path: 取り込み対象ディレクトリのパス（絶対パスまたは相対パス）
         pattern: glob パターン（デフォルト: ``**/*`` で再帰的に全対応ファイルを検索）
+        upload_mode: 同名ファイル存在時の動作。"fail"（スキップ、デフォルト）または "replace"（上書き）
 
     Returns:
         取り込み結果のサマリーテキスト
     """
     if get_settings().rag_transport == "http":
         return "エラー: rag_crawl_documents は HTTP モードでは無効です（セキュリティ上の制約）"
+
+    if upload_mode not in _VALID_UPLOAD_MODES:
+        valid = ", ".join(sorted(_VALID_UPLOAD_MODES))
+        return f"エラー: 無効な upload_mode: {upload_mode!r}（有効値: {valid}）"
 
     controller = await _get_pipeline_controller()
     local_ingester = PipelineLocalIngester(
@@ -808,6 +841,7 @@ async def rag_crawl_documents(dir_path: str, pattern: str = "**/*") -> str:
     try:
         ingest_result = await asyncio.to_thread(
             local_ingester.crawl_documents, dir_path, pattern,
+            upload_mode=upload_mode,  # type: ignore[arg-type]
         )
 
         if ingest_result.placed == 0 and ingest_result.errors == 0:
@@ -843,6 +877,10 @@ async def rag_delete(url: str) -> str:
     Returns:
         削除結果のメッセージ
     """
+    # BM25 はインメモリインデックスのため、別プロセス（CLI）が
+    # ディスク上のインデックスを更新していても反映されない。
+    # delete 前にコントローラをリセットし、最新のディスク状態をロードする。
+    _reset_pipeline_controller()
     controller = await _get_pipeline_controller()
 
     try:

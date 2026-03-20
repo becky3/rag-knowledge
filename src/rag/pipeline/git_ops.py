@@ -179,4 +179,5 @@ class GitOperations:
             text=True,
             check=True,
             encoding="utf-8",
+            stdin=subprocess.DEVNULL,
         )

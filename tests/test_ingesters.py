@@ -633,4 +633,4 @@ class TestRAGServiceWithWebIngester:
             "https://example.com/page".encode()
         ).hexdigest()[:16]
         assert chunk.id.startswith(expected_hash)
-        assert chunk.metadata["source_url"] == "https://example.com/page"
+        assert chunk.metadata["source_id"] == "https://example.com/page"

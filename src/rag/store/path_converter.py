@@ -67,8 +67,10 @@ def url_to_path(url: str) -> str:
         netloc = netloc.split("@", 1)[1]
     host = _escape_path(netloc)
 
-    # パス部分（先頭の / を除去）
-    path = parsed.path.lstrip("/")
+    # パス部分（先頭・末尾の / を除去）
+    # 末尾 / を除去しないと "path/" のままディレクトリ扱いになり、
+    # コンバーターが ".html" 拡張子を付与した際に "path/.html" となる
+    path = parsed.path.strip("/")
 
     # クエリパラメータ（? を全角に置換して結合）
     query = parsed.query
