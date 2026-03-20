@@ -19,6 +19,7 @@ from rag.store.metadata_db import MetadataDB
 from rag.store.models import (
     FileData,
     SourceMetadata,
+    SourceRecord,
     SourceType,
 )
 from rag.store.path_converter import url_to_path
@@ -174,6 +175,38 @@ class SourceStore:
 
     # --- ファイル取得 ---
 
+    def _build_metadata(self, record: SourceRecord) -> SourceMetadata:
+        """SourceRecord と .meta ファイルから SourceMetadata を構築する.
+
+        .meta の collected_at を優先し、なければ DB の created_at を使用する。
+        共通フィールド（source_id, source_type, title）を除いた残りを extra に格納する。
+
+        Args:
+            record: DB レコード
+
+        Returns:
+            SourceMetadata
+        """
+        extra: dict[str, Any] = {}
+        collected_at = record.created_at
+        if record.source_type not in _NO_META_TYPES:
+            file_path = self._root / record.file_path
+            meta_file = meta_path_for(file_path)
+            if meta_file.exists():
+                meta_data = read_meta(file_path)
+                collected_at = str(meta_data.pop("collected_at", collected_at))
+                for key in ("source_id", "source_type", "title"):
+                    meta_data.pop(key, None)
+                extra = meta_data
+
+        return SourceMetadata(
+            source_id=record.source_id,
+            source_type=record.source_type,
+            title=record.title,
+            collected_at=collected_at,
+            extra=extra,
+        )
+
     def get_file(self, source_id: str) -> FileData | None:
         """source_id でファイルを取得する.
 
@@ -196,32 +229,26 @@ class SourceStore:
 
         content = file_path.read_bytes()
 
-        # メタデータ構築: .meta の collected_at を優先、なければ DB の created_at
-        extra: dict[str, Any] = {}
-        collected_at = record.created_at
-        if record.source_type not in _NO_META_TYPES:
-            meta_file = meta_path_for(file_path)
-            if meta_file.exists():
-                meta_data = read_meta(file_path)
-                collected_at = str(meta_data.pop("collected_at", collected_at))
-                # 共通フィールドを除いた残りが extra
-                for key in ("source_id", "source_type", "title"):
-                    meta_data.pop(key, None)
-                extra = meta_data
-
-        source_meta = SourceMetadata(
-            source_id=record.source_id,
-            source_type=record.source_type,
-            title=record.title,
-            collected_at=collected_at,
-            extra=extra,
-        )
-
         return FileData(
             content=content,
             file_path=record.file_path,
-            metadata=source_meta,
+            metadata=self._build_metadata(record),
         )
+
+    def get_metadata(self, source_id: str) -> SourceMetadata | None:
+        """source_id でメタデータのみ取得する（ファイル内容は読まない）.
+
+        Args:
+            source_id: ソース識別子
+
+        Returns:
+            SourceMetadata。存在しない場合は None。
+        """
+        record = self._db.get_source(source_id)
+        if record is None:
+            return None
+
+        return self._build_metadata(record)
 
     # --- ファイル一覧 ---
 
