@@ -20,8 +20,10 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 
 from rag.pipeline.ingesters.web import (
+    MAX_CRAWL_DEPTH_HARD_LIMIT,
     WebIngester,
     _check_ssrf,
+    _decode_html_bytes,
     _extract_links,
     _extract_title,
     _needs_html_extension,
@@ -503,3 +505,301 @@ class TestCrawlPreview:
             client=client,
         )
         assert result == []
+
+
+class TestDecodeHtmlBytes:
+    """_decode_html_bytes のテスト."""
+
+    def test_utf8(self) -> None:
+        """UTF-8 の HTML が正しくデコードされること."""
+        html = "<html><body>テスト</body></html>".encode("utf-8")
+        result = _decode_html_bytes(html)
+        assert "テスト" in result
+
+    def test_empty_bytes(self) -> None:
+        """空バイト列でエラーにならないこと."""
+        result = _decode_html_bytes(b"")
+        assert result == ""
+
+
+@pytest.mark.asyncio()
+class TestCrawlDepth:
+    """crawl の再帰クロール（depth）テスト."""
+
+    async def test_depth_1_same_as_default(
+        self, source_store: SourceStore
+    ) -> None:
+        """depth=1 は従来動作と同じ結果になること."""
+        index_html = b"""
+        <html><body>
+        <a href="https://example.com/page1">Page 1</a>
+        </body></html>
+        """
+        page_html = b"<html><head><title>Page</title></head><body>content</body></html>"
+
+        index_resp = _make_mock_response(content=index_html)
+        page_resp = _make_mock_response(content=page_html)
+        client = AsyncMock()
+        client.get = AsyncMock(side_effect=[index_resp, page_resp])
+
+        ingester = WebIngester(
+            source_store,
+            url_safety_check=False,
+            respect_robots_txt=False,
+        )
+        result = await ingester.crawl(
+            "https://example.com/index",
+            depth=1,
+            client=client,
+        )
+
+        assert result.placed == 1
+        assert result.errors == 0
+
+    async def test_depth_2_follows_links(
+        self, source_store: SourceStore
+    ) -> None:
+        """depth=2 で取得したページからさらにリンクを辿ること."""
+        index_html = b"""
+        <html><body>
+        <a href="https://example.com/docs/page1">Page 1</a>
+        </body></html>
+        """
+        # page1 has a link to page2
+        page1_html = b"""
+        <html><head><title>Page 1</title></head><body>
+        <a href="https://example.com/docs/page2">Page 2</a>
+        </body></html>
+        """
+        page2_html = b"<html><head><title>Page 2</title></head><body>content 2</body></html>"
+
+        index_resp = _make_mock_response(content=index_html)
+        page1_resp = _make_mock_response(content=page1_html)
+        page2_resp = _make_mock_response(content=page2_html)
+        client = AsyncMock()
+        client.get = AsyncMock(side_effect=[index_resp, page1_resp, page2_resp])
+
+        ingester = WebIngester(
+            source_store,
+            url_safety_check=False,
+            respect_robots_txt=False,
+        )
+        result = await ingester.crawl(
+            "https://example.com/index",
+            pattern=r"/docs/",
+            depth=2,
+            client=client,
+        )
+
+        assert result.placed == 2
+        assert result.errors == 0
+
+    async def test_depth_loop_detection(
+        self, source_store: SourceStore
+    ) -> None:
+        """再帰クロール中に訪問済み URL がスキップされること."""
+        index_html = b"""
+        <html><body>
+        <a href="https://example.com/docs/page1">Page 1</a>
+        </body></html>
+        """
+        # page1 links back to index and itself
+        page1_html = b"""
+        <html><head><title>Page 1</title></head><body>
+        <a href="https://example.com/index">Back</a>
+        <a href="https://example.com/docs/page1">Self</a>
+        </body></html>
+        """
+
+        index_resp = _make_mock_response(content=index_html)
+        page1_resp = _make_mock_response(content=page1_html)
+        client = AsyncMock()
+        client.get = AsyncMock(side_effect=[index_resp, page1_resp])
+
+        ingester = WebIngester(
+            source_store,
+            url_safety_check=False,
+            respect_robots_txt=False,
+        )
+        result = await ingester.crawl(
+            "https://example.com/index",
+            pattern=r"example\.com",
+            depth=3,
+            client=client,
+        )
+
+        # page1 only — index and page1 are both visited, no new links for depth 2
+        assert result.placed == 1
+
+    async def test_depth_clamped_to_hard_limit(
+        self, source_store: SourceStore
+    ) -> None:
+        """depth がハードリミットを超えた場合にクランプされること."""
+        # 各 depth で 1 ページずつリンクがある構造を作る
+        # depth=99 を指定してもハードリミット（10）でクランプされるため
+        # 最大でも 10 depth 分しか処理されない
+        def make_page(n: int) -> bytes:
+            return (
+                f'<html><head><title>P{n}</title></head><body>'
+                f'<a href="https://example.com/d/p{n + 1}">next</a>'
+                f'</body></html>'
+            ).encode()
+
+        responses = [_make_mock_response(content=make_page(i)) for i in range(MAX_CRAWL_DEPTH_HARD_LIMIT + 5)]
+        client = AsyncMock()
+        client.get = AsyncMock(side_effect=responses)
+
+        ingester = WebIngester(
+            source_store,
+            url_safety_check=False,
+            respect_robots_txt=False,
+        )
+        result = await ingester.crawl(
+            "https://example.com/d/p0",
+            pattern=r"/d/",
+            depth=99,
+            client=client,
+        )
+
+        # ハードリミット(10)でクランプされるため、最大 10 ページ
+        assert result.placed <= MAX_CRAWL_DEPTH_HARD_LIMIT
+        assert result.errors == 0
+
+    async def test_max_pages_shared_across_depths(
+        self, source_store: SourceStore
+    ) -> None:
+        """max_crawl_pages が全 depth で共有されること."""
+        index_html = b"""
+        <html><body>
+        <a href="https://example.com/docs/p1">P1</a>
+        <a href="https://example.com/docs/p2">P2</a>
+        </body></html>
+        """
+        page_html = b"""
+        <html><head><title>P</title></head><body>
+        <a href="https://example.com/docs/p3">P3</a>
+        </body></html>
+        """
+
+        index_resp = _make_mock_response(content=index_html)
+        page_resp = _make_mock_response(content=page_html)
+        client = AsyncMock()
+        # index, p1, p2 (max_pages=2 reached before depth 2)
+        client.get = AsyncMock(side_effect=[index_resp, page_resp, page_resp])
+
+        ingester = WebIngester(
+            source_store,
+            max_crawl_pages=2,
+            url_safety_check=False,
+            respect_robots_txt=False,
+        )
+        result = await ingester.crawl(
+            "https://example.com/index",
+            pattern=r"/docs/",
+            depth=2,
+            client=client,
+        )
+
+        # max_crawl_pages=2 なので最大 2 ページ
+        assert result.placed == 2
+
+
+@pytest.mark.asyncio()
+class TestCrawlMaxErrors:
+    """crawl の累計エラー停止テスト."""
+
+    async def test_stops_on_error_threshold(
+        self, source_store: SourceStore
+    ) -> None:
+        """累計エラー数が閾値に達した場合に操作が中断されること."""
+        index_html = b"""
+        <html><body>
+        <a href="https://example.com/p1">P1</a>
+        <a href="https://example.com/p2">P2</a>
+        <a href="https://example.com/p3">P3</a>
+        <a href="https://example.com/p4">P4</a>
+        <a href="https://example.com/p5">P5</a>
+        <a href="https://example.com/p6">P6</a>
+        </body></html>
+        """
+
+        index_resp = _make_mock_response(content=index_html)
+        error_resp = _make_mock_response(status_code=403)
+        client = AsyncMock()
+        # index succeeds, then all pages return 403
+        client.get = AsyncMock(
+            side_effect=[index_resp] + [error_resp] * 6
+        )
+
+        ingester = WebIngester(
+            source_store,
+            crawl_max_errors=5,
+            url_safety_check=False,
+            respect_robots_txt=False,
+        )
+        result = await ingester.crawl(
+            "https://example.com/index",
+            client=client,
+        )
+
+        assert result.placed == 0
+        # エラー数は閾値（5）で止まる（6件全ては処理されない）
+        assert result.errors == 5
+
+    async def test_max_errors_clamped_to_minimum(
+        self, source_store: SourceStore
+    ) -> None:
+        """crawl_max_errors が下限（5）にクランプされること."""
+        ingester = WebIngester(
+            source_store,
+            crawl_max_errors=1,  # 1 は下限 5 にクランプ
+            url_safety_check=False,
+            respect_robots_txt=False,
+        )
+        assert ingester._crawl_max_errors == 5
+
+
+@pytest.mark.asyncio()
+class TestCrawlPreviewDepth:
+    """crawl_preview の再帰クロール（depth）テスト."""
+
+    async def test_preview_depth_2(
+        self, source_store: SourceStore
+    ) -> None:
+        """depth=2 のプレビューでリンクを辿った結果が返ること."""
+        index_html = b"""
+        <html><body>
+        <a href="https://example.com/docs/page1">Page 1</a>
+        </body></html>
+        """
+        page1_html = b"""
+        <html><head><title>Page 1</title></head><body>
+        <a href="https://example.com/docs/page2">Page 2</a>
+        </body></html>
+        """
+        page2_html = b"<html><head><title>Page 2</title></head><body>end</body></html>"
+
+        index_resp = _make_mock_response(content=index_html)
+        page1_resp = _make_mock_response(content=page1_html)
+        page2_resp = _make_mock_response(content=page2_html)
+        client = AsyncMock()
+        client.get = AsyncMock(
+            side_effect=[index_resp, page1_resp, page2_resp]
+        )
+
+        ingester = WebIngester(
+            source_store,
+            url_safety_check=False,
+            respect_robots_txt=False,
+        )
+        previews = await ingester.crawl_preview(
+            "https://example.com/index",
+            pattern=r"/docs/",
+            depth=2,
+            client=client,
+        )
+
+        assert len(previews) == 2
+        urls = [p["url"] for p in previews]
+        assert "https://example.com/docs/page1" in urls
+        assert "https://example.com/docs/page2" in urls

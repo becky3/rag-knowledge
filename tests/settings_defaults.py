@@ -33,6 +33,8 @@ TEST_SETTINGS_DEFAULTS: dict[str, object] = {
     "rag_bm25_b": 0.50,
     "rag_max_crawl_pages": 50,
     "rag_crawl_delay_sec": 1.0,
+    "rag_crawl_default_depth": 1,
+    "rag_crawl_max_errors": 5,
     "rag_respect_robots_txt": True,
     "rag_robots_txt_cache_ttl": 3600,
     "rag_url_safety_check": False,

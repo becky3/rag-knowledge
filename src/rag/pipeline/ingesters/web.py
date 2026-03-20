@@ -39,6 +39,13 @@ logger = logging.getLogger(__name__)
 # ハードリミット: クロール対象ページ数上限
 MAX_CRAWL_PAGES_HARD_LIMIT = 500
 
+# ハードリミット: クロール深度上限
+MAX_CRAWL_DEPTH_HARD_LIMIT = 10
+
+# クロールエラー停止閾値の許容範囲
+_CRAWL_MAX_ERRORS_MIN = 5
+_CRAWL_MAX_ERRORS_MAX = 10
+
 # Safe Browsing キャッシュ最大エントリ数
 SAFE_BROWSING_CACHE_MAX_ENTRIES = 1000
 
@@ -123,13 +130,12 @@ def _check_ssrf(url: str) -> None:
                 )
 
 
-def _extract_title(data: bytes) -> str:
-    """HTML バイト列からタイトルを抽出する.
+def _decode_html_bytes(data: bytes) -> str:
+    """HTML バイト列をテキストにデコードする.
 
-    charset_normalizer でエンコーディングを自動検出し、
-    BeautifulSoup でタイトルタグを取得する。
+    charset_normalizer でエンコーディングを自動検出する。
+    Shift_JIS、EUC-JP、UTF-8 等の日本語エンコーディングに対応。
     """
-    # エンコーディング検出
     try:
         import charset_normalizer
         detected = charset_normalizer.from_bytes(data).best()
@@ -137,10 +143,14 @@ def _extract_title(data: bytes) -> str:
     except ImportError:
         encoding = "utf-8"
     try:
-        html_text = data.decode(encoding, errors="replace")
+        return data.decode(encoding, errors="replace")
     except Exception:
-        html_text = data.decode("utf-8", errors="replace")
+        return data.decode("utf-8", errors="replace")
 
+
+def _extract_title(data: bytes) -> str:
+    """HTML バイト列からタイトルを抽出する."""
+    html_text = _decode_html_bytes(data)
     soup = BeautifulSoup(html_text, "html.parser")
     title_tag = soup.find("title")
     if title_tag and title_tag.string:
@@ -208,6 +218,7 @@ class WebIngester:
         *,
         max_crawl_pages: int = 50,
         crawl_request_timeout: int = 30,
+        crawl_max_errors: int = 5,
         respect_robots_txt: bool = True,
         robots_txt_cache_ttl: int = 3600,
         url_safety_check: bool = True,
@@ -218,6 +229,10 @@ class WebIngester:
         self._store = source_store
         self._max_crawl_pages = min(max_crawl_pages, MAX_CRAWL_PAGES_HARD_LIMIT)
         self._crawl_request_timeout = crawl_request_timeout
+        self._crawl_max_errors = max(
+            _CRAWL_MAX_ERRORS_MIN,
+            min(crawl_max_errors, _CRAWL_MAX_ERRORS_MAX),
+        )
         self._respect_robots_txt = respect_robots_txt
         self._robots_txt_cache_ttl = robots_txt_cache_ttl
         self._url_safety_check = url_safety_check
@@ -321,14 +336,19 @@ class WebIngester:
         url: str,
         *,
         pattern: str = "",
+        depth: int = 1,
         client: Any | None = None,
         safe_browsing_api_key: str = "",
     ) -> IngestResult:
         """リンク集ページから一括クロールして source_store に配置する.
 
+        再帰クロール対応: depth > 1 の場合、取得した各ページの HTML から
+        リンクを再抽出し、次の depth の対象とする。
+
         Args:
             url: リンク集ページの URL
             pattern: リンクをフィルタする正規表現パターン
+            depth: クロール深度（1〜10。デフォルト: 1 = 従来動作）
             client: ConstrainedClient インスタンス
             safe_browsing_api_key: Safe Browsing API キー
 
@@ -343,27 +363,17 @@ class WebIngester:
         if client is None:
             raise ValueError("client (ConstrainedClient) が必要です")
 
-        # インデックスページ取得
-        resp = await client.get(
-            url,
-            follow_redirects=False,
-        )
-        if 300 <= resp.status_code < 400:
-            raise ValueError(
-                f"リダイレクトは SSRF 防止のため拒否されています: "
-                f"{resp.status_code} ({url})"
+        # depth をハードリミットにクランプ
+        if depth > MAX_CRAWL_DEPTH_HARD_LIMIT:
+            logger.warning(
+                "depth %d はハードリミット %d を超えています。クランプします",
+                depth,
+                MAX_CRAWL_DEPTH_HARD_LIMIT,
             )
-        if resp.status_code >= 400:
-            raise ValueError(
-                f"HTTP エラー: {resp.status_code} ({url})"
-            )
+        depth = max(1, min(depth, MAX_CRAWL_DEPTH_HARD_LIMIT))
 
-        html_text = resp.content.decode("utf-8", errors="replace")
-
-        # リンク抽出
-        links = _extract_links(html_text, url)
-
-        # パターンフィルタ
+        # パターンコンパイル（1回のみ）
+        regex: re.Pattern[str] | None = None
         if pattern:
             try:
                 regex = re.compile(pattern)
@@ -371,87 +381,166 @@ class WebIngester:
                 result.errors = 1
                 result.error_details.append(f"無効な正規表現パターン: {e}")
                 return result
-            links = [link for link in links if regex.search(link)]
 
-        # robots.txt フィルタ
-        if self._respect_robots_txt:
-            filtered: list[str] = []
-            for link in links:
-                if await self._can_fetch(link, client):
-                    filtered.append(link)
-                else:
-                    logger.info("robots.txt により除外: %s", link)
-            links = filtered
-
-        # Safe Browsing 一括チェック
+        # Safe Browsing 警告（1回のみ）
         if self._url_safety_check and not safe_browsing_api_key:
-            logger.warning("Safe Browsing が有効ですが API キーが未指定です。チェックをスキップします")
-        if self._url_safety_check and safe_browsing_api_key and links:
-            safety_results = await self._check_safe_browsing(
-                links, safe_browsing_api_key, client
-            )
-            safe_links: list[str] = []
-            for link in links:
-                if safety_results.get(link, True):
-                    safe_links.append(link)
-                else:
-                    logger.warning("Safe Browsing で除外: %s", link)
-                    result.skipped += 1
-            links = safe_links
-
-        # ページ数上限チェック
-        if len(links) > self._max_crawl_pages:
             logger.warning(
-                "クロール対象ページ数が上限 %d を超えています（%d）。上限で打ち切ります",
-                self._max_crawl_pages,
-                len(links),
+                "Safe Browsing が有効ですが API キーが未指定です。チェックをスキップします"
             )
-            links = links[: self._max_crawl_pages]
 
-        # 各ページを順次処理
-        for link in links:
-            try:
-                _check_ssrf(link)
+        # インデックスページ取得
+        resp = await client.get(url, follow_redirects=False)
+        if 300 <= resp.status_code < 400:
+            raise ValueError(
+                f"リダイレクトは SSRF 防止のため拒否されています: "
+                f"{resp.status_code} ({url})"
+            )
+        if resp.status_code >= 400:
+            raise ValueError(f"HTTP エラー: {resp.status_code} ({url})")
 
-                page_resp = await client.get(
-                    link,
-                    follow_redirects=False,
+        index_html = _decode_html_bytes(resp.content)
+
+        # 全 depth で共有する状態
+        visited: set[str] = {url}
+        remaining_pages = self._max_crawl_pages
+        pending_links = _extract_links(index_html, url)
+
+        for current_depth in range(1, depth + 1):
+            if remaining_pages <= 0:
+                logger.info("ページ数上限に到達。残りの depth をスキップします")
+                break
+            if result.errors >= self._crawl_max_errors:
+                logger.warning(
+                    "累計エラー数が閾値 %d に到達。操作を中断します",
+                    self._crawl_max_errors,
                 )
-                if 300 <= page_resp.status_code < 400:
-                    logger.warning("リダイレクト（SSRF 防止）: %s", link)
-                    result.errors += 1
-                    result.error_details.append(f"Redirect blocked: {link}")
-                    continue
-                if page_resp.status_code >= 400:
-                    logger.warning("HTTP エラー %d: %s", page_resp.status_code, link)
-                    result.errors += 1
-                    result.error_details.append(f"HTTP {page_resp.status_code}: {link}")
-                    continue
-
-                page_data = page_resp.content
-                title = _extract_title(page_data)
-
-                metadata = {
-                    "source_id": link,
-                    "source_type": "web",
-                    "title": title,
-                    "collected_at": now_iso(),
-                    "url": link,
-                }
-
-                ext = ".html" if _needs_html_extension(link) else ""
-                self._store.place_file_from_url(
-                    url=link,
-                    data=page_data,
-                    metadata=metadata,
-                    extension=ext,
+                break
+            if not pending_links:
+                logger.info(
+                    "depth %d: 新規リンクなし。処理を終了します", current_depth
                 )
-                result.placed += 1
+                break
 
-            except Exception:
-                logger.exception("ページの取得に失敗しました: %s", link)
-                result.errors += 1
-                result.error_details.append(link)
+            # パターンフィルタ
+            if regex:
+                pending_links = [
+                    link for link in pending_links if regex.search(link)
+                ]
+
+            # 訪問済み除外 + 登録
+            new_links: list[str] = []
+            for link in pending_links:
+                if link not in visited:
+                    visited.add(link)
+                    new_links.append(link)
+            pending_links = new_links
+
+            # robots.txt フィルタ
+            if self._respect_robots_txt:
+                filtered: list[str] = []
+                for link in pending_links:
+                    if await self._can_fetch(link, client):
+                        filtered.append(link)
+                    else:
+                        logger.info("robots.txt により除外: %s", link)
+                pending_links = filtered
+
+            # Safe Browsing 一括チェック
+            if (
+                self._url_safety_check
+                and safe_browsing_api_key
+                and pending_links
+            ):
+                safety_results = await self._check_safe_browsing(
+                    pending_links, safe_browsing_api_key, client
+                )
+                safe_links: list[str] = []
+                for link in pending_links:
+                    if safety_results.get(link, True):
+                        safe_links.append(link)
+                    else:
+                        logger.warning("Safe Browsing で除外: %s", link)
+                        result.skipped += 1
+                pending_links = safe_links
+
+            # 残ページ数上限チェック
+            if len(pending_links) > remaining_pages:
+                logger.warning(
+                    "depth %d: クロール対象ページ数が残り上限 %d を超えています"
+                    "（%d）。上限で打ち切ります",
+                    current_depth,
+                    remaining_pages,
+                    len(pending_links),
+                )
+                pending_links = pending_links[:remaining_pages]
+
+            logger.info(
+                "depth %d: %d ページを処理します", current_depth, len(pending_links)
+            )
+
+            # 各ページを取得・配置し、次 depth 用のリンクを収集
+            next_depth_links: list[str] = []
+
+            for link in pending_links:
+                if result.errors >= self._crawl_max_errors:
+                    logger.warning(
+                        "累計エラー数が閾値 %d に到達。操作を中断します",
+                        self._crawl_max_errors,
+                    )
+                    break
+
+                try:
+                    _check_ssrf(link)
+
+                    page_resp = await client.get(link, follow_redirects=False)
+                    if 300 <= page_resp.status_code < 400:
+                        logger.warning("リダイレクト（SSRF 防止）: %s", link)
+                        result.errors += 1
+                        result.error_details.append(f"Redirect blocked: {link}")
+                        continue
+                    if page_resp.status_code >= 400:
+                        logger.warning(
+                            "HTTP エラー %d: %s", page_resp.status_code, link
+                        )
+                        result.errors += 1
+                        result.error_details.append(
+                            f"HTTP {page_resp.status_code}: {link}"
+                        )
+                        continue
+
+                    page_data = page_resp.content
+                    title = _extract_title(page_data)
+
+                    metadata = {
+                        "source_id": link,
+                        "source_type": "web",
+                        "title": title,
+                        "collected_at": now_iso(),
+                        "url": link,
+                    }
+
+                    ext = ".html" if _needs_html_extension(link) else ""
+                    self._store.place_file_from_url(
+                        url=link,
+                        data=page_data,
+                        metadata=metadata,
+                        extension=ext,
+                    )
+                    result.placed += 1
+                    remaining_pages -= 1
+
+                    # 次 depth 用: ページからリンクを抽出
+                    if current_depth < depth:
+                        page_html = _decode_html_bytes(page_data)
+                        page_links = _extract_links(page_html, link)
+                        next_depth_links.extend(page_links)
+
+                except Exception:
+                    logger.exception("ページの取得に失敗しました: %s", link)
+                    result.errors += 1
+                    result.error_details.append(link)
+
+            pending_links = next_depth_links
 
         return result
 
@@ -460,15 +549,19 @@ class WebIngester:
         url: str,
         *,
         pattern: str = "",
+        depth: int = 1,
         client: Any | None = None,
     ) -> list[dict[str, str]]:
         """クロール対象ページのタイトル・URL 一覧を返す.
 
         source_store への配置は行わない。
+        再帰クロール対応: depth > 1 の場合、各ページからリンクを
+        再抽出して次の depth の候補とする。
 
         Args:
             url: リンク集ページの URL
             pattern: リンクをフィルタする正規表現パターン
+            depth: クロール深度（1〜10。デフォルト: 1）
             client: ConstrainedClient インスタンス
 
         Returns:
@@ -484,58 +577,97 @@ class WebIngester:
         if client is None:
             raise ValueError("client (ConstrainedClient) が必要です")
 
+        # depth をハードリミットにクランプ
+        if depth > MAX_CRAWL_DEPTH_HARD_LIMIT:
+            logger.warning(
+                "depth %d はハードリミット %d を超えています。クランプします",
+                depth,
+                MAX_CRAWL_DEPTH_HARD_LIMIT,
+            )
+        depth = max(1, min(depth, MAX_CRAWL_DEPTH_HARD_LIMIT))
+
+        # パターンコンパイル（1回のみ）
+        regex: re.Pattern[str] | None = None
+        if pattern:
+            try:
+                regex = re.compile(pattern)
+            except re.error:
+                logger.warning("無効な正規表現パターン: %s", pattern)
+                return []
+
         # インデックスページ取得
-        resp = await client.get(
-            url,
-            follow_redirects=False,
-        )
+        resp = await client.get(url, follow_redirects=False)
         if 300 <= resp.status_code < 400:
             raise ValueError(
                 f"リダイレクトは SSRF 防止のため拒否されています: "
                 f"{resp.status_code} ({url})"
             )
         if resp.status_code >= 400:
-            raise ValueError(
-                f"HTTP エラー: {resp.status_code} ({url})"
-            )
+            raise ValueError(f"HTTP エラー: {resp.status_code} ({url})")
 
-        html_text = resp.content.decode("utf-8", errors="replace")
+        index_html = _decode_html_bytes(resp.content)
 
-        # リンク抽出
-        links = _extract_links(html_text, url)
-
-        # パターンフィルタ
-        if pattern:
-            try:
-                regex = re.compile(pattern)
-                links = [link for link in links if regex.search(link)]
-            except re.error:
-                logger.warning("無効な正規表現パターン: %s", pattern)
-                return []
-
-        # robots.txt フィルタ
-        if self._respect_robots_txt:
-            filtered: list[str] = []
-            for link in links:
-                if await self._can_fetch(link, client):
-                    filtered.append(link)
-            links = filtered
-
-        # 各ページのタイトル取得
+        # 全 depth で共有する状態
+        visited: set[str] = {url}
+        remaining_pages = self._max_crawl_pages
+        pending_links = _extract_links(index_html, url)
         previews: list[dict[str, str]] = []
-        for link in links:
-            title = ""
-            try:
-                page_resp = await client.get(
-                    link,
-                    follow_redirects=False,
-                )
-                if page_resp.status_code < 300:
-                    title = _extract_title(page_resp.content)
-            except Exception:
-                logger.debug("タイトル取得に失敗: %s", link)
 
-            previews.append({"title": title, "url": link})
+        for current_depth in range(1, depth + 1):
+            if remaining_pages <= 0 or not pending_links:
+                break
+
+            # パターンフィルタ
+            if regex:
+                pending_links = [
+                    link for link in pending_links if regex.search(link)
+                ]
+
+            # 訪問済み除外 + 登録
+            new_links: list[str] = []
+            for link in pending_links:
+                if link not in visited:
+                    visited.add(link)
+                    new_links.append(link)
+            pending_links = new_links
+
+            # robots.txt フィルタ
+            if self._respect_robots_txt:
+                filtered: list[str] = []
+                for link in pending_links:
+                    if await self._can_fetch(link, client):
+                        filtered.append(link)
+                pending_links = filtered
+
+            # 残ページ数上限チェック
+            if len(pending_links) > remaining_pages:
+                pending_links = pending_links[:remaining_pages]
+
+            # 各ページのタイトル取得 + 次 depth 用リンク収集
+            next_depth_links: list[str] = []
+
+            for link in pending_links:
+                title = ""
+                try:
+                    page_resp = await client.get(
+                        link, follow_redirects=False
+                    )
+                    if page_resp.status_code < 300:
+                        page_data = page_resp.content
+                        title = _extract_title(page_data)
+
+                        # 次 depth 用: ページからリンクを抽出
+                        if current_depth < depth:
+                            page_html = _decode_html_bytes(page_data)
+                            page_links = _extract_links(page_html, link)
+                            next_depth_links.extend(page_links)
+                except Exception:
+                    logger.debug("タイトル取得に失敗: %s", link)
+
+                previews.append({"title": title, "url": link})
+                remaining_pages -= 1
+
+            pending_links = next_depth_links
 
         return previews
 

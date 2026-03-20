@@ -245,7 +245,13 @@ def main() -> None:
     preview_parser.add_argument(
         "--pattern",
         default="",
-        help="URLフィルタリング用の正規表現パターン（任意）",
+        help="URLフィルタリング用の正規表現パターン（depth >= 2 の場合は必須）",
+    )
+    preview_parser.add_argument(
+        "--depth",
+        type=int,
+        default=None,
+        help="クロール深度（1〜10。未指定時は設定値を使用）",
     )
     preview_parser.add_argument(
         "--format",
@@ -328,7 +334,8 @@ def main() -> None:
     # crawl: リンク集クロール
     crawl_parser = subparsers.add_parser("crawl", help="リンク集ページからクロール＆一括取り込み")
     crawl_parser.add_argument("url", help="リンク集ページのURL")
-    crawl_parser.add_argument("--pattern", default="", help="URLフィルタリング用の正規表現パターン")
+    crawl_parser.add_argument("--pattern", default="", help="URLフィルタリング用の正規表現パターン（depth >= 2 の場合は必須）")
+    crawl_parser.add_argument("--depth", type=int, default=None, help="クロール深度（1〜10。未指定時は設定値を使用）")
 
     # crawl-bluesky: BlueSky 取り込み
     bs_parser = subparsers.add_parser("crawl-bluesky", help="BlueSky 投稿を一括取り込み")
@@ -895,10 +902,18 @@ async def run_crawl_preview(args: argparse.Namespace) -> None:
     source_store_dir.mkdir(parents=True, exist_ok=True)
     source_store = SourceStore(source_store_dir)
 
+    depth = args.depth if args.depth is not None else settings.rag_crawl_default_depth
+
+    # depth >= 2 の場合は pattern 必須
+    if depth >= 2 and not args.pattern:
+        logger.error("depth が 2 以上の場合は --pattern の指定が必須です")
+        sys.exit(1)
+
     web_ingester = WebIngester(
         source_store,
         max_crawl_pages=settings.rag_max_crawl_pages,
         crawl_request_timeout=settings.rag_crawl_request_timeout,
+        crawl_max_errors=settings.rag_crawl_max_errors,
         respect_robots_txt=settings.rag_respect_robots_txt,
         robots_txt_cache_ttl=settings.rag_robots_txt_cache_ttl,
     )
@@ -909,7 +924,7 @@ async def run_crawl_preview(args: argparse.Namespace) -> None:
             request_interval=settings.rag_crawl_delay_sec,
         ) as client:
             pages = await web_ingester.crawl_preview(
-                args.url, pattern=args.pattern, client=client,
+                args.url, pattern=args.pattern, depth=depth, client=client,
             )
     except ValueError as e:
         logger.error("URL validation failed: %s", e)
@@ -1514,10 +1529,19 @@ async def run_crawl(args: argparse.Namespace) -> None:
     from py_common_lib.httpx import ConstrainedClient  # safety:allowed
 
     controller, settings = _build_cli_pipeline_controller()
+
+    depth = args.depth if args.depth is not None else settings.rag_crawl_default_depth
+
+    # depth >= 2 の場合は pattern 必須
+    if depth >= 2 and not args.pattern:
+        logger.error("depth が 2 以上の場合は --pattern の指定が必須です")
+        sys.exit(1)
+
     web_ingester = WebIngester(
         controller.source_store,
         max_crawl_pages=settings.rag_max_crawl_pages,
         crawl_request_timeout=settings.rag_crawl_request_timeout,
+        crawl_max_errors=settings.rag_crawl_max_errors,
         respect_robots_txt=settings.rag_respect_robots_txt,
         robots_txt_cache_ttl=settings.rag_robots_txt_cache_ttl,
         url_safety_check=settings.rag_url_safety_check,
@@ -1533,7 +1557,7 @@ async def run_crawl(args: argparse.Namespace) -> None:
             request_interval=settings.rag_crawl_delay_sec,
         ) as client:
             ingest_result = await web_ingester.crawl(
-                args.url, pattern=args.pattern, client=client,
+                args.url, pattern=args.pattern, depth=depth, client=client,
                 safe_browsing_api_key=api_key,
             )
     except ValueError as e:
