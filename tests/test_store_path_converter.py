@@ -54,6 +54,22 @@ class TestUrlToPath:
         result = url_to_path("https://example.com")
         assert result == "web/https/example.com"
 
+    def test_trailing_slash(self) -> None:
+        """末尾 / が除去されること（ディレクトリ扱い回避）."""
+        result = url_to_path("https://example.com/path/")
+        assert result == "web/https/example.com/path"
+
+    def test_trailing_slash_nested(self) -> None:
+        """ネストしたパスの末尾 / が除去されること."""
+        result = url_to_path("https://example.com/docs/guide/")
+        assert result == "web/https/example.com/docs/guide"
+
+    def test_trailing_slash_same_as_no_slash(self) -> None:
+        """末尾 / ありとなしで同一パスになること."""
+        assert url_to_path("https://example.com/path/") == url_to_path(
+            "https://example.com/path"
+        )
+
     def test_multiple_query_params(self) -> None:
         result = url_to_path("https://example.com/search?q=test&page=2")
         assert result == "web/https/example.com/search\uff1fq=test&page=2"

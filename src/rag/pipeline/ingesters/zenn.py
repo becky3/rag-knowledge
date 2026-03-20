@@ -253,6 +253,20 @@ class ZennIngester:
             for item in items:
                 if len(slugs) >= max_count:
                     break
+                # ユーザー名検証: Zenn API は ?username= を無視して
+                # 全ユーザーの記事を返す場合があるため、
+                # レスポンス内の user.username を照合する
+                item_user = item.get("user")
+                if isinstance(item_user, dict):
+                    item_username = item_user.get("username", "")
+                    if item_username and item_username != username:
+                        logger.info(
+                            "Skipping %s from different user: %s (expected: %s)",
+                            kind,
+                            item_username,
+                            username,
+                        )
+                        continue
                 slug = item.get("slug", "")
                 if slug:
                     slugs.append(slug)

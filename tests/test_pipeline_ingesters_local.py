@@ -5,12 +5,19 @@
 
 from __future__ import annotations
 
+import datetime
 from pathlib import Path
 
 import pytest
 
-from rag.pipeline.ingesters.local import LocalIngester, MAX_FILES_HARD_LIMIT
+from rag.pipeline.ingesters.local import LocalIngester, MAX_FILES_HARD_LIMIT, _UPLOAD_DIR
 from rag.store.source_store import SourceStore
+
+
+def _today_prefix() -> str:
+    """テスト用: 当日の日付プレフィックスを返す."""
+    today = datetime.date.today()
+    return f"{today.year}/{today.month:02d}/{today.day:02d}"
 
 
 @pytest.fixture()
@@ -50,7 +57,7 @@ class TestAddDocument:
         result = ingester.add_document(str(sample_file))
         assert result.placed == 1
         assert result.errors == 0
-        placed = source_store.root_dir / "local" / "sample.md"
+        placed = source_store.root_dir / "local" / _UPLOAD_DIR / _today_prefix() / "sample.md"
         assert placed.exists()
 
     def test_add_nonexistent_file(self, ingester: LocalIngester) -> None:
@@ -79,19 +86,33 @@ class TestAddDocument:
         result = ingester.add_document(str(f))
         assert result.errors == 1
 
-    def test_add_overwrite(self, ingester: LocalIngester, tmp_path: Path, source_store: SourceStore) -> None:
+    def test_add_replace_mode(self, ingester: LocalIngester, tmp_path: Path, source_store: SourceStore) -> None:
+        """replace モード: 同名ファイルを上書きできること."""
         f = tmp_path / "overwrite.md"
         f.write_text("v1", encoding="utf-8")
-        ingester.add_document(str(f))
+        ingester.add_document(str(f), upload_mode="replace")
         f.write_text("v2", encoding="utf-8")
-        result = ingester.add_document(str(f))
+        result = ingester.add_document(str(f), upload_mode="replace")
         assert result.placed == 1
-        placed = source_store.root_dir / "local" / "overwrite.md"
+        placed = source_store.root_dir / "local" / _UPLOAD_DIR / _today_prefix() / "overwrite.md"
         assert placed.read_text(encoding="utf-8") == "v2"
+
+    def test_add_fail_mode_duplicate(self, ingester: LocalIngester, tmp_path: Path) -> None:
+        """fail モード（デフォルト）: 同名ファイルが既にある場合にエラーになること."""
+        f = tmp_path / "dup.md"
+        f.write_text("first", encoding="utf-8")
+        result1 = ingester.add_document(str(f))
+        assert result1.placed == 1
+
+        f.write_text("second", encoding="utf-8")
+        result2 = ingester.add_document(str(f))
+        assert result2.placed == 0
+        assert result2.errors == 1
+        assert "同名ファイル" in result2.error_details[0]
 
     def test_no_meta_for_local(self, ingester: LocalIngester, sample_file: Path, source_store: SourceStore) -> None:
         ingester.add_document(str(sample_file))
-        meta = source_store.root_dir / "local" / "sample.md.meta"
+        meta = source_store.root_dir / "local" / _UPLOAD_DIR / _today_prefix() / "sample.md.meta"
         assert not meta.exists()
 
 
@@ -100,7 +121,7 @@ class TestCrawlDocuments:
         result = ingester.crawl_documents(str(sample_dir))
         assert result.placed == 3
         assert result.errors == 0
-        base = source_store.root_dir / "local" / "docs"
+        base = source_store.root_dir / "local" / _UPLOAD_DIR / _today_prefix() / "docs"
         assert (base / "readme.md").exists()
         assert (base / "notes.txt").exists()
         assert (base / "sub" / "deep.md").exists()
@@ -150,6 +171,39 @@ class TestCrawlDocuments:
             (d / f"file_{i:04d}.md").write_text(f"Content {i}")
         result = ingester.crawl_documents(str(d))
         assert result.placed == MAX_FILES_HARD_LIMIT
+
+    def test_crawl_fail_mode_skips_duplicates(self, ingester: LocalIngester, sample_dir: Path) -> None:
+        """fail モード: 重複ファイルがスキップされること."""
+        result1 = ingester.crawl_documents(str(sample_dir))
+        assert result1.placed == 3
+
+        result2 = ingester.crawl_documents(str(sample_dir))
+        assert result2.placed == 0
+        assert result2.skipped == 3
+
+    def test_crawl_replace_mode(self, ingester: LocalIngester, sample_dir: Path) -> None:
+        """replace モード: 重複ファイルが上書きされること."""
+        result1 = ingester.crawl_documents(str(sample_dir), upload_mode="replace")
+        assert result1.placed == 3
+
+        result2 = ingester.crawl_documents(str(sample_dir), upload_mode="replace")
+        assert result2.placed == 3
+        assert result2.skipped == 0
+
+
+class TestUploadPath:
+    """アップロードパスの構造テスト."""
+
+    def test_upload_path_structure(self, ingester: LocalIngester, sample_file: Path, source_store: SourceStore) -> None:
+        """MCP 経由のファイルが .upload/yyyy/MM/dd/ に配置されること."""
+        ingester.add_document(str(sample_file))
+        upload_base = source_store.root_dir / "local" / _UPLOAD_DIR
+        assert upload_base.exists()
+        # 日付ディレクトリの存在確認
+        today = datetime.date.today()
+        date_dir = upload_base / str(today.year) / f"{today.month:02d}" / f"{today.day:02d}"
+        assert date_dir.exists()
+        assert (date_dir / "sample.md").exists()
 
 
 class TestHttpModeRestriction:

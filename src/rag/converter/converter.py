@@ -27,6 +27,7 @@ from rag.converter.handlers import (
 from rag.converter.normalize import normalize_text
 from rag.ingesters.document_ingester import DocumentIngester, PdfBackendConfig
 from rag.pipeline.models import detect_source_type
+from rag.store.meta import read_meta
 from rag.store.models import SourceType
 
 logger = logging.getLogger(__name__)
@@ -163,6 +164,12 @@ class Converter:
         # 変換処理
         text = self._dispatch_conversion(ext, source_path, file_path)
 
+        # Zenn 記事: body_html にタイトルが含まれないため .meta から取得して先頭付与
+        if text is not None:
+            text = self._prepend_title_from_meta(
+                text, file_path, source_store_dir,
+            )
+
         if text is None or not text.strip():
             # 空結果: 既存ファイルを削除（Zenn スクラップ空コメント等）
             if converted_path.exists():
@@ -266,6 +273,40 @@ class Converter:
         return result
 
     # --- 内部メソッド ---
+
+    def _prepend_title_from_meta(
+        self,
+        text: str,
+        file_path: str,
+        source_store_dir: Path,
+    ) -> str:
+        """タイトルがコンテンツに含まれないソースに .meta のタイトルを先頭付与する.
+
+        Zenn 記事の body_html にはタイトルが含まれないため、
+        .meta の title フィールドを H1 見出しとして先頭に付与する。
+
+        Args:
+            text: 変換後テキスト
+            file_path: source_store 内の相対パス
+            source_store_dir: source_store のルートディレクトリ
+
+        Returns:
+            タイトル付与済みテキスト（対象外の場合はそのまま返す）
+        """
+        source_type = detect_source_type(file_path)
+        if source_type != "zenn" or "/articles/" not in file_path:
+            return text
+
+        source_path = source_store_dir / file_path
+        try:
+            meta = read_meta(source_path)
+            title = meta.get("title", "")
+            if title:
+                return f"# {title}\n\n{text}"
+        except (FileNotFoundError, ValueError, OSError):
+            logger.debug("No .meta for title prepend: %s", file_path)
+
+        return text
 
     def _dispatch_conversion(
         self,
