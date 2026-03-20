@@ -286,6 +286,10 @@ class WebIngester:
                 f"リダイレクトは SSRF 防止のため拒否されています: "
                 f"{resp.status_code} ({url})"
             )
+        if resp.status_code >= 400:
+            raise ValueError(
+                f"HTTP エラー: {resp.status_code} ({url})"
+            )
 
         data = resp.content
 
@@ -348,6 +352,10 @@ class WebIngester:
             raise ValueError(
                 f"リダイレクトは SSRF 防止のため拒否されています: "
                 f"{resp.status_code} ({url})"
+            )
+        if resp.status_code >= 400:
+            raise ValueError(
+                f"HTTP エラー: {resp.status_code} ({url})"
             )
 
         html_text = resp.content.decode("utf-8", errors="replace")
@@ -413,6 +421,11 @@ class WebIngester:
                     logger.warning("リダイレクト（SSRF 防止）: %s", link)
                     result.errors += 1
                     result.error_details.append(f"Redirect blocked: {link}")
+                    continue
+                if page_resp.status_code >= 400:
+                    logger.warning("HTTP エラー %d: %s", page_resp.status_code, link)
+                    result.errors += 1
+                    result.error_details.append(f"HTTP {page_resp.status_code}: {link}")
                     continue
 
                 page_data = page_resp.content
@@ -480,6 +493,10 @@ class WebIngester:
             raise ValueError(
                 f"リダイレクトは SSRF 防止のため拒否されています: "
                 f"{resp.status_code} ({url})"
+            )
+        if resp.status_code >= 400:
+            raise ValueError(
+                f"HTTP エラー: {resp.status_code} ({url})"
             )
 
         html_text = resp.content.decode("utf-8", errors="replace")
