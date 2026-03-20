@@ -784,8 +784,6 @@ async def rag_add_document(
         )
 
         if ingest_result.placed == 0 and ingest_result.errors == 0:
-            if ingest_result.skipped > 0:
-                return f"同名ファイルが既に存在するためスキップしました: {file_path}"
             return f"エラー: ファイルの取り込みに失敗しました。パス: {file_path}"
 
         if ingest_result.errors > 0:
