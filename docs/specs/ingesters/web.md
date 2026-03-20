@@ -2,12 +2,12 @@
 
 ## 概要
 
-Web ページを HTTP 経由で取得し、source_store にファイルを配置するインジェスター。単一ページ追加（`rag_add`）、一括クロール（`rag_crawl`）の 2 つの取り込み操作に加え、クロール前のプレビュー機能（`rag_crawl_preview`）を提供する。
+Web ページを HTTP 経由で取得し、source_store にファイルを配置するインジェスター。単一ページ追加（`rag_add`）、一括クロール（`rag_crawl`）の 2 つの取り込み操作に加え、クロール前のプレビュー機能（`rag_crawl_preview`）を提供する。一括クロールは再帰クロール（depth 指定）に対応し、リンク集ページから複数階層のリンクを辿れる。
 
 スコープ:
 
 - 単一 URL の Web ページ取得と source_store への配置
-- リンク集ページからの一括クロールと source_store への配置
+- リンク集ページからの一括クロール（再帰クロール対応）と source_store への配置
 - クロール対象ページのプレビュー（タイトル・URL 一覧の返却、source_store への配置なし）
 - URL 安全性チェック（Google Safe Browsing API）
 - robots.txt 遵守
@@ -45,6 +45,7 @@ Web ページを HTTP 経由で取得し、source_store にファイルを配置
   - 最低リクエスト間隔: 0.1 秒（ConstrainedClient 共通。robots.txt 取得、ページ取得、タイトル取得を含む全外部リクエスト間に適用）
   - 操作全体タイムアウト: 600 秒（許容範囲 1〜600 秒、ConstrainedClient 共通）
   - クロール対象ページ数上限: 500 ページ（Web インジェスター固有）
+  - クロール深度上限: 10（Web インジェスター固有）
 - サーキットブレーカー: 5 回連続失敗で操作全体を中断する（ConstrainedClient 共通）
 
 ### バリデーションとクランプ
@@ -135,19 +136,27 @@ Safe Browsing API はオプション機能。API キーが未登録の場合は�
 | 最悪ケース所要時間 | 3 × 30 秒（per-request タイムアウト）= 90 秒。操作全体タイムアウト 600 秒の範囲内 |
 | 想定エラー率 | 低リスク。単一ページのみ |
 
-### rag_crawl（一括クロール）
+### rag_crawl（一括クロール、depth=1）
 
 | 項目 | 内容 |
 |------|------|
 | 最悪ケースリクエスト数 | 1（インデックスページ）+ 1（robots.txt）+ 1（Safe Browsing 一括チェック。Lookup API v4 は最大 500 URL を 1 リクエストで検査可能）+ 497（個別ページ。バジェット 500 から先行リクエスト分を差し引き）= 500。バジェットトラッカー上限 500 で打ち切り |
 | 最悪ケース所要時間 | 500 × 0.1 秒（ハードリミット最小間隔での理論最短）= 50 秒。デフォルト設定（1.0 秒間隔）では 500 秒。per-request タイムアウト・処理時間は含まない。操作全体タイムアウト 600 秒で打ち切り |
-| 想定エラー率 | 外部 Web サイト依存。リトライ機構なし（失敗ページはスキップし処理を続行）。5 回連続失敗でサーキットブレーカーが発動し操作中断 |
+| 想定エラー率 | 外部 Web サイト依存。リトライ機構なし（失敗ページはスキップし処理を続行）。累計エラー数が閾値に達した場合、またはサーキットブレーカー（5 回連続 HTTP 失敗）が発動した場合に操作中断 |
+
+### rag_crawl（一括クロール、depth > 1）
+
+| 項目 | 内容 |
+|------|------|
+| 最悪ケースリクエスト数 | depth=1 と同じ上限（500）を全 depth で共有する。各 depth でインデックスページ取得 + リンク抽出 + ページ取得を繰り返すが、トータルのバジェット・ページ数上限は変わらない |
+| 最悪ケース所要時間 | depth=1 と同じ（操作全体タイムアウト 600 秒で打ち切り） |
+| 想定エラー率 | depth が深いほど無関係なページに到達する確率が上がるため、pattern 必須でフィルタリングする。累計エラー数が閾値に達した場合に操作中断 |
 
 ### rag_crawl_preview（プレビュー）
 
 | 項目 | 内容 |
 |------|------|
-| 最悪ケースリクエスト数 | 1（インデックスページ）+ 1（robots.txt）+ 498（タイトル取得）= 500。バジェットトラッカー上限 500 で打ち切り |
+| 最悪ケースリクエスト数 | 1（インデックスページ）+ 1（robots.txt）+ 498（タイトル取得）= 500。バジェットトラッカー上限 500 で打ち切り。depth > 1 の場合も同じ上限を共有 |
 | 最悪ケース所要時間 | 500 × 0.1 秒（ハードリミット最小間隔での理論最短）= 50 秒。デフォルト設定（1.0 秒間隔）では 500 秒。操作全体タイムアウト 600 秒で打ち切り |
 | 想定エラー率 | タイトル取得失敗時は空文字列とし処理を続行 |
 
@@ -160,12 +169,15 @@ Safe Browsing API はオプション機能。API キーが未登録の場合は�
 | 操作全体タイムアウト | ハードリミット | 600 秒、許容範囲 1〜600 秒 | 引き上げ不可（引き下げ可、下限 1 秒） |
 | サーキットブレーカー閾値 | ハードリミット | 5 回連続失敗 | 引き上げ不可（引き下げ可） |
 | クロール対象ページ数上限 | ハードリミット | 500 ページ | 引き上げ不可（引き下げ可） |
+| クロール深度上限 | ハードリミット | 10 | 引き上げ不可（引き下げ可） |
 | SSRF 対策 | ハードリミット | プライベート IP・ローカルホストへのリクエスト拒否 | 無効化不可 |
 | リダイレクト追従無効化 | ハードリミット | HTTP リダイレクト（3xx）をエラーとして扱う | 無効化不可 |
 | HTTP エラーレスポンス拒否 | ハードリミット | HTTP 4xx/5xx レスポンスをエラーとして扱い、コンテンツを保存しない | 無効化不可 |
 | クロール対象ページ数 | 設定値 | 許容範囲 1〜500、デフォルト 50 | 範囲内で変更可 |
 | クロール遅延（リクエスト間隔） | 設定値 | 許容範囲 0.1〜60 秒、デフォルト 1.0 秒 | 範囲内で変更可 |
 | リクエストタイムアウト | 設定値 | 許容範囲 1〜120 秒、デフォルト 30 秒 | 範囲内で変更可 |
+| クロール深度 | 設定値 | 許容範囲 1〜10、デフォルト 1 | 範囲内で変更可 |
+| クロールエラー停止閾値 | 設定値 | 許容範囲 5〜10、デフォルト 5 | 範囲内で変更可 |
 | Safe Browsing キャッシュ最大エントリ数 | ハードリミット | 1000 エントリ | 引き上げ不可（引き下げ可） |
 | 生 HTTP クライアント利用禁止 | CI チェック | `src/` 全体を grep で走査（httpx / aiohttp / requests / urllib.request）。`# safety:allowed` 行を除外。ConstrainedClient は py-common-lib パッケージで提供（`src/` 外のため検出対象外） | 許可例外は `# safety:allowed` コメントで可 |
 
@@ -178,8 +190,8 @@ Safe Browsing API はオプション機能。API キーが未登録の場合は�
 | ツール | 入力 | 概要 |
 |--------|------|------|
 | `rag_add` | URL | 単一ページを HTTP 取得し source_store に配置する |
-| `rag_crawl` | URL、パターン | リンク集から一括取得して source_store に配置する |
-| `rag_crawl_preview` | URL、パターン | クロール対象のタイトル・URL 一覧を返す（配置なし） |
+| `rag_crawl` | URL、パターン、深度 | リンク集から一括取得（再帰クロール対応）して source_store に配置する |
+| `rag_crawl_preview` | URL、パターン、深度 | クロール対象のタイトル・URL 一覧を返す（配置なし） |
 
 #### rag_add パラメータ
 
@@ -194,7 +206,8 @@ Safe Browsing API はオプション機能。API キーが未登録の場合は�
 | パラメータ | 型 | 必須 | 説明 |
 |-----------|-----|------|------|
 | `url` | 文字列 | はい | リンク集ページの URL |
-| `pattern` | 文字列 | いいえ | リンクをフィルタする正規表現パターン。デフォルト: フィルタなし（全リンクが対象） |
+| `pattern` | 文字列 | 条件付き必須 | リンクをフィルタする正規表現パターン。`depth` が 2 以上の場合は必須。デフォルト: フィルタなし（全リンクが対象） |
+| `depth` | 整数 | いいえ | クロール深度。1 = インデックスページからの直接リンクのみ（従来動作）、2 以上 = 取得したページからさらにリンクを辿る。デフォルト: 設定値（`rag_crawl_default_depth`）。許容範囲: 1〜10 |
 
 ツール出力: source_store への配置結果（配置ファイル数、スキップ数、エラー数）
 
@@ -203,7 +216,8 @@ Safe Browsing API はオプション機能。API キーが未登録の場合は�
 | パラメータ | 型 | 必須 | 説明 |
 |-----------|-----|------|------|
 | `url` | 文字列 | はい | リンク集ページの URL |
-| `pattern` | 文字列 | いいえ | リンクをフィルタする正規表現パターン。デフォルト: フィルタなし |
+| `pattern` | 文字列 | 条件付き必須 | リンクをフィルタする正規表現パターン。`depth` が 2 以上の場合は必須。デフォルト: フィルタなし |
+| `depth` | 整数 | いいえ | クロール深度。デフォルト: 設定値（`rag_crawl_default_depth`）。許容範囲: 1〜10 |
 
 ツール出力: クロール対象ページのタイトルと URL の一覧
 
@@ -220,6 +234,8 @@ Safe Browsing API はオプション機能。API キーが未登録の場合は�
 | `rag_url_safety_fail_open` | bool | `config.toml` | true | — | Safe Browsing API 障害時に URL を許可するか |
 | `rag_url_safety_timeout` | float | `config.toml` | 5.0 | 0 より大きい | Safe Browsing API のリクエストタイムアウト（秒） |
 | `rag_crawl_request_timeout` | int | `config.toml` | 30 | 1〜120 | ページ取得時の per-request タイムアウト（秒） |
+| `rag_crawl_default_depth` | int | `config.toml` | 1 | 1〜10 | クロールのデフォルト深度。1 = 従来動作（インデックスページの直接リンクのみ） |
+| `rag_crawl_max_errors` | int | `config.toml` | 5 | 5〜10 | 1 回のクロール操作で許容する累計エラー数。閾値に達すると操作を中断する |
 
 ## コンポーネント構成
 
@@ -306,25 +322,30 @@ flowchart TD
 
 ```mermaid
 flowchart TD
-    START["rag_crawl(url, pattern)"]
-    VALIDATE["URL バリデーション"]
-    FETCH_INDEX["インデックスページ取得"]
-    EXTRACT["リンク抽出（同一ドメインのみ）"]
-    FILTER["パターンフィルタ（正規表現）"]
+    START["rag_crawl(url, pattern, depth)"]
+    VALIDATE["URL バリデーション + depth > 1 なら pattern 必須チェック"]
+    DEPTH_LOOP["depth ループ開始（現在の depth = 1）"]
+    FETCH_INDEX["対象ページ群を取得"]
+    EXTRACT["各ページの HTML からリンク抽出（同一ドメインのみ）"]
+    FILTER["パターンフィルタ + 訪問済み URL 除外"]
     ROBOTS["robots.txt フィルタ（有効時）"]
     SAFETY["Safe Browsing 一括チェック（有効時）"]
-    LIMIT["ページ数上限チェック"]
+    LIMIT["ページ数上限チェック（残バジェット）"]
     LOOP["各ページを順次処理"]
     FETCH_PAGE["ページ取得"]
+    ERR_CHECK{"累計エラー数 >= 閾値?"}
     TITLE_EXTRACT["タイトル抽出"]
     PATH["URL → source_store パス変換"]
     SAVE["source_store にファイル配置"]
     META[".meta 生成"]
+    NEXT_DEPTH{"次の depth あり? かつ新規 URL あり?"}
     NOTIFY["パイプライン制御に完了通知"]
     RESULT["結果サマリーを返却"]
+    ABORT["エラー閾値到達: 操作中断"]
 
     START --> VALIDATE
-    VALIDATE --> FETCH_INDEX
+    VALIDATE --> DEPTH_LOOP
+    DEPTH_LOOP --> FETCH_INDEX
     FETCH_INDEX --> EXTRACT
     EXTRACT --> FILTER
     FILTER --> ROBOTS
@@ -332,14 +353,26 @@ flowchart TD
     SAFETY --> LIMIT
     LIMIT --> LOOP
     LOOP --> FETCH_PAGE
-    FETCH_PAGE --> TITLE_EXTRACT
+    FETCH_PAGE --> ERR_CHECK
+    ERR_CHECK -->|"はい"| ABORT
+    ERR_CHECK -->|"いいえ"| TITLE_EXTRACT
     TITLE_EXTRACT --> PATH
     PATH --> SAVE
     SAVE --> META
     META -->|未処理ページあり| LOOP
-    META -->|全ページ処理済み| NOTIFY
+    META -->|全ページ処理済み| NEXT_DEPTH
+    NEXT_DEPTH -->|"はい"| DEPTH_LOOP
+    NEXT_DEPTH -->|"いいえ"| NOTIFY
+    ABORT --> NOTIFY
     NOTIFY --> RESULT
 ```
+
+再帰クロールの動作:
+
+- depth=1（デフォルト）: 従来動作。インデックスページの直接リンクのみを取得する
+- depth=2 以上: 取得した各ページの HTML からリンクを再抽出し、次の depth の対象とする。全 depth を通じて訪問済み URL セットを共有し、ループを防止する
+- `rag_max_crawl_pages` と ConstrainedClient のバジェット（500）は全 depth で共有する。いずれかの上限に達した時点で残りの depth をスキップする
+- 累計エラー数が `rag_crawl_max_errors` に達した場合、操作を中断する。これは HTTP レベルのサーキットブレーカー（ConstrainedClient、接続エラー・タイムアウト検出）とは別のアプリケーションレベルの保護で、4xx/5xx レスポンス等のページレベルエラーを検出する
 
 一括クロールでは、インデックスページの SSRF チェック通過により同一ドメインの安全性が確認される。個別ページの取得時にも WebCrawler が各 URL に対して SSRF 検証（DNS 解決 + IP 検証）を実行する。robots.txt フィルタを Safe Browsing チェックの前に実行するのは、robots.txt で除外される URL に対する不要な API 呼び出しを回避するためである。
 
@@ -347,34 +380,39 @@ flowchart TD
 
 ```mermaid
 flowchart TD
-    START["rag_crawl_preview(url, pattern)"]
-    VALIDATE["URL バリデーション"]
-    FETCH_INDEX["インデックスページ取得"]
+    START["rag_crawl_preview(url, pattern, depth)"]
+    VALIDATE["URL バリデーション + depth > 1 なら pattern 必須チェック"]
+    DEPTH_LOOP["depth ループ開始"]
+    FETCH_INDEX["対象ページ群を取得"]
     EXTRACT["リンク抽出（同一ドメインのみ）"]
-    FILTER["パターンフィルタ・robots.txt フィルタ"]
-    TITLE["各ページのタイトル取得"]
+    FILTER["パターンフィルタ・訪問済み除外・robots.txt フィルタ"]
+    TITLE["各ページのタイトル取得 + 次 depth 用リンク収集"]
+    NEXT_DEPTH{"次の depth あり? かつ新規 URL あり?"}
     LIST["タイトル + URL 一覧を返却"]
 
     START --> VALIDATE
-    VALIDATE --> FETCH_INDEX
+    VALIDATE --> DEPTH_LOOP
+    DEPTH_LOOP --> FETCH_INDEX
     FETCH_INDEX --> EXTRACT
     EXTRACT --> FILTER
     FILTER --> TITLE
-    TITLE --> LIST
+    TITLE --> NEXT_DEPTH
+    NEXT_DEPTH -->|"はい"| DEPTH_LOOP
+    NEXT_DEPTH -->|"いいえ"| LIST
 ```
 
-source_store への配置は行わない。クロール前に対象ページを確認する機能。
+source_store への配置は行わない。クロール前に対象ページを確認する機能。depth > 1 の場合、各ページの HTML からリンクを抽出して次の depth の候補とする（`rag_crawl` と同様の depth ループ動作）。
 
 ### リンク抽出
 
-インデックスページの HTML からリンク（`<a href="...">`）を抽出する。
+インデックスページ（および再帰クロール時の各ページ）の HTML からリンク（`<a href="...">`）を抽出する。
 
 抽出規則:
 
 - 同一ドメインのリンクのみを対象とする（異なるドメインへのリンクは除外）
 - URL フラグメント（`#section`）は除去する
-- 相対 URL はインデックスページの URL を基準に絶対 URL に解決する
-- 重複 URL は除去する
+- 相対 URL は対象ページの URL を基準に絶対 URL に解決する
+- 重複 URL は除去する（全 depth で訪問済み URL セットを共有）
 
 ### robots.txt チェック
 
@@ -502,7 +540,8 @@ source_id の決定方式は [source-store.md](../source-store.md) の「source_
 | `GOOGLE_SAFE_BROWSING_API_KEY` が未登録 | URL 安全性チェックを無効化し、警告ログを出力して処理を続行する |
 | URL にフラグメント（`#section`）が含まれる場合 | フラグメント部分を除去してから処理する。フラグメント違いの URL は同一ファイルとして扱う |
 | URL にクエリパラメータが含まれる場合 | クエリパラメータも含めてパスに変換する（`?` → `？` の全角変換）。同一パスで異なるクエリの URL は異なるファイルとして扱う |
-| クロール時の個別ページエラー | ページ単位でエラーを隔離し、成功したページの処理を続行する |
+| クロール時の個別ページエラー | ページ単位でエラーを隔離し、成功したページの処理を続行する。ただし累計エラー数が `rag_crawl_max_errors` に達した場合は操作を中断する |
+| 累計エラー数が閾値に到達 | 操作を中断し、取得済みデータを返す。エラー閾値到達の旨をログ出力する。攻撃とみなされアクセスがブロックされた場合等の過剰アクセスを防止する |
 | 同一 URL の再取り込み | ファイルを上書きし、.meta を再生成する |
 | クロール対象ページ数が上限超過（設定値） | 上限に達した時点で残りのページをスキップし、取得済みデータを処理する |
 | バジェット上限到達 | 取得済みデータを返し、上限到達の旨をログ出力する |
@@ -515,6 +554,11 @@ source_id の決定方式は [source-store.md](../source-store.md) の「source_
 | 文字エンコーディングの検出に失敗した場合 | UTF-8 としてデコードし、デコードエラーは置換文字（U+FFFD）に変換する |
 | パス内の全角代替文字がユーザーの手動配置で使用された場合 | web 媒体のパス配下にユーザーが手動でファイルを配置することは想定しない |
 | リンク集ページに同一ドメイン外のリンクのみ | 0 件対象として正常終了する |
+| `depth` が 2 以上で `pattern` が未指定 | バリデーションエラーとして拒否する（MCP ツール / CLI レベルで検証） |
+| `depth` がハードリミット（10）を超過 | ハードリミット値にクランプし、警告ログを出力する |
+| 再帰クロール中に訪問済み URL に遭遇 | 訪問済み URL セットでスキップし、ループを防止する |
+| 再帰クロール中に新規リンクが 0 件 | その depth で処理を終了し、残りの depth をスキップする |
+| 再帰クロール中にページ数上限到達 | 残りの depth をスキップし、取得済みデータを処理する |
 
 ## 関連ドキュメント
 

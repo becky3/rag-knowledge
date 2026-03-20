@@ -132,6 +132,8 @@ class RAGSettings(BaseModel):
     # クロール（範囲外の値は WebCrawler / ConstrainedClient が警告付きでクランプする）
     rag_max_crawl_pages: int = Field(ge=1)
     rag_crawl_delay_sec: float = Field(ge=0)
+    rag_crawl_default_depth: int = Field(ge=1, le=10)
+    rag_crawl_max_errors: int = Field(ge=5, le=10)
 
     # robots.txt
     rag_respect_robots_txt: bool

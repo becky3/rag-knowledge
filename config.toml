@@ -24,6 +24,8 @@ rag_bm25_b = 0.50
 # クロール
 rag_max_crawl_pages = 500
 rag_crawl_delay_sec = 0.1
+rag_crawl_default_depth = 1
+rag_crawl_max_errors = 5
 
 # robots.txt
 rag_respect_robots_txt = true

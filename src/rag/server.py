@@ -284,6 +284,7 @@ def _create_web_ingester(source_store: SourceStore) -> PipelineWebIngester:
         source_store,
         max_crawl_pages=settings.rag_max_crawl_pages,
         crawl_request_timeout=settings.rag_crawl_request_timeout,
+        crawl_max_errors=settings.rag_crawl_max_errors,
         respect_robots_txt=settings.rag_respect_robots_txt,
         robots_txt_cache_ttl=settings.rag_robots_txt_cache_ttl,
         url_safety_check=settings.rag_url_safety_check,
@@ -495,21 +496,36 @@ async def rag_add(url: str) -> str:
 
 
 @mcp.tool()
-async def rag_crawl(url: str, pattern: str = "") -> str:
+async def rag_crawl(
+    url: str, pattern: str = "", depth: int | None = None
+) -> str:
     """[rag-knowledge] RAG crawl - リンク集ページからクロール＆一括取り込み.
 
-    knowledge base, bulk ingest, web crawl, link index.
+    knowledge base, bulk ingest, web crawl, link index, recursive crawl.
+    再帰クロール対応: depth > 1 でリンクを複数階層辿れる。
 
     Args:
         url: リンク集ページのURL
-        pattern: URLフィルタリング用の正規表現パターン（任意）
+        pattern: URLフィルタリング用の正規表現パターン（depth >= 2 の場合は必須）
+        depth: クロール深度（1〜10。未指定時は設定値を使用。1 = 直接リンクのみ）
 
     Returns:
         クロール結果のサマリー
     """
+    settings = get_settings()
+
+    if depth is None:
+        depth = settings.rag_crawl_default_depth
+
+    # depth >= 2 の場合は pattern 必須
+    if depth >= 2 and not pattern:
+        return (
+            "エラー: depth が 2 以上の場合は pattern の指定が必須です。"
+            "再帰クロールではパターンなしだと無関係なページまで辿る恐れがあります"
+        )
+
     controller = await _get_pipeline_controller()
     web_ingester = _create_web_ingester(controller.source_store)
-    settings = get_settings()
 
     try:
         api_key = _get_safe_browsing_api_key()
@@ -518,7 +534,7 @@ async def rag_crawl(url: str, pattern: str = "") -> str:
             request_interval=settings.rag_crawl_delay_sec,
         ) as client:
             ingest_result = await web_ingester.crawl(
-                url, pattern=pattern, client=client,
+                url, pattern=pattern, depth=depth, client=client,
                 safe_browsing_api_key=api_key,
             )
 
@@ -539,21 +555,35 @@ async def rag_crawl(url: str, pattern: str = "") -> str:
 
 
 @mcp.tool()
-async def rag_crawl_preview(url: str, pattern: str = "") -> str:
+async def rag_crawl_preview(
+    url: str, pattern: str = "", depth: int | None = None
+) -> str:
     """[rag-knowledge] RAG crawl preview - クロール対象ページのプレビュー.
 
-    knowledge base, crawl preview, dry run, link list.
+    knowledge base, crawl preview, dry run, link list, recursive.
     実際の取り込み（チャンキング・ベクトル化）は行わず、
     クロール対象となるページのタイトルとURLの一覧を返す。
 
     Args:
         url: リンク集ページのURL
-        pattern: URLフィルタリング用の正規表現パターン（任意）
+        pattern: URLフィルタリング用の正規表現パターン（depth >= 2 の場合は必須）
+        depth: クロール深度（1〜10。未指定時は設定値を使用。1 = 直接リンクのみ）
 
     Returns:
         クロール対象ページの一覧テキスト
     """
     settings = get_settings()
+
+    if depth is None:
+        depth = settings.rag_crawl_default_depth
+
+    # depth >= 2 の場合は pattern 必須
+    if depth >= 2 and not pattern:
+        return (
+            "エラー: depth が 2 以上の場合は pattern の指定が必須です。"
+            "再帰クロールではパターンなしだと無関係なページまで辿る恐れがあります"
+        )
+
     # crawl_preview は配置を行わないため、PipelineController の重い初期化を避ける
     source_store_dir = Path(settings.source_store_dir)
     source_store_dir.mkdir(parents=True, exist_ok=True)
@@ -566,7 +596,7 @@ async def rag_crawl_preview(url: str, pattern: str = "") -> str:
             request_interval=settings.rag_crawl_delay_sec,
         ) as client:
             pages = await web_ingester.crawl_preview(
-                url, pattern=pattern, client=client,
+                url, pattern=pattern, depth=depth, client=client,
             )
 
         if not pages:
