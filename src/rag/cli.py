@@ -1,4 +1,4 @@
-"""RAG評価CLIモジュール
+"""RAG Knowledge CLIモジュール
 
 仕様: docs/specs/rag-knowledge.md
 """
@@ -92,7 +92,7 @@ def _validate_bm25_b(value: str) -> float:
 
 def main() -> None:
     """CLIエントリポイント."""
-    parser = argparse.ArgumentParser(description="RAG評価CLI")
+    parser = argparse.ArgumentParser(description="RAG Knowledge CLI")
     subparsers = parser.add_subparsers(dest="command", required=True)
 
     # evaluate サブコマンド
@@ -290,6 +290,35 @@ def main() -> None:
         help="対象媒体フィルタ（incremental では指定不可）",
     )
 
+    # stats サブコマンド
+    subparsers.add_parser("stats", help="ナレッジベースの統計情報を表示")
+
+    # search サブコマンド
+    search_parser = subparsers.add_parser("search", help="ナレッジベースを検索")
+    search_parser.add_argument("--query", required=True, help="検索クエリ")
+    def _validate_n_results(value: str) -> int:
+        n = int(value)
+        if n < 1:
+            raise argparse.ArgumentTypeError(
+                f"--n-results must be >= 1 (got {n})"
+            )
+        return n
+
+    search_parser.add_argument(
+        "--n-results", type=_validate_n_results, default=None,
+        help="各エンジンから取得する結果数（未指定時は設定値を使用）",
+    )
+    search_parser.add_argument(
+        "--source-type",
+        choices=["web", "bluesky", "zenn", "local"],
+        default=None,
+        help="ソース種別フィルタ",
+    )
+
+    # delete サブコマンド
+    delete_parser = subparsers.add_parser("delete", help="ソースをナレッジベースから論理削除")
+    delete_parser.add_argument("source_id", help="削除するソース識別子（source_id）")
+
     # --- インジェスト系サブコマンド ---
 
     # add: 単一ページ取り込み
@@ -341,6 +370,9 @@ def main() -> None:
     _SYNC_COMMANDS: dict[str, object] = {
         "get-document": run_get_document,
         "rebuild": run_rebuild,
+        "stats": run_stats,
+        "search": run_search,
+        "delete": run_delete,
     }
 
     if args.command in _ASYNC_COMMANDS:
@@ -1053,6 +1085,284 @@ def run_rebuild(args: argparse.Namespace) -> None:
     if summary.errors:
         for err_file in summary.errors:
             logger.error("  エラーファイル: %s", err_file)
+
+
+def run_stats(args: argparse.Namespace) -> None:
+    """ナレッジベースの統計情報を表示する.
+
+    MCP ツール rag_stats と同等の情報を CLI で出力する。
+
+    Args:
+        args: コマンドライン引数
+    """
+    import contextlib
+    import io
+
+    from .config import get_settings
+    from .embedding.factory import get_embedding_provider
+    from .store.metadata_db import MetadataDB
+    from .vector_store import VectorStore
+
+    settings = get_settings()
+
+    parts: list[str] = ["RAG Knowledge 統計"]
+
+    # --- source_store セクション ---
+    parts.append("")
+    parts.append("■ source_store")
+    if not settings.source_store_dir:
+        parts.append("  未設定")
+    else:
+        source_store_dir = Path(settings.source_store_dir)
+        if not source_store_dir.exists():
+            parts.append("  ディレクトリが存在しません")
+        else:
+            total_files = 0
+            total_size = 0
+            by_type: dict[str, dict[str, int]] = {}
+            from .pipeline.models import detect_source_type
+            for file in source_store_dir.rglob("*"):
+                if not file.is_file():
+                    continue
+                rel = file.relative_to(source_store_dir)
+                rel_posix = rel.as_posix()
+                if (
+                    rel_posix == ".git"
+                    or rel_posix.startswith(".git/")
+                    or rel_posix == ".gitignore"
+                ):
+                    continue
+                name = file.name
+                if name.endswith(".meta") or name.startswith("metadata.db"):
+                    continue
+                size = file.stat().st_size
+                total_files += 1
+                total_size += size
+                st = detect_source_type(rel_posix)
+                if st not in by_type:
+                    by_type[st] = {"files": 0, "size": 0}
+                by_type[st]["files"] += 1
+                by_type[st]["size"] += size
+
+            parts.append(f"  総ファイル数: {total_files:,}")
+            parts.append(f"  総サイズ: {_format_cli_size(total_size)}")
+            if by_type:
+                parts.append("  媒体別:")
+                for st_key in sorted(by_type.keys()):
+                    info = by_type[st_key]
+                    parts.append(
+                        f"    {st_key}: {info['files']} files"
+                        f" ({_format_cli_size(info['size'])})"
+                    )
+
+    # --- converted_store セクション ---
+    parts.append("")
+    parts.append("■ converted_store")
+    if not settings.converted_store_dir:
+        parts.append("  未設定")
+    else:
+        cs_dir = Path(settings.converted_store_dir)
+        if not cs_dir.exists():
+            parts.append("  ディレクトリが存在しません")
+        else:
+            cs_files = 0
+            cs_size = 0
+            for file in cs_dir.rglob("*"):
+                if file.is_file():
+                    cs_files += 1
+                    cs_size += file.stat().st_size
+            parts.append(f"  総ファイル数: {cs_files:,}")
+            parts.append(f"  総サイズ: {_format_cli_size(cs_size)}")
+
+    # --- インデックスセクション ---
+    parts.append("")
+    parts.append("■ インデックス")
+    try:
+        embedding_provider = get_embedding_provider(settings, settings.embedding_provider)
+        with contextlib.redirect_stdout(io.StringIO()):
+            vector_store = VectorStore(
+                embedding_provider=embedding_provider,
+                persist_directory=settings.chromadb_persist_dir,
+            )
+        index_stats = vector_store.get_stats()
+        total_chunks = int(str(index_stats.get("total_chunks", 0)))
+        source_count = int(str(index_stats.get("source_count", 0)))
+        parts.append(f"  総チャンク数: {total_chunks:,}")
+        parts.append(f"  ソース数: {source_count:,}")
+    except Exception:
+        logger.exception("インデックス統計の取得に失敗")
+        parts.append("  エラー: 統計の取得に失敗しました")
+
+    # --- パイプラインセクション ---
+    parts.append("")
+    parts.append("■ パイプライン")
+    if not settings.source_store_dir:
+        parts.append("  未設定")
+    else:
+        from .store.models import NULL_COMMIT_HASH
+        db_path = Path(settings.source_store_dir) / "metadata.db"
+        if not db_path.exists():
+            parts.append("  未初期化")
+        else:
+            db = MetadataDB(db_path)
+            try:
+                db.initialize()
+                history = db.get_pipeline_history()
+                last_commit_id = db.get_last_commit_id()
+                deleted_count = db.source_count(status="deleted")
+                last_at = history[-1].processed_at if history else "（未実行）"
+                parts.append(f"  最終処理: {last_at}")
+                parts.append(f"  実行回数: {len(history)}")
+                commit_str = str(last_commit_id)
+                if commit_str == NULL_COMMIT_HASH:
+                    parts.append("  last_commit_id: （未実行）")
+                else:
+                    parts.append(f"  last_commit_id: {commit_str[:7]}")
+                parts.append(f"  論理削除: {deleted_count} 件")
+            finally:
+                db.close()
+
+    print("\n".join(parts))
+
+
+def run_search(args: argparse.Namespace) -> None:
+    """ナレッジベースを検索する.
+
+    MCP ツール rag_search と同等の検索を CLI で実行する。
+
+    Args:
+        args: コマンドライン引数
+    """
+    import asyncio as _asyncio
+    import contextlib
+    import io
+
+    from .bm25_index import BM25Index
+    from .config import get_settings
+    from .embedding.factory import get_embedding_provider
+    from .rag_knowledge import RAGKnowledgeService
+    from .vector_store import VectorStore
+    from .web_crawler import WebCrawler
+
+    settings = get_settings()
+    embedding_provider = get_embedding_provider(settings, settings.embedding_provider)
+
+    with contextlib.redirect_stdout(io.StringIO()):
+        vector_store = VectorStore(
+            embedding_provider=embedding_provider,
+            persist_directory=settings.chromadb_persist_dir,
+        )
+        bm25_index = BM25Index(
+            k1=settings.rag_bm25_k1,
+            b=settings.rag_bm25_b,
+            persist_dir=settings.bm25_persist_dir,
+        )
+
+    service = RAGKnowledgeService(
+        vector_store=vector_store,
+        web_crawler=WebCrawler(),
+        chunk_size=settings.rag_chunk_size,
+        chunk_overlap=settings.rag_chunk_overlap,
+        similarity_threshold=None,
+        bm25_index=bm25_index,
+        hybrid_search_enabled=True,
+        vector_weight=settings.rag_vector_weight,
+    )
+
+    n_results = args.n_results if args.n_results is not None else settings.rag_retrieval_count
+    source_type: str | None = args.source_type
+
+    raw = _asyncio.run(
+        service.retrieve_raw_results(
+            args.query, n_results=n_results, source_type=source_type,
+        )
+    )
+
+    if not raw.vector_results and not raw.bm25_results:
+        print("該当する情報が見つかりませんでした")
+        return
+
+    parts: list[str] = []
+
+    if raw.vector_results:
+        parts.append("## ベクトル検索結果 (意味的類似度)\n")
+        for i, item in enumerate(raw.vector_results, start=1):
+            chunk_pos = _format_cli_chunk_position(item.chunk_index, item.total_chunks)
+            parts.append(f"### Result {i} [distance={item.distance:.3f}]")
+            parts.append(f"Source: {item.source_url}")
+            parts.append(f"Title: {item.title}")
+            parts.append(f"Chunk: {chunk_pos}")
+            parts.append(f"Type: {item.source_type}")
+            if item.collected_at:
+                parts.append(f"Collected: {item.collected_at}")
+            parts.append("")
+            parts.append(item.text)
+            parts.append("")
+
+    if raw.bm25_results:
+        parts.append("## BM25 検索結果 (キーワード一致)\n")
+        for i, bm25_item in enumerate(raw.bm25_results, start=1):
+            chunk_pos = _format_cli_chunk_position(bm25_item.chunk_index, bm25_item.total_chunks)
+            parts.append(f"### Result {i} [score={bm25_item.score:.3f}]")
+            parts.append(f"Source: {bm25_item.source_url}")
+            parts.append(f"Title: {bm25_item.title}")
+            parts.append(f"Chunk: {chunk_pos}")
+            parts.append(f"Type: {bm25_item.source_type}")
+            if bm25_item.collected_at:
+                parts.append(f"Collected: {bm25_item.collected_at}")
+            parts.append("")
+            parts.append(bm25_item.text)
+            parts.append("")
+
+    print("\n".join(parts).rstrip())
+
+
+def run_delete(args: argparse.Namespace) -> None:
+    """ソースをナレッジベースから論理削除する.
+
+    MCP ツール rag_delete と同等の論理削除を CLI で実行する。
+
+    Args:
+        args: コマンドライン引数
+    """
+    controller, _settings = _build_cli_pipeline_controller()
+    source_id: str = args.source_id
+
+    try:
+        controller.source_store.soft_delete(source_id)
+    except KeyError:
+        print(f"該当するソースが見つかりませんでした: {source_id}", file=sys.stderr)
+        sys.exit(1)
+
+    try:
+        controller.indexer.delete(source_id)
+    except Exception:
+        logger.exception("インデックス削除に失敗: %s", source_id)
+        print(
+            f"エラー: インデックスからの削除に失敗しました: {source_id}",
+            file=sys.stderr,
+        )
+        sys.exit(1)
+
+    print(f"論理削除しました: {source_id}")
+
+
+def _format_cli_size(size_bytes: int) -> str:
+    """バイト数を人間が読みやすい単位に変換する."""
+    if size_bytes < 1024:
+        return f"{size_bytes} B"
+    if size_bytes < 1024 * 1024:
+        return f"{size_bytes / 1024:.1f} KB"
+    if size_bytes < 1024 * 1024 * 1024:
+        return f"{size_bytes / (1024 * 1024):.1f} MB"
+    return f"{size_bytes / (1024 * 1024 * 1024):.1f} GB"
+
+
+def _format_cli_chunk_position(chunk_index: int, total_chunks: int) -> str:
+    """チャンク位置を表示用にフォーマットする."""
+    if total_chunks > 0:
+        return f"{chunk_index + 1}/{total_chunks}"
+    return str(chunk_index + 1)
 
 
 # --- インジェスト系 CLI コマンド ---

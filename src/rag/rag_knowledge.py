@@ -10,7 +10,7 @@ import hashlib
 import logging
 import mimetypes
 from collections.abc import Awaitable, Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path, PurePosixPath
 from typing import TYPE_CHECKING
 from urllib.parse import urldefrag
@@ -110,6 +110,7 @@ class VectorSearchItem:
     title: str = ""
     source_type: str = ""
     total_chunks: int = 0
+    collected_at: str = ""
 
 
 @dataclass
@@ -137,6 +138,7 @@ class BM25SearchItem:
     title: str = ""
     source_type: str = ""
     total_chunks: int = 0
+    collected_at: str = ""
 
 
 @dataclass
@@ -854,6 +856,11 @@ class RAGKnowledgeService:
             title = str(result.metadata.get("title", ""))
             source_type_val = str(result.metadata.get("source_type", ""))
             total_chunks = int(result.metadata.get("total_chunks", 0))
+            # 新形式 "collected_at"、レガシー "crawled_at" の順でフォールバック
+            collected_at = str(
+                result.metadata.get("collected_at")
+                or result.metadata.get("crawled_at", "")
+            )
             vector_items.append(
                 VectorSearchItem(
                     text=result.text,
@@ -863,6 +870,7 @@ class RAGKnowledgeService:
                     title=title,
                     source_type=source_type_val,
                     total_chunks=total_chunks,
+                    collected_at=collected_at,
                 )
             )
 
@@ -889,6 +897,9 @@ class RAGKnowledgeService:
                 )
                 total_chunks = int(meta.get("total_chunks", 0))
                 chunk_index = int(meta.get("chunk_index", 0))
+                collected_at = str(
+                    meta.get("collected_at") or meta.get("crawled_at", "")
+                )
                 bm25_items.append(
                     BM25SearchItem(
                         text=bm25_result.text,
@@ -899,6 +910,7 @@ class RAGKnowledgeService:
                         title=title,
                         source_type=bm25_source_type,
                         total_chunks=total_chunks,
+                        collected_at=collected_at,
                     )
                 )
 
@@ -1035,6 +1047,8 @@ class DocumentResult:
     content: str
     is_binary: bool = False
     error: str | None = None
+    collected_at: str = ""
+    extra: dict[str, object] = field(default_factory=dict)
 
 
 _VALID_FORMATS: frozenset[str] = frozenset({"text", "original"})
@@ -1091,6 +1105,11 @@ def get_document(
         source_type = record.source_type
         file_path = record.file_path
 
+        # メタデータ取得（collected_at, extra）— record を渡して DB 再問い合わせを回避
+        source_meta = store.get_metadata(source_id, record=record)
+        collected_at = source_meta.collected_at if source_meta else ""
+        extra = source_meta.extra if source_meta else {}
+
         if format == "original":
             # バイナリ判定: テキスト拡張子以外はバイナリとして扱う
             ext = PurePosixPath(file_path).suffix.lower()
@@ -1109,6 +1128,8 @@ def get_document(
                     format=format,
                     content=info,
                     is_binary=True,
+                    collected_at=collected_at,
+                    extra=extra,
                 )
 
             # テキストファイル: source_store から読み取り
@@ -1134,6 +1155,8 @@ def get_document(
                 source_type=source_type,
                 format=format,
                 content=content,
+                collected_at=collected_at,
+                extra=extra,
             )
 
     # format == "text": converted_store から読み取り
@@ -1165,6 +1188,8 @@ def get_document(
         source_type=source_type,
         format=format,
         content=content,
+        collected_at=collected_at,
+        extra=extra,
     )
 
 
@@ -1185,7 +1210,17 @@ def format_document_response(result: DocumentResult) -> str:
         f"Title: {result.title}",
         f"Type: {result.source_type}",
         f"Format: {result.format}",
-        "",
-        result.content,
     ]
+    if result.collected_at:
+        lines.append(f"Collected: {result.collected_at}")
+    for key, value in result.extra.items():
+        if (
+            value is None
+            or (isinstance(value, str) and value == "")
+            or (isinstance(value, (list, dict)) and len(value) == 0)
+        ):
+            continue
+        lines.append(f"{key}: {value}")
+    lines.append("")
+    lines.append(result.content)
     return "\n".join(lines)

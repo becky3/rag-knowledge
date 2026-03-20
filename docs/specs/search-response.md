@@ -78,13 +78,14 @@ MCP クライアントからの rag_search ツール呼び出し。入力パラ�
 
 **各結果のメタデータ:**
 
-| 項目 | 内容 | 例 |
-|------|------|-----|
-| スコア | ベクトル検索: `distance`、BM25: `score` | `[distance=0.234]`、`[score=4.521]` |
-| Source | ソース識別子 | `Source: https://example.com/docs/guide` |
-| Title | コンテンツのタイトル | `Title: ガイドページ` |
-| Chunk | チャンク位置（現在位置/全体数、1 始まり表示） | `Chunk: 3/15` |
-| Type | ソース種別 | `Type: web` |
+| 項目 | 内容 | 出力条件 | 例 |
+|------|------|---------|-----|
+| スコア | ベクトル検索: `distance`、BM25: `score` | 常時 | `[distance=0.234]`、`[score=4.521]` |
+| Source | ソース識別子 | 常時 | `Source: https://example.com/docs/guide` |
+| Title | コンテンツのタイトル | 常時 | `Title: ガイドページ` |
+| Chunk | チャンク位置（現在位置/全体数、1 始まり表示） | 常時 | `Chunk: 3/15` |
+| Type | ソース種別 | 常時 | `Type: web` |
+| Collected | 取り込み日時 | 値がある場合のみ | `Collected: 2025-01-15T10:30:00Z` |
 
 メタデータの後に空行を挟み、チャンクテキストを出力する。
 
@@ -101,6 +102,7 @@ Source: https://example.com/docs/guide
 Title: ガイドページ
 Chunk: 3/15
 Type: web
+Collected: 2025-01-15T10:30:00Z
 
 チャンクテキストがここに入る...
 
@@ -109,6 +111,7 @@ Source: at://did:plc:abc123/app.bsky.feed.post/xyz789
 Title: Sample post
 Chunk: 1/1
 Type: bluesky
+Collected: 2025-01-20T14:00:00Z
 
 チャンクテキストがここに入る...
 
@@ -119,6 +122,7 @@ Source: https://zenn.dev/alice/articles/sample
 Title: サンプル記事
 Chunk: 5/20
 Type: zenn
+Collected: 2025-01-18T08:00:00Z
 
 チャンクテキストがここに入る...
 ```
@@ -161,12 +165,14 @@ MCP クライアントからの rag_get_document ツール呼び出し、また�
 
 **メタデータヘッダー:**
 
-| 項目 | 内容 |
-|------|------|
-| Source | ソース識別子 |
-| Title | コンテンツのタイトル |
-| Type | ソース種別 |
-| Format | 取得形式（`text` または `original`） |
+| 項目 | 内容 | 出力条件 |
+|------|------|---------|
+| Source | ソース識別子 | 常時 |
+| Title | コンテンツのタイトル | 常時 |
+| Type | ソース種別 | 常時 |
+| Format | 取得形式（`text` または `original`） | 常時 |
+| Collected | 取り込み日時 | 値がある場合のみ |
+| (custom フィールド) | ソース種別固有のメタデータ（`.meta` ファイルの extra フィールド） | 値がある場合のみ |
 
 メタデータヘッダーの後に空行を挟み、ドキュメント全文を出力する。
 
@@ -177,6 +183,7 @@ Source: https://example.com/docs/guide
 Title: ガイドページ
 Type: web
 Format: text
+Collected: 2025-01-15T10:30:00Z
 
 ドキュメントの全文テキストがここに入る...
 ```
