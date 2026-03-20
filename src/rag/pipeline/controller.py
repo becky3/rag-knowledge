@@ -184,8 +184,12 @@ class PipelineController:
 
         converted_store とインデックスをクリアし、
         source_store 全ファイルをパイプライン処理する。
+
+        Raises:
+            RuntimeError: source_store に未コミットの変更がある場合
         """
         self._git.init_repo()
+        self._check_uncommitted_changes()
 
         # 1. metadata.db 再構築
         self._source_store.rebuild_db()
@@ -255,6 +259,19 @@ class PipelineController:
             to_commit_id=to_commit,
         )
 
+    def _check_uncommitted_changes(self) -> None:
+        """source_store に未コミットの変更がないか確認する.
+
+        Raises:
+            RuntimeError: 未コミットの変更がある場合
+        """
+        if self._git.has_commits() and self._git.has_uncommitted_changes():
+            msg = (
+                "source_store に未コミットの変更があります。"
+                "rebuild 前に変更をコミットしてください。"
+            )
+            raise RuntimeError(msg)
+
     def run_convert_only(
         self,
         source_type: SourceType | None = None,
@@ -263,7 +280,13 @@ class PipelineController:
 
         converted_store をクリアし、source_store 全ファイルを
         コンバーターで再処理する。インデクサーは実行しない。
+
+        Raises:
+            RuntimeError: source_store に未コミットの変更がある場合
         """
+        self._git.init_repo()
+        self._check_uncommitted_changes()
+
         # 1. converted_store クリア
         self._converter.clear(self._converted_store_dir, source_type)
 
@@ -320,7 +343,13 @@ class PipelineController:
 
         ChromaDB + BM25 をクリアし、
         converted_store 全ファイルからインデックスを再構築する。
+
+        Raises:
+            RuntimeError: source_store に未コミットの変更がある場合
         """
+        self._git.init_repo()
+        self._check_uncommitted_changes()
+
         # 1. インデックスクリア
         self._indexer.clear(source_type)
 

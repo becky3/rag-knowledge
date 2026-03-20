@@ -307,7 +307,33 @@ class SourceStore:
 
         return sorted(result)
 
-    # --- 論理削除 ---
+    # --- 削除 ---
+
+    def remove_file(self, source_id: str) -> None:
+        """ソースファイルと .meta サイドカーをディスクから削除する.
+
+        metadata.db の更新は行わない（パイプライン制御が git diff 経由で処理する）。
+        呼び出し後に controller.ingest_and_index() を実行すること。
+
+        Args:
+            source_id: 削除対象のソース識別子
+
+        Raises:
+            KeyError: source_id が metadata.db に存在しない場合
+        """
+        record = self._db.get_source(source_id)
+        if record is None:
+            msg = f"source_id が存在しません: {source_id}"
+            raise KeyError(msg)
+
+        self._validate_rel_path(record.file_path)
+        file_path = self._root / record.file_path
+        if file_path.exists():
+            file_path.unlink()
+
+        meta_file = meta_path_for(file_path)
+        if meta_file.exists():
+            meta_file.unlink()
 
     def soft_delete(self, source_id: str) -> None:
         """ソースを論理削除する.

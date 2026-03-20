@@ -47,9 +47,9 @@
 | 操作 | 入力 | 出力 | 振る舞い |
 |------|------|------|---------|
 | 差分更新 | なし（自動検知） | 処理結果サマリ | `last_commit_id` と HEAD の差分を検知し、変更ファイルのみをパイプライン処理する。通常運用のデフォルト操作 |
-| 全再構築 | source_type フィルタ（任意） | 処理結果サマリ | converted_store とインデックスをクリアし、source_store 全ファイルをパイプライン処理する。source_type 指定時はその媒体のみ対象。データ破損時や大規模な設計変更時に使用 |
-| コンバートのみ再実行 | source_type フィルタ（任意） | 処理結果サマリ | converted_store をクリアし、source_store 全ファイルをコンバーターで再処理する。source_type 指定時はその媒体のみ対象。コンバーターの変換ロジック改修時に使用。インデックスは後続のインデックス再構築で更新する |
-| インデックスのみ再構築 | source_type フィルタ（任意） | 処理結果サマリ | ChromaDB + BM25 をクリアし、converted_store 全ファイルからインデックスを再構築する。source_type 指定時はその媒体のインデックスのみ削除して再構築する（他の source_type のインデックスは維持）。Embedding モデル変更時やチャンクパラメータ変更時に使用 |
+| 全再構築 | source_type フィルタ（任意） | 処理結果サマリ | converted_store とインデックスをクリアし、source_store 全ファイルをパイプライン処理する。source_type 指定時はその媒体のみ対象。データ破損時や大規模な設計変更時に使用。source_store に未コミットの変更がある場合はエラーとする（git とディスクの不整合を防止） |
+| コンバートのみ再実行 | source_type フィルタ（任意） | 処理結果サマリ | converted_store をクリアし、source_store 全ファイルをコンバーターで再処理する。source_type 指定時はその媒体のみ対象。コンバーターの変換ロジック改修時に使用。インデックスは後続のインデックス再構築で更新する。source_store に未コミットの変更がある場合はエラーとする |
+| インデックスのみ再構築 | source_type フィルタ（任意） | 処理結果サマリ | ChromaDB + BM25 をクリアし、converted_store 全ファイルからインデックスを再構築する。source_type 指定時はその媒体のインデックスのみ削除して再構築する（他の source_type のインデックスは維持）。Embedding モデル変更時やチャンクパラメータ変更時に使用。source_store に未コミットの変更がある場合はエラーとする |
 | 取り込み実行 | コミットメッセージ | 処理結果サマリ | インジェスター実行後の後処理を一括実行する。source_store の変更を `git add -A` + `git commit` し、差分更新を実行する。インジェスターと後続パイプライン処理を結合する便利操作 |
 
 ### git 操作
@@ -115,6 +115,8 @@ flowchart TD
 ```mermaid
 flowchart TD
     START["全再構築開始"]
+    CHECK_DIRTY{"未コミットの変更あり?"}
+    ERROR_DIRTY["エラー: rebuild 拒否"]
     CLEAR_CONV["converted_store をクリア"]
     CLEAR_IDX["ChromaDB + BM25 をクリア"]
     SCAN["source_store 全ファイルをスキャン"]
@@ -126,7 +128,9 @@ flowchart TD
 
     REBUILD_DB["metadata.db 再構築（source_store スキャン）"]
 
-    START --> REBUILD_DB
+    START --> CHECK_DIRTY
+    CHECK_DIRTY -- Yes --> ERROR_DIRTY
+    CHECK_DIRTY -- No --> REBUILD_DB
     REBUILD_DB --> CLEAR_CONV
     CLEAR_CONV --> CLEAR_IDX
     CLEAR_IDX --> SCAN
@@ -201,6 +205,7 @@ sequenceDiagram
 | source_store の git リポジトリが未初期化 | パイプライン初回実行時に `git init` を自動実行する |
 | .meta ファイルのみが変更された場合 | 拡張子 `.meta` で .meta ファイルを判定する。metadata.db のメタデータを更新する。コンバーターの再処理は行わない（データ本体に変更がないため）。インデックス側にメタデータ（title 等）を保持している場合は、インデクサーにメタデータ更新を指示する（チャンクの再生成は不要、メタデータのみ upsert） |
 | metadata.db の `status` が `deleted` のファイルが git diff に含まれる場合 | ファイルの変更種別に応じた処理を行う。`deleted` ステータスのファイルはインデックスに追加しない |
+| 再構築操作（全再構築・コンバートのみ・インデックスのみ）時に source_store に未コミットの変更がある場合 | エラーとして再構築を拒否する。git とディスクの不整合状態で再構築すると、pipeline_history と実際のファイル状態が乖離する |
 
 ### 設定項目
 

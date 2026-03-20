@@ -13,7 +13,7 @@ metadata.db、converted_store、検索インデックスは全て source_store �
 - metadata.db によるメタデータの索引
 - source_id の決定規則
 - URL とファイルパスの双方向変換
-- 論理削除
+- 削除（物理削除 + 論理削除）
 
 スコープ外:
 
@@ -31,9 +31,9 @@ metadata.db、converted_store、検索インデックスは全て source_store �
 
 ### データ保全
 
-- **オリジナルデータの物理削除機能は一切実装しない**。設定パス誤りによるシステムファイル削除リスクを排除する
 - オリジナルデータは無加工で保存する。メタデータの埋め込み等の加工を行わない
-- 参照させたくないデータは論理削除（metadata.db のステータス変更）で対応する
+- source_store は git 管理下にあるため、物理削除されたファイルも `git checkout` で復旧可能。この復旧可能性を前提に、物理削除を許容する
+- 物理削除は source_store の git リポジトリ内でのみ行う。`remove_file` は metadata.db から取得した `file_path` を使い、source_store ルートからの相対パスで操作する
 
 ### git 管理
 
@@ -78,9 +78,10 @@ metadata.db、converted_store、検索インデックスは全て source_store �
 | .meta 読み取り | ファイルパス | メタデータ辞書 | 指定ファイルの .meta サイドカーを YAML として読み取る |
 | .meta 書き込み | ファイルパス、メタデータ辞書 | なし | 指定ファイルの .meta サイドカーを YAML として書き込む |
 | ファイル一覧 | source_type（任意） | ファイルパスのリスト | source_store 内のファイルを列挙する。source_type 指定時はそのディレクトリのみ。`.meta`、`metadata.db`、`.git/`、`.gitignore` は除外する |
-| 論理削除 | source_id | なし | metadata.db のステータスを `deleted` に変更する。ファイル自体は削除しない |
+| ファイル削除 | source_id | なし | source_id に対応するファイルと .meta サイドカーをディスクから削除する。metadata.db の更新は行わない（パイプライン制御が git diff 経由で処理する）。呼び出し後にパイプライン制御の取り込み実行（[pipeline-controller.md](pipeline-controller.md) 参照）を実行することで、git commit → パイプラインによる論理削除・インデックス削除が行われる |
+| 論理削除 | source_id | なし | metadata.db のステータスを `deleted` に変更する。パイプライン制御の内部処理で使用 |
 | 論理削除解除 | source_id | なし | metadata.db のステータスを `active` に戻す |
-| ファイル取得 | source_id | ファイルデータ + メタデータ | source_id に対応するファイルと .meta を返す。論理削除済みのファイルも取得可能（全文取得ツール等で使用） |
+| ファイル取得 | source_id | ファイルデータ + メタデータ / `None` | source_id に対応するファイルと .meta を返す。物理削除済み（ファイル欠落）の場合は警告ログを出力して `None` を返す（復元が必要な場合は source_store の git リポジトリから `git checkout` で復元する） |
 
 ### metadata.db 操作
 
@@ -377,7 +378,8 @@ source_store 内の全ファイルのメタデータ索引。
 | URL にクエリパラメータが含まれる場合 | クエリパラメータも含めてパスに変換する（`?` → `？` の全角変換）。同一パスで異なるクエリの URL は異なるファイルとして扱う |
 | source_store の git リポジトリが未初期化の場合 | パイプライン制御が初回実行時に `git init` を行う |
 | 同一 source_id のファイルが既に存在する場合 | 上書きする（再取り込み時の更新動作） |
-| metadata.db の `status` が `deleted` のファイルへの再取り込み | ステータスを `active` に戻し、ファイルを上書きする |
+| 物理削除済みファイルの再取り込み | `place_file` でファイルを配置し、`ingest_and_index` を実行する。git diff が `A`（追加）として検知し、パイプラインが変換・インデックス追加・metadata.db 登録を行う |
+| metadata.db の `status` が `deleted` のファイルへの再取り込み | `place_file` が `register_source` でステータスを `active` に戻し、ファイルを上書きする |
 | URL にフラグメント（`#section`）が含まれる場合 | パス変換前にフラグメント部分を除去する。フラグメント違いの URL は同一ファイルとして扱う |
 | `LongPathsEnabled` が無効で長いパスの操作に失敗した場合 | OS エラーをそのまま伝播し、エラーログに `LongPathsEnabled` の有効化を促すメッセージを出力する |
 | パス内の全角代替文字がユーザーの手動配置で使用された場合（local 媒体） | local 媒体は URL 逆変換を行わないため影響なし。web 媒体のパス配下にユーザーが手動でファイルを配置することは想定しない |
