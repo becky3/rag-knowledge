@@ -1176,19 +1176,11 @@ def run_stats(args: argparse.Namespace) -> None:
                 embedding_provider=embedding_provider,
                 persist_directory=settings.chromadb_persist_dir,
             )
-        collection = vector_store._collection
-        count = collection.count()
-        parts.append(f"  総チャンク数: {count:,}")
-
-        if count > 0:
-            all_meta = collection.get(include=["metadatas"])
-            source_ids: set[str] = set()
-            for m in (all_meta.get("metadatas") or []):
-                if isinstance(m, dict):
-                    sid = m.get("source_id", "")
-                    if sid:
-                        source_ids.add(str(sid))
-            parts.append(f"  ソース数: {len(source_ids):,}")
+        index_stats = vector_store.get_stats()
+        total_chunks = int(str(index_stats.get("total_chunks", 0)))
+        source_count = int(str(index_stats.get("source_count", 0)))
+        parts.append(f"  総チャンク数: {total_chunks:,}")
+        parts.append(f"  ソース数: {source_count:,}")
     except Exception:
         logger.exception("インデックス統計の取得に失敗")
         parts.append("  エラー: 統計の取得に失敗しました")

@@ -235,16 +235,23 @@ class SourceStore:
             metadata=self._build_metadata(record),
         )
 
-    def get_metadata(self, source_id: str) -> SourceMetadata | None:
+    def get_metadata(
+        self,
+        source_id: str,
+        *,
+        record: SourceRecord | None = None,
+    ) -> SourceMetadata | None:
         """source_id でメタデータのみ取得する（ファイル内容は読まない）.
 
         Args:
             source_id: ソース識別子
+            record: 既に取得済みの SourceRecord（省略時は DB から取得）
 
         Returns:
             SourceMetadata。存在しない場合は None。
         """
-        record = self._db.get_source(source_id)
+        if record is None:
+            record = self._db.get_source(source_id)
         if record is None:
             return None
 

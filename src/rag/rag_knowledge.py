@@ -856,8 +856,11 @@ class RAGKnowledgeService:
             title = str(result.metadata.get("title", ""))
             source_type_val = str(result.metadata.get("source_type", ""))
             total_chunks = int(result.metadata.get("total_chunks", 0))
-            # ChromaDB メタデータキーは "crawled_at"（レガシー名）
-            collected_at = str(result.metadata.get("crawled_at", ""))
+            # 新形式 "collected_at"、レガシー "crawled_at" の順でフォールバック
+            collected_at = str(
+                result.metadata.get("collected_at")
+                or result.metadata.get("crawled_at", "")
+            )
             vector_items.append(
                 VectorSearchItem(
                     text=result.text,
@@ -894,7 +897,9 @@ class RAGKnowledgeService:
                 )
                 total_chunks = int(meta.get("total_chunks", 0))
                 chunk_index = int(meta.get("chunk_index", 0))
-                collected_at = str(meta.get("crawled_at", ""))
+                collected_at = str(
+                    meta.get("collected_at") or meta.get("crawled_at", "")
+                )
                 bm25_items.append(
                     BM25SearchItem(
                         text=bm25_result.text,
@@ -1100,8 +1105,8 @@ def get_document(
         source_type = record.source_type
         file_path = record.file_path
 
-        # メタデータ取得（collected_at, extra）
-        source_meta = store.get_metadata(source_id)
+        # メタデータ取得（collected_at, extra）— record を渡して DB 再問い合わせを回避
+        source_meta = store.get_metadata(source_id, record=record)
         collected_at = source_meta.collected_at if source_meta else ""
         extra = source_meta.extra if source_meta else {}
 
@@ -1209,6 +1214,8 @@ def format_document_response(result: DocumentResult) -> str:
     if result.collected_at:
         lines.append(f"Collected: {result.collected_at}")
     for key, value in result.extra.items():
+        if value is None or (isinstance(value, str) and value == ""):
+            continue
         lines.append(f"{key}: {value}")
     lines.append("")
     lines.append(result.content)
