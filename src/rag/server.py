@@ -868,12 +868,12 @@ async def rag_crawl_documents(
 
 @mcp.tool()
 async def rag_delete(url: str) -> str:
-    """[rag-knowledge] RAG delete - ソースURL指定でナレッジから論理削除.
+    """[rag-knowledge] RAG delete - ソースURL指定でナレッジから削除.
 
-    knowledge base, remove source, delete document, soft delete.
-    source_store 内のファイルは削除せず、metadata.db で論理削除する。
-    検索インデックスからは即座に除去される。
-    復旧は rag_rebuild で全再構築を行えば可能。
+    knowledge base, remove source, delete document.
+    source_store からファイルを物理削除し、パイプライン経由で
+    インデックス・metadata.db を更新する。
+    git 管理下のため、削除後も git checkout で復旧可能。
 
     Args:
         url: 削除するソースURL（source_id）
@@ -888,23 +888,24 @@ async def rag_delete(url: str) -> str:
     controller = await _get_pipeline_controller()
 
     try:
-        # source_id として url をそのまま使用
         source_id = url
 
-        def _do_delete() -> bool:
+        def _do_delete() -> PipelineSummary | None:
             try:
-                controller.source_store.soft_delete(source_id)
+                controller.source_store.remove_file(source_id)
             except KeyError:
-                return False
-            controller.indexer.delete(source_id)
-            return True
+                return None
+            return controller.ingest_and_index(f"delete: {source_id}")
 
-        deleted = await asyncio.to_thread(_do_delete)
-        if not deleted:
+        result = await asyncio.to_thread(_do_delete)
+        if result is None:
             return f"該当するソースが見つかりませんでした: {url}"
 
         _reset_rag_service()
-        return f"論理削除しました: {url}"
+        if result.errors:
+            errors_text = "; ".join(result.errors)
+            return f"削除しましたが、パイプラインでエラーが発生しました: {url} ({errors_text})"
+        return f"削除しました: {url}"
     except Exception:
         logger.exception("Failed to delete: %s", url)
         return f"エラー: 削除に失敗しました。URL: {url}"

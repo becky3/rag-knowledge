@@ -1318,9 +1318,10 @@ def run_search(args: argparse.Namespace) -> None:
 
 
 def run_delete(args: argparse.Namespace) -> None:
-    """ソースをナレッジベースから論理削除する.
+    """ソースをナレッジベースから削除する.
 
-    MCP ツール rag_delete と同等の論理削除を CLI で実行する。
+    MCP ツール rag_delete と同等の削除を CLI で実行する。
+    ファイルを物理削除し、パイプライン経由でインデックス・metadata.db を更新する。
 
     Args:
         args: コマンドライン引数
@@ -1329,22 +1330,26 @@ def run_delete(args: argparse.Namespace) -> None:
     source_id: str = args.source_id
 
     try:
-        controller.source_store.soft_delete(source_id)
+        controller.source_store.remove_file(source_id)
     except KeyError:
         print(f"該当するソースが見つかりませんでした: {source_id}", file=sys.stderr)
         sys.exit(1)
 
     try:
-        controller.indexer.delete(source_id)
+        summary = controller.ingest_and_index(f"delete: {source_id}")
     except Exception:
-        logger.exception("インデックス削除に失敗: %s", source_id)
+        logger.exception("削除パイプライン実行に失敗: %s", source_id)
         print(
-            f"エラー: インデックスからの削除に失敗しました: {source_id}",
+            f"エラー: 削除に失敗しました: {source_id}",
             file=sys.stderr,
         )
         sys.exit(1)
 
-    print(f"論理削除しました: {source_id}")
+    if summary.errors:
+        print(f"警告: パイプラインでエラーが発生しました: {source_id}", file=sys.stderr)
+        for err in summary.errors:
+            print(f"  - {err}", file=sys.stderr)
+    print(f"削除しました: {source_id}")
 
 
 def _format_cli_size(size_bytes: int) -> str:

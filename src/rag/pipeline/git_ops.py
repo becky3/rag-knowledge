@@ -69,6 +69,12 @@ class GitOperations:
         result = self._run(["git", "rev-parse", "HEAD"])
         return result.stdout.strip()
 
+    def has_uncommitted_changes(self) -> bool:
+        """未コミットの変更があるか確認する."""
+        self._run(["git", "add", "-A"])
+        result = self._run(["git", "status", "--porcelain"])
+        return bool(result.stdout.strip())
+
     def has_commits(self) -> bool:
         """リポジトリにコミットが存在するか確認する."""
         try:

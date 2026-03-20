@@ -438,8 +438,200 @@ class TestRunIncremental:
         assert "local/b.txt" in converter.converted
 
 
+class TestDeleteAndReAdd:
+    """物理削除 → 再追加フローのテスト."""
+
+    def test_delete_and_readd_same_content(
+        self,
+        controller: tuple[PipelineController, StubConverter, StubIndexer],
+        workspace: dict[str, Path],
+    ) -> None:
+        """同一内容ファイルの削除→再追加でインデックスに復帰する."""
+        ctrl, converter, indexer = controller
+        content = "test content for readd"
+
+        # 1. 初回追加
+        _place_local_file(workspace["source"], "local/a.txt", content)
+        ctrl.commit("add a")
+        ctrl.run_incremental()
+        assert "local/a.txt" in indexer.added
+
+        # 2. 物理削除（remove_file 相当: ファイル削除 + commit + pipeline）
+        (workspace["source"] / "local" / "a.txt").unlink()
+        ctrl.commit("delete a")
+        ctrl.run_incremental()
+        assert "local/a.txt" in indexer.deleted_ids
+        record = ctrl.db.get_source("local/a.txt")
+        assert record is not None
+        assert record.status == "deleted"
+
+        # スタブをリセット
+        indexer.added.clear()
+        indexer.deleted_ids.clear()
+        converter.converted.clear()
+
+        # 3. 同一内容で再追加
+        _place_local_file(workspace["source"], "local/a.txt", content)
+        # place_file 相当: metadata.db を active に戻す
+        ctrl.source_store._db.register_source(
+            source_id="local/a.txt",
+            source_type="local",
+            file_path="local/a.txt",
+            title="a",
+            content_hash="dummy",
+            file_size=len(content),
+            created_at="2026-01-01T00:00:00+00:00",
+            updated_at="2026-01-01T00:00:00+00:00",
+        )
+        ctrl.commit("readd a")
+        summary = ctrl.run_incremental()
+
+        # git diff は A（追加）として検知し、パイプラインが処理する
+        assert summary.processed == 1
+        assert "local/a.txt" in indexer.added
+        record = ctrl.db.get_source("local/a.txt")
+        assert record is not None
+        assert record.status == "active"
+
+    def test_delete_and_readd_different_content(
+        self,
+        controller: tuple[PipelineController, StubConverter, StubIndexer],
+        workspace: dict[str, Path],
+    ) -> None:
+        """異なる内容でのファイル削除→再追加でインデックスに復帰する."""
+        ctrl, converter, indexer = controller
+
+        # 1. 初回追加
+        _place_local_file(workspace["source"], "local/b.txt", "original")
+        ctrl.commit("add b")
+        ctrl.run_incremental()
+
+        # 2. 物理削除
+        (workspace["source"] / "local" / "b.txt").unlink()
+        ctrl.commit("delete b")
+        ctrl.run_incremental()
+
+        indexer.added.clear()
+        indexer.deleted_ids.clear()
+        converter.converted.clear()
+
+        # 3. 異なる内容で再追加
+        _place_local_file(workspace["source"], "local/b.txt", "new content")
+        ctrl.source_store._db.register_source(
+            source_id="local/b.txt",
+            source_type="local",
+            file_path="local/b.txt",
+            title="b",
+            content_hash="dummy2",
+            file_size=11,
+            created_at="2026-01-01T00:00:00+00:00",
+            updated_at="2026-01-01T00:00:00+00:00",
+        )
+        ctrl.commit("readd b with new content")
+        summary = ctrl.run_incremental()
+
+        assert summary.processed == 1
+        assert "local/b.txt" in indexer.added
+
+
+class TestRemoveFile:
+    """source_store.remove_file のテスト."""
+
+    def test_remove_file_deletes_file_and_meta(
+        self,
+        workspace: dict[str, Path],
+    ) -> None:
+        """ファイルと .meta を削除する."""
+        source_dir = workspace["source"]
+        source_store = SourceStore(source_dir)
+        source_store.initialize()
+
+        # web ファイル + .meta を配置
+        _place_web_file(
+            source_dir,
+            "web/https/example.com/page.html",
+            "<html>test</html>",
+            title="Test",
+            source_id="https://example.com/page",
+        )
+        # metadata.db に登録
+        source_store._db.register_source(
+            source_id="https://example.com/page",
+            source_type="web",
+            file_path="web/https/example.com/page.html",
+            title="Test",
+            content_hash="dummy",
+            file_size=17,
+            created_at="2026-01-01T00:00:00+00:00",
+            updated_at="2026-01-01T00:00:00+00:00",
+        )
+
+        file_path = source_dir / "web/https/example.com/page.html"
+        meta_path = source_dir / "web/https/example.com/page.html.meta"
+        assert file_path.exists()
+        assert meta_path.exists()
+
+        source_store.remove_file("https://example.com/page")
+
+        assert not file_path.exists()
+        assert not meta_path.exists()
+
+    def test_remove_file_raises_for_unknown_source(
+        self,
+        workspace: dict[str, Path],
+    ) -> None:
+        """存在しない source_id で KeyError."""
+        source_dir = workspace["source"]
+        source_store = SourceStore(source_dir)
+        source_store.initialize()
+
+        with pytest.raises(KeyError):
+            source_store.remove_file("nonexistent")
+
+    def test_remove_file_tolerates_missing_file(
+        self,
+        workspace: dict[str, Path],
+    ) -> None:
+        """ファイルが既にディスク上にない場合もエラーにならない."""
+        source_dir = workspace["source"]
+        source_store = SourceStore(source_dir)
+        source_store.initialize()
+
+        # DB にだけ登録（ファイルは作らない）
+        source_store._db.register_source(
+            source_id="local/ghost.txt",
+            source_type="local",
+            file_path="local/ghost.txt",
+            title="ghost",
+            content_hash="dummy",
+            file_size=0,
+            created_at="2026-01-01T00:00:00+00:00",
+            updated_at="2026-01-01T00:00:00+00:00",
+        )
+
+        # エラーにならない
+        source_store.remove_file("local/ghost.txt")
+
+
 class TestRunFullRebuild:
     """全再構築のテスト."""
+
+    def test_rebuild_rejects_uncommitted_changes(
+        self,
+        controller: tuple[PipelineController, StubConverter, StubIndexer],
+        workspace: dict[str, Path],
+    ) -> None:
+        """未コミットの変更がある場合、rebuild はエラーになる."""
+        ctrl, _, _ = controller
+        # 最初のコミットを作る（has_commits が True になるように）
+        _place_local_file(workspace["source"], "local/a.txt")
+        ctrl.commit("first")
+
+        # 未コミットのファイルを追加
+        _place_local_file(workspace["source"], "local/uncommitted.txt")
+
+        with pytest.raises(RuntimeError, match="未コミットの変更があります"):
+            ctrl.run_full_rebuild()
 
     def test_rebuilds_all(
         self,
