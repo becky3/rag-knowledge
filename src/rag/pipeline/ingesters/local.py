@@ -141,7 +141,7 @@ class LocalIngester:
 
     def _file_exists(self, rel_path: str) -> bool:
         """source_store 内にファイルが存在するか確認する."""
-        return (self._store._root / rel_path).exists()  # noqa: SLF001
+        return (self._store.root_dir / rel_path).exists()
 
     def _validate_single_file(self, file_path: str) -> Path:
         if not file_path or not file_path.strip():

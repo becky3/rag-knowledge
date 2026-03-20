@@ -1324,8 +1324,8 @@ async def run_add_document(args: argparse.Namespace) -> None:
         print(f"取り込み対象がありませんでした: {args.file_path}")
         return
     if ingest_result.errors > 0:
-        print(f"エラー: {ingest_result.error_details[0]}")
-        return
+        print(f"エラー: {ingest_result.error_details[0]}", file=sys.stderr)
+        raise SystemExit(1)
 
     pipeline_summary = controller.ingest_and_index(f"ingest(local): add {args.file_path}")
     _print_ingest_result(ingest_result, pipeline_summary, context=args.file_path)
@@ -1354,6 +1354,9 @@ async def run_crawl_documents(args: argparse.Namespace) -> None:
     if ingest_result.placed == 0 and ingest_result.errors == 0:
         print(f"対象ファイルが見つかりませんでした: {args.dir_path}")
         return
+    if ingest_result.errors > 0 and ingest_result.placed == 0:
+        print(f"エラー: {ingest_result.error_details[0]}", file=sys.stderr)
+        raise SystemExit(1)
 
     pipeline_summary = controller.ingest_and_index(f"ingest(local): crawl {args.dir_path}")
     _print_ingest_result(ingest_result, pipeline_summary, context=f"ディレクトリ: {args.dir_path}")

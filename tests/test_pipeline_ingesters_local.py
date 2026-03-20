@@ -14,10 +14,21 @@ from rag.pipeline.ingesters.local import LocalIngester, MAX_FILES_HARD_LIMIT, _U
 from rag.store.source_store import SourceStore
 
 
+_FIXED_DATE = datetime.date(2026, 1, 15)
+
+
 def _today_prefix() -> str:
-    """テスト用: 当日の日付プレフィックスを返す."""
-    today = datetime.date.today()
-    return f"{today.year}/{today.month:02d}/{today.day:02d}"
+    """テスト用: 固定日付のプレフィックスを返す."""
+    return f"{_FIXED_DATE.year}/{_FIXED_DATE.month:02d}/{_FIXED_DATE.day:02d}"
+
+
+@pytest.fixture(autouse=True)
+def _freeze_date(monkeypatch: pytest.MonkeyPatch) -> None:
+    """date.today() を固定して日付境界でのテストフレークを防止する."""
+    monkeypatch.setattr(
+        "rag.pipeline.ingesters.local.datetime",
+        type("FakeDatetime", (), {"date": type("FakeDate", (), {"today": staticmethod(lambda: _FIXED_DATE)})})(),
+    )
 
 
 @pytest.fixture()
@@ -199,9 +210,8 @@ class TestUploadPath:
         ingester.add_document(str(sample_file))
         upload_base = source_store.root_dir / "local" / _UPLOAD_DIR
         assert upload_base.exists()
-        # 日付ディレクトリの存在確認
-        today = datetime.date.today()
-        date_dir = upload_base / str(today.year) / f"{today.month:02d}" / f"{today.day:02d}"
+        # 日付ディレクトリの存在確認（_FIXED_DATE で固定）
+        date_dir = upload_base / str(_FIXED_DATE.year) / f"{_FIXED_DATE.month:02d}" / f"{_FIXED_DATE.day:02d}"
         assert date_dir.exists()
         assert (date_dir / "sample.md").exists()
 
