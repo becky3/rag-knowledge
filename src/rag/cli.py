@@ -909,6 +909,17 @@ async def run_crawl_preview(args: argparse.Namespace) -> None:
         logger.error("depth が 2 以上の場合は --pattern の指定が必須です")
         sys.exit(1)
 
+    # MSYS パス変換検出
+    from .pipeline.ingesters.web import _looks_like_msys_path
+    if args.pattern and _looks_like_msys_path(args.pattern):
+        logger.error(
+            "pattern が Windows パスに変換されています: %r。"
+            "Git Bash 環境では先頭の / が自動変換されます。"
+            "先頭の / を除去するか、MSYS_NO_PATHCONV=1 を設定してください",
+            args.pattern,
+        )
+        sys.exit(1)
+
     web_ingester = WebIngester(
         source_store,
         max_crawl_pages=settings.rag_max_crawl_pages,
@@ -1535,6 +1546,17 @@ async def run_crawl(args: argparse.Namespace) -> None:
     # depth >= 2 の場合は pattern 必須
     if depth >= 2 and not args.pattern:
         logger.error("depth が 2 以上の場合は --pattern の指定が必須です")
+        sys.exit(1)
+
+    # MSYS パス変換検出
+    from .pipeline.ingesters.web import _looks_like_msys_path
+    if args.pattern and _looks_like_msys_path(args.pattern):
+        logger.error(
+            "pattern が Windows パスに変換されています: %r。"
+            "Git Bash 環境では先頭の / が自動変換されます。"
+            "先頭の / を除去するか、MSYS_NO_PATHCONV=1 を設定してください",
+            args.pattern,
+        )
         sys.exit(1)
 
     web_ingester = WebIngester(

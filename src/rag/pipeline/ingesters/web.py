@@ -46,6 +46,17 @@ MAX_CRAWL_DEPTH_HARD_LIMIT = 10
 _CRAWL_MAX_ERRORS_MIN = 5
 _CRAWL_MAX_ERRORS_MAX = 10
 
+# クロール時に許可する URL 拡張子（許可リスト方式）
+# 拡張子なし（空文字列）は HTML ページの大半が該当するため許可
+_CRAWL_ALLOWED_EXTENSIONS: frozenset[str] = frozenset(
+    {"", ".html", ".htm", ".pdf"},
+)
+
+# クロール時に許可する Content-Type（GET レスポンスの事後フィルタ）
+_CRAWL_ALLOWED_CONTENT_TYPES: frozenset[str] = frozenset(
+    {"text/html", "application/pdf"},
+)
+
 # Safe Browsing キャッシュ最大エントリ数
 SAFE_BROWSING_CACHE_MAX_ENTRIES = 1000
 
@@ -193,10 +204,42 @@ def _extract_links(html_text: str, base_url: str) -> list[str]:
         clean_url = abs_url.split("#")[0]
 
         if clean_url not in seen:
+            # URL 拡張子フィルタ（許可リスト方式）
+            if not _is_crawlable_url(clean_url):
+                continue
             seen.add(clean_url)
             links.append(clean_url)
 
     return links
+
+
+def _is_crawlable_url(url: str) -> bool:
+    """URL の拡張子がクロール許可リストに含まれるか判定する.
+
+    許可リスト方式: 拡張子なし, .html, .htm, .pdf のみ許可。
+    それ以外（.exe, .zip, .png, .mp4 等）はスキップする。
+    """
+    path = urlparse(url).path
+    ext = PurePosixPath(path).suffix.lower()
+    return ext in _CRAWL_ALLOWED_EXTENSIONS
+
+
+def _is_allowed_content_type(content_type: str) -> bool:
+    """Content-Type がクロール許可リストに含まれるか判定する.
+
+    Content-Type ヘッダの値から charset 等のパラメータを除去して判定する。
+    例: "text/html; charset=utf-8" → "text/html"
+    """
+    mime = content_type.split(";")[0].strip().lower()
+    return mime in _CRAWL_ALLOWED_CONTENT_TYPES
+
+
+def _looks_like_msys_path(pattern: str) -> bool:
+    """pattern が MSYS パス変換されたように見えるか判定する.
+
+    Git Bash 環境では /foo が C:/Program Files/Git/foo 等に変換される。
+    """
+    return len(pattern) >= 3 and pattern[0].isalpha() and pattern[1:3] in (":/", ":\\")
 
 
 def _needs_html_extension(url: str) -> bool:
@@ -503,7 +546,13 @@ class WebIngester:
                         result.errors += 1
                         result.error_details.append(f"Redirect blocked: {link}")
                         continue
+                    if page_resp.status_code == 404:
+                        # 404 はリンク切れ（スキップ扱い、エラーカウント対象外）
+                        logger.info("リンク切れ（404）: %s", link)
+                        result.skipped += 1
+                        continue
                     if page_resp.status_code >= 400:
+                        # 403/429/5xx 等はアクセスブロックの可能性あり（エラーカウント対象）
                         logger.warning(
                             "HTTP エラー %d: %s", page_resp.status_code, link
                         )
@@ -511,6 +560,19 @@ class WebIngester:
                         result.error_details.append(
                             f"HTTP {page_resp.status_code}: {link}"
                         )
+                        continue
+
+                    # Content-Type フィルタ（許可リスト方式）
+                    resp_content_type = page_resp.headers.get(
+                        "content-type", ""
+                    )
+                    if not _is_allowed_content_type(resp_content_type):
+                        logger.info(
+                            "Content-Type が許可対象外のためスキップ: %s (%s)",
+                            link,
+                            resp_content_type,
+                        )
+                        result.skipped += 1
                         continue
 
                     page_data = page_resp.content
@@ -616,11 +678,18 @@ class WebIngester:
         # 全 depth で共有する状態
         visited: set[str] = {url}
         remaining_pages = self._max_crawl_pages
+        error_count = 0
         pending_links = _extract_links(index_html, url)
         previews: list[dict[str, str]] = []
 
         for current_depth in range(1, depth + 1):
             if remaining_pages <= 0 or not pending_links:
+                break
+            if error_count >= self._crawl_max_errors:
+                logger.warning(
+                    "累計エラー数が閾値 %d に到達。操作を中断します",
+                    self._crawl_max_errors,
+                )
                 break
 
             # パターンフィルタ
@@ -653,23 +722,54 @@ class WebIngester:
             next_depth_links: list[str] = []
 
             for link in pending_links:
+                if error_count >= self._crawl_max_errors:
+                    logger.warning(
+                        "累計エラー数が閾値 %d に到達。操作を中断します",
+                        self._crawl_max_errors,
+                    )
+                    break
+
                 title = ""
                 try:
+                    _check_ssrf(link)
+
                     page_resp = await client.get(
                         link, follow_redirects=False
                     )
-                    if page_resp.status_code < 300:
-                        page_data = page_resp.content
-                        # 1回だけデコードしてタイトル・リンク抽出に共有
-                        page_html = _decode_html_bytes(page_data)
-                        title = _extract_title_from_text(page_html)
+                    if 300 <= page_resp.status_code < 400:
+                        # リダイレクト: エラーカウント（crawl と統一）
+                        error_count += 1
+                        continue
+                    if page_resp.status_code == 404:
+                        # リンク切れ: スキップ（エラーカウント対象外）
+                        continue
+                    if page_resp.status_code >= 400:
+                        # 403/429/5xx: エラーカウント
+                        error_count += 1
+                        continue
 
-                        # 次 depth 用: デコード済み HTML からリンクを抽出
-                        if current_depth < depth:
-                            page_links = _extract_links(page_html, link)
-                            next_depth_links.extend(page_links)
+                    # Content-Type フィルタ
+                    resp_ct = page_resp.headers.get("content-type", "")
+                    if not _is_allowed_content_type(resp_ct):
+                        logger.info(
+                            "Content-Type が許可対象外のためスキップ: %s (%s)",
+                            link,
+                            resp_ct,
+                        )
+                        continue
+
+                    page_data = page_resp.content
+                    # 1回だけデコードしてタイトル・リンク抽出に共有
+                    page_html = _decode_html_bytes(page_data)
+                    title = _extract_title_from_text(page_html)
+
+                    # 次 depth 用: デコード済み HTML からリンクを抽出
+                    if current_depth < depth:
+                        page_links = _extract_links(page_html, link)
+                        next_depth_links.extend(page_links)
                 except Exception:
-                    logger.debug("タイトル取得に失敗: %s", link)
+                    logger.debug("ページ取得に失敗: %s", link)
+                    error_count += 1
 
                 previews.append({"title": title, "url": link})
                 remaining_pages -= 1

@@ -524,6 +524,15 @@ async def rag_crawl(
             "再帰クロールではパターンなしだと無関係なページまで辿る恐れがあります"
         )
 
+    # MSYS パス変換検出（Git Bash 環境で /pattern が C:/Program Files/... に変換される）
+    from .pipeline.ingesters.web import _looks_like_msys_path
+    if pattern and _looks_like_msys_path(pattern):
+        return (
+            f"エラー: pattern が Windows パスに変換されています: {pattern!r}。"
+            "Git Bash 環境では先頭の / が自動変換されます。"
+            "先頭の / を除去するか、MSYS_NO_PATHCONV=1 を設定してください"
+        )
+
     controller = await _get_pipeline_controller()
     web_ingester = _create_web_ingester(controller.source_store)
 
@@ -582,6 +591,15 @@ async def rag_crawl_preview(
         return (
             "エラー: depth が 2 以上の場合は pattern の指定が必須です。"
             "再帰クロールではパターンなしだと無関係なページまで辿る恐れがあります"
+        )
+
+    # MSYS パス変換検出
+    from .pipeline.ingesters.web import _looks_like_msys_path
+    if pattern and _looks_like_msys_path(pattern):
+        return (
+            f"エラー: pattern が Windows パスに変換されています: {pattern!r}。"
+            "Git Bash 環境では先頭の / が自動変換されます。"
+            "先頭の / を除去するか、MSYS_NO_PATHCONV=1 を設定してください"
         )
 
     # crawl_preview は配置を行わないため、PipelineController の重い初期化を避ける

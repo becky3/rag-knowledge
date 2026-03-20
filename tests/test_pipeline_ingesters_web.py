@@ -26,6 +26,9 @@ from rag.pipeline.ingesters.web import (
     _decode_html_bytes,
     _extract_links,
     _extract_title,
+    _is_allowed_content_type,
+    _is_crawlable_url,
+    _looks_like_msys_path,
     _needs_html_extension,
     _validate_url,
 )
@@ -160,12 +163,14 @@ def _make_mock_response(
     content: bytes = b"<html><head><title>Test</title></head></html>",
     status_code: int = 200,
     text: str = "",
+    content_type: str = "text/html; charset=utf-8",
 ) -> MagicMock:
     """モック HTTP レスポンスを生成する."""
     resp = MagicMock()
     resp.content = content
     resp.status_code = status_code
     resp.text = text or content.decode("utf-8", errors="replace")
+    resp.headers = {"content-type": content_type}
     resp.json.return_value = {}
     return resp
 
@@ -803,3 +808,146 @@ class TestCrawlPreviewDepth:
         urls = [p["url"] for p in previews]
         assert "https://example.com/docs/page1" in urls
         assert "https://example.com/docs/page2" in urls
+
+
+class TestIsCrawlableUrl:
+    """_is_crawlable_url のテスト."""
+
+    def test_no_extension_allowed(self) -> None:
+        """拡張子なし URL が許可されること."""
+        assert _is_crawlable_url("https://example.com/docs/guide") is True
+
+    def test_html_allowed(self) -> None:
+        """.html が許可されること."""
+        assert _is_crawlable_url("https://example.com/page.html") is True
+
+    def test_htm_allowed(self) -> None:
+        """.htm が許可されること."""
+        assert _is_crawlable_url("https://example.com/page.htm") is True
+
+    def test_pdf_allowed(self) -> None:
+        """.pdf が許可されること."""
+        assert _is_crawlable_url("https://example.com/report.pdf") is True
+
+    def test_exe_blocked(self) -> None:
+        """.exe がブロックされること."""
+        assert _is_crawlable_url("https://example.com/setup.exe") is False
+
+    def test_zip_blocked(self) -> None:
+        """.zip がブロックされること."""
+        assert _is_crawlable_url("https://example.com/archive.zip") is False
+
+    def test_png_blocked(self) -> None:
+        """.png がブロックされること."""
+        assert _is_crawlable_url("https://example.com/image.png") is False
+
+    def test_mp4_blocked(self) -> None:
+        """.mp4 がブロックされること."""
+        assert _is_crawlable_url("https://example.com/video.mp4") is False
+
+    def test_js_blocked(self) -> None:
+        """.js がブロックされること."""
+        assert _is_crawlable_url("https://example.com/script.js") is False
+
+    def test_css_blocked(self) -> None:
+        """.css がブロックされること."""
+        assert _is_crawlable_url("https://example.com/style.css") is False
+
+    def test_trailing_slash_allowed(self) -> None:
+        """末尾スラッシュ URL が許可されること."""
+        assert _is_crawlable_url("https://example.com/docs/") is True
+
+
+class TestIsAllowedContentType:
+    """_is_allowed_content_type のテスト."""
+
+    def test_text_html(self) -> None:
+        """text/html が許可されること."""
+        assert _is_allowed_content_type("text/html") is True
+
+    def test_text_html_with_charset(self) -> None:
+        """charset 付き text/html が許可されること."""
+        assert _is_allowed_content_type("text/html; charset=utf-8") is True
+
+    def test_application_pdf(self) -> None:
+        """application/pdf が許可されること."""
+        assert _is_allowed_content_type("application/pdf") is True
+
+    def test_image_png_blocked(self) -> None:
+        """image/png がブロックされること."""
+        assert _is_allowed_content_type("image/png") is False
+
+    def test_application_octet_stream_blocked(self) -> None:
+        """application/octet-stream がブロックされること."""
+        assert _is_allowed_content_type("application/octet-stream") is False
+
+    def test_empty_blocked(self) -> None:
+        """空文字列がブロックされること."""
+        assert _is_allowed_content_type("") is False
+
+
+class TestExtractLinksFiltering:
+    """_extract_links の URL 拡張子フィルタテスト."""
+
+    def test_binary_links_filtered(self) -> None:
+        """バイナリ拡張子のリンクがフィルタされること."""
+        html = """
+        <html><body>
+        <a href="https://example.com/page.html">HTML</a>
+        <a href="https://example.com/setup.exe">EXE</a>
+        <a href="https://example.com/image.png">PNG</a>
+        <a href="https://example.com/docs/guide">No ext</a>
+        <a href="https://example.com/report.pdf">PDF</a>
+        </body></html>
+        """
+        links = _extract_links(html, "https://example.com/index")
+        assert "https://example.com/page.html" in links
+        assert "https://example.com/docs/guide" in links
+        assert "https://example.com/report.pdf" in links
+        assert "https://example.com/setup.exe" not in links
+        assert "https://example.com/image.png" not in links
+
+
+@pytest.mark.asyncio()
+class TestCrawlContentTypeFilter:
+    """crawl の Content-Type フィルタテスト."""
+
+    async def test_non_html_content_type_skipped(
+        self, source_store: SourceStore
+    ) -> None:
+        """Content-Type が許可対象外のページがスキップされること."""
+        index_html = b"""
+        <html><body>
+        <a href="https://example.com/page1">Page 1</a>
+        <a href="https://example.com/page2">Page 2</a>
+        </body></html>
+        """
+        html_page = b"<html><head><title>Page</title></head><body>content</body></html>"
+
+        index_resp = _make_mock_response(content=index_html)
+        # page1: text/html（許可）
+        html_resp = MagicMock()
+        html_resp.content = html_page
+        html_resp.status_code = 200
+        html_resp.headers = {"content-type": "text/html; charset=utf-8"}
+        # page2: image/png（ブロック）
+        img_resp = MagicMock()
+        img_resp.content = b"\x89PNG\r\n"
+        img_resp.status_code = 200
+        img_resp.headers = {"content-type": "image/png"}
+
+        client = AsyncMock()
+        client.get = AsyncMock(side_effect=[index_resp, html_resp, img_resp])
+
+        ingester = WebIngester(
+            source_store,
+            url_safety_check=False,
+            respect_robots_txt=False,
+        )
+        result = await ingester.crawl(
+            "https://example.com/index",
+            client=client,
+        )
+
+        assert result.placed == 1  # page1 のみ
+        assert result.skipped == 1  # page2 はスキップ
