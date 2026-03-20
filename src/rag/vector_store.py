@@ -26,7 +26,7 @@ class DocumentChunk:
 
     id: str  # ユニークID（URLハッシュ + chunk_index）
     text: str  # チャンク本文
-    metadata: dict[str, str | int | float | bool]  # source_url, title, chunk_index, crawled_at, source_type, custom:*
+    metadata: dict[str, str | int | float | bool]  # source_id, title, chunk_index, collected_at, source_type, custom:*
 
 
 @dataclass
@@ -229,7 +229,7 @@ class VectorStore:
         """
         results = await asyncio.to_thread(
             self._collection.get,
-            where={"source_url": source_url},
+            where={"source_id": source_url},
             include=["documents", "metadatas"],
         )
 
@@ -294,7 +294,7 @@ class VectorStore:
         """
         results = await asyncio.to_thread(
             self._collection.get,
-            where={"source_url": source_url},
+            where={"source_id": source_url},
             include=[],
         )
         return bool(results["ids"])
@@ -311,7 +311,7 @@ class VectorStore:
         # まず該当するドキュメントを検索
         results = await asyncio.to_thread(
             self._collection.get,
-            where={"source_url": source_url},
+            where={"source_id": source_url},
             include=["metadatas"],
         )
 
@@ -345,7 +345,7 @@ class VectorStore:
         # ソースURLの全チャンクを取得
         results = await asyncio.to_thread(
             self._collection.get,
-            where={"source_url": source_url},
+            where={"source_id": source_url},
             include=["metadatas"],
         )
 
@@ -391,8 +391,8 @@ class VectorStore:
         source_details: dict[str, dict[str, str | int]] = {}
         if all_docs["metadatas"]:
             for meta in all_docs["metadatas"]:
-                if meta and "source_url" in meta:
-                    url = str(meta["source_url"])
+                if meta and "source_id" in meta:
+                    url = str(meta["source_id"])
                     source_urls.add(url)
                     if url not in source_details:
                         source_details[url] = {

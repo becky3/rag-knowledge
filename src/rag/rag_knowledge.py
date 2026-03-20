@@ -566,7 +566,7 @@ class RAGKnowledgeService:
                 id=f"{url_hash}_{i}",
                 text=chunk,
                 metadata={
-                    "source_url": normalized_url,
+                    "source_id": normalized_url,
                     "title": page.title,
                     "chunk_index": i,
                     "crawled_at": page.crawled_at,
@@ -632,7 +632,7 @@ class RAGKnowledgeService:
 
         # 共通メタデータ + source_type + カスタムメタデータ（custom: プレフィックス）
         base_metadata: dict[str, str | int | float | bool] = {
-            "source_url": normalized_url,
+            "source_id": normalized_url,
             "title": content.title,
             "crawled_at": content.ingested_at,
             "source_type": content.source_type,
@@ -725,7 +725,7 @@ class RAGKnowledgeService:
         if self._debug_log_enabled:
             logger.info("RAG retrieve (vector only): query=%r", query)
             for i, result in enumerate(results, start=1):
-                source_url = result.metadata.get("source_url", "不明")
+                source_url = result.metadata.get("source_id", "不明")
                 logger.info(
                     "RAG result %d: distance=%.3f source=%r",
                     i,
@@ -742,7 +742,7 @@ class RAGKnowledgeService:
         formatted_parts: list[str] = []
         sources: list[str] = []
         for i, result in enumerate(results, start=1):
-            source_url = str(result.metadata.get("source_url", "不明"))
+            source_url = str(result.metadata.get("source_id", "不明"))
             formatted_parts.append(
                 f"--- 参考情報 {i} ---\n出典: {source_url}\n{result.text}"
             )
@@ -786,7 +786,7 @@ class RAGKnowledgeService:
         if self._debug_log_enabled:
             logger.info("RAG retrieve (hybrid): query=%r", query)
             for i, result in enumerate(results, start=1):
-                source_url = result.metadata.get("source_url", "不明")
+                source_url = result.metadata.get("source_id", "不明")
                 logger.info(
                     "RAG result %d: combined_score=%.4f vector_dist=%s bm25_score=%s source=%r",
                     i,
@@ -805,7 +805,7 @@ class RAGKnowledgeService:
         formatted_parts: list[str] = []
         sources: list[str] = []
         for i, result in enumerate(results, start=1):
-            source_url = str(result.metadata.get("source_url", "不明"))
+            source_url = str(result.metadata.get("source_id", "不明"))
             formatted_parts.append(
                 f"--- 参考情報 {i} ---\n出典: {source_url}\n{result.text}"
             )
@@ -849,7 +849,7 @@ class RAGKnowledgeService:
         )
         vector_items: list[VectorSearchItem] = []
         for result in vector_results_raw:
-            source_url = str(result.metadata.get("source_url", ""))
+            source_url = str(result.metadata.get("source_id", ""))
             chunk_index = int(result.metadata.get("chunk_index", 0))
             title = str(result.metadata.get("title", ""))
             source_type_val = str(result.metadata.get("source_type", ""))

@@ -270,12 +270,12 @@ class TestRetrieve:
         mock_vector_store.search.return_value = [
             RetrievalResult(
                 text="This is relevant content 1.",
-                metadata={"source_url": "https://example.com/page1"},
+                metadata={"source_id": "https://example.com/page1"},
                 distance=0.1,
             ),
             RetrievalResult(
                 text="This is relevant content 2.",
-                metadata={"source_url": "https://example.com/page2"},
+                metadata={"source_id": "https://example.com/page2"},
                 distance=0.2,
             ),
         ]
@@ -458,7 +458,7 @@ class TestRAGDebugLog:
         mock_vector_store.search.return_value = [
             RetrievalResult(
                 text="Test content",
-                metadata={"source_url": "https://example.com/page1"},
+                metadata={"source_id": "https://example.com/page1"},
                 distance=0.234,
             ),
         ]
@@ -486,12 +486,12 @@ class TestRAGDebugLog:
         mock_vector_store.search.return_value = [
             RetrievalResult(
                 text=long_text,
-                metadata={"source_url": "https://example.com/page1"},
+                metadata={"source_id": "https://example.com/page1"},
                 distance=0.234,
             ),
             RetrievalResult(
                 text="Short text",
-                metadata={"source_url": "https://example.com/page2"},
+                metadata={"source_id": "https://example.com/page2"},
                 distance=0.312,
             ),
         ]
@@ -520,7 +520,7 @@ class TestRAGDebugLog:
         mock_vector_store.search.return_value = [
             RetrievalResult(
                 text=full_text,
-                metadata={"source_url": "https://example.com/page1"},
+                metadata={"source_id": "https://example.com/page1"},
                 distance=0.1,
             ),
         ]
@@ -544,7 +544,7 @@ class TestRAGDebugLog:
         mock_vector_store.search.return_value = [
             RetrievalResult(
                 text="Test content",
-                metadata={"source_url": "https://example.com/page1"},
+                metadata={"source_id": "https://example.com/page1"},
                 distance=0.1,
             ),
         ]
@@ -571,12 +571,12 @@ class TestRAGRetrievalResultSources:
         mock_vector_store.search.return_value = [
             RetrievalResult(
                 text="Content 1",
-                metadata={"source_url": "https://example.com/page1"},
+                metadata={"source_id": "https://example.com/page1"},
                 distance=0.1,
             ),
             RetrievalResult(
                 text="Content 2",
-                metadata={"source_url": "https://example.com/page2"},
+                metadata={"source_id": "https://example.com/page2"},
                 distance=0.2,
             ),
         ]
@@ -600,17 +600,17 @@ class TestRAGRetrievalResultSources:
         mock_vector_store.search.return_value = [
             RetrievalResult(
                 text="Content 1 from page1",
-                metadata={"source_url": "https://example.com/page1"},
+                metadata={"source_id": "https://example.com/page1"},
                 distance=0.1,
             ),
             RetrievalResult(
                 text="Content 2 from page1",
-                metadata={"source_url": "https://example.com/page1"},
+                metadata={"source_id": "https://example.com/page1"},
                 distance=0.2,
             ),
             RetrievalResult(
                 text="Content from page2",
-                metadata={"source_url": "https://example.com/page2"},
+                metadata={"source_id": "https://example.com/page2"},
                 distance=0.3,
             ),
         ]
@@ -633,7 +633,7 @@ class TestRAGRetrievalResultSources:
         mock_vector_store.search.return_value = [
             RetrievalResult(
                 text="Content with source",
-                metadata={"source_url": "https://example.com/page1"},
+                metadata={"source_id": "https://example.com/page1"},
                 distance=0.1,
             ),
             RetrievalResult(
@@ -713,7 +713,7 @@ class TestFragmentNormalization:
         expected_hash = hashlib.sha256("https://example.com/page".encode()).hexdigest()[:16]
         assert chunk.id.startswith(expected_hash)
         # メタデータもフラグメント除去済みURL
-        assert chunk.metadata["source_url"] == "https://example.com/page"
+        assert chunk.metadata["source_id"] == "https://example.com/page"
 
         # delete_stale_chunks もフラグメント除去済みURLで呼ばれる
         mock_vector_store.delete_stale_chunks.assert_called_once()
@@ -1037,17 +1037,17 @@ class TestGetFullPageText:
             return_value=[
                 RetrievalResult(
                     text="チャンク1のテキスト",
-                    metadata={"source_url": "https://example.com/page", "chunk_index": 0},
+                    metadata={"source_id": "https://example.com/page", "chunk_index": 0},
                     distance=0.0,
                 ),
                 RetrievalResult(
                     text="チャンク2のテキスト",
-                    metadata={"source_url": "https://example.com/page", "chunk_index": 1},
+                    metadata={"source_id": "https://example.com/page", "chunk_index": 1},
                     distance=0.0,
                 ),
                 RetrievalResult(
                     text="チャンク3のテキスト",
-                    metadata={"source_url": "https://example.com/page", "chunk_index": 2},
+                    metadata={"source_id": "https://example.com/page", "chunk_index": 2},
                     distance=0.0,
                 ),
             ]
@@ -1100,7 +1100,7 @@ class TestRetrieveRawResults:
         mock_vector_store.search.return_value = [
             RetrievalResult(
                 text="Vector result text",
-                metadata={"source_url": "https://example.com/vector", "chunk_index": 0},
+                metadata={"source_id": "https://example.com/vector", "chunk_index": 0},
                 distance=0.234,
             ),
         ]
@@ -1146,7 +1146,7 @@ class TestRetrieveRawResults:
         mock_vector_store.search.return_value = [
             RetrievalResult(
                 text="Vector only",
-                metadata={"source_url": "https://example.com/vec", "chunk_index": 2},
+                metadata={"source_id": "https://example.com/vec", "chunk_index": 2},
                 distance=0.5,
             ),
         ]
@@ -1211,12 +1211,12 @@ class TestRetrieveRawResults:
         mock_vector_store.search.return_value = [
             RetrievalResult(
                 text="close match",
-                metadata={"source_url": "https://example.com", "chunk_index": 0},
+                metadata={"source_id": "https://example.com", "chunk_index": 0},
                 distance=0.05,
             ),
             RetrievalResult(
                 text="far match",
-                metadata={"source_url": "https://example.com", "chunk_index": 1},
+                metadata={"source_id": "https://example.com", "chunk_index": 1},
                 distance=1.234,
             ),
         ]

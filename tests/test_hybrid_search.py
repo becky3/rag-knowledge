@@ -115,7 +115,7 @@ class TestHybridSearchResult:
         result = HybridSearchResult(
             doc_id="doc1",
             text="テスト",
-            metadata={"source_url": "http://example.com"},
+            metadata={"source_id": "http://example.com"},
             vector_distance=0.3,
             bm25_score=5.0,
             combined_score=0.75,
@@ -191,12 +191,12 @@ class TestHybridSearchEngine:
         mock_vector_store.search.return_value = [
             RetrievalResult(
                 text="ドキュメント1の内容",
-                metadata={"source_url": "http://example.com/1", "chunk_index": 0},
+                metadata={"source_id": "http://example.com/1", "chunk_index": 0},
                 distance=0.2,
             ),
             RetrievalResult(
                 text="ドキュメント2の内容",
-                metadata={"source_url": "http://example.com/2", "chunk_index": 0},
+                metadata={"source_id": "http://example.com/2", "chunk_index": 0},
                 distance=0.3,
             ),
         ]
@@ -244,7 +244,7 @@ class TestHybridSearchEngine:
         mock_vector_store.search.return_value = [
             RetrievalResult(
                 text="ベクトル検索でのみヒット",
-                metadata={"source_url": "http://example.com/vec", "chunk_index": 0},
+                metadata={"source_id": "http://example.com/vec", "chunk_index": 0},
                 distance=0.25,
             ),
         ]
@@ -281,7 +281,7 @@ class TestHybridSearchEngine:
         mock_vector_store.search.return_value = [
             RetrievalResult(
                 text="テスト",
-                metadata={"source_url": "http://example.com/test", "chunk_index": 0},
+                metadata={"source_id": "http://example.com/test", "chunk_index": 0},
                 distance=0.2,
             ),
         ]
@@ -315,7 +315,7 @@ class TestHybridSearchEngine:
         mock_vector_store.search.return_value = [
             RetrievalResult(
                 text=f"ドキュメント{i}",
-                metadata={"source_url": f"http://example.com/{i}", "chunk_index": 0},
+                metadata={"source_id": f"http://example.com/{i}", "chunk_index": 0},
                 distance=0.1 + i * 0.05,
             )
             for i in range(10)
@@ -334,12 +334,12 @@ class TestHybridSearchEngine:
         mock_vector_store.search.return_value = [
             RetrievalResult(
                 text="閾値内",
-                metadata={"source_url": "http://example.com/good", "chunk_index": 0},
+                metadata={"source_id": "http://example.com/good", "chunk_index": 0},
                 distance=0.3,
             ),
             RetrievalResult(
                 text="閾値超過",
-                metadata={"source_url": "http://example.com/bad", "chunk_index": 0},
+                metadata={"source_id": "http://example.com/bad", "chunk_index": 0},
                 distance=0.8,
             ),
         ]
@@ -374,12 +374,12 @@ class TestHybridSearchEngine:
         mock_vector_store.search.return_value = [
             RetrievalResult(
                 text="高スコアドキュメント",
-                metadata={"source_url": "http://example.com/high", "chunk_index": 0},
+                metadata={"source_id": "http://example.com/high", "chunk_index": 0},
                 distance=0.1,
             ),
             RetrievalResult(
                 text="低スコアドキュメント",
-                metadata={"source_url": "http://example.com/low", "chunk_index": 0},
+                metadata={"source_id": "http://example.com/low", "chunk_index": 0},
                 distance=0.9,
             ),
         ]
@@ -407,12 +407,12 @@ class TestHybridSearchEngine:
         mock_vector_store.search.return_value = [
             RetrievalResult(
                 text="ドキュメントA",
-                metadata={"source_url": "http://example.com/a", "chunk_index": 0},
+                metadata={"source_id": "http://example.com/a", "chunk_index": 0},
                 distance=0.1,
             ),
             RetrievalResult(
                 text="ドキュメントB",
-                metadata={"source_url": "http://example.com/b", "chunk_index": 0},
+                metadata={"source_id": "http://example.com/b", "chunk_index": 0},
                 distance=0.3,
             ),
         ]

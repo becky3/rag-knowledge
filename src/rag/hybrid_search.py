@@ -200,7 +200,7 @@ class HybridSearchEngine:
         vector_doc_data: dict[str, tuple[float, str, dict[str, str | int | float | bool], float]] = {}
 
         for i, vr in enumerate(vector_results):
-            source_url = str(vr.metadata.get("source_url", ""))
+            source_url = str(vr.metadata.get("source_id", ""))
             chunk_index = int(vr.metadata.get("chunk_index", i))
             doc_id = _generate_doc_id(source_url, chunk_index)
 
@@ -233,7 +233,7 @@ class HybridSearchEngine:
             bm25_source_url = self._bm25_index.get_source_url(br.doc_id)
             bm25_metadata: dict[str, str | int | float | bool] = {}
             if bm25_source_url:
-                bm25_metadata["source_url"] = bm25_source_url
+                bm25_metadata["source_id"] = bm25_source_url
             bm25_doc_data[br.doc_id] = (br.score, br.text, bm25_metadata)
 
         # BM25 スコアの min-max 正規化
