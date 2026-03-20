@@ -70,8 +70,7 @@ class GitOperations:
         return result.stdout.strip()
 
     def has_uncommitted_changes(self) -> bool:
-        """未コミットの変更があるか確認する."""
-        self._run(["git", "add", "-A"])
+        """未コミットの変更があるか確認する（副作用なし）."""
         result = self._run(["git", "status", "--porcelain"])
         return bool(result.stdout.strip())
 

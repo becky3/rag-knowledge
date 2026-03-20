@@ -326,6 +326,7 @@ class SourceStore:
             msg = f"source_id が存在しません: {source_id}"
             raise KeyError(msg)
 
+        self._validate_rel_path(record.file_path)
         file_path = self._root / record.file_path
         if file_path.exists():
             file_path.unlink()
