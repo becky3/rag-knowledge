@@ -22,8 +22,8 @@ rag_bm25_b = 0.50
 # rag_min_combined_score = (未設定時は None)
 
 # クロール
-rag_max_crawl_pages = 50
-rag_crawl_delay_sec = 1.0
+rag_max_crawl_pages = 500
+rag_crawl_delay_sec = 0.1
 
 # robots.txt
 rag_respect_robots_txt = true
