@@ -33,6 +33,10 @@ FAILURE_TAG_DESCRIPTIONS: dict[str, tuple[str, str]] = {
 
 if TYPE_CHECKING:
     from .bm25_index import BM25Index
+    from .config import RAGSettings as Settings
+    from .pipeline.controller import PipelineController
+    from .pipeline.ingesters._common import IngestResult
+    from .pipeline.models import PipelineSummary
     from .rag_knowledge import RAGKnowledgeService
 
 
@@ -286,18 +290,63 @@ def main() -> None:
         help="対象媒体フィルタ（incremental では指定不可）",
     )
 
+    # --- インジェスト系サブコマンド ---
+
+    # add: 単一ページ取り込み
+    add_parser = subparsers.add_parser("add", help="単一ページをナレッジベースに取り込む")
+    add_parser.add_argument("url", help="取り込むページのURL")
+
+    # crawl: リンク集クロール
+    crawl_parser = subparsers.add_parser("crawl", help="リンク集ページからクロール＆一括取り込み")
+    crawl_parser.add_argument("url", help="リンク集ページのURL")
+    crawl_parser.add_argument("--pattern", default="", help="URLフィルタリング用の正規表現パターン")
+
+    # crawl-bluesky: BlueSky 取り込み
+    bs_parser = subparsers.add_parser("crawl-bluesky", help="BlueSky 投稿を一括取り込み")
+    bs_parser.add_argument("handle", help="BlueSky ハンドル（例: user.bsky.social）")
+    bs_parser.add_argument("--max-posts", type=int, default=None, help="取得する最大投稿数")
+    bs_parser.add_argument("--include-reposts", action="store_true", default=None, help="リポストを含める")
+
+    # crawl-zenn: Zenn 取り込み
+    zenn_parser = subparsers.add_parser("crawl-zenn", help="Zenn コンテンツを一括取り込み")
+    zenn_parser.add_argument("username", help="Zenn ユーザー名")
+    zenn_parser.add_argument("--max-articles", type=int, default=None, help="取得する最大コンテンツ数")
+    zenn_parser.add_argument("--content-type", choices=["articles", "scraps", "all"], default="all", help="取得対象")
+
+    # add-document: 単一ドキュメント取り込み
+    adddoc_parser = subparsers.add_parser("add-document", help="ドキュメントファイルをナレッジベースに取り込む")
+    adddoc_parser.add_argument("file_path", help="取り込み対象ファイルのパス")
+    adddoc_parser.add_argument("--upload-mode", choices=["fail", "replace"], default="fail", help="同名ファイル存在時の動作")
+
+    # crawl-documents: ディレクトリ一括取り込み
+    crawldoc_parser = subparsers.add_parser("crawl-documents", help="ディレクトリ内ドキュメントを一括取り込み")
+    crawldoc_parser.add_argument("dir_path", help="取り込み対象ディレクトリのパス")
+    crawldoc_parser.add_argument("--pattern", default="**/*", help="glob パターン")
+    crawldoc_parser.add_argument("--upload-mode", choices=["fail", "replace"], default="fail", help="同名ファイル存在時の動作")
+
     args = parser.parse_args()
 
-    if args.command == "evaluate":
-        asyncio.run(run_evaluation(args))
-    elif args.command == "init-test-db":
-        asyncio.run(init_test_db(args))
-    elif args.command == "crawl-preview":
-        asyncio.run(run_crawl_preview(args))
-    elif args.command == "get-document":
-        run_get_document(args)
-    elif args.command == "rebuild":
-        run_rebuild(args)
+    # コマンドディスパッチ（sync / async 統一）
+    _ASYNC_COMMANDS: dict[str, object] = {
+        "evaluate": run_evaluation,
+        "init-test-db": init_test_db,
+        "crawl-preview": run_crawl_preview,
+        "add": run_add,
+        "crawl": run_crawl,
+        "crawl-bluesky": run_crawl_bluesky,
+        "crawl-zenn": run_crawl_zenn,
+        "add-document": run_add_document,
+        "crawl-documents": run_crawl_documents,
+    }
+    _SYNC_COMMANDS: dict[str, object] = {
+        "get-document": run_get_document,
+        "rebuild": run_rebuild,
+    }
+
+    if args.command in _ASYNC_COMMANDS:
+        asyncio.run(_ASYNC_COMMANDS[args.command](args))  # type: ignore[operator]
+    elif args.command in _SYNC_COMMANDS:
+        _SYNC_COMMANDS[args.command](args)  # type: ignore[operator]
 
 
 async def create_rag_service(
@@ -1004,6 +1053,294 @@ def run_rebuild(args: argparse.Namespace) -> None:
     if summary.errors:
         for err_file in summary.errors:
             logger.error("  エラーファイル: %s", err_file)
+
+
+# --- インジェスト系 CLI コマンド ---
+
+
+def _build_cli_pipeline_controller() -> tuple[
+    "PipelineController", "Settings"
+]:
+    """CLI 用の PipelineController を構築する.
+
+    Returns:
+        (PipelineController, Settings) のタプル
+    """
+    import contextlib
+    import io
+
+    from .bm25_index import BM25Index
+    from .config import get_settings
+    from .converter import Converter
+    from .embedding.factory import get_embedding_provider
+    from .indexer import Indexer
+    from .ingesters.document_ingester import PdfBackendConfig
+    from .pipeline.controller import PipelineController
+    from .store.source_store import SourceStore
+    from .vector_store import VectorStore
+
+    settings = get_settings()
+
+    source_store_dir = Path(settings.source_store_dir)
+    converted_store_dir = Path(settings.converted_store_dir)
+    converted_store_dir.mkdir(parents=True, exist_ok=True)
+
+    source_store = SourceStore(source_store_dir)
+    source_store.initialize()
+
+    pdf_config = PdfBackendConfig(
+        backend=settings.rag_pdf_backend,
+        mineru_mfd_conf_thres=settings.rag_pdf_mineru_mfd_conf_thres,
+        quality_ufffd_threshold=settings.rag_pdf_quality_ufffd_threshold,
+        quality_greek_threshold=settings.rag_pdf_quality_greek_threshold,
+        quality_cjk_min_threshold=settings.rag_pdf_quality_cjk_min_threshold,
+        quality_min_chars_per_page=settings.rag_pdf_quality_min_chars_per_page,
+        quality_sample_pages=settings.rag_pdf_quality_sample_pages,
+    )
+    converter = Converter(regen_option="force", pdf_config=pdf_config)
+
+    embedding_provider = get_embedding_provider(settings, settings.embedding_provider)
+
+    with contextlib.redirect_stdout(io.StringIO()):
+        vector_store = VectorStore(
+            embedding_provider=embedding_provider,
+            persist_directory=settings.chromadb_persist_dir,
+        )
+        bm25_index = BM25Index(
+            k1=settings.rag_bm25_k1,
+            b=settings.rag_bm25_b,
+            persist_dir=settings.bm25_persist_dir,
+        )
+
+    indexer = Indexer(
+        vector_store=vector_store,
+        bm25_index=bm25_index,
+        metadata_db=source_store.db,
+        chunk_size=settings.rag_chunk_size,
+        chunk_overlap=settings.rag_chunk_overlap,
+    )
+
+    controller = PipelineController(
+        source_store=source_store,
+        converted_store_dir=converted_store_dir,
+        converter=converter,
+        indexer=indexer,
+    )
+    return controller, settings
+
+
+def _get_safe_browsing_api_key_for_cli(settings: "Settings") -> str:
+    """CLI 用: Safe Browsing API キーを取得する."""
+    from py_common_lib.secrets import SecretNotFoundError, SecretStoreError, get_secret
+
+    if not settings.rag_url_safety_check:
+        return ""
+    try:
+        return get_secret("GOOGLE_SAFE_BROWSING_API_KEY", service="rag-knowledge") or ""
+    except (SecretNotFoundError, SecretStoreError):
+        logger.warning("Safe Browsing API key not available")
+        return ""
+
+
+def _print_ingest_result(
+    ingest_result: "IngestResult",
+    pipeline_summary: "PipelineSummary | None",
+    *,
+    context: str = "",
+) -> None:
+    """取り込み結果を標準出力に表示する."""
+    print(ingest_result.summary(context=context))
+    if pipeline_summary is not None:
+        print(f"パイプライン: {pipeline_summary.processed}件処理")
+        if pipeline_summary.errors:
+            print(f"パイプラインエラー: {len(pipeline_summary.errors)}件")
+
+
+async def run_add(args: argparse.Namespace) -> None:
+    """単一ページ取り込み."""
+    from .pipeline.ingesters.web import WebIngester
+
+    from py_common_lib.httpx import ConstrainedClient  # safety:allowed
+
+    controller, settings = _build_cli_pipeline_controller()
+    web_ingester = WebIngester(
+        controller.source_store,
+        max_crawl_pages=settings.rag_max_crawl_pages,
+        crawl_request_timeout=settings.rag_crawl_request_timeout,
+        respect_robots_txt=settings.rag_respect_robots_txt,
+        robots_txt_cache_ttl=settings.rag_robots_txt_cache_ttl,
+        url_safety_check=settings.rag_url_safety_check,
+        url_safety_cache_ttl=settings.rag_url_safety_cache_ttl,
+        url_safety_fail_open=settings.rag_url_safety_fail_open,
+        url_safety_timeout=settings.rag_url_safety_timeout,
+    )
+    api_key = _get_safe_browsing_api_key_for_cli(settings)
+
+    async with ConstrainedClient(
+        request_timeout=settings.rag_crawl_request_timeout,
+        request_interval=settings.rag_crawl_delay_sec,
+    ) as client:
+        ingest_result = await web_ingester.add(
+            args.url, client=client, safe_browsing_api_key=api_key,
+        )
+
+    pipeline_summary = controller.ingest_and_index(f"ingest(web): add {args.url}")
+    _print_ingest_result(ingest_result, pipeline_summary, context=args.url)
+
+
+async def run_crawl(args: argparse.Namespace) -> None:
+    """リンク集クロール."""
+    from .pipeline.ingesters.web import WebIngester
+
+    from py_common_lib.httpx import ConstrainedClient  # safety:allowed
+
+    controller, settings = _build_cli_pipeline_controller()
+    web_ingester = WebIngester(
+        controller.source_store,
+        max_crawl_pages=settings.rag_max_crawl_pages,
+        crawl_request_timeout=settings.rag_crawl_request_timeout,
+        respect_robots_txt=settings.rag_respect_robots_txt,
+        robots_txt_cache_ttl=settings.rag_robots_txt_cache_ttl,
+        url_safety_check=settings.rag_url_safety_check,
+        url_safety_cache_ttl=settings.rag_url_safety_cache_ttl,
+        url_safety_fail_open=settings.rag_url_safety_fail_open,
+        url_safety_timeout=settings.rag_url_safety_timeout,
+    )
+    api_key = _get_safe_browsing_api_key_for_cli(settings)
+
+    async with ConstrainedClient(
+        request_timeout=settings.rag_crawl_request_timeout,
+        request_interval=settings.rag_crawl_delay_sec,
+    ) as client:
+        ingest_result = await web_ingester.crawl(
+            args.url, pattern=args.pattern, client=client,
+            safe_browsing_api_key=api_key,
+        )
+
+    pipeline_summary = controller.ingest_and_index(f"ingest(web): crawl {args.url}")
+    _print_ingest_result(ingest_result, pipeline_summary, context=args.url)
+
+
+async def run_crawl_bluesky(args: argparse.Namespace) -> None:
+    """BlueSky 投稿取り込み."""
+    from .pipeline.ingesters.bluesky import BlueskyIngester
+
+    from py_common_lib.httpx import ConstrainedClient  # safety:allowed
+
+    controller, settings = _build_cli_pipeline_controller()
+
+    max_posts = args.max_posts if args.max_posts is not None else settings.rag_bluesky_max_posts
+    include_reposts = args.include_reposts if args.include_reposts is not None else settings.rag_bluesky_include_reposts
+
+    bluesky_ingester = BlueskyIngester(
+        controller.source_store,
+        appview_url=settings.rag_bluesky_appview_url,
+        max_posts=max_posts,
+        include_reposts=include_reposts,
+    )
+
+    async with ConstrainedClient(
+        request_timeout=settings.rag_bluesky_request_timeout,
+        request_interval=settings.rag_bluesky_request_interval,
+    ) as client:
+        ingest_result = await bluesky_ingester.crawl_bluesky(
+            args.handle,
+            max_posts=max_posts,
+            include_reposts=include_reposts,
+            client=client,
+        )
+
+    pipeline_summary = controller.ingest_and_index(f"ingest(bluesky): {args.handle}")
+    _print_ingest_result(ingest_result, pipeline_summary, context=f"ハンドル: {args.handle}")
+
+
+async def run_crawl_zenn(args: argparse.Namespace) -> None:
+    """Zenn コンテンツ取り込み."""
+    from .pipeline.ingesters.zenn import ZennIngester
+
+    from py_common_lib.httpx import ConstrainedClient  # safety:allowed
+
+    controller, settings = _build_cli_pipeline_controller()
+
+    max_articles = args.max_articles if args.max_articles is not None else settings.rag_zenn_max_articles
+
+    zenn_ingester = ZennIngester(
+        controller.source_store,
+        max_articles=max_articles,
+    )
+
+    async with ConstrainedClient(
+        request_timeout=settings.rag_zenn_request_timeout,
+        request_interval=settings.rag_zenn_request_interval,
+    ) as client:
+        ingest_result = await zenn_ingester.crawl_zenn(
+            args.username,
+            max_articles=max_articles,
+            content_type=args.content_type,
+            client=client,
+        )
+
+    pipeline_summary = controller.ingest_and_index(f"ingest(zenn): {args.username}")
+    _print_ingest_result(ingest_result, pipeline_summary, context=f"ユーザー: {args.username}")
+
+
+async def run_add_document(args: argparse.Namespace) -> None:
+    """単一ドキュメント取り込み."""
+    from .pipeline.ingesters.local import LocalIngester
+
+    controller, settings = _build_cli_pipeline_controller()
+
+    supported_extensions = [
+        ext.strip() if ext.strip().startswith(".") else f".{ext.strip()}"
+        for ext in settings.rag_document_supported_extensions.split(",")
+        if ext.strip()
+    ]
+    local_ingester = LocalIngester(
+        controller.source_store,
+        supported_extensions=supported_extensions,
+    )
+
+    ingest_result = local_ingester.add_document(
+        args.file_path, upload_mode=args.upload_mode,
+    )
+
+    if ingest_result.placed == 0 and ingest_result.errors == 0:
+        print(f"取り込み対象がありませんでした: {args.file_path}")
+        return
+    if ingest_result.errors > 0:
+        print(f"エラー: {ingest_result.error_details[0]}")
+        return
+
+    pipeline_summary = controller.ingest_and_index(f"ingest(local): add {args.file_path}")
+    _print_ingest_result(ingest_result, pipeline_summary, context=args.file_path)
+
+
+async def run_crawl_documents(args: argparse.Namespace) -> None:
+    """ディレクトリ一括取り込み."""
+    from .pipeline.ingesters.local import LocalIngester
+
+    controller, settings = _build_cli_pipeline_controller()
+
+    supported_extensions = [
+        ext.strip() if ext.strip().startswith(".") else f".{ext.strip()}"
+        for ext in settings.rag_document_supported_extensions.split(",")
+        if ext.strip()
+    ]
+    local_ingester = LocalIngester(
+        controller.source_store,
+        supported_extensions=supported_extensions,
+    )
+
+    ingest_result = local_ingester.crawl_documents(
+        args.dir_path, args.pattern, upload_mode=args.upload_mode,
+    )
+
+    if ingest_result.placed == 0 and ingest_result.errors == 0:
+        print(f"対象ファイルが見つかりませんでした: {args.dir_path}")
+        return
+
+    pipeline_summary = controller.ingest_and_index(f"ingest(local): crawl {args.dir_path}")
+    _print_ingest_result(ingest_result, pipeline_summary, context=f"ディレクトリ: {args.dir_path}")
 
 
 if __name__ == "__main__":
