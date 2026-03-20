@@ -151,6 +151,11 @@ def _decode_html_bytes(data: bytes) -> str:
 def _extract_title(data: bytes) -> str:
     """HTML バイト列からタイトルを抽出する."""
     html_text = _decode_html_bytes(data)
+    return _extract_title_from_text(html_text)
+
+
+def _extract_title_from_text(html_text: str) -> str:
+    """デコード済み HTML テキストからタイトルを抽出する."""
     soup = BeautifulSoup(html_text, "html.parser")
     title_tag = soup.find("title")
     if title_tag and title_tag.string:
@@ -509,7 +514,9 @@ class WebIngester:
                         continue
 
                     page_data = page_resp.content
-                    title = _extract_title(page_data)
+                    # 1回だけデコードしてタイトル抽出・リンク抽出に共有
+                    page_html = _decode_html_bytes(page_data)
+                    title = _extract_title_from_text(page_html)
 
                     metadata = {
                         "source_id": link,
@@ -529,9 +536,8 @@ class WebIngester:
                     result.placed += 1
                     remaining_pages -= 1
 
-                    # 次 depth 用: ページからリンクを抽出
+                    # 次 depth 用: デコード済み HTML からリンクを抽出
                     if current_depth < depth:
-                        page_html = _decode_html_bytes(page_data)
                         page_links = _extract_links(page_html, link)
                         next_depth_links.extend(page_links)
 
@@ -654,11 +660,12 @@ class WebIngester:
                     )
                     if page_resp.status_code < 300:
                         page_data = page_resp.content
-                        title = _extract_title(page_data)
+                        # 1回だけデコードしてタイトル・リンク抽出に共有
+                        page_html = _decode_html_bytes(page_data)
+                        title = _extract_title_from_text(page_html)
 
-                        # 次 depth 用: ページからリンクを抽出
+                        # 次 depth 用: デコード済み HTML からリンクを抽出
                         if current_depth < depth:
-                            page_html = _decode_html_bytes(page_data)
                             page_links = _extract_links(page_html, link)
                             next_depth_links.extend(page_links)
                 except Exception:
