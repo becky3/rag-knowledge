@@ -28,6 +28,7 @@ from rag.pipeline.ingesters.web import (
     _extract_title,
     _is_allowed_content_type,
     _is_crawlable_url,
+    _looks_like_msys_path,
     _needs_html_extension,
     _validate_url,
 )

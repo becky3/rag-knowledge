@@ -234,6 +234,14 @@ def _is_allowed_content_type(content_type: str) -> bool:
     return mime in _CRAWL_ALLOWED_CONTENT_TYPES
 
 
+def _looks_like_msys_path(pattern: str) -> bool:
+    """pattern が MSYS パス変換されたように見えるか判定する.
+
+    Git Bash 環境では /foo が C:/Program Files/Git/foo 等に変換される。
+    """
+    return len(pattern) >= 3 and pattern[0].isalpha() and pattern[1:3] in (":/", ":\\")
+
+
 def _needs_html_extension(url: str) -> bool:
     """URL パスが既知の拡張子を持たない場合に True を返す.
 
@@ -723,11 +731,14 @@ class WebIngester:
 
                 title = ""
                 try:
+                    _check_ssrf(link)
+
                     page_resp = await client.get(
                         link, follow_redirects=False
                     )
                     if 300 <= page_resp.status_code < 400:
-                        # リダイレクト: スキップ
+                        # リダイレクト: エラーカウント（crawl と統一）
+                        error_count += 1
                         continue
                     if page_resp.status_code == 404:
                         # リンク切れ: スキップ（エラーカウント対象外）
@@ -757,7 +768,8 @@ class WebIngester:
                         page_links = _extract_links(page_html, link)
                         next_depth_links.extend(page_links)
                 except Exception:
-                    logger.debug("タイトル取得に失敗: %s", link)
+                    logger.debug("ページ取得に失敗: %s", link)
+                    error_count += 1
 
                 previews.append({"title": title, "url": link})
                 remaining_pages -= 1

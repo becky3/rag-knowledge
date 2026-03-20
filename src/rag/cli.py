@@ -910,6 +910,7 @@ async def run_crawl_preview(args: argparse.Namespace) -> None:
         sys.exit(1)
 
     # MSYS パス変換検出
+    from .pipeline.ingesters.web import _looks_like_msys_path
     if args.pattern and _looks_like_msys_path(args.pattern):
         logger.error(
             "pattern が Windows パスに変換されています: %r。"
@@ -1398,11 +1399,6 @@ def _format_cli_chunk_position(chunk_index: int, total_chunks: int) -> str:
 # --- インジェスト系 CLI コマンド ---
 
 
-def _looks_like_msys_path(pattern: str) -> bool:
-    """pattern が MSYS パス変換されたように見えるか判定する."""
-    return len(pattern) >= 3 and pattern[0].isalpha() and pattern[1:3] in (":/", ":\\")
-
-
 def _build_cli_pipeline_controller() -> tuple[
     "PipelineController", "Settings"
 ]:
@@ -1553,6 +1549,7 @@ async def run_crawl(args: argparse.Namespace) -> None:
         sys.exit(1)
 
     # MSYS パス変換検出
+    from .pipeline.ingesters.web import _looks_like_msys_path
     if args.pattern and _looks_like_msys_path(args.pattern):
         logger.error(
             "pattern が Windows パスに変換されています: %r。"

@@ -277,14 +277,6 @@ def _format_ingest_response(
 # --- ファクトリヘルパー ---
 
 
-def _looks_like_msys_path(pattern: str) -> bool:
-    """pattern が MSYS パス変換されたように見えるか判定する.
-
-    Git Bash 環境では /foo が C:/Program Files/Git/foo 等に変換される。
-    """
-    return len(pattern) >= 3 and pattern[0].isalpha() and pattern[1:3] in (":/", ":\\")
-
-
 def _create_web_ingester(source_store: SourceStore) -> PipelineWebIngester:
     """設定に基づいて PipelineWebIngester を生成する."""
     settings = get_settings()
@@ -533,6 +525,7 @@ async def rag_crawl(
         )
 
     # MSYS パス変換検出（Git Bash 環境で /pattern が C:/Program Files/... に変換される）
+    from .pipeline.ingesters.web import _looks_like_msys_path
     if pattern and _looks_like_msys_path(pattern):
         return (
             f"エラー: pattern が Windows パスに変換されています: {pattern!r}。"
@@ -601,6 +594,7 @@ async def rag_crawl_preview(
         )
 
     # MSYS パス変換検出
+    from .pipeline.ingesters.web import _looks_like_msys_path
     if pattern and _looks_like_msys_path(pattern):
         return (
             f"エラー: pattern が Windows パスに変換されています: {pattern!r}。"
