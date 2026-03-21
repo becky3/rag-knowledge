@@ -122,7 +122,7 @@ class TestConvertHtml:
             "<style>.red{color:red}</style>"
             "<p>Content</p>"
             "<noscript>NoScript</noscript>"
-            "<form><input type='text'></form>"
+            "<form><label>Search Site</label><button>Submit</button></form>"
             "</div>"
             "</body></html>"
         )
@@ -134,7 +134,8 @@ class TestConvertHtml:
         assert "Content" in result
         assert "alert" not in result
         assert "NoScript" not in result
-        assert "input" not in result
+        assert "Search Site" not in result
+        assert "Submit" not in result
 
     def test_content_area_id_main(self, tmp_path: Path) -> None:
         """id='main' でコンテンツ領域が特定され、外部のノイズが除外される."""
@@ -171,6 +172,24 @@ class TestConvertHtml:
         assert result is not None
         assert "Content body." in result
         assert "Sidebar" not in result
+
+    def test_content_area_class_main_content(self, tmp_path: Path) -> None:
+        """class='main-content' でコンテンツ領域が特定される."""
+        html = (
+            "<html><body>"
+            "<div class='sidebar'>Sidebar Noise</div>"
+            "<div class='main-content'><h1>Title</h1><p>Main body.</p></div>"
+            "<div class='footer'>Footer Noise</div>"
+            "</body></html>"
+        )
+        html_file = tmp_path / "test.html"
+        html_file.write_text(html, encoding="utf-8")
+
+        result = convert_html(html_file)
+        assert result is not None
+        assert "Main body." in result
+        assert "Sidebar Noise" not in result
+        assert "Footer Noise" not in result
 
     def test_content_area_id_page_container(self, tmp_path: Path) -> None:
         """id='page-container' でコンテンツ領域が特定される."""
