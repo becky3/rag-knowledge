@@ -3,7 +3,7 @@
 仕様: docs/specs/rag-knowledge.md, docs/specs/search-response.md
 独立リポジトリとして動作する。
 
-FastMCP を使用して 12 個の RAG ツールを公開する:
+FastMCP を使用して 13 個の RAG ツールを公開する:
 - rag_search: ナレッジベース検索（チャンク単位返却）
 - rag_get_document: ソース全文取得
 - rag_add: 単一ページをナレッジベースに取り込み
@@ -13,6 +13,7 @@ FastMCP を使用して 12 個の RAG ツールを公開する:
 - rag_crawl_bluesky: BlueSky 投稿の一括取り込み
 - rag_add_document: ドキュメントファイルをナレッジベースに取り込み
 - rag_crawl_documents: ディレクトリ内ドキュメントを一括取り込み
+- rag_site_ingest: Scrapy によるサイト一括取り込み（大規模サイト向け）
 - rag_delete: ソースURL指定でナレッジから論理削除
 - rag_rebuild: ナレッジベースの再構築
 - rag_stats: ナレッジベースの統計情報を表示
@@ -455,9 +456,10 @@ async def rag_get_document(
 
 @mcp.tool()
 async def rag_add(url: str) -> str:
-    """[rag-knowledge] RAG add - 単一ページをナレッジベースに取り込む.
+    """[rag-knowledge] RAG add - 単一ページをナレッジベースに取り込む（非推奨: rag_site_ingest を推奨）.
 
     knowledge base, ingest, web page, crawl single URL.
+    非推奨: 大規模サイトには rag_site_ingest を使用してください。
 
     Args:
         url: 取り込むページのURL
@@ -499,9 +501,10 @@ async def rag_add(url: str) -> str:
 async def rag_crawl(
     url: str, pattern: str = "", depth: int | None = None
 ) -> str:
-    """[rag-knowledge] RAG crawl - リンク集ページからクロール＆一括取り込み.
+    """[rag-knowledge] RAG crawl - リンク集ページからクロール＆一括取り込み（非推奨: rag_site_ingest を推奨）.
 
     knowledge base, bulk ingest, web crawl, link index, recursive crawl.
+    非推奨: 大規模サイトには rag_site_ingest を使用してください。上限500ページ。
     再帰クロール対応: depth > 1 でリンクを複数階層辿れる。
 
     Args:
@@ -567,9 +570,10 @@ async def rag_crawl(
 async def rag_crawl_preview(
     url: str, pattern: str = "", depth: int | None = None
 ) -> str:
-    """[rag-knowledge] RAG crawl preview - クロール対象ページのプレビュー.
+    """[rag-knowledge] RAG crawl preview - クロール対象ページのプレビュー（非推奨: rag_site_ingest を推奨）.
 
     knowledge base, crawl preview, dry run, link list, recursive.
+    非推奨: 大規模サイトには rag_site_ingest を使用してください。
     実際の取り込み（チャンキング・ベクトル化）は行わず、
     クロール対象となるページのタイトルとURLの一覧を返す。
 
@@ -912,6 +916,135 @@ async def rag_crawl_documents(
     except Exception:
         logger.exception("Failed to crawl documents: %s", dir_path)
         return f"エラー: ドキュメントの取り込みに失敗しました（ディレクトリ: {dir_path}）"
+
+
+@mcp.tool()
+async def rag_site_ingest(
+    url: str,
+    url_pattern: str = "",
+    max_pages: int | None = None,
+    force: bool = False,
+) -> str:
+    """[rag-knowledge] RAG site ingest - Scrapy でサイトを一括取り込み.
+
+    knowledge base, bulk ingest, site crawl, large scale, scrapy.
+    数千ページ規模の大規模サイトを Scrapy subprocess で一括取り込みする。
+    既存の rag_crawl（上限500ページ）では足りない大規模サイト向け。
+
+    Args:
+        url: クロール開始 URL
+        url_pattern: URL フィルタパターン（正規表現、任意）
+        max_pages: ページ数上限（未指定時は設定値を使用）
+        force: True の場合、JOBDIR を削除して最初からクロール
+
+    Returns:
+        取り込み結果のサマリー
+    """
+    import re
+    import time as time_mod
+
+    from .pipeline.ingesters.web import _check_ssrf, _validate_url
+    from .scrapy.bridge import import_to_source_store
+    from .scrapy.runner import ScrapyRunner
+
+    settings = get_settings()
+
+    # URL バリデーション
+    try:
+        url = _validate_url(url)
+        _check_ssrf(url)
+    except ValueError as e:
+        return f"エラー: {e}"
+
+    # url_pattern バリデーション
+    if url_pattern:
+        try:
+            re.compile(url_pattern)
+        except re.error as e:
+            return f"エラー: 無効な正規表現パターン: {e}"
+
+    # max_pages のクランプ
+    effective_max_pages = max_pages if max_pages is not None else settings.site_ingest_max_pages
+    if effective_max_pages < 1:
+        effective_max_pages = 1
+        logger.warning("max_pages を 1 にクランプしました")
+    elif effective_max_pages > 50000:
+        effective_max_pages = 50000
+        logger.warning("max_pages を 50000 にクランプしました")
+
+    # ドメイン導出
+    from urllib.parse import urlparse
+    parsed = urlparse(url)
+    allowed_domains = parsed.hostname or ""
+
+    controller = await _get_pipeline_controller()
+
+    start_time = time_mod.monotonic()
+
+    try:
+        # Scrapy Runner で クロール
+        runner = ScrapyRunner(
+            temp_dir=settings.site_ingest_temp_dir,
+            delay_sec=settings.site_ingest_delay_sec,
+            max_pages=effective_max_pages,
+            download_timeout=settings.site_ingest_download_timeout,
+            timeout_sec=settings.site_ingest_timeout_sec,
+            error_count=settings.site_ingest_error_count,
+        )
+
+        crawl_result = await runner.run(
+            start_url=url,
+            allowed_domains=allowed_domains,
+            url_pattern=url_pattern,
+            max_pages=effective_max_pages,
+            force=force,
+        )
+
+        if not crawl_result.jsonl_path.exists():
+            elapsed = time_mod.monotonic() - start_time
+            return (
+                f"クロールが完了しましたが、メタデータが出力されませんでした。"
+                f" exit_code={crawl_result.exit_code}, 所要時間={elapsed:.1f}秒"
+            )
+
+        # Bridge: JSONL + HTML → source_store
+        bridge_result = await asyncio.to_thread(
+            import_to_source_store,
+            jsonl_path=crawl_result.jsonl_path,
+            html_dir=crawl_result.output_dir,
+            source_store=controller.source_store,
+        )
+
+        # パイプライン処理
+        pipeline_summary: PipelineSummary | None = None
+        if bridge_result.ingest.placed > 0:
+            pipeline_summary = await asyncio.to_thread(
+                controller.ingest_and_index, f"ingest(web): site-ingest {url}",
+            )
+            _reset_rag_service()
+
+        # 操作全体の所要時間（クロール + Bridge + パイプライン）
+        elapsed = time_mod.monotonic() - start_time
+
+        # 結果サマリー構築
+        parts: list[str] = []
+        parts.append(
+            f"サイト取り込み完了: {bridge_result.ingest.placed}件配置"
+            f", {bridge_result.ingest.skipped}件スキップ"
+            f", {bridge_result.ingest.errors}件エラー"
+        )
+        parts.append(f"所要時間: {elapsed:.1f}秒")
+        if pipeline_summary is not None:
+            parts.append(f"パイプライン: {pipeline_summary.processed}件処理")
+            if pipeline_summary.errors:
+                parts.append(f"パイプラインエラー: {len(pipeline_summary.errors)}件")
+        if not crawl_result.success:
+            parts.append(f"Scrapy exit_code={crawl_result.exit_code}（部分的な結果）")
+
+        return " / ".join(parts)
+    except Exception:
+        logger.exception("Failed to site-ingest: %s", url)
+        return f"エラー: サイト取り込みに失敗しました。URL: {url}"
 
 
 @mcp.tool()

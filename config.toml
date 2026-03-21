@@ -71,3 +71,10 @@ rag_bluesky_max_posts = 200
 rag_bluesky_request_timeout = 30
 rag_bluesky_request_interval = 1.0
 rag_bluesky_include_reposts = true
+
+# サイト一括取り込み（Scrapy subprocess）
+site_ingest_delay_sec = 0.1
+site_ingest_max_pages = 10000
+site_ingest_download_timeout = 30
+site_ingest_timeout_sec = 7200
+site_ingest_error_count = 10

@@ -5,7 +5,7 @@
 外部 Web ページから収集した知識をベクトル DB に蓄積し、
 MCP クライアントからのクエリに対して関連情報を検索・提供する
 RAG（Retrieval-Augmented Generation）基盤。
-MCP サーバーとして独立動作し、11 個のツールを提供する。
+MCP サーバーとして独立動作し、13 個のツールを提供する。
 
 スコープ:
 
@@ -43,6 +43,7 @@ MCP サーバーとして独立動作し、11 個のツールを提供する。
 | ストレージ | `CHROMADB_PERSIST_DIR`, `BM25_PERSIST_DIR`, `SOURCE_STORE_DIR`, `CONVERTED_STORE_DIR` |
 | トランスポート | `RAG_TRANSPORT`, `RAG_HTTP_HOST`, `RAG_HTTP_PORT`, `RAG_DNS_REBINDING_PROTECTION` |
 | デバッグ | `RAG_DEBUG_LOG_ENABLED` |
+| サイト一括取り込み | `SITE_INGEST_TEMP_DIR` |
 
 #### `config.toml`（共通設定値）
 
@@ -60,6 +61,7 @@ MCP サーバーとして独立動作し、11 個のツールを提供する。
 | BlueSky インジェスター | `rag_bluesky_appview_url`, `rag_bluesky_max_posts`, `rag_bluesky_request_timeout`, `rag_bluesky_request_interval`, `rag_bluesky_include_reposts` |
 | ドキュメントインジェスター | `rag_document_supported_extensions` |
 | PDF バックエンド | `rag_pdf_backend`, `rag_pdf_mineru_mfd_conf_thres`, `rag_pdf_quality_ufffd_threshold`, `rag_pdf_quality_greek_threshold`, `rag_pdf_quality_cjk_min_threshold`, `rag_pdf_quality_min_chars_per_page`, `rag_pdf_quality_sample_pages` |
+| サイト一括取り込み | `site_ingest_delay_sec`, `site_ingest_max_pages`, `site_ingest_download_timeout`, `site_ingest_timeout_sec`, `site_ingest_error_count` |
 
 - Embedding モデルを変更した場合、既存データとの類似度計算が不正確になるため、コレクション再構築が必要
 - 呼び出し元が MCP クライアントとして本サーバーに接続することで RAG 機能を利用できる
@@ -116,7 +118,7 @@ MCP サーバーとして独立動作し、11 個のツールを提供する。
 
 ### MCP ツール
 
-MCP サーバーが公開する 11 個のツール。
+MCP サーバーが公開する 13 個のツール。
 
 | ツール | 入力 | 振る舞い |
 | --- | --- | --- |
@@ -129,12 +131,13 @@ MCP サーバーが公開する 11 個のツール。
 | rag_crawl_bluesky | handle、max_posts（任意）、include_reposts（任意） | 指定ユーザーの BlueSky 投稿を AT Protocol API 経由で取得し、ナレッジベースに取り込む。max_posts はタイムライン全体（リポスト含む）に適用。BlueSky は投稿編集不可のため、既存 `source_id` と一致する投稿はスキップする（上書き不要） |
 | rag_add_document | file_path | 単一ドキュメントファイルを読み取り、ナレッジベースに取り込む。同一ファイルの再取り込み時は `source_id`（file URI）の一致で検出し、既存の知識を最新に置き換える |
 | rag_crawl_documents | dir_path、pattern（任意） | 指定ディレクトリ内のドキュメントファイルを glob パターンで検索し、一括でナレッジベースに取り込む。同一ファイルの再取り込み時は `source_id`（file URI）の一致で検出し、既存の知識を最新に置き換える |
+| rag_site_ingest | url、url_pattern（任意）、max_pages（任意）、force（任意） | Scrapy subprocess で対象サイトをクロールし、source_store に配置後、パイプライン処理を実行する。大規模サイト向け（上限 50,000 ページ）。詳細は [site-ingest.md](site-ingest.md) を参照 |
 | rag_delete | URL | ソース URL 指定でナレッジを論理削除する。metadata.db のステータスを `deleted` に変更し、検索インデックスから該当チャンクを削除する。source_store 内のファイルは削除しない |
 | rag_stats | なし | 統計情報（総チャンク数、ソース URL 数）と蓄積データ概要（ドメイン別ソース URL 一覧・タイトル）を返す。表示件数上限は `RAG_STATS_MAX_SOURCES` で制御する |
 
 ### 取り込みツールの出力形式
 
-取り込みツール（rag_add、rag_crawl、rag_crawl_zenn、rag_crawl_bluesky、rag_add_document、rag_crawl_documents）は、source_store への配置結果とパイプライン処理結果を統合したサマリーを返す。配置結果には配置ファイル数・スキップ数・エラー数を含み、パイプライン処理結果にはコンバート・インデックス構築の処理件数を含む。rag_crawl_preview は source_store への配置を行わないため本出力形式の対象外。
+取り込みツール（rag_add、rag_crawl、rag_crawl_zenn、rag_crawl_bluesky、rag_add_document、rag_crawl_documents、rag_site_ingest）は、source_store への配置結果とパイプライン処理結果を統合したサマリーを返す。配置結果には配置ファイル数・スキップ数・エラー数を含み、パイプライン処理結果にはコンバート・インデックス構築の処理件数を含む。rag_crawl_preview は source_store への配置を行わないため本出力形式の対象外。
 
 ### 検索結果の設計
 
