@@ -50,7 +50,9 @@ MCP ツール `rag_site_ingest` と CLI コマンド `site-ingest` の 2 つの�
 ### Safe Browsing チェック
 
 - 数千件規模の URL に対する Google Safe Browsing API 呼び出しは非現実的なためスキップする
-- SSRF チェックは初回 URL（ユーザー入力）のみ実施する。Scrapy が後続で辿る URL（同一ドメイン内）については、per-request の IP 解決検証は行わない。DNS リバインディング等のリスクは `allowed_domains` によるドメイン制約で緩和する。per-request の SSRF チェック（Downloader Middleware）は将来対応とする
+- SSRF チェックは初回 URL（ユーザー入力）のみ実施する。Scrapy が後続で辿る URL（同一ドメイン内）については、per-request の IP 解決検証は行わない。DNS リバインディング等のリスクは `allowed_domains` によるドメイン制約で緩和する
+
+> **TODO:#316** per-request の SSRF チェック（Downloader Middleware）を実装し、DNS リバインディングに対応する
 
 ### robots.txt
 
