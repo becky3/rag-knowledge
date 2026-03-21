@@ -86,8 +86,12 @@ def check_ssrf(url: str) -> None:
             addr = addr.split("%", 1)[0]
         try:
             ip = ipaddress.ip_address(addr)
-        except ValueError:
-            continue
+        except ValueError as e:
+            # パース不能なアドレスは fail-closed として拒否する
+            raise ValueError(
+                f"DNS 解決結果に無効な IP アドレスが含まれています: "
+                f"{hostname} ({addr})"
+            ) from e
         # IPv4-mapped IPv6（例: "::ffff:127.0.0.1"）は IPv4 として判定
         if isinstance(ip, ipaddress.IPv6Address) and ip.ipv4_mapped is not None:
             ip = ip.ipv4_mapped

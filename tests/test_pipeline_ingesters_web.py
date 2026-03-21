@@ -117,6 +117,15 @@ class TestCheckSsrf:
         with pytest.raises(ValueError, match="プライベート"):
             check_ssrf("http://link-local.example.com/")
 
+    @patch("socket.getaddrinfo")
+    def test_unparseable_ip_rejected(self, mock_getaddr: MagicMock) -> None:
+        """パース不能な IP アドレスは fail-closed で拒否されること."""
+        mock_getaddr.return_value = [
+            (2, 1, 6, "", ("not-an-ip", 80))
+        ]
+        with pytest.raises(ValueError, match="無効な IP アドレス"):
+            check_ssrf("http://bad-dns.example.com/")
+
 
 class TestExtractTitle:
     """_extract_title のテスト."""
