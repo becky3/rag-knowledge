@@ -564,11 +564,14 @@ class TestRagCrawlPreviewTool:
         preview_return: list[dict[str, str]] | None = None,
         preview_side_effect: Exception | None = None,
     ) -> contextlib.AbstractContextManager[AsyncMock]:
-        """crawl_preview の新アーキテクチャ用モックコンテキストを生成する."""
+        """crawl_preview 用モックコンテキストを生成する."""
         from contextlib import contextmanager
 
-        mock_controller = AsyncMock()
-        mock_controller.source_store = MagicMock()
+        mock_settings = MagicMock()
+        mock_settings.rag_crawl_default_depth = 1
+        mock_settings.source_store_dir = "/tmp/test_source_store"
+        mock_settings.rag_crawl_request_timeout = 10
+        mock_settings.rag_crawl_delay_sec = 0.5
 
         mock_ingester_instance = AsyncMock()
         if preview_side_effect:
@@ -587,8 +590,10 @@ class TestRagCrawlPreviewTool:
         @contextmanager
         def ctx():
             with (
-                patch.object(mod, "_get_pipeline_controller", return_value=mock_controller),
-                patch.object(mod, "PipelineWebIngester", return_value=mock_ingester_instance),
+                patch.object(mod, "get_settings", return_value=mock_settings),
+                patch("pathlib.Path.mkdir"),
+                patch.object(mod, "SourceStore", return_value=MagicMock()),
+                patch.object(mod, "_create_web_ingester", return_value=mock_ingester_instance),
                 patch.object(mod, "ConstrainedClient", return_value=mock_client),
             ):
                 yield mock_ingester_instance
