@@ -101,13 +101,14 @@ def _find_content_area(soup: BeautifulSoup) -> Tag | BeautifulSoup:
 
     仕様: docs/specs/converter.md「コンテンツ領域の特定」
 
-    優先順:
-    1. セマンティックタグ（article, main）
-    2. role="main" 属性
-    3. id パターンマッチ
-    4. class パターンマッチ
-    5. テキスト密度フォールバック（body 直下で最大テキスト量の子要素）
-    6. body タグ（最終フォールバック）
+    優先順（仕様書と同一）:
+    1. <article> タグ
+    2. <main> タグ
+    3. role="main" 属性
+    4. id パターンマッチ
+    5. class パターンマッチ
+    6. テキスト密度フォールバック（body 直下で最大テキスト量のコンテナ要素）
+    7. <body> タグ（最終フォールバック。body もなければ soup を返す）
     """
     # 1. セマンティックタグ
     for tag_name in _SEMANTIC_CONTENT_TAGS:
