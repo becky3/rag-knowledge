@@ -81,8 +81,16 @@ def check_ssrf(url: str) -> None:
         addr = addrinfo[4][0]
         try:
             ip = ipaddress.ip_address(addr)
-        except ValueError:
-            continue
+        except ValueError as e:
+            # パース不能なアドレス表現は fail-closed として拒否する
+            raise ValueError(
+                f"DNS 解決結果に無効な IP アドレスが含まれています: {hostname} ({addr})"
+            ) from e
+
+        # IPv4-mapped IPv6 (::ffff:127.0.0.1 など) は対応する IPv4 として評価する
+        if isinstance(ip, ipaddress.IPv6Address) and ip.ipv4_mapped is not None:
+            ip = ip.ipv4_mapped
+
         for network in _BLOCKED_NETWORKS:
             if ip in network:
                 raise ValueError(
