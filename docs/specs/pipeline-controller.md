@@ -47,17 +47,44 @@
 | 操作 | 入力 | 出力 | 振る舞い |
 |------|------|------|---------|
 | 差分更新 | なし（自動検知） | 処理結果サマリ | `last_commit_id` と HEAD の差分を検知し、変更ファイルのみをパイプライン処理する。通常運用のデフォルト操作 |
-| 全再構築 | source_type フィルタ（任意） | 処理結果サマリ | converted_store とインデックスをクリアし、source_store 全ファイルをパイプライン処理する。source_type 指定時はその媒体のみ対象。データ破損時や大規模な設計変更時に使用。source_store に未コミットの変更がある場合はエラーとする（git とディスクの不整合を防止） |
-| コンバートのみ再実行 | source_type フィルタ（任意） | 処理結果サマリ | converted_store をクリアし、source_store 全ファイルをコンバーターで再処理する。source_type 指定時はその媒体のみ対象。コンバーターの変換ロジック改修時に使用。インデックスは後続のインデックス再構築で更新する。source_store に未コミットの変更がある場合はエラーとする |
-| インデックスのみ再構築 | source_type フィルタ（任意） | 処理結果サマリ | ChromaDB + BM25 をクリアし、converted_store 全ファイルからインデックスを再構築する。source_type 指定時はその媒体のインデックスのみ削除して再構築する（他の source_type のインデックスは維持）。Embedding モデル変更時やチャンクパラメータ変更時に使用。source_store に未コミットの変更がある場合はエラーとする |
+| 全再構築 | source_type フィルタ（任意）、auto_commit（任意） | 処理結果サマリ | converted_store とインデックスをクリアし、source_store 全ファイルをパイプライン処理する。source_type 指定時はその媒体のみ対象。データ破損時や大規模な設計変更時に使用。source_store に未コミットの変更がある場合の振る舞いは auto_commit の設定に従う |
+| コンバートのみ再実行 | source_type フィルタ（任意）、auto_commit（任意） | 処理結果サマリ | converted_store をクリアし、source_store 全ファイルをコンバーターで再処理する。source_type 指定時はその媒体のみ対象。コンバーターの変換ロジック改修時に使用。インデックスは後続のインデックス再構築で更新する。source_store に未コミットの変更がある場合の振る舞いは auto_commit の設定に従う |
+| インデックスのみ再構築 | source_type フィルタ（任意）、auto_commit（任意） | 処理結果サマリ | ChromaDB + BM25 をクリアし、converted_store 全ファイルからインデックスを再構築する。source_type 指定時はその媒体のインデックスのみ削除して再構築する（他の source_type のインデックスは維持）。Embedding モデル変更時やチャンクパラメータ変更時に使用。source_store に未コミットの変更がある場合の振る舞いは auto_commit の設定に従う |
 | 取り込み実行 | コミットメッセージ | 処理結果サマリ | インジェスター実行後の後処理を一括実行する。source_store の変更を `git add -A` + `git commit` し、差分更新を実行する。インジェスターと後続パイプライン処理を結合する便利操作 |
+
+### 未コミット変更チェックと auto_commit
+
+再構築操作（全再構築・コンバートのみ再実行・インデックスのみ再構築）の実行前に、source_store に未コミットの変更があるかチェックする。チェック範囲と自動コミット範囲は `source_type` の指定有無に応じて変わる。
+
+| auto_commit の値 | 未コミット変更がある場合の振る舞い |
+|-----------------|-------------------------------|
+| `false`（デフォルト） | エラーとして再構築を拒否する（従来動作） |
+| `true` | 自動コミットを実行し、コミット成功後に再構築を続行する |
+
+#### source_type によるスコープ
+
+| source_type | 未コミットチェックの範囲 | auto_commit のステージング範囲 |
+|-------------|---------------------|--------------------------|
+| 指定あり | `git status --porcelain -- {source_type}/` でそのディレクトリのみチェック | `git add {source_type}/` でそのディレクトリのみステージング＋コミット |
+| 指定なし | `git status --porcelain` で全体チェック（従来動作） | `git add -A` で全体ステージング＋コミット（従来動作） |
+
+source_type を指定することで、他の source_type ディレクトリに編集途中のファイルがあっても影響を受けずに再構築を実行できる。
+
+#### auto_commit が `true` の場合の処理フロー
+
+1. source_store の未コミット変更を検知する（source_type 指定時はそのディレクトリのみ）
+2. ステージング＋コミットで変更をコミットする（コミットメッセージ形式は「コミットメッセージ規則」を参照）
+3. コミット成功後、再構築処理に進む
+4. auto_commit が `true` だが変更がない場合は自動コミットをスキップし、再構築に進む。git commit コマンド自体が失敗した場合（権限エラー等）はエラーとする
+
+差分更新および取り込み実行は未コミット変更チェックの対象外であり、auto_commit パラメータは適用されない。
 
 ### git 操作
 
 | 操作 | 入力 | 出力 | 振る舞い |
 |------|------|------|---------|
 | リポジトリ初期化 | source_store パス | なし | source_store ディレクトリで `git init` を実行する。既に初期化済みの場合は何もしない |
-| ステージング＋コミット | コミットメッセージ | コミット ID | source_store 内の変更を `git add -A` + `git commit` する。変更がない場合はスキップする |
+| ステージング＋コミット | コミットメッセージ、対象パス（任意） | コミット ID | source_store 内の変更をステージング＋コミットする。対象パス指定時は `git add {対象パス}/` でそのパス配下のみをステージングする。未指定時は `git add -A` で全体をステージングする。変更がない場合はスキップする |
 | 差分取得 | 基準コミット ID | 変更ファイルリスト | `git diff --name-status <基準ID>..HEAD` で変更ファイル（追加・変更・削除・リネーム）を取得する |
 
 ### 変更ファイルリストの構造
@@ -116,6 +143,8 @@ flowchart TD
 flowchart TD
     START["全再構築開始"]
     CHECK_DIRTY{"未コミットの変更あり?"}
+    CHECK_AUTO{"auto_commit が true?"}
+    AUTO_COMMIT["自動コミット実行"]
     ERROR_DIRTY["エラー: rebuild 拒否"]
     CLEAR_CONV["converted_store をクリア"]
     CLEAR_IDX["ChromaDB + BM25 をクリア"]
@@ -129,7 +158,10 @@ flowchart TD
     REBUILD_DB["metadata.db 再構築（source_store スキャン）"]
 
     START --> CHECK_DIRTY
-    CHECK_DIRTY -- Yes --> ERROR_DIRTY
+    CHECK_DIRTY -- Yes --> CHECK_AUTO
+    CHECK_AUTO -- Yes --> AUTO_COMMIT
+    AUTO_COMMIT --> REBUILD_DB
+    CHECK_AUTO -- No --> ERROR_DIRTY
     CHECK_DIRTY -- No --> REBUILD_DB
     REBUILD_DB --> CLEAR_CONV
     CLEAR_CONV --> CLEAR_IDX
@@ -189,6 +221,10 @@ sequenceDiagram
 |---------|-------------|
 | インジェスター実行後 | `ingest({source_type}): {概要}` |
 | 手動ファイル配置後（local） | `ingest(local): manual update` |
+| 再構築時の自動コミット（source_type 指定なし） | `auto-commit: rebuild ({mode})` |
+| 再構築時の自動コミット（source_type 指定あり） | `auto-commit: rebuild ({mode}, {source_type})` |
+
+`{mode}` は再構築モード（`full`、`convert`、`index`）が入る。
 
 `source_type` の取りうる値は [source-store.md](source-store.md) の「source_id の決定方式」を参照（`web`, `bluesky`, `zenn`, `local`）。
 
@@ -205,7 +241,8 @@ sequenceDiagram
 | source_store の git リポジトリが未初期化 | パイプライン初回実行時に `git init` を自動実行する |
 | .meta ファイルのみが変更された場合 | 拡張子 `.meta` で .meta ファイルを判定する。metadata.db のメタデータを更新する。コンバーターの再処理は行わない（データ本体に変更がないため）。インデックス側にメタデータ（title 等）を保持している場合は、インデクサーにメタデータ更新を指示する（チャンクの再生成は不要、メタデータのみ upsert） |
 | metadata.db の `status` が `deleted` のファイルが git diff に含まれる場合 | ファイルの変更種別に応じた処理を行う。`deleted` ステータスのファイルはインデックスに追加しない |
-| 再構築操作（全再構築・コンバートのみ・インデックスのみ）時に source_store に未コミットの変更がある場合 | エラーとして再構築を拒否する。git とディスクの不整合状態で再構築すると、pipeline_history と実際のファイル状態が乖離する |
+| 再構築操作（全再構築・コンバートのみ・インデックスのみ）時に source_store に未コミットの変更がある場合 | auto_commit が `false`（デフォルト）の場合はエラーとして再構築を拒否する。auto_commit が `true` の場合は自動コミットを実行してから再構築を続行する |
+| 自動コミット時に git commit が失敗した場合 | エラーとして再構築を拒否する（コミット失敗の原因をエラーメッセージに含める） |
 
 ### 設定項目
 

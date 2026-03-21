@@ -1229,7 +1229,11 @@ def _collect_pipeline_stats(
 
 
 @mcp.tool()
-async def rag_rebuild(mode: str, source_type: str | None = None) -> str:
+async def rag_rebuild(
+    mode: str,
+    source_type: str | None = None,
+    auto_commit: bool = False,
+) -> str:
     """[rag-knowledge] RAG rebuild - ナレッジベースの再構築を実行する.
 
     knowledge base, rebuild, pipeline, reindex, convert.
@@ -1245,6 +1249,8 @@ async def rag_rebuild(mode: str, source_type: str | None = None) -> str:
             "incremental" — 差分更新（通常運用）
         source_type: 対象媒体フィルタ: "web", "bluesky", "zenn", "local"。
             未指定時は全媒体。incremental モードでは指定不可。
+        auto_commit: source_store に未コミット変更がある場合に自動コミットするか。
+            デフォルト: false。incremental モードでは指定不可。
 
     Returns:
         処理結果サマリ（処理件数、スキップ件数、エラー件数、所要時間）
@@ -1263,6 +1269,9 @@ async def rag_rebuild(mode: str, source_type: str | None = None) -> str:
             "エラー: incremental モードでは source_type を指定できません"
             "（git diff に従います）"
         )
+
+    if mode == "incremental" and auto_commit:
+        return "エラー: incremental モードでは auto_commit を指定できません"
 
     # 設定の検証
     settings = get_settings()
@@ -1286,11 +1295,17 @@ async def rag_rebuild(mode: str, source_type: str | None = None) -> str:
         def _run_rebuild() -> PipelineSummary:
             controller = _build_pipeline_controller()
             if mode == "full":
-                return controller.run_full_rebuild(source_type=st)
+                return controller.run_full_rebuild(
+                    source_type=st, auto_commit=auto_commit,
+                )
             if mode == "convert":
-                return controller.run_convert_only(source_type=st)
+                return controller.run_convert_only(
+                    source_type=st, auto_commit=auto_commit,
+                )
             if mode == "index":
-                return controller.run_index_only(source_type=st)
+                return controller.run_index_only(
+                    source_type=st, auto_commit=auto_commit,
+                )
             # mode == "incremental"
             return controller.run_incremental()
 

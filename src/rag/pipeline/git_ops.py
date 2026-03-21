@@ -42,19 +42,30 @@ class GitOperations:
         # パイプライン用のローカル git user 設定
         self._ensure_git_user()
 
-    def commit(self, message: str) -> str | None:
+    def commit(self, message: str, path: str | None = None) -> str | None:
         """ステージング + コミット.
 
         変更がない場合はスキップする。
 
         Args:
             message: コミットメッセージ
+            path: 対象ディレクトリ（None で全体）
 
         Returns:
             コミット ID。変更なしの場合は None。
         """
-        self._run(["git", "add", "-A"])
-        result = self._run(["git", "status", "--porcelain"])
+        if path is not None:
+            try:
+                self._run(["git", "add", f"{path}/"])
+            except subprocess.CalledProcessError as exc:
+                err = exc.stderr or ""
+                if "did not match any files" in err:
+                    return None
+                raise
+            result = self._run(["git", "status", "--porcelain", "--", f"{path}/"])
+        else:
+            self._run(["git", "add", "-A"])
+            result = self._run(["git", "status", "--porcelain"])
         if not result.stdout.strip():
             return None
         self._run(["git", "commit", "-m", message])
@@ -69,9 +80,18 @@ class GitOperations:
         result = self._run(["git", "rev-parse", "HEAD"])
         return result.stdout.strip()
 
-    def has_uncommitted_changes(self) -> bool:
-        """未コミットの変更があるか確認する（副作用なし）."""
-        result = self._run(["git", "status", "--porcelain"])
+    def has_uncommitted_changes(self, path: str | None = None) -> bool:
+        """未コミットの変更があるか確認する（副作用なし）.
+
+        Args:
+            path: 対象ディレクトリ（None で全体）
+        """
+        if path is not None:
+            result = self._run(
+                ["git", "status", "--porcelain", "--", f"{path}/"],
+            )
+        else:
+            result = self._run(["git", "status", "--porcelain"])
         return bool(result.stdout.strip())
 
     def has_commits(self) -> bool:
