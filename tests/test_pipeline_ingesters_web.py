@@ -99,6 +99,24 @@ class TestCheckSsrf:
         # パブリック IP は SSRF ブロックされない（例外が発生しないことを確認）
         check_ssrf("http://example.com/")
 
+    @patch("socket.getaddrinfo")
+    def test_ipv4_mapped_ipv6_blocked(self, mock_getaddr: MagicMock) -> None:
+        """IPv4-mapped IPv6 アドレスがブロックされること."""
+        mock_getaddr.return_value = [
+            (10, 1, 6, "", ("::ffff:127.0.0.1", 80, 0, 0))
+        ]
+        with pytest.raises(ValueError, match="プライベート"):
+            check_ssrf("http://mapped-v6.example.com/")
+
+    @patch("socket.getaddrinfo")
+    def test_ipv6_zone_index_blocked(self, mock_getaddr: MagicMock) -> None:
+        """zone index 付き IPv6 リンクローカルアドレスがブロックされること."""
+        mock_getaddr.return_value = [
+            (10, 1, 6, "", ("fe80::1%lo0", 80, 0, 0))
+        ]
+        with pytest.raises(ValueError, match="プライベート"):
+            check_ssrf("http://link-local.example.com/")
+
 
 class TestExtractTitle:
     """_extract_title のテスト."""
