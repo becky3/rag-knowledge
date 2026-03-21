@@ -55,7 +55,13 @@ class GitOperations:
             コミット ID。変更なしの場合は None。
         """
         if path is not None:
-            self._run(["git", "add", f"{path}/"])
+            try:
+                self._run(["git", "add", f"{path}/"])
+            except subprocess.CalledProcessError as exc:
+                err = exc.stderr or ""
+                if "did not match any files" in err:
+                    return None
+                raise
             result = self._run(["git", "status", "--porcelain", "--", f"{path}/"])
         else:
             self._run(["git", "add", "-A"])
