@@ -196,6 +196,11 @@ class SiteSpider(scrapy.Spider):  # type: ignore[misc]
         for href in response.css("a::attr(href)").getall():
             full_url, _ = urldefrag(response.urljoin(href))
 
+            # スキームフィルタ: http/https 以外 (mailto:, tel:, javascript: 等) は辿らない
+            parsed = urlparse(full_url)
+            if parsed.scheme not in ("http", "https"):
+                continue
+
             # URL パターンフィルタ
             if self._url_pattern and not self._url_pattern.search(full_url):
                 continue

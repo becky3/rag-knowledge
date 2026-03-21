@@ -20,6 +20,12 @@ import pytest
 from rag.scrapy.runner import CrawlResult, ScrapyRunner
 
 
+async def _async_lines_iter(lines: list[bytes]):
+    """AsyncMock の stderr 用の非同期イテレータ."""
+    for line in lines:
+        yield line
+
+
 # --- CrawlResult テスト ---
 
 
@@ -171,8 +177,8 @@ class TestScrapyRunnerRun:
         runner = ScrapyRunner(temp_dir=tmp_path)
 
         mock_process = AsyncMock()
-        mock_process.communicate.return_value = (b"", b"INFO: Spider closed\n")
-        mock_process.returncode = 0
+        mock_process.wait.return_value = 0
+        mock_process.stderr = _async_lines_iter([b"INFO: Spider closed\n"])
 
         with patch("asyncio.create_subprocess_exec", return_value=mock_process):
             result = await runner.run(start_url="https://example.com")
@@ -188,8 +194,8 @@ class TestScrapyRunnerRun:
         runner = ScrapyRunner(temp_dir=tmp_path)
 
         mock_process = AsyncMock()
-        mock_process.communicate.return_value = (b"", b"ERROR: Something failed\n")
-        mock_process.returncode = 1
+        mock_process.wait.return_value = 1
+        mock_process.stderr = _async_lines_iter([b"ERROR: Something failed\n"])
 
         with patch("asyncio.create_subprocess_exec", return_value=mock_process):
             result = await runner.run(start_url="https://example.com")
@@ -204,8 +210,8 @@ class TestScrapyRunnerRun:
         runner = ScrapyRunner(temp_dir=tmp_path)
 
         mock_process = AsyncMock()
-        mock_process.communicate.return_value = (b"", b"")
-        mock_process.returncode = 0
+        mock_process.wait.return_value = 0
+        mock_process.stderr = _async_lines_iter([])
 
         with patch("asyncio.create_subprocess_exec", return_value=mock_process):
             await runner.run(start_url="https://docs.example.com/guide")
@@ -233,8 +239,8 @@ class TestScrapyRunnerRun:
         jsonl_path.write_text('{"url":"old"}\n', encoding="utf-8")
 
         mock_process = AsyncMock()
-        mock_process.communicate.return_value = (b"", b"")
-        mock_process.returncode = 0
+        mock_process.wait.return_value = 0
+        mock_process.stderr = _async_lines_iter([])
 
         with patch("asyncio.create_subprocess_exec", return_value=mock_process):
             await runner.run(start_url="https://example.com", force=True)
@@ -252,8 +258,8 @@ class TestScrapyRunnerRun:
         runner = ScrapyRunner(temp_dir=tmp_path, max_pages=10000)
 
         mock_process = AsyncMock()
-        mock_process.communicate.return_value = (b"", b"")
-        mock_process.returncode = 0
+        mock_process.wait.return_value = 0
+        mock_process.stderr = _async_lines_iter([])
 
         with patch("asyncio.create_subprocess_exec", return_value=mock_process):
             await runner.run(start_url="https://example.com", max_pages=50)
@@ -269,8 +275,8 @@ class TestScrapyRunnerRun:
         runner = ScrapyRunner(temp_dir=tmp_path)
 
         mock_process = AsyncMock()
-        mock_process.communicate.return_value = (b"", b"")
-        mock_process.returncode = 0
+        mock_process.wait.return_value = 0
+        mock_process.stderr = _async_lines_iter([])
 
         with patch("asyncio.create_subprocess_exec", return_value=mock_process) as mock_exec:
             await runner.run(start_url="https://example.com")
@@ -289,8 +295,8 @@ class TestScrapyRunnerRun:
         )
 
         mock_process = AsyncMock()
-        mock_process.communicate.return_value = (b"", b"")
-        mock_process.returncode = 0
+        mock_process.wait.return_value = 0
+        mock_process.stderr = _async_lines_iter([])
 
         with patch("asyncio.create_subprocess_exec", return_value=mock_process):
             await runner.run(
@@ -319,8 +325,8 @@ class TestScrapyRunnerRun:
         )
 
         mock_process = AsyncMock()
-        mock_process.communicate.return_value = (b"", b"")
-        mock_process.returncode = 0
+        mock_process.wait.return_value = 0
+        mock_process.stderr = _async_lines_iter([])
 
         with patch("asyncio.create_subprocess_exec", return_value=mock_process):
             await runner.run(start_url="https://example.com")
@@ -336,8 +342,8 @@ class TestScrapyRunnerRun:
         runner = ScrapyRunner(temp_dir=tmp_path)
 
         mock_process = AsyncMock()
-        mock_process.communicate.return_value = (b"", b"")
-        mock_process.returncode = 0
+        mock_process.wait.return_value = 0
+        mock_process.stderr = _async_lines_iter([])
 
         with patch("asyncio.create_subprocess_exec", return_value=mock_process):
             await runner.run(start_url="https://gcgx.games/dq1/")
@@ -353,8 +359,8 @@ class TestScrapyRunnerRun:
         runner = ScrapyRunner(temp_dir=tmp_path)
 
         mock_process = AsyncMock()
-        mock_process.communicate.return_value = (b"", b"")
-        mock_process.returncode = 0
+        mock_process.wait.return_value = 0
+        mock_process.stderr = _async_lines_iter([])
 
         with patch("asyncio.create_subprocess_exec", return_value=mock_process):
             await runner.run(start_url="https://example.com/")
@@ -369,8 +375,8 @@ class TestScrapyRunnerRun:
         runner = ScrapyRunner(temp_dir=tmp_path)
 
         mock_process = AsyncMock()
-        mock_process.communicate.return_value = (b"", b"")
-        mock_process.returncode = 0
+        mock_process.wait.return_value = 0
+        mock_process.stderr = _async_lines_iter([])
 
         with patch("asyncio.create_subprocess_exec", return_value=mock_process):
             await runner.run(

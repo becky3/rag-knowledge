@@ -48,7 +48,7 @@ class ScrapyRunner:
         delay_sec: float = 0.1,
         max_pages: int = 10000,
         download_timeout: int = 30,
-        timeout_sec: int = 0,
+        timeout_sec: float = 0.0,
         error_count: int = 0,
     ) -> None:
         self._temp_dir = Path(temp_dir)
@@ -146,23 +146,28 @@ class ScrapyRunner:
             self._delay_sec,
         )
 
-        # subprocess 起動
+        # subprocess 起動（stdout は /dev/null、stderr のみ末尾を保持）
         process = await asyncio.create_subprocess_exec(
             sys.executable,
             "-c",
             spider_script,
-            stdout=asyncio.subprocess.PIPE,
+            stdout=asyncio.subprocess.DEVNULL,
             stderr=asyncio.subprocess.PIPE,
             env=env,
         )
 
-        stdout_data, stderr_data = await process.communicate()
-        exit_code = process.returncode or 0
+        # stderr をストリーミングで読み、末尾20行のみ保持
+        stderr_lines: list[str] = []
+        max_tail = 20
+        assert process.stderr is not None  # noqa: S101
+        async for raw_line in process.stderr:
+            line = raw_line.decode("utf-8", errors="replace").rstrip()
+            stderr_lines.append(line)
+            if len(stderr_lines) > max_tail:
+                stderr_lines.pop(0)
 
-        # stderr の末尾をログ用に保持
-        stderr_text = stderr_data.decode("utf-8", errors="replace")
-        stderr_lines = stderr_text.strip().split("\n")
-        stderr_tail = "\n".join(stderr_lines[-20:]) if stderr_lines else ""
+        exit_code = await process.wait()
+        stderr_tail = "\n".join(stderr_lines)
 
         if exit_code != 0:
             logger.error(
@@ -207,12 +212,12 @@ import json
 import sys
 
 # rag パッケージが import できるように src/ を sys.path に追加
-src_dir = r'{src_dir}'
+src_dir = {json.dumps(src_dir)}
 if src_dir not in sys.path:
     sys.path.insert(0, src_dir)
 
 # パラメータを JSON ファイルから読み込み（コードインジェクション防止）
-with open(r'{safe_params_path}', encoding='utf-8') as f:
+with open({json.dumps(safe_params_path)}, encoding='utf-8') as f:
     params = json.load(f)
 
 from scrapy.crawler import CrawlerProcess

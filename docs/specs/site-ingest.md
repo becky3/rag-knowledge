@@ -33,7 +33,7 @@ MCP ツール `rag_site_ingest` と CLI コマンド `site-ingest` の 2 つの�
 
 - Scrapy は `asyncio.create_subprocess_exec` で別プロセスとして起動する。MCP サーバーの asyncio イベントループと Twisted の reactor を分離する
 - ConstrainedClient は使用しない。Scrapy が HTTP リクエストを直接管理する
-- `src/` 配下で Scrapy の HTTP リクエストが ConstrainedClient を経由しない点について、`# safety:allowed` コメントで CI チェック（`check-raw-http` ワークフロー）の例外とする
+- 現行の raw HTTP チェック（`check-raw-http` ワークフロー）は aiohttp/httpx/requests/urllib.request の直接利用のみを検出対象としており、Scrapy の利用は検出対象外のため、`# safety:allowed` コメントによる CI 例外指定は不要である
 
 ### ドメイン制約
 
@@ -228,7 +228,7 @@ Scrapy プロセスの subprocess ラッパー。
 振る舞い:
 
 - `asyncio.create_subprocess_exec` で Scrapy を起動する
-- Scrapy 設定をコマンドライン引数で渡す（`-s` オプション）
+- `asyncio.create_subprocess_exec` で Scrapy を起動し、インラインスクリプト内で `CrawlerProcess(settings=...)` を構成する
 - JOBDIR を指定して中断再開に対応する
 - 環境変数 `PYTHONIOENCODING=utf-8` を設定する
 - Scrapy プロセスの終了を待機し、exit code で成否を判定する

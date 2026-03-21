@@ -988,6 +988,8 @@ async def rag_site_ingest(
             delay_sec=settings.site_ingest_delay_sec,
             max_pages=effective_max_pages,
             download_timeout=settings.site_ingest_download_timeout,
+            timeout_sec=settings.site_ingest_timeout_sec,
+            error_count=settings.site_ingest_error_count,
         )
 
         crawl_result = await runner.run(
