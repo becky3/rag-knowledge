@@ -8,10 +8,8 @@ URL 安全性チェック・robots.txt 遵守・SSRF 対策を含む。
 
 from __future__ import annotations
 
-import ipaddress
 import logging
 import re
-import socket
 import time
 from urllib.parse import urljoin, urlparse
 from urllib.robotparser import RobotFileParser
@@ -23,6 +21,7 @@ from bs4 import BeautifulSoup
 from pathlib import PurePosixPath
 
 from rag.pipeline.ingesters._common import IngestResult, now_iso
+from rag.utils.url import check_ssrf, validate_url
 
 # converter が認識する拡張子（変換対象 + パススルー対象）
 # この拡張子を持つ URL は .html を付与しない
@@ -59,86 +58,6 @@ _CRAWL_ALLOWED_CONTENT_TYPES: frozenset[str] = frozenset(
 
 # Safe Browsing キャッシュ最大エントリ数
 SAFE_BROWSING_CACHE_MAX_ENTRIES = 1000
-
-# SSRF 対策: ブロック対象ホスト名
-_BLOCKED_HOSTNAMES = frozenset({"localhost", "localhost.localdomain"})
-
-# SSRF 対策: ブロック対象ネットワーク
-_BLOCKED_NETWORKS: list[ipaddress.IPv4Network | ipaddress.IPv6Network] = [
-    ipaddress.IPv4Network("127.0.0.0/8"),
-    ipaddress.IPv4Network("10.0.0.0/8"),
-    ipaddress.IPv4Network("172.16.0.0/12"),
-    ipaddress.IPv4Network("192.168.0.0/16"),
-    ipaddress.IPv4Network("169.254.0.0/16"),
-    ipaddress.IPv6Network("::1/128"),
-    ipaddress.IPv6Network("fc00::/7"),
-    ipaddress.IPv6Network("fe80::/10"),
-]
-
-
-def _validate_url(url: str) -> str:
-    """URL のバリデーションを行う.
-
-    Returns:
-        フラグメントを除去した URL
-
-    Raises:
-        ValueError: 不正な URL の場合
-    """
-    if not url or not url.strip():
-        raise ValueError("URL が空です")
-
-    parsed = urlparse(url)
-
-    if parsed.scheme not in ("http", "https"):
-        raise ValueError(f"無効な URL スキームです: {parsed.scheme}")
-
-    if not parsed.hostname:
-        raise ValueError(f"URL にホスト名がありません: {url}")
-
-    # フラグメント除去
-    if parsed.fragment:
-        url = url.split("#")[0]
-
-    return url
-
-
-def _check_ssrf(url: str) -> None:
-    """SSRF 対策: プライベート IP・ローカルホストへのリクエストを拒否する.
-
-    Raises:
-        ValueError: SSRF の疑いがある場合
-    """
-    parsed = urlparse(url)
-    hostname = parsed.hostname
-
-    if not hostname:
-        raise ValueError(f"URL にホスト名がありません: {url}")
-
-    # ホスト名文字列マッチ
-    if hostname.lower() in _BLOCKED_HOSTNAMES:
-        raise ValueError(
-            f"プライベートホストへのアクセスは拒否されています: {hostname}"
-        )
-
-    # DNS 解決 + IP 検証
-    try:
-        addrinfos = socket.getaddrinfo(hostname, None)
-    except socket.gaierror as e:
-        raise ValueError(f"DNS 解決に失敗しました: {hostname}") from e
-
-    for addrinfo in addrinfos:
-        addr = addrinfo[4][0]
-        try:
-            ip = ipaddress.ip_address(addr)
-        except ValueError:
-            continue
-        for network in _BLOCKED_NETWORKS:
-            if ip in network:
-                raise ValueError(
-                    f"プライベート IP へのアクセスは拒否されています: "
-                    f"{hostname} ({addr})"
-                )
 
 
 def _decode_html_bytes(data: bytes) -> str:
@@ -313,8 +232,8 @@ class WebIngester:
         """
         result = IngestResult()
 
-        url = _validate_url(url)
-        _check_ssrf(url)
+        url = validate_url(url)
+        check_ssrf(url)
 
         if client is None:
             raise ValueError("client (ConstrainedClient) が必要です")
@@ -405,8 +324,8 @@ class WebIngester:
         """
         result = IngestResult()
 
-        url = _validate_url(url)
-        _check_ssrf(url)
+        url = validate_url(url)
+        check_ssrf(url)
 
         if client is None:
             raise ValueError("client (ConstrainedClient) が必要です")
@@ -538,7 +457,7 @@ class WebIngester:
                     break
 
                 try:
-                    _check_ssrf(link)
+                    check_ssrf(link)
 
                     page_resp = await client.get(link, follow_redirects=False)
                     if 300 <= page_resp.status_code < 400:
@@ -636,11 +555,11 @@ class WebIngester:
             タイトルと URL の辞書リスト
         """
         try:
-            url = _validate_url(url)
+            url = validate_url(url)
         except ValueError:
             return []
 
-        _check_ssrf(url)
+        check_ssrf(url)
 
         if client is None:
             raise ValueError("client (ConstrainedClient) が必要です")
@@ -731,7 +650,7 @@ class WebIngester:
 
                 title = ""
                 try:
-                    _check_ssrf(link)
+                    check_ssrf(link)
 
                     page_resp = await client.get(
                         link, follow_redirects=False

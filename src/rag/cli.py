@@ -1736,14 +1736,14 @@ async def run_site_ingest(args: argparse.Namespace) -> None:
     import re
     import time as time_mod
 
-    from .pipeline.ingesters.web import _check_ssrf, _validate_url
     from .scrapy.bridge import import_to_source_store
     from .scrapy.runner import ScrapyRunner
+    from .utils.url import check_ssrf, validate_url
 
     # URL バリデーション
     try:
-        url = _validate_url(args.url)
-        _check_ssrf(url)
+        url = validate_url(args.url)
+        check_ssrf(url)
     except ValueError as e:
         logger.error("エラー: %s", e)
         sys.exit(1)
