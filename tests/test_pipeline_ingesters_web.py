@@ -22,17 +22,15 @@ import pytest
 from rag.pipeline.ingesters.web import (
     MAX_CRAWL_DEPTH_HARD_LIMIT,
     WebIngester,
-    _check_ssrf,
     _decode_html_bytes,
     _extract_links,
     _extract_title,
     _is_allowed_content_type,
     _is_crawlable_url,
-    _looks_like_msys_path,
     _needs_html_extension,
-    _validate_url,
 )
 from rag.store.source_store import SourceStore
+from rag.utils.url import check_ssrf, validate_url
 
 
 @pytest.fixture()
@@ -44,62 +42,62 @@ def source_store(tmp_path: Path) -> SourceStore:
 
 
 class TestValidateUrl:
-    """_validate_url のテスト."""
+    """validate_url() のテスト."""
 
     def test_valid_http(self) -> None:
         """http スキームが通ること."""
-        assert _validate_url("http://example.com/page") == "http://example.com/page"
+        assert validate_url("http://example.com/page") == "http://example.com/page"
 
     def test_valid_https(self) -> None:
         """https スキームが通ること."""
-        assert _validate_url("https://example.com/page") == "https://example.com/page"
+        assert validate_url("https://example.com/page") == "https://example.com/page"
 
     def test_empty_raises(self) -> None:
         """空の URL でエラーになること."""
         with pytest.raises(ValueError, match="空"):
-            _validate_url("")
+            validate_url("")
 
     def test_invalid_scheme_raises(self) -> None:
         """無効なスキームでエラーになること."""
         with pytest.raises(ValueError, match="スキーム"):
-            _validate_url("ftp://example.com/file")
+            validate_url("ftp://example.com/file")
 
     def test_no_hostname_raises(self) -> None:
         """ホスト名なしでエラーになること."""
         with pytest.raises(ValueError, match="ホスト名"):
-            _validate_url("https:///path")
+            validate_url("https:///path")
 
     def test_fragment_removed(self) -> None:
         """フラグメントが除去されること."""
-        result = _validate_url("https://example.com/page#section")
+        result = validate_url("https://example.com/page#section")
         assert "#" not in result
         assert result == "https://example.com/page"
 
 
 class TestCheckSsrf:
-    """_check_ssrf のテスト."""
+    """check_ssrf() のテスト."""
 
     def test_localhost_blocked(self) -> None:
         """localhost がブロックされること."""
         with pytest.raises(ValueError, match="プライベートホスト"):
-            _check_ssrf("http://localhost/api")
+            check_ssrf("http://localhost/api")
 
     def test_localhost_localdomain_blocked(self) -> None:
         """localhost.localdomain がブロックされること."""
         with pytest.raises(ValueError, match="プライベートホスト"):
-            _check_ssrf("http://localhost.localdomain/api")
+            check_ssrf("http://localhost.localdomain/api")
 
     def test_private_ip_blocked(self) -> None:
         """プライベート IP がブロックされること."""
         with pytest.raises(ValueError, match="プライベート"):
-            _check_ssrf("http://127.0.0.1/api")
+            check_ssrf("http://127.0.0.1/api")
 
     @patch("socket.getaddrinfo")
     def test_public_ip_allowed(self, mock_getaddr: MagicMock) -> None:
         """パブリック IP が許可されること."""
         mock_getaddr.return_value = [(2, 1, 6, "", ("93.184.216.34", 80))]
         # パブリック IP は SSRF ブロックされない（例外が発生しないことを確認）
-        _check_ssrf("http://example.com/")
+        check_ssrf("http://example.com/")
 
 
 class TestExtractTitle:
