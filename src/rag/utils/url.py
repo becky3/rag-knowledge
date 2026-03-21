@@ -14,7 +14,9 @@ from urllib.parse import urlparse
 _BLOCKED_HOSTNAMES = frozenset({"localhost", "localhost.localdomain"})
 
 # SSRF 対策: ブロック対象ネットワーク
-_BLOCKED_NETWORKS: list[ipaddress.IPv4Network | ipaddress.IPv6Network] = [
+_BLOCKED_NETWORKS: tuple[
+    ipaddress.IPv4Network | ipaddress.IPv6Network, ...
+] = (
     ipaddress.IPv4Network("127.0.0.0/8"),
     ipaddress.IPv4Network("10.0.0.0/8"),
     ipaddress.IPv4Network("172.16.0.0/12"),
@@ -23,7 +25,7 @@ _BLOCKED_NETWORKS: list[ipaddress.IPv4Network | ipaddress.IPv6Network] = [
     ipaddress.IPv6Network("::1/128"),
     ipaddress.IPv6Network("fc00::/7"),
     ipaddress.IPv6Network("fe80::/10"),
-]
+)
 
 
 def validate_url(url: str) -> str:
@@ -79,18 +81,20 @@ def check_ssrf(url: str) -> None:
 
     for addrinfo in addrinfos:
         addr = addrinfo[4][0]
+        # IPv6 の zone index（例: "fe80::1%lo0" の "%lo0"）を除去
+        if isinstance(addr, str) and "%" in addr:
+            addr = addr.split("%", 1)[0]
         try:
             ip = ipaddress.ip_address(addr)
         except ValueError as e:
-            # パース不能なアドレス表現は fail-closed として拒否する
+            # パース不能なアドレスは fail-closed として拒否する
             raise ValueError(
-                f"DNS 解決結果に無効な IP アドレスが含まれています: {hostname} ({addr})"
+                f"DNS 解決結果に無効な IP アドレスが含まれています: "
+                f"{hostname} ({addr})"
             ) from e
-
-        # IPv4-mapped IPv6 (::ffff:127.0.0.1 など) は対応する IPv4 として評価する
+        # IPv4-mapped IPv6（例: "::ffff:127.0.0.1"）は IPv4 として判定
         if isinstance(ip, ipaddress.IPv6Address) and ip.ipv4_mapped is not None:
             ip = ip.ipv4_mapped
-
         for network in _BLOCKED_NETWORKS:
             if ip in network:
                 raise ValueError(

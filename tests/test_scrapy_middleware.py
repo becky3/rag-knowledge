@@ -183,7 +183,12 @@ class TestCheckSsrf:
 
 
 class TestSsrfMiddleware:
-    """SsrfMiddleware のテスト（同期パス）."""
+    """SsrfMiddleware のテスト.
+
+    process_request は Deferred を返す（deferToThread 経由）。
+    テストでは deferToThread をモックして同期的に実行し、
+    Middleware のフロー（pass / IgnoreRequest 変換）を検証する。
+    """
 
     def setup_method(self) -> None:
         """各テスト前に Middleware インスタンスを生成する."""
@@ -195,3 +200,55 @@ class TestSsrfMiddleware:
         request = Request(url="https:///path/only")
         with pytest.raises(IgnoreRequest, match="SSRF check failed"):
             self.middleware.process_request(request, self.spider)
+
+    @patch("rag.scrapy.middleware.threads.deferToThread")
+    def test_public_ip_returns_deferred(
+        self, mock_defer: MagicMock
+    ) -> None:
+        """パブリック IP の場合、Deferred を返すこと."""
+        from twisted.internet import defer as twisted_defer
+
+        # check_ssrf が成功（何も返さない）をシミュレート
+        mock_defer.return_value = twisted_defer.succeed(None)
+        request = Request(url="https://example.com/page")
+        result = self.middleware.process_request(request, self.spider)
+        assert isinstance(result, twisted_defer.Deferred)
+        mock_defer.assert_called_once_with(check_ssrf, "https://example.com/page")
+
+    @patch("rag.scrapy.middleware.threads.deferToThread")
+    def test_private_ip_raises_ignore_request(
+        self, mock_defer: MagicMock
+    ) -> None:
+        """プライベート IP の場合、errback で IgnoreRequest に変換すること."""
+        from twisted.internet import defer as twisted_defer
+        from twisted.python.failure import Failure
+
+        # check_ssrf が ValueError を送出するシミュレート
+        err = ValueError("プライベート IP へのアクセスは拒否されています: evil.com (10.0.0.1)")
+        mock_defer.return_value = twisted_defer.fail(Failure(err))
+        request = Request(url="https://evil.com/page")
+        d = self.middleware.process_request(request, self.spider)
+
+        # errback が IgnoreRequest を送出するか検証
+        errors: list[Failure] = []
+        d.addErrback(lambda f: errors.append(f))
+        assert len(errors) == 1
+        assert errors[0].check(IgnoreRequest)
+
+    @patch("rag.scrapy.middleware.threads.deferToThread")
+    def test_dns_failure_raises_ignore_request(
+        self, mock_defer: MagicMock
+    ) -> None:
+        """DNS 解決失敗の場合、errback で IgnoreRequest に変換すること."""
+        from twisted.internet import defer as twisted_defer
+        from twisted.python.failure import Failure
+
+        err = ValueError("DNS 解決に失敗しました: nonexistent.com")
+        mock_defer.return_value = twisted_defer.fail(Failure(err))
+        request = Request(url="https://nonexistent.com/page")
+        d = self.middleware.process_request(request, self.spider)
+
+        errors: list[Failure] = []
+        d.addErrback(lambda f: errors.append(f))
+        assert len(errors) == 1
+        assert errors[0].check(IgnoreRequest)
