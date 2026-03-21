@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import hashlib
 import logging
+import subprocess
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -179,17 +180,25 @@ class PipelineController:
     def run_full_rebuild(
         self,
         source_type: SourceType | None = None,
+        *,
+        auto_commit: bool = False,
     ) -> PipelineSummary:
         """全再構築を実行する.
 
         converted_store とインデックスをクリアし、
         source_store 全ファイルをパイプライン処理する。
 
+        Args:
+            source_type: 対象媒体フィルタ（None で全媒体）
+            auto_commit: True の場合、未コミット変更を自動コミットする
+
         Raises:
             RuntimeError: source_store に未コミットの変更がある場合
+                (auto_commit=False 時)
         """
         self._git.init_repo()
-        self._check_uncommitted_changes()
+        self._auto_commit_if_needed(auto_commit, "full", source_type)
+        self._check_uncommitted_changes(source_type)
 
         # 1. metadata.db 再構築
         self._source_store.rebuild_db()
@@ -259,33 +268,76 @@ class PipelineController:
             to_commit_id=to_commit,
         )
 
-    def _check_uncommitted_changes(self) -> None:
+    def _check_uncommitted_changes(
+        self,
+        source_type: SourceType | None = None,
+    ) -> None:
         """source_store に未コミットの変更がないか確認する.
+
+        Args:
+            source_type: チェック対象の媒体ディレクトリ（None で全体）
 
         Raises:
             RuntimeError: 未コミットの変更がある場合
         """
-        if self._git.has_commits() and self._git.has_uncommitted_changes():
+        if self._git.has_commits() and self._git.has_uncommitted_changes(
+            path=source_type,
+        ):
             msg = (
                 "source_store に未コミットの変更があります。"
                 "rebuild 前に変更をコミットしてください。"
             )
             raise RuntimeError(msg)
 
+    def _auto_commit_if_needed(
+        self,
+        auto_commit: bool,
+        mode: str,
+        source_type: SourceType | None = None,
+    ) -> None:
+        """auto_commit が有効な場合、未コミット変更を自動コミットする.
+
+        Args:
+            auto_commit: 自動コミットを実行するか
+            mode: 再構築モード（コミットメッセージに使用）
+            source_type: コミット対象の媒体ディレクトリ（None で全体）
+        """
+        if not auto_commit:
+            return
+        if source_type is not None:
+            message = f"auto-commit: rebuild ({mode}, {source_type})"
+        else:
+            message = f"auto-commit: rebuild ({mode})"
+        try:
+            commit_id = self._git.commit(message, path=source_type)
+        except subprocess.CalledProcessError as e:
+            msg = f"自動コミットに失敗しました: {e.stderr or e}"
+            raise RuntimeError(msg) from e
+        if commit_id:
+            logger.info("自動コミット完了: %s", commit_id)
+
     def run_convert_only(
         self,
         source_type: SourceType | None = None,
+        *,
+        auto_commit: bool = False,
     ) -> PipelineSummary:
         """コンバートのみ再実行する.
 
         converted_store をクリアし、source_store 全ファイルを
         コンバーターで再処理する。インデクサーは実行しない。
 
+        Args:
+            source_type: 対象媒体フィルタ（None で全媒体）
+            auto_commit: True の場合、未コミット変更を自動コミットする
+
         Raises:
             RuntimeError: source_store に未コミットの変更がある場合
+                (auto_commit=False 時)
         """
         self._git.init_repo()
-        self._check_uncommitted_changes()
+        self._auto_commit_if_needed(auto_commit, "convert", source_type)
+        self._check_uncommitted_changes(source_type)
 
         # 1. converted_store クリア
         self._converter.clear(self._converted_store_dir, source_type)
@@ -338,17 +390,25 @@ class PipelineController:
     def run_index_only(
         self,
         source_type: SourceType | None = None,
+        *,
+        auto_commit: bool = False,
     ) -> PipelineSummary:
         """インデックスのみ再構築する.
 
         ChromaDB + BM25 をクリアし、
         converted_store 全ファイルからインデックスを再構築する。
 
+        Args:
+            source_type: 対象媒体フィルタ（None で全媒体）
+            auto_commit: True の場合、未コミット変更を自動コミットする
+
         Raises:
             RuntimeError: source_store に未コミットの変更がある場合
+                (auto_commit=False 時)
         """
         self._git.init_repo()
-        self._check_uncommitted_changes()
+        self._auto_commit_if_needed(auto_commit, "index", source_type)
+        self._check_uncommitted_changes(source_type)
 
         # 1. インデックスクリア
         self._indexer.clear(source_type)

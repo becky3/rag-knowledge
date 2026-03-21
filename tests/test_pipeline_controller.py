@@ -14,6 +14,7 @@
 from __future__ import annotations
 
 import shutil
+import subprocess
 from pathlib import Path
 
 import pytest
@@ -954,3 +955,212 @@ class TestRenamedLocalSourceId:
         # インデクサー: 旧削除 + 新追加
         assert "local/old.txt" in indexer.deleted_ids
         assert "local/new.txt" in indexer.added
+
+
+class TestAutoCommit:
+    """auto_commit オプションのテスト."""
+
+    def test_auto_commit_full_rebuild_with_uncommitted(
+        self,
+        controller: tuple[PipelineController, StubConverter, StubIndexer],
+        workspace: dict[str, Path],
+    ) -> None:
+        """auto_commit=True + 未コミット変更あり → 自動コミットされて rebuild 成功."""
+        ctrl, converter, indexer = controller
+        _place_local_file(workspace["source"], "local/a.txt")
+        ctrl.commit("first")
+        ctrl.run_incremental()
+
+        # 未コミットのファイルを追加
+        _place_local_file(workspace["source"], "local/new.txt")
+
+        converter.converted.clear()
+        indexer.added.clear()
+
+        # auto_commit=True なので成功する
+        summary = ctrl.run_full_rebuild(auto_commit=True)
+        assert summary.mode == PipelineMode.FULL_REBUILD
+        assert summary.processed == 2  # a.txt + new.txt
+
+    def test_auto_commit_false_with_uncommitted_raises(
+        self,
+        controller: tuple[PipelineController, StubConverter, StubIndexer],
+        workspace: dict[str, Path],
+    ) -> None:
+        """auto_commit=False（デフォルト） + 未コミット変更あり → RuntimeError."""
+        ctrl, _, _ = controller
+        _place_local_file(workspace["source"], "local/a.txt")
+        ctrl.commit("first")
+
+        _place_local_file(workspace["source"], "local/uncommitted.txt")
+
+        with pytest.raises(RuntimeError, match="未コミットの変更があります"):
+            ctrl.run_full_rebuild()
+
+    def test_auto_commit_no_changes(
+        self,
+        controller: tuple[PipelineController, StubConverter, StubIndexer],
+        workspace: dict[str, Path],
+    ) -> None:
+        """auto_commit=True + 変更なし → 正常に rebuild 実行."""
+        ctrl, converter, indexer = controller
+        _place_local_file(workspace["source"], "local/a.txt")
+        ctrl.commit("first")
+        ctrl.run_incremental()
+
+        converter.converted.clear()
+        indexer.added.clear()
+
+        summary = ctrl.run_full_rebuild(auto_commit=True)
+        assert summary.mode == PipelineMode.FULL_REBUILD
+        assert summary.processed == 1  # a.txt
+
+    def test_auto_commit_convert_only(
+        self,
+        controller: tuple[PipelineController, StubConverter, StubIndexer],
+        workspace: dict[str, Path],
+    ) -> None:
+        """run_convert_only で auto_commit が機能する."""
+        ctrl, converter, _ = controller
+        _place_local_file(workspace["source"], "local/a.txt")
+        ctrl.commit("first")
+        ctrl.run_incremental()
+
+        # 既存ファイルを変更（未コミット状態にする）
+        _place_local_file(workspace["source"], "local/a.txt", "updated")
+
+        converter.converted.clear()
+
+        # auto_commit=False ならエラーになるが、True なので成功する
+        summary = ctrl.run_convert_only(auto_commit=True)
+        assert summary.mode == PipelineMode.CONVERT_ONLY
+        assert summary.processed == 1  # a.txt（metadata.db に登録済み）
+
+    def test_auto_commit_index_only(
+        self,
+        controller: tuple[PipelineController, StubConverter, StubIndexer],
+        workspace: dict[str, Path],
+    ) -> None:
+        """run_index_only で auto_commit が機能する."""
+        ctrl, _, indexer = controller
+        _place_local_file(workspace["source"], "local/a.txt")
+        ctrl.commit("first")
+        ctrl.run_incremental()
+
+        # 既存ファイルを変更（未コミット状態にする）
+        _place_local_file(workspace["source"], "local/a.txt", "updated")
+
+        indexer.added.clear()
+
+        # auto_commit=False ならエラーになるが、True なので成功する
+        summary = ctrl.run_index_only(auto_commit=True)
+        assert summary.mode == PipelineMode.INDEX_ONLY
+        assert summary.processed == 1  # a.txt（converted_store にある）
+
+    def test_auto_commit_message_format(
+        self,
+        controller: tuple[PipelineController, StubConverter, StubIndexer],
+        workspace: dict[str, Path],
+    ) -> None:
+        """自動コミットのメッセージが仕様通りの形式になる."""
+        ctrl, _, _ = controller
+        _place_local_file(workspace["source"], "local/a.txt")
+        ctrl.commit("first")
+
+        # 未コミットのファイルを追加
+        _place_local_file(workspace["source"], "local/new.txt")
+
+        ctrl.run_full_rebuild(auto_commit=True)
+
+        # git log で最新コミットメッセージを確認
+        result = subprocess.run(
+            ["git", "log", "-1", "--format=%s"],
+            cwd=str(workspace["source"]),
+            capture_output=True,
+            text=True,
+            check=True,
+            encoding="utf-8",
+        )
+        assert result.stdout.strip() == "auto-commit: rebuild (full)"
+
+    def test_auto_commit_scoped_by_source_type(
+        self,
+        controller: tuple[PipelineController, StubConverter, StubIndexer],
+        workspace: dict[str, Path],
+    ) -> None:
+        """source_type 指定時、他の source_type の変更はコミットされない."""
+        ctrl, _, _ = controller
+        _place_local_file(workspace["source"], "local/a.txt")
+        _place_web_file(workspace["source"], "web/example.com/page.html")
+        ctrl.commit("first")
+        ctrl.run_incremental()
+
+        # 両方に未コミット変更を追加
+        _place_local_file(workspace["source"], "local/b.txt", "new local")
+        _place_web_file(
+            workspace["source"],
+            "web/example.com/page2.html",
+            title="Page 2",
+            source_id="web/example.com/page2.html",
+        )
+
+        # source_type="local" で auto_commit → local だけコミットされる
+        ctrl.run_full_rebuild(source_type="local", auto_commit=True)
+
+        # web の変更はまだ未コミットのはず
+        result = subprocess.run(
+            ["git", "status", "--porcelain", "--", "web/"],
+            cwd=str(workspace["source"]),
+            capture_output=True,
+            text=True,
+            check=True,
+            encoding="utf-8",
+        )
+        assert result.stdout.strip() != ""  # web にはまだ変更がある
+
+    def test_auto_commit_source_type_message_format(
+        self,
+        controller: tuple[PipelineController, StubConverter, StubIndexer],
+        workspace: dict[str, Path],
+    ) -> None:
+        """source_type 指定時のコミットメッセージ形式を確認."""
+        ctrl, _, _ = controller
+        _place_local_file(workspace["source"], "local/a.txt")
+        ctrl.commit("first")
+
+        _place_local_file(workspace["source"], "local/new.txt")
+
+        ctrl.run_full_rebuild(source_type="local", auto_commit=True)
+
+        result = subprocess.run(
+            ["git", "log", "-1", "--format=%s"],
+            cwd=str(workspace["source"]),
+            capture_output=True,
+            text=True,
+            check=True,
+            encoding="utf-8",
+        )
+        assert result.stdout.strip() == "auto-commit: rebuild (full, local)"
+
+    def test_uncommitted_check_scoped_by_source_type(
+        self,
+        controller: tuple[PipelineController, StubConverter, StubIndexer],
+        workspace: dict[str, Path],
+    ) -> None:
+        """source_type 指定時、他の source_type の未コミット変更はエラーにならない."""
+        ctrl, _, _ = controller
+        _place_local_file(workspace["source"], "local/a.txt")
+        ctrl.commit("first")
+        ctrl.run_incremental()
+
+        # web に未コミット変更を追加（local は変更なし）
+        _place_web_file(
+            workspace["source"],
+            "web/example.com/new.html",
+            title="New Page",
+            source_id="web/example.com/new.html",
+        )
+
+        # source_type="local" で rebuild → web の変更は無視されるので成功する
+        summary = ctrl.run_full_rebuild(source_type="local")
+        assert summary.mode == PipelineMode.FULL_REBUILD
