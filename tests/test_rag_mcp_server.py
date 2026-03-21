@@ -591,6 +591,7 @@ class TestRagCrawlPreviewTool:
         def ctx():
             with (
                 patch.object(mod, "get_settings", return_value=mock_settings),
+                patch("pathlib.Path.mkdir"),
                 patch.object(mod, "SourceStore", return_value=MagicMock()),
                 patch.object(mod, "_create_web_ingester", return_value=mock_ingester_instance),
                 patch.object(mod, "ConstrainedClient", return_value=mock_client),
