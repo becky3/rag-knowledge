@@ -8,6 +8,7 @@
 from __future__ import annotations
 
 import logging
+import re
 import shutil
 from pathlib import Path
 from typing import Any
@@ -25,9 +26,63 @@ from rag.markdown import RagMarkdownConverter
 
 logger = logging.getLogger(__name__)
 
-# 非コンテンツタグ（HTML 変換時に除去）
-_NON_CONTENT_TAGS = (
-    "script", "style", "nav", "header", "footer", "aside", "noscript",
+# --- HTML コンテンツ領域特定 ---
+
+# セマンティックタグ（優先順）
+_SEMANTIC_CONTENT_TAGS = ("article", "main")
+
+# id パターン（長いものから試行 = 具体的なパターン優先）
+_CONTENT_ID_PATTERNS = (
+    "main-content",
+    "main_content",
+    "content-wrap",
+    "content_wrap",
+    "page-container",
+    "page_container",
+    "main-body",
+    "main_body",
+    "content",
+    "main",
+)
+
+# class パターン
+_CONTENT_CLASS_PATTERNS = (
+    "main-content",
+    "main_content",
+    "content-wrap",
+    "content_wrap",
+    "page-container",
+    "page_container",
+)
+
+# --- コンテンツ領域内の非コンテンツ除去 ---
+
+# タグ名ベースの除去
+_REMOVE_TAGS = ("script", "style", "noscript", "form")
+
+# class パターンベースの除去（部分一致）
+_REMOVE_CLASS_PATTERNS = (
+    "breadcrumb",
+    "topic-path",
+    "nextprev",
+    "pagination",
+    "toolbar",
+)
+
+# テキスト密度フォールバックで除外するタグ
+_TEXT_DENSITY_SKIP_TAGS = frozenset(
+    ("script", "style", "nav", "noscript", "link"),
+)
+
+# 事前コンパイル済み正規表現
+_COMPILED_ID_PATTERNS = tuple(
+    re.compile(re.escape(p), re.IGNORECASE) for p in _CONTENT_ID_PATTERNS
+)
+_COMPILED_CLASS_PATTERNS = tuple(
+    re.compile(re.escape(p), re.IGNORECASE) for p in _CONTENT_CLASS_PATTERNS
+)
+_COMPILED_REMOVE_CLASS_RE = re.compile(
+    "|".join(re.escape(p) for p in _REMOVE_CLASS_PATTERNS), re.IGNORECASE
 )
 
 
@@ -41,13 +96,91 @@ def _create_md_converter() -> RagMarkdownConverter:
     )
 
 
+def _find_content_area(soup: BeautifulSoup) -> Tag | BeautifulSoup:
+    """HTML からコンテンツ領域を特定する.
+
+    仕様: docs/specs/converter.md「コンテンツ領域の特定」
+
+    優先順（仕様書と同一）:
+    1. <article> タグ
+    2. <main> タグ
+    3. role="main" 属性
+    4. id パターンマッチ
+    5. class パターンマッチ
+    6. テキスト密度フォールバック（body 直下で最大テキスト量のコンテナ要素）
+    7. <body> タグ（最終フォールバック。body もなければ soup を返す）
+    """
+    # 1. セマンティックタグ
+    for tag_name in _SEMANTIC_CONTENT_TAGS:
+        found = soup.find(tag_name)
+        if isinstance(found, Tag):
+            return found
+
+    # 2. role="main"
+    found = soup.find(attrs={"role": "main"})
+    if isinstance(found, Tag):
+        return found
+
+    # 3. id パターンマッチ（長いパターンから = 具体的なパターン優先）
+    for regex in _COMPILED_ID_PATTERNS:
+        found = soup.find(id=regex)
+        if isinstance(found, Tag):
+            return found
+
+    # 4. class パターンマッチ
+    for regex in _COMPILED_CLASS_PATTERNS:
+        found = soup.find(class_=regex)
+        if isinstance(found, Tag):
+            return found
+
+    # 5-6. テキスト密度フォールバック → body 最終フォールバック
+    body = soup.find("body")
+    if isinstance(body, Tag):
+        # body 直下の子要素のうち、子 Tag を持つコンテナ要素に限定して
+        # テキスト量が最大のものを選ぶ。<p> や <h1> 等の末端要素は
+        # コンテンツラッパーではないため候補から除外する。
+        best: Tag | None = None
+        best_len = 0
+        for child in body.children:
+            if not isinstance(child, Tag):
+                continue
+            if child.name in _TEXT_DENSITY_SKIP_TAGS:
+                continue
+            # 子 Tag を持たない末端要素はラッパーではない
+            if not any(isinstance(c, Tag) for c in child.children):
+                continue
+            text_len = len(child.get_text(strip=True))
+            if text_len > best_len:
+                best_len = text_len
+                best = child
+        # テキスト密度で候補が見つかればそれを、なければ body を返す
+        return best if best is not None else body
+
+    return soup
+
+
+def _clean_content_area(content: Tag | BeautifulSoup) -> None:
+    """コンテンツ領域内の非コンテンツ要素を除去する.
+
+    仕様: docs/specs/converter.md「コンテンツ領域内の非コンテンツ除去」
+    """
+    # タグ名ベースの除去
+    for tag_name in _REMOVE_TAGS:
+        for tag in content.find_all(tag_name):
+            tag.decompose()
+
+    # class パターンベースの除去（1つの結合済み正規表現で1パス走査）
+    for tag in content.find_all(class_=_COMPILED_REMOVE_CLASS_RE):
+        tag.decompose()
+
+
 def convert_html(source_path: Path) -> str | None:
     """HTML ファイルを Markdown に変換する.
 
     仕様: docs/specs/converter.md「HTML → Markdown 変換」
 
-    - コンテンツエリア優先抽出（article > main > body）
-    - 非コンテンツタグ除去
+    - コンテンツ領域の特定（article/main → role="main" → id/class パターン → テキスト密度 → body）
+    - コンテンツ領域内の非コンテンツ除去
     - markdownify ベースの変換（ATX見出し、テーブル保持、リンクURL除去）
     - 非 UTF-8 エンコーディング自動推定（charset_normalizer）
 
@@ -72,18 +205,11 @@ def convert_html(source_path: Path) -> str | None:
 
     soup = BeautifulSoup(html_text, "html.parser")
 
-    # コンテンツエリア優先抽出（article > main > body）
-    content_area: Tag | BeautifulSoup = soup
-    for tag_name in ("article", "main", "body"):
-        found = soup.find(tag_name)
-        if isinstance(found, Tag):
-            content_area = found
-            break
+    # コンテンツ領域の特定
+    content_area = _find_content_area(soup)
 
-    # 非コンテンツタグ除去
-    for tag_name in _NON_CONTENT_TAGS:
-        for tag in content_area.find_all(tag_name):
-            tag.decompose()
+    # コンテンツ領域内の非コンテンツ除去
+    _clean_content_area(content_area)
 
     # HTML → Markdown 変換
     md_converter = _create_md_converter()
