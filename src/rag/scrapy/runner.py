@@ -221,14 +221,12 @@ with open({json.dumps(safe_params_path)}, encoding='utf-8') as f:
 
 from scrapy.crawler import CrawlerProcess
 from rag.scrapy.spider import SiteSpider
-from rag.scrapy.middleware import SsrfMiddleware
-
 settings = {{
     # ハード制約（Spider 実装変更で無効化されないよう Runner 側で明示）
     'ROBOTSTXT_OBEY': True,
     'TELNETCONSOLE_ENABLED': False,
     'DOWNLOADER_MIDDLEWARES': {{
-        SsrfMiddleware: 50,
+        'rag.scrapy.middleware.SsrfMiddleware': 50,
     }},
     # クロール設定
     'JOBDIR': params['jobdir'],

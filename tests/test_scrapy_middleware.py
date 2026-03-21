@@ -181,6 +181,17 @@ class TestCheckSsrf:
         with pytest.raises(ValueError, match="ホスト名がありません"):
             check_ssrf("https:///path/only")
 
+    @patch("rag.utils.url.socket.getaddrinfo")
+    def test_ipv6_zone_index_rejected(
+        self, mock_getaddrinfo: MagicMock
+    ) -> None:
+        """zone index 付き IPv6 リンクローカルアドレスが拒否されること."""
+        mock_getaddrinfo.return_value = [
+            (10, 1, 6, "", ("fe80::1%lo0", 80, 0, 0)),
+        ]
+        with pytest.raises(ValueError, match="プライベート IP"):
+            check_ssrf("https://link-local-zone.example.com/page")
+
 
 class TestSsrfMiddleware:
     """SsrfMiddleware のテスト.
