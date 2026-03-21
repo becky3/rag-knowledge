@@ -124,6 +124,10 @@ class SiteSpider(scrapy.Spider):  # type: ignore[misc]
 
         # HTML ファイルを保存
         filepath = self._save_html(response)
+        if filepath is None:
+            # 保存失敗時はメタデータを yield しない（JSONL に不整合な行を書かない）
+            yield from self._follow_links(response)
+            return
 
         # JSONL 用メタデータを yield（FEEDS 機能で自動出力）
         title = self._extract_title(response)
@@ -147,8 +151,12 @@ class SiteSpider(scrapy.Spider):  # type: ignore[misc]
             "application/xml",
         )
 
-    def _save_html(self, response: Response) -> Path:
-        """レスポンスの HTML を一時保存ディレクトリに保存する."""
+    def _save_html(self, response: Response) -> Path | None:
+        """レスポンスの HTML を一時保存ディレクトリに保存する.
+
+        Returns:
+            保存したファイルパス。保存失敗時は None。
+        """
         filename = self._url_to_filename(response.url)
         filepath = self._output_dir / filename
         try:
@@ -157,6 +165,7 @@ class SiteSpider(scrapy.Spider):  # type: ignore[misc]
         except OSError:
             self._error_count += 1
             self.logger.exception("ファイル保存に失敗: %s", filepath)
+            return None
         return filepath
 
     # .html 付加をスキップする Web 系拡張子
@@ -196,16 +205,20 @@ class SiteSpider(scrapy.Spider):  # type: ignore[misc]
         for href in response.css("a::attr(href)").getall():
             full_url, _ = urldefrag(response.urljoin(href))
 
-            # スキームフィルタ: http/https 以外 (mailto:, tel:, javascript: 等) は辿らない
             parsed = urlparse(full_url)
+
+            # スキームフィルタ: http/https 以外 (mailto:, tel:, javascript: 等) は辿らない
             if parsed.scheme not in ("http", "https"):
                 continue
 
-            # URL パターンフィルタ
-            if self._url_pattern and not self._url_pattern.search(full_url):
+            # クエリを削除して canonical URL に揃える
+            canonical_url = parsed._replace(query="").geturl()
+
+            # URL パターンフィルタ（canonical URL に対して適用）
+            if self._url_pattern and not self._url_pattern.search(canonical_url):
                 continue
 
-            yield scrapy.Request(full_url, callback=self.parse)
+            yield scrapy.Request(canonical_url, callback=self.parse)
 
     def closed(self, reason: str) -> None:
         """Spider 終了時のログ出力."""

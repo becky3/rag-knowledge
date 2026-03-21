@@ -224,6 +224,10 @@ from scrapy.crawler import CrawlerProcess
 from rag.scrapy.spider import SiteSpider
 
 settings = {{
+    # ハード制約（Spider 実装変更で無効化されないよう Runner 側で明示）
+    'ROBOTSTXT_OBEY': True,
+    'TELNETCONSOLE_ENABLED': False,
+    # クロール設定
     'JOBDIR': params['jobdir'],
     'FEEDS': {{
         params['jsonl_path']: {{

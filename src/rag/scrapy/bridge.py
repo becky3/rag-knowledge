@@ -136,7 +136,9 @@ def import_to_source_store(
 
             record = _parse_jsonl_line(line, line_num)
             if record is None:
-                result.parse_errors += 1
+                # 空行はエラーとしてカウントしない
+                if line.strip():
+                    result.parse_errors += 1
                 continue
 
             _process_record(
