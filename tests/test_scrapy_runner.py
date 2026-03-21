@@ -346,12 +346,12 @@ class TestScrapyRunnerRun:
         mock_process.stderr = _async_lines_iter([])
 
         with patch("asyncio.create_subprocess_exec", return_value=mock_process):
-            await runner.run(start_url="https://gcgx.games/dq1/")
+            await runner.run(start_url="https://example.com/docs/guide/")
 
-        params_path = tmp_path / "gcgx.games" / "spider_params.json"
+        params_path = tmp_path / "example.com" / "spider_params.json"
         params = json.loads(params_path.read_text(encoding="utf-8"))
         # re.escape でドメインのドットがエスケープされたパターン
-        assert params["url_pattern"] == r"^https://gcgx\.games/dq1/"
+        assert params["url_pattern"] == r"^https://example\.com/docs/guide(?:/|$)"
 
     @pytest.mark.asyncio()
     async def test_url_pattern_not_generated_for_root(self, tmp_path: Path) -> None:

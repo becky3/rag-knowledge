@@ -1795,9 +1795,8 @@ async def run_site_ingest(args: argparse.Namespace) -> None:
         force=args.force,
     )
 
-    elapsed = time_mod.monotonic() - start_time
-
     if not crawl_result.jsonl_path.exists():
+        elapsed = time_mod.monotonic() - start_time
         print(
             f"クロールが完了しましたが、メタデータが出力されませんでした。"
             f" exit_code={crawl_result.exit_code}, 所要時間={elapsed:.1f}秒",
@@ -1815,6 +1814,9 @@ async def run_site_ingest(args: argparse.Namespace) -> None:
     pipeline_summary = None
     if bridge_result.ingest.placed > 0:
         pipeline_summary = controller.ingest_and_index(f"ingest(web): site-ingest {url}")
+
+    # 操作全体の所要時間（クロール + Bridge + パイプライン）
+    elapsed = time_mod.monotonic() - start_time
 
     # 結果表示
     print(

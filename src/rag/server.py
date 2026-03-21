@@ -1000,9 +1000,8 @@ async def rag_site_ingest(
             force=force,
         )
 
-        elapsed = time_mod.monotonic() - start_time
-
         if not crawl_result.jsonl_path.exists():
+            elapsed = time_mod.monotonic() - start_time
             return (
                 f"クロールが完了しましたが、メタデータが出力されませんでした。"
                 f" exit_code={crawl_result.exit_code}, 所要時間={elapsed:.1f}秒"
@@ -1023,6 +1022,9 @@ async def rag_site_ingest(
                 controller.ingest_and_index, f"ingest(web): site-ingest {url}",
             )
             _reset_rag_service()
+
+        # 操作全体の所要時間（クロール + Bridge + パイプライン）
+        elapsed = time_mod.monotonic() - start_time
 
         # 結果サマリー構築
         parts: list[str] = []

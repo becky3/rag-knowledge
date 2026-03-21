@@ -87,8 +87,9 @@ class ScrapyRunner:
             path = parsed.path.rstrip("/")
             if path and path != "/":
                 # スキーム + ホスト + パスプレフィックスを正規表現エスケープ
-                prefix = f"{parsed.scheme}://{parsed.hostname}{path}/"
-                url_pattern = f"^{re.escape(prefix)}"
+                # 末尾スラッシュ有無の両方にマッチするようにする
+                base_prefix = f"{parsed.scheme}://{parsed.hostname}{path}"
+                url_pattern = f"^{re.escape(base_prefix)}(?:/|$)"
                 logger.info("url_pattern を自動生成: %s", url_pattern)
 
         # ドメインから一時保存ディレクトリを決定
