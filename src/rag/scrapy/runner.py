@@ -105,12 +105,10 @@ class ScrapyRunner:
             logger.info("--force: ドメインディレクトリを削除します: %s", domain_dir)
             try:
                 shutil.rmtree(domain_dir)
-            except OSError:
-                logger.warning(
-                    "ドメインディレクトリの削除に失敗しました（ファイルロックの可能性）: %s",
-                    domain_dir,
-                    exc_info=True,
-                )
+            except OSError as exc:
+                msg = f"--force 指定時にドメインディレクトリの削除に失敗しました: {domain_dir}"
+                logger.error(msg, exc_info=True)
+                raise RuntimeError(msg) from exc
 
         # ディレクトリ準備
         html_dir.mkdir(parents=True, exist_ok=True)

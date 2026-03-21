@@ -214,7 +214,7 @@ flowchart TD
 
 Spider の振る舞い:
 
-- `start_url` からクロールを開始し、ページ内のリンクを辿る
+- `start_url` からクロールを開始し、ページ内のリンクを辿る。リンク辿り時はクエリ文字列を除去して canonical URL に正規化する（静的サイトを主要ユースケースとする設計判断。`?page=2` 等のクエリでページが区別されるサイトでは一部ページが欠落する可能性がある）
 - `allowed_domains` に含まれないドメインへのリクエストは自動的にフィルタされる
 - `url_pattern` が指定されている場合、パターンに一致する URL のみ取得・保存する
 - 取得した HTML をファイルとして `output_dir` に保存する。URL パスのディレクトリ構造を維持する（例: `https://example.com/docs/api/auth.html` → `output_dir/docs/api/auth.html`）

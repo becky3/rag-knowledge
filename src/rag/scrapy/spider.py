@@ -160,13 +160,23 @@ class SiteSpider(scrapy.Spider):  # type: ignore[misc]
         filename = self._url_to_filename(response.url)
         filepath = self._output_dir / filename
         try:
-            filepath.parent.mkdir(parents=True, exist_ok=True)
-            filepath.write_bytes(response.body)
+            # パストラバーサル防止
+            output_root = self._output_dir.resolve()
+            resolved_filepath = filepath.resolve()
+            if not resolved_filepath.is_relative_to(output_root):
+                self._error_count += 1
+                self.logger.warning(
+                    "出力ディレクトリ外への書き込みをブロック: %s", resolved_filepath,
+                )
+                return None
+
+            resolved_filepath.parent.mkdir(parents=True, exist_ok=True)
+            resolved_filepath.write_bytes(response.body)
         except OSError:
             self._error_count += 1
             self.logger.exception("ファイル保存に失敗: %s", filepath)
             return None
-        return filepath
+        return resolved_filepath
 
     # .html 付加をスキップする Web 系拡張子
     _WEB_EXTENSIONS = {".html", ".htm", ".xhtml", ".shtml", ".php", ".asp", ".aspx", ".jsp"}
