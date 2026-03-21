@@ -50,9 +50,9 @@ MCP ツール `rag_site_ingest` と CLI コマンド `site-ingest` の 2 つの�
 ### Safe Browsing チェック
 
 - 数千件規模の URL に対する Google Safe Browsing API 呼び出しは非現実的なためスキップする
-- SSRF チェックは初回 URL（ユーザー入力）のみ実施する。Scrapy が後続で辿る URL（同一ドメイン内）については、per-request の IP 解決検証は行わない。DNS リバインディング等のリスクは `allowed_domains` によるドメイン制約で緩和する
-
-> **TODO:#316** per-request の SSRF チェック（Downloader Middleware）を実装し、DNS リバインディングに対応する
+- SSRF チェックは 2 層で実施する:
+  1. **初回 URL チェック**: ユーザー入力の開始 URL に対して、クロール開始前に `check_ssrf` で検証する
+  2. **per-request チェック**: Scrapy Downloader Middleware で、各リクエストの送信前に DNS 解決 → IP 検証を実行する。DNS リバインディング攻撃（初回解決時はパブリック IP、実際のリクエスト時にプライベート IP に切り替わる手法）に対応する
 
 ### robots.txt
 
@@ -101,7 +101,8 @@ MCP ツール `rag_site_ingest` と CLI コマンド `site-ingest` の 2 つの�
 
 | 制約名 | 種別 | 値 | 解除可否 |
 |--------|------|-----|---------|
-| SSRF チェック | ハードリミット | 初回 URL に対して実施。プライベート IP・ローカルホストを拒否 | 無効化不可 |
+| SSRF チェック（初回 URL） | ハードリミット | クロール開始前に開始 URL を検証。プライベート IP・ローカルホストを拒否 | 無効化不可 |
+| SSRF チェック（per-request） | ハードリミット | Downloader Middleware で各リクエストの DNS 解決結果を検証。プライベート IP を拒否 | 無効化不可 |
 | ドメイン制約 | ハードリミット | `allowed_domains` で初回 URL と同一ドメインに制限 | 無効化不可 |
 | robots.txt 遵守 | ハードリミット | `ROBOTSTXT_OBEY = True`（固定） | 無効化不可 |
 | ページ数上限 | 設定値 | 許容範囲 1〜50,000、デフォルト 10,000 | 範囲内で変更可 |
@@ -199,6 +200,7 @@ flowchart TD
 | Spider | `src/rag/scrapy/spider.py` | 汎用 Scrapy Spider。URL・ドメイン制約・URL パターンをパラメータで受け取り、HTML ファイルを一時保存ディレクトリに保存する |
 | Runner | `src/rag/scrapy/runner.py` | subprocess ラッパー。Scrapy プロセスの起動・監視・終了判定を行う |
 | Bridge | `src/rag/scrapy/bridge.py` | JSONL + HTML を source_store に変換・配置する。.meta サイドカーファイルを生成する |
+| SSRF Middleware | `src/rag/scrapy/middleware.py` | Downloader Middleware。各リクエストの DNS 解決結果を検証し、プライベート IP へのアクセスを拒否する |
 | パッケージ初期化 | `src/rag/scrapy/__init__.py` | パッケージ初期化 |
 
 ### Spider
@@ -248,7 +250,47 @@ Scrapy に渡す設定:
 | `CLOSESPIDER_ERRORCOUNT` | `site_ingest_error_count`（config.toml） |
 | `JOBDIR` | 一時保存ディレクトリ内の `jobdir/` |
 | `FEEDS` | JSONL 出力パス |
+| `DOWNLOADER_MIDDLEWARES` | SSRF Middleware を有効化（優先度 50） |
 | `LOG_LEVEL` | `INFO` |
+
+### SSRF Middleware
+
+Scrapy Downloader Middleware として動作し、各リクエストの送信前に SSRF チェックを実行する。
+
+動作フロー:
+
+1. Scrapy がリクエストを発行する
+2. Middleware がリクエスト URL のホスト名を DNS 解決する
+3. 解決された全 IP アドレスがプライベート IP レンジに該当しないか検証する
+4. 検証に通過した場合、リクエストを次の Middleware（または Downloader）に渡す
+5. 検証に失敗した場合、リクエストを `IgnoreRequest` 例外で拒否し、警告ログを出力する
+
+拒否対象（Web インジェスターの `check_ssrf` と同一の判定基準）:
+
+| アドレス範囲 | 区分 |
+|-------------|------|
+| `127.0.0.0/8` | IPv4 ループバック |
+| `10.0.0.0/8` | RFC 1918 プライベート |
+| `172.16.0.0/12` | RFC 1918 プライベート |
+| `192.168.0.0/16` | RFC 1918 プライベート |
+| `169.254.0.0/16` | リンクローカル |
+| `::1/128` | IPv6 ループバック |
+| `fc00::/7` | IPv6 ユニークローカル |
+| `fe80::/10` | IPv6 リンクローカル |
+| `localhost` / `localhost.localdomain` | ホスト名文字列マッチ |
+
+DNS リバインディング対策:
+
+- Middleware は Scrapy の Downloader が HTTP 接続を確立する直前に DNS 解決を行い、その結果を検証する。初回 URL チェック時の DNS 結果をキャッシュして再利用するのではなく、リクエストごとに独立して DNS 解決を実行する
+- これにより、初回 DNS 解決時にパブリック IP を返し、後続の解決でプライベート IP に切り替える DNS リバインディング攻撃を検出する
+
+Middleware の優先度:
+
+- `DOWNLOADER_MIDDLEWARES` で優先度 50 に設定する。Scrapy のデフォルト Middleware（`HttpCompressionMiddleware`: 590、`RedirectMiddleware`: 600 等）より先に実行されるため、プライベート IP への接続自体を防止する
+
+判定ロジックの共有:
+
+- IP アドレスの判定ロジックは `rag.utils.url.check_ssrf` を使用する。初回 URL チェックと per-request チェックで同一の判定基準を適用する
 
 ### Bridge
 
@@ -359,6 +401,8 @@ Scrapy は独立した Python パッケージとして `pyproject.toml` に依�
 | 同一 URL が既に source_store に存在する場合 | `SourceStore.place_file_from_url` が既存ファイルを上書きする（通常の重複検出動作） |
 | `url_pattern` が無効な正規表現の場合 | バリデーションエラーとして拒否する |
 | Windows でのファイルロック | Scrapy プロセス終了後に JOBDIR のファイルがロックされている場合、`--force` による JOBDIR 削除が失敗する可能性がある。リトライまたは手動削除を案内する |
+| DNS リバインディングによるプライベート IP への誘導 | SSRF Middleware が各リクエストの DNS 解決結果を検証し、プライベート IP へのアクセスを `IgnoreRequest` で拒否する。該当リクエストは Scrapy の統計に失敗として記録される |
+| SSRF Middleware での DNS 解決失敗 | DNS 解決に失敗した場合、そのリクエストを `IgnoreRequest` で拒否する。ネットワーク障害等による一時的な DNS エラーは Scrapy のリトライ対象外となる |
 
 ## 関連ドキュメント
 
