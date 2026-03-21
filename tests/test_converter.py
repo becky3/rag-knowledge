@@ -114,16 +114,16 @@ class TestConvertHtml:
         assert "Navigation" not in result
 
     def test_non_content_tags_removed(self, tmp_path: Path) -> None:
+        """script/style/noscript/form がコンテンツ領域内で除去される."""
         html = (
             "<html><body>"
+            "<div id='main'>"
             "<script>alert('x')</script>"
             "<style>.red{color:red}</style>"
-            "<nav>Nav</nav>"
-            "<header>Header</header>"
             "<p>Content</p>"
-            "<footer>Footer</footer>"
-            "<aside>Sidebar</aside>"
             "<noscript>NoScript</noscript>"
+            "<form><input type='text'></form>"
+            "</div>"
             "</body></html>"
         )
         html_file = tmp_path / "test.html"
@@ -133,11 +133,173 @@ class TestConvertHtml:
         assert result is not None
         assert "Content" in result
         assert "alert" not in result
-        assert "Nav" not in result
-        assert "Header" not in result
-        assert "Footer" not in result
-        assert "Sidebar" not in result
         assert "NoScript" not in result
+        assert "input" not in result
+
+    def test_content_area_id_main(self, tmp_path: Path) -> None:
+        """id='main' でコンテンツ領域が特定され、外部のノイズが除外される."""
+        html = (
+            "<html><body>"
+            "<div id='header'>Header Noise</div>"
+            "<div id='sidebar'>Sidebar Noise</div>"
+            "<div id='main'><h1>Title</h1><p>Main body.</p></div>"
+            "<div id='footer'>Footer Noise</div>"
+            "</body></html>"
+        )
+        html_file = tmp_path / "test.html"
+        html_file.write_text(html, encoding="utf-8")
+
+        result = convert_html(html_file)
+        assert result is not None
+        assert "Main body." in result
+        assert "Header Noise" not in result
+        assert "Sidebar Noise" not in result
+        assert "Footer Noise" not in result
+
+    def test_content_area_id_content_wrap(self, tmp_path: Path) -> None:
+        """id='content-wrap' でコンテンツ領域が特定される."""
+        html = (
+            "<html><body>"
+            "<div id='sidebar'>Sidebar</div>"
+            "<div id='content-wrap'><p>Content body.</p></div>"
+            "</body></html>"
+        )
+        html_file = tmp_path / "test.html"
+        html_file.write_text(html, encoding="utf-8")
+
+        result = convert_html(html_file)
+        assert result is not None
+        assert "Content body." in result
+        assert "Sidebar" not in result
+
+    def test_content_area_id_page_container(self, tmp_path: Path) -> None:
+        """id='page-container' でコンテンツ領域が特定される."""
+        html = (
+            "<html><body>"
+            "<div id='global-header'>Global Header</div>"
+            "<div id='page-container'>"
+            "<header class='interviewheader'><h2>Interview Title</h2></header>"
+            "<p>Interview body.</p>"
+            "</div>"
+            "</body></html>"
+        )
+        html_file = tmp_path / "test.html"
+        html_file.write_text(html, encoding="utf-8")
+
+        result = convert_html(html_file)
+        assert result is not None
+        assert "Interview Title" in result
+        assert "Interview body." in result
+        assert "Global Header" not in result
+
+    def test_content_area_role_main(self, tmp_path: Path) -> None:
+        """role='main' でコンテンツ領域が特定される."""
+        html = (
+            "<html><body>"
+            "<div class='nav'>Nav</div>"
+            "<div role='main'><p>Main content.</p></div>"
+            "</body></html>"
+        )
+        html_file = tmp_path / "test.html"
+        html_file.write_text(html, encoding="utf-8")
+
+        result = convert_html(html_file)
+        assert result is not None
+        assert "Main content." in result
+        assert "Nav" not in result
+
+    def test_header_inside_content_preserved(self, tmp_path: Path) -> None:
+        """コンテンツ領域内の <header> タグは除去されずに保持される."""
+        html = (
+            "<html><body>"
+            "<div id='main'>"
+            "<header><h1>Article Title</h1></header>"
+            "<p>Article body.</p>"
+            "</div>"
+            "</body></html>"
+        )
+        html_file = tmp_path / "test.html"
+        html_file.write_text(html, encoding="utf-8")
+
+        result = convert_html(html_file)
+        assert result is not None
+        assert "Article Title" in result
+        assert "Article body." in result
+
+    def test_text_density_fallback(self, tmp_path: Path) -> None:
+        """パターンマッチに失敗した場合、テキスト密度で最大の子要素を選ぶ."""
+        html = (
+            "<html><body>"
+            "<div class='small-nav'>Nav Link</div>"
+            "<div class='big-content'>"
+            "<h1>Title</h1>"
+            "<p>Long content paragraph with substantial text for density.</p>"
+            "<p>Another paragraph with more content to make this the largest.</p>"
+            "</div>"
+            "<div class='tiny-footer'>Footer Noise</div>"
+            "</body></html>"
+        )
+        html_file = tmp_path / "test.html"
+        html_file.write_text(html, encoding="utf-8")
+
+        result = convert_html(html_file)
+        assert result is not None
+        assert "Long content paragraph" in result
+        assert "Nav Link" not in result
+        assert "Footer Noise" not in result
+
+    def test_breadcrumb_class_removed(self, tmp_path: Path) -> None:
+        """コンテンツ領域内の breadcrumb class が除去される."""
+        html = (
+            "<html><body>"
+            "<div id='main'>"
+            "<div class='breadcrumb'>Home > Page</div>"
+            "<p>Content here.</p>"
+            "</div>"
+            "</body></html>"
+        )
+        html_file = tmp_path / "test.html"
+        html_file.write_text(html, encoding="utf-8")
+
+        result = convert_html(html_file)
+        assert result is not None
+        assert "Content here." in result
+        assert "Home > Page" not in result
+
+    def test_details_summary_preserved(self, tmp_path: Path) -> None:
+        """<details>/<summary> タグ内のコンテンツが保持される."""
+        html = (
+            "<html><body>"
+            "<div id='content'>"
+            "<details><summary><h3>FAQ Question</h3></summary>"
+            "<p>FAQ Answer here.</p>"
+            "</details>"
+            "</div>"
+            "</body></html>"
+        )
+        html_file = tmp_path / "test.html"
+        html_file.write_text(html, encoding="utf-8")
+
+        result = convert_html(html_file)
+        assert result is not None
+        assert "FAQ Question" in result
+        assert "FAQ Answer" in result
+
+    def test_semantic_article_takes_priority(self, tmp_path: Path) -> None:
+        """<article> がある場合、id パターンより優先される."""
+        html = (
+            "<html><body>"
+            "<div id='main'><p>Main div content.</p></div>"
+            "<article><p>Article content.</p></article>"
+            "</body></html>"
+        )
+        html_file = tmp_path / "test.html"
+        html_file.write_text(html, encoding="utf-8")
+
+        result = convert_html(html_file)
+        assert result is not None
+        assert "Article content." in result
+        assert "Main div content." not in result
 
     def test_atx_headings(self, tmp_path: Path) -> None:
         html = "<html><body><h1>H1</h1><h2>H2</h2><h3>H3</h3></body></html>"
