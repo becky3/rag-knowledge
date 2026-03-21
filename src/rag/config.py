@@ -72,6 +72,9 @@ class _EnvLoader(BaseSettings):
     # デバッグ
     rag_debug_log_enabled: bool
 
+    # サイト一括取り込み
+    site_ingest_temp_dir: str = ".tmp/site_ingest"
+
 
 # .env 管理フィールド名の集合（重複検出に使用）
 _ENV_FIELD_NAMES = frozenset(_EnvLoader.model_fields.keys())
@@ -102,6 +105,7 @@ class RAGSettings(BaseModel):
     rag_http_port: int = Field(ge=1, le=65535)
     rag_dns_rebinding_protection: bool
     rag_debug_log_enabled: bool
+    site_ingest_temp_dir: str
 
     # --- config.toml から取得（共通設定値） ---
 
@@ -179,6 +183,13 @@ class RAGSettings(BaseModel):
     rag_bluesky_request_timeout: int = Field(ge=1, le=120)
     rag_bluesky_request_interval: float = Field(ge=0.1, le=60.0)
     rag_bluesky_include_reposts: bool
+
+    # サイト一括取り込み（Scrapy subprocess）
+    site_ingest_delay_sec: float = Field(ge=0.05, le=60.0)
+    site_ingest_max_pages: int = Field(ge=1, le=50000)
+    site_ingest_download_timeout: int = Field(ge=1, le=300)
+    site_ingest_timeout_sec: float = Field(ge=60.0, le=86400.0)
+    site_ingest_error_count: int = Field(ge=1, le=1000)
 
     @model_validator(mode="after")
     def validate_chunk_settings(self) -> RAGSettings:

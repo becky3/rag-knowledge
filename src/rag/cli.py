@@ -360,6 +360,13 @@ def main() -> None:
     crawldoc_parser.add_argument("--pattern", default="**/*", help="glob パターン")
     crawldoc_parser.add_argument("--upload-mode", choices=["fail", "replace"], default="fail", help="同名ファイル存在時の動作")
 
+    # site-ingest: Scrapy によるサイト一括取り込み
+    siteingest_parser = subparsers.add_parser("site-ingest", help="Scrapy でサイトを一括取り込み（大規模サイト向け）")
+    siteingest_parser.add_argument("url", help="クロール開始 URL")
+    siteingest_parser.add_argument("--url-pattern", default="", help="URL フィルタパターン（正規表現）")
+    siteingest_parser.add_argument("--max-pages", type=int, default=None, help="ページ数上限")
+    siteingest_parser.add_argument("--force", action="store_true", help="JOBDIR を削除して再クロール")
+
     args = parser.parse_args()
 
     # コマンドディスパッチ（sync / async 統一）
@@ -373,6 +380,7 @@ def main() -> None:
         "crawl-zenn": run_crawl_zenn,
         "add-document": run_add_document,
         "crawl-documents": run_crawl_documents,
+        "site-ingest": run_site_ingest,
     }
     _SYNC_COMMANDS: dict[str, object] = {
         "get-document": run_get_document,
@@ -1721,6 +1729,104 @@ async def run_crawl_documents(args: argparse.Namespace) -> None:
 
     pipeline_summary = controller.ingest_and_index(f"ingest(local): crawl {args.dir_path}")
     _print_ingest_result(ingest_result, pipeline_summary, context=f"ディレクトリ: {args.dir_path}")
+
+
+async def run_site_ingest(args: argparse.Namespace) -> None:
+    """Scrapy によるサイト一括取り込み."""
+    import re
+    import time as time_mod
+
+    from .pipeline.ingesters.web import _check_ssrf, _validate_url
+    from .scrapy.bridge import import_to_source_store
+    from .scrapy.runner import ScrapyRunner
+
+    # URL バリデーション
+    try:
+        url = _validate_url(args.url)
+        _check_ssrf(url)
+    except ValueError as e:
+        logger.error("エラー: %s", e)
+        sys.exit(1)
+
+    # url_pattern バリデーション
+    if args.url_pattern:
+        try:
+            re.compile(args.url_pattern)
+        except re.error as e:
+            logger.error("無効な正規表現パターン: %s", e)
+            sys.exit(1)
+
+    controller, settings = _build_cli_pipeline_controller()
+
+    # max_pages のクランプ
+    effective_max_pages = (
+        args.max_pages if args.max_pages is not None
+        else settings.site_ingest_max_pages
+    )
+    if effective_max_pages < 1:
+        effective_max_pages = 1
+        logger.warning("max_pages を 1 にクランプしました")
+    elif effective_max_pages > 50000:
+        effective_max_pages = 50000
+        logger.warning("max_pages を 50000 にクランプしました")
+
+    # ドメイン導出
+    from urllib.parse import urlparse
+    parsed = urlparse(url)
+    allowed_domains = parsed.hostname or ""
+
+    start_time = time_mod.monotonic()
+
+    # Scrapy Runner で クロール
+    runner = ScrapyRunner(
+        temp_dir=settings.site_ingest_temp_dir,
+        delay_sec=settings.site_ingest_delay_sec,
+        max_pages=effective_max_pages,
+        download_timeout=settings.site_ingest_download_timeout,
+    )
+
+    crawl_result = await runner.run(
+        start_url=url,
+        allowed_domains=allowed_domains,
+        url_pattern=args.url_pattern,
+        max_pages=effective_max_pages,
+        force=args.force,
+    )
+
+    elapsed = time_mod.monotonic() - start_time
+
+    if not crawl_result.jsonl_path.exists():
+        print(
+            f"クロールが完了しましたが、メタデータが出力されませんでした。"
+            f" exit_code={crawl_result.exit_code}, 所要時間={elapsed:.1f}秒",
+        )
+        return
+
+    # Bridge: JSONL + HTML → source_store
+    bridge_result = import_to_source_store(
+        jsonl_path=crawl_result.jsonl_path,
+        html_dir=crawl_result.output_dir,
+        source_store=controller.source_store,
+    )
+
+    # パイプライン処理
+    pipeline_summary = None
+    if bridge_result.ingest.placed > 0:
+        pipeline_summary = controller.ingest_and_index(f"ingest(web): site-ingest {url}")
+
+    # 結果表示
+    print(
+        f"サイト取り込み完了: {bridge_result.ingest.placed}件配置"
+        f", {bridge_result.ingest.skipped}件スキップ"
+        f", {bridge_result.ingest.errors}件エラー"
+    )
+    print(f"所要時間: {elapsed:.1f}秒")
+    if pipeline_summary is not None:
+        print(f"パイプライン: {pipeline_summary.processed}件処理")
+        if pipeline_summary.errors:
+            print(f"パイプラインエラー: {len(pipeline_summary.errors)}件")
+    if not crawl_result.success:
+        print(f"Scrapy exit_code={crawl_result.exit_code}（部分的な結果）")
 
 
 if __name__ == "__main__":

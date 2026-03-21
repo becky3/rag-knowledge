@@ -62,4 +62,11 @@ TEST_SETTINGS_DEFAULTS: dict[str, object] = {
     "rag_pdf_quality_cjk_min_threshold": 0.05,
     "rag_pdf_quality_min_chars_per_page": 10,
     "rag_pdf_quality_sample_pages": 10,
+    # サイト一括取り込み（Scrapy subprocess）
+    "site_ingest_temp_dir": ".tmp/site_ingest",
+    "site_ingest_delay_sec": 0.1,
+    "site_ingest_max_pages": 10000,
+    "site_ingest_download_timeout": 30,
+    "site_ingest_timeout_sec": 7200,
+    "site_ingest_error_count": 10,
 }

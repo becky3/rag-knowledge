@@ -1,9 +1,10 @@
 """RAG MCPサーバーのテスト.
 
-仕様: docs/specs/rag-knowledge.md, docs/specs/search-response.md, docs/specs/rebuild-stats.md
-12個のRAGツール（rag_search, rag_get_document, rag_add, rag_crawl, rag_crawl_preview,
+仕様: docs/specs/rag-knowledge.md, docs/specs/search-response.md, docs/specs/rebuild-stats.md,
+      docs/specs/site-ingest.md
+13個のRAGツール（rag_search, rag_get_document, rag_add, rag_crawl, rag_crawl_preview,
 rag_crawl_zenn, rag_crawl_bluesky, rag_add_document, rag_crawl_documents,
-rag_delete, rag_rebuild, rag_stats）が
+rag_site_ingest, rag_delete, rag_rebuild, rag_stats）が
 MCPサーバーとして公開されていることを検証する。
 """
 
@@ -31,8 +32,8 @@ def _reset_rag_global_state() -> None:
 
 
 @pytest.mark.asyncio
-async def test_rag_server_exposes_twelve_tools() -> None:
-    """RAG MCPサーバーが12個のツールを公開すること."""
+async def test_rag_server_exposes_thirteen_tools() -> None:
+    """RAG MCPサーバーが13個のツールを公開すること."""
     mod = import_module("rag.server")
     server = mod.mcp
 
@@ -42,20 +43,20 @@ async def test_rag_server_exposes_twelve_tools() -> None:
     expected = {
         "rag_search", "rag_get_document", "rag_add", "rag_crawl",
         "rag_crawl_preview", "rag_crawl_zenn", "rag_crawl_bluesky",
-        "rag_add_document", "rag_crawl_documents", "rag_delete",
-        "rag_rebuild", "rag_stats",
+        "rag_add_document", "rag_crawl_documents", "rag_site_ingest",
+        "rag_delete", "rag_rebuild", "rag_stats",
     }
     assert tool_names == expected, f"Expected {expected}, got {tool_names}"
 
 
 @pytest.mark.asyncio
 async def test_rag_server_tool_count() -> None:
-    """RAG MCPサーバーのツール数が正確に11であること."""
+    """RAG MCPサーバーのツール数が正確に13であること."""
     mod = import_module("rag.server")
     server = mod.mcp
 
     tools = await server.list_tools()
-    assert len(tools) == 12
+    assert len(tools) == 13
 
 
 class TestRagSearchOutput:

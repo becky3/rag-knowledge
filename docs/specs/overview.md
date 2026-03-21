@@ -30,6 +30,7 @@ RAG Knowledge は、外部 Web ページから収集した知識をベクトル 
 | 20 | Local インジェスター | ローカルファイルの配置 | [ingesters/local.md](ingesters/local.md) |
 | 21 | 検索レスポンス + 全文取得 | チャンク単位検索レスポンスと全文取得ツール | [search-response.md](search-response.md) |
 | 22 | 再構築・統計・バックアップ | パイプライン再構築の MCP/CLI 公開・統計拡張・バックアップ手順 | [rebuild-stats.md](rebuild-stats.md) |
+| 23 | サイト一括取り込み（Scrapy subprocess） | Scrapy subprocess による大規模サイトの一括取り込み | [site-ingest.md](site-ingest.md) |
 
 ## 3. 技術スタック
 
