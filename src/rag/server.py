@@ -943,16 +943,16 @@ async def rag_site_ingest(
     import re
     import time as time_mod
 
-    from .pipeline.ingesters.web import _check_ssrf, _validate_url
     from .scrapy.bridge import import_to_source_store
     from .scrapy.runner import ScrapyRunner
+    from .utils.url import check_ssrf, validate_url
 
     settings = get_settings()
 
     # URL バリデーション
     try:
-        url = _validate_url(url)
-        _check_ssrf(url)
+        url = validate_url(url)
+        check_ssrf(url)
     except ValueError as e:
         return f"エラー: {e}"
 
