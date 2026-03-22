@@ -9,7 +9,7 @@ C 拡張（BM25s 等）の SEGFAULT がサーバープロセスを巻き込ま�
 
 Usage:
     python -m rag.pipeline.worker rebuild \\
-        --mode full --source-type web --auto-commit
+        --mode full --source-type web
     python -m rag.pipeline.worker ingest-and-index \\
         --commit-message "add: new document"
     python -m rag.pipeline.worker delete \\
@@ -67,14 +67,10 @@ def run_rebuild(args: argparse.Namespace) -> None:
 
     mode: str = args.mode
     source_type: SourceType | None = args.source_type
-    auto_commit: bool = args.auto_commit
 
     # incremental モードのバリデーション（CLI と同等）
     if mode == "incremental" and source_type is not None:
         print(json.dumps({"type": "error", "error": True, "message": "incremental モードでは source_type を指定できません"}))
-        sys.exit(1)
-    if mode == "incremental" and auto_commit:
-        print(json.dumps({"type": "error", "error": True, "message": "incremental モードでは auto_commit を指定できません"}))
         sys.exit(1)
 
     try:
@@ -84,17 +80,17 @@ def run_rebuild(args: argparse.Namespace) -> None:
 
         if mode == "full":
             summary = controller.run_full_rebuild(
-                source_type=source_type, auto_commit=auto_commit,
+                source_type=source_type,
                 progress_callback=_emit_progress,
             )
         elif mode == "convert":
             summary = controller.run_convert_only(
-                source_type=source_type, auto_commit=auto_commit,
+                source_type=source_type,
                 progress_callback=_emit_progress,
             )
         elif mode == "index":
             summary = controller.run_index_only(
-                source_type=source_type, auto_commit=auto_commit,
+                source_type=source_type,
                 progress_callback=_emit_progress,
             )
         else:
@@ -167,9 +163,6 @@ def main() -> None:
         "--source-type",
         choices=["web", "bluesky", "zenn", "local"],
         default=None,
-    )
-    rebuild_parser.add_argument(
-        "--auto-commit", action="store_true", default=False,
     )
 
     ingest_parser = subparsers.add_parser("ingest-and-index")

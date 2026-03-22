@@ -121,10 +121,14 @@ class PipelineController:
     def run_incremental(self, progress_callback: ProgressCallback | None = None) -> PipelineSummary:
         """差分更新を実行する.
 
-        last_commit_id と HEAD の差分を検知し、
-        変更ファイルのみをパイプライン処理する。
+        source_store に未コミットの変更がある場合は自動コミットし、
+        last_commit_id と HEAD の差分を検知して変更ファイルのみをパイプライン処理する。
         """
         self._git.init_repo()
+
+        # 未コミット変更の自動コミット
+        if self._git.has_uncommitted_changes():
+            self._auto_commit_for_incremental()
 
         if not self._git.has_commits():
             return PipelineSummary(
@@ -191,7 +195,6 @@ class PipelineController:
         self,
         source_type: SourceType | None = None,
         *,
-        auto_commit: bool = False,
         progress_callback: ProgressCallback | None = None,
     ) -> PipelineSummary:
         """全再構築を実行する.
@@ -201,14 +204,11 @@ class PipelineController:
 
         Args:
             source_type: 対象媒体フィルタ（None で全媒体）
-            auto_commit: True の場合、未コミット変更を自動コミットする
 
         Raises:
             RuntimeError: source_store に未コミットの変更がある場合
-                (auto_commit=False 時)
         """
         self._git.init_repo()
-        self._auto_commit_if_needed(auto_commit, "full", source_type)
         self._check_uncommitted_changes(source_type)
 
         # 1. metadata.db 再構築
@@ -293,7 +293,7 @@ class PipelineController:
         Raises:
             RuntimeError: 未コミットの変更がある場合
         """
-        if self._git.has_commits() and self._git.has_uncommitted_changes(
+        if self._git.has_uncommitted_changes(
             path=source_type,
         ):
             msg = (
@@ -302,27 +302,10 @@ class PipelineController:
             )
             raise RuntimeError(msg)
 
-    def _auto_commit_if_needed(
-        self,
-        auto_commit: bool,
-        mode: str,
-        source_type: SourceType | None = None,
-    ) -> None:
-        """auto_commit が有効な場合、未コミット変更を自動コミットする.
-
-        Args:
-            auto_commit: 自動コミットを実行するか
-            mode: 再構築モード（コミットメッセージに使用）
-            source_type: コミット対象の媒体ディレクトリ（None で全体）
-        """
-        if not auto_commit:
-            return
-        if source_type is not None:
-            message = f"auto-commit: rebuild ({mode}, {source_type})"
-        else:
-            message = f"auto-commit: rebuild ({mode})"
+    def _auto_commit_for_incremental(self) -> None:
+        """差分更新時に未コミット変更を自動コミットする."""
         try:
-            commit_id = self._git.commit(message, path=source_type)
+            commit_id = self._git.commit("auto-commit: incremental")
         except subprocess.CalledProcessError as e:
             msg = f"自動コミットに失敗しました: {e.stderr or e}"
             raise RuntimeError(msg) from e
@@ -333,7 +316,6 @@ class PipelineController:
         self,
         source_type: SourceType | None = None,
         *,
-        auto_commit: bool = False,
         progress_callback: ProgressCallback | None = None,
     ) -> PipelineSummary:
         """コンバートのみ再実行する.
@@ -343,14 +325,11 @@ class PipelineController:
 
         Args:
             source_type: 対象媒体フィルタ（None で全媒体）
-            auto_commit: True の場合、未コミット変更を自動コミットする
 
         Raises:
             RuntimeError: source_store に未コミットの変更がある場合
-                (auto_commit=False 時)
         """
         self._git.init_repo()
-        self._auto_commit_if_needed(auto_commit, "convert", source_type)
         self._check_uncommitted_changes(source_type)
 
         # 1. converted_store クリア
@@ -407,7 +386,6 @@ class PipelineController:
         self,
         source_type: SourceType | None = None,
         *,
-        auto_commit: bool = False,
         progress_callback: ProgressCallback | None = None,
     ) -> PipelineSummary:
         """インデックスのみ再構築する.
@@ -417,14 +395,11 @@ class PipelineController:
 
         Args:
             source_type: 対象媒体フィルタ（None で全媒体）
-            auto_commit: True の場合、未コミット変更を自動コミットする
 
         Raises:
             RuntimeError: source_store に未コミットの変更がある場合
-                (auto_commit=False 時)
         """
         self._git.init_repo()
-        self._auto_commit_if_needed(auto_commit, "index", source_type)
         self._check_uncommitted_changes(source_type)
 
         # 1. インデックスクリア
