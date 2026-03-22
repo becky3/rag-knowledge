@@ -46,40 +46,42 @@
 
 | 操作 | 入力 | 出力 | 振る舞い |
 |------|------|------|---------|
-| 差分更新 | なし（自動検知） | 処理結果サマリ | `last_commit_id` と HEAD の差分を検知し、変更ファイルのみをパイプライン処理する。通常運用のデフォルト操作 |
-| 全再構築 | source_type フィルタ（任意）、auto_commit（任意） | 処理結果サマリ | converted_store とインデックスをクリアし、source_store 全ファイルをパイプライン処理する。source_type 指定時はその媒体のみ対象。データ破損時や大規模な設計変更時に使用。source_store に未コミットの変更がある場合の振る舞いは auto_commit の設定に従う |
-| コンバートのみ再実行 | source_type フィルタ（任意）、auto_commit（任意） | 処理結果サマリ | converted_store をクリアし、source_store 全ファイルをコンバーターで再処理する。source_type 指定時はその媒体のみ対象。コンバーターの変換ロジック改修時に使用。インデックスは後続のインデックス再構築で更新する。source_store に未コミットの変更がある場合の振る舞いは auto_commit の設定に従う |
-| インデックスのみ再構築 | source_type フィルタ（任意）、auto_commit（任意） | 処理結果サマリ | ChromaDB + BM25 をクリアし、converted_store 全ファイルからインデックスを再構築する。source_type 指定時はその媒体のインデックスのみ削除して再構築する（他の source_type のインデックスは維持）。Embedding モデル変更時やチャンクパラメータ変更時に使用。source_store に未コミットの変更がある場合の振る舞いは auto_commit の設定に従う |
+| 差分更新 | なし（自動検知） | 処理結果サマリ | source_store に未コミットの変更がある場合は自動コミットし、`last_commit_id` と HEAD の差分を検知して変更ファイルのみをパイプライン処理する。通常運用のデフォルト操作 |
+| 全再構築 | source_type フィルタ（任意） | 処理結果サマリ | converted_store とインデックスをクリアし、source_store 全ファイルをパイプライン処理する。source_type 指定時はその媒体のみ対象。データ破損時や大規模な設計変更時に使用。source_store に未コミットの変更がある場合はエラー |
+| コンバートのみ再実行 | source_type フィルタ（任意） | 処理結果サマリ | converted_store をクリアし、source_store 全ファイルをコンバーターで再処理する。source_type 指定時はその媒体のみ対象。コンバーターの変換ロジック改修時に使用。インデックスは後続のインデックス再構築で更新する。source_store に未コミットの変更がある場合はエラー |
+| インデックスのみ再構築 | source_type フィルタ（任意） | 処理結果サマリ | ChromaDB + BM25 をクリアし、converted_store 全ファイルからインデックスを再構築する。source_type 指定時はその媒体のインデックスのみ削除して再構築する（他の source_type のインデックスは維持）。Embedding モデル変更時やチャンクパラメータ変更時に使用。source_store に未コミットの変更がある場合はエラー |
 | 取り込み実行 | コミットメッセージ | 処理結果サマリ | インジェスター実行後の後処理を一括実行する。source_store の変更を `git add -A` + `git commit` し、差分更新を実行する。インジェスターと後続パイプライン処理を結合する便利操作 |
 
 全操作は `progress_callback`（任意）を受け取り、ファイル処理完了ごとにコールバックを呼び出す。callback シグネチャ: `(processed: int, total: int, current: str) -> None`。未指定時は進捗通知なし。詳細は [rebuild-stats.md](rebuild-stats.md) のサブプロセス進捗通知セクションを参照。
 
-### 未コミット変更チェックと auto_commit
+### 未コミット変更の扱い
 
-再構築操作（全再構築・コンバートのみ再実行・インデックスのみ再構築）の実行前に、source_store に未コミットの変更があるかチェックする。チェック範囲と自動コミット範囲は `source_type` の指定有無に応じて変わる。
+モードによって未コミット変更の扱いが異なる。
 
-| auto_commit の値 | 未コミット変更がある場合の振る舞い |
-|-----------------|-------------------------------|
-| `false`（デフォルト） | エラーとして再構築を拒否する（従来動作） |
-| `true` | 自動コミットを実行し、コミット成功後に再構築を続行する |
+| モード | 未コミット変更がある場合の振る舞い |
+|--------|-------------------------------|
+| 差分更新（incremental） | 自動コミットしてから差分更新を実行する |
+| 全再構築 / コンバートのみ / インデックスのみ | エラーとして再構築を拒否する |
+| 取り込み実行 | 取り込み時のコミットに含まれる（従来動作） |
 
-#### source_type によるスコープ
+#### 差分更新の自動コミット
 
-| source_type | 未コミットチェックの範囲 | auto_commit のステージング範囲 |
-|-------------|---------------------|--------------------------|
-| 指定あり | `git status --porcelain -- {source_type}/` でそのディレクトリのみチェック | `git add {source_type}/` でそのディレクトリのみステージング＋コミット |
-| 指定なし | `git status --porcelain` で全体チェック（従来動作） | `git add -A` で全体ステージング＋コミット（従来動作） |
+差分更新（incremental）は、未コミットの変更がある場合に自動コミットを実行してから差分を処理する。
 
-source_type を指定することで、他の source_type ディレクトリに編集途中のファイルがあっても影響を受けずに再構築を実行できる。
+1. source_store の未コミット変更を検知する
+2. 変更がある場合、ステージング＋コミットで変更をコミットする（コミットメッセージ形式は「コミットメッセージ規則」を参照）
+3. コミット成功後、差分更新処理に進む
+4. 変更がない場合は自動コミットをスキップし、差分更新に進む
+5. git commit コマンド自体が失敗した場合（権限エラー等）はエラーとする
 
-#### auto_commit が `true` の場合の処理フロー
+#### 再構築操作の未コミットチェック
 
-1. source_store の未コミット変更を検知する（source_type 指定時はそのディレクトリのみ）
-2. ステージング＋コミットで変更をコミットする（コミットメッセージ形式は「コミットメッセージ規則」を参照）
-3. コミット成功後、再構築処理に進む
-4. auto_commit が `true` だが変更がない場合は自動コミットをスキップし、再構築に進む。git commit コマンド自体が失敗した場合（権限エラー等）はエラーとする
+再構築操作（全再構築・コンバートのみ再実行・インデックスのみ再構築）は、未コミットの変更がある場合エラーとする。`source_type` 指定時はそのディレクトリのみをチェックする。
 
-差分更新および取り込み実行は未コミット変更チェックの対象外であり、auto_commit パラメータは適用されない。
+| source_type | 未コミットチェックの範囲 |
+|-------------|---------------------|
+| 指定あり | `git status --porcelain -- {source_type}/` でそのディレクトリのみチェック |
+| 指定なし | `git status --porcelain` で全体チェック |
 
 ### git 操作
 
@@ -106,6 +108,8 @@ git diff から取得する変更ファイルリストの各エントリが持�
 ```mermaid
 flowchart TD
     START["パイプライン開始"]
+    CHECK_DIRTY{"未コミットの変更あり?"}
+    AUTO_COMMIT["自動コミット実行"]
     GET_STATE["pipeline_history から last_commit_id 取得"]
     CHECK["last_commit_id が null commit hash か"]
     DIFF["git diff last_commit_id..HEAD"]
@@ -126,7 +130,10 @@ flowchart TD
     UPDATE_STATE["pipeline_history に実行履歴を追加"]
     END_NODE["パイプライン完了"]
 
-    START --> GET_STATE
+    START --> CHECK_DIRTY
+    CHECK_DIRTY -- Yes --> AUTO_COMMIT
+    AUTO_COMMIT --> GET_STATE
+    CHECK_DIRTY -- No --> GET_STATE
     GET_STATE --> CHECK
     CHECK -->|通常のコミット ID| DIFF
     CHECK -->|null commit hash（初回）| FULL
@@ -145,8 +152,6 @@ flowchart TD
 flowchart TD
     START["全再構築開始"]
     CHECK_DIRTY{"未コミットの変更あり?"}
-    CHECK_AUTO{"auto_commit が true?"}
-    AUTO_COMMIT["自動コミット実行"]
     ERROR_DIRTY["エラー: rebuild 拒否"]
     CLEAR_CONV["converted_store をクリア"]
     CLEAR_IDX["ChromaDB + BM25 をクリア"]
@@ -160,10 +165,7 @@ flowchart TD
     REBUILD_DB["metadata.db 再構築（source_store スキャン）"]
 
     START --> CHECK_DIRTY
-    CHECK_DIRTY -- Yes --> CHECK_AUTO
-    CHECK_AUTO -- Yes --> AUTO_COMMIT
-    AUTO_COMMIT --> REBUILD_DB
-    CHECK_AUTO -- No --> ERROR_DIRTY
+    CHECK_DIRTY -- Yes --> ERROR_DIRTY
     CHECK_DIRTY -- No --> REBUILD_DB
     REBUILD_DB --> CLEAR_CONV
     CLEAR_CONV --> CLEAR_IDX
@@ -223,10 +225,7 @@ sequenceDiagram
 |---------|-------------|
 | インジェスター実行後 | `ingest({source_type}): {概要}` |
 | 手動ファイル配置後（local） | `ingest(local): manual update` |
-| 再構築時の自動コミット（source_type 指定なし） | `auto-commit: rebuild ({mode})` |
-| 再構築時の自動コミット（source_type 指定あり） | `auto-commit: rebuild ({mode}, {source_type})` |
-
-`{mode}` は再構築モード（`full`、`convert`、`index`）が入る。
+| 差分更新時の自動コミット | `auto-commit: incremental` |
 
 `source_type` の取りうる値は [source-store.md](source-store.md) の「source_id の決定方式」を参照（`web`, `bluesky`, `zenn`, `local`）。
 
@@ -243,8 +242,9 @@ sequenceDiagram
 | source_store の git リポジトリが未初期化 | パイプライン初回実行時に `git init` を自動実行する |
 | .meta ファイルのみが変更された場合 | 拡張子 `.meta` で .meta ファイルを判定する。metadata.db のメタデータを更新する。コンバーターの再処理は行わない（データ本体に変更がないため）。インデックス側にメタデータ（title 等）を保持している場合は、インデクサーにメタデータ更新を指示する（チャンクの再生成は不要、メタデータのみ upsert） |
 | metadata.db の `status` が `deleted` のファイルが git diff に含まれる場合 | ファイルの変更種別に応じた処理を行う。`deleted` ステータスのファイルはインデックスに追加しない |
-| 再構築操作（全再構築・コンバートのみ・インデックスのみ）時に source_store に未コミットの変更がある場合 | auto_commit が `false`（デフォルト）の場合はエラーとして再構築を拒否する。auto_commit が `true` の場合は自動コミットを実行してから再構築を続行する |
-| 自動コミット時に git commit が失敗した場合 | エラーとして再構築を拒否する（コミット失敗の原因をエラーメッセージに含める） |
+| 再構築操作（全再構築・コンバートのみ・インデックスのみ）時に source_store に未コミットの変更がある場合 | エラーとして再構築を拒否する |
+| 差分更新時に source_store に未コミットの変更がある場合 | 自動コミットを実行してから差分更新を続行する |
+| 差分更新の自動コミット時に git commit が失敗した場合 | エラーとして差分更新を拒否する（コミット失敗の原因をエラーメッセージに含める） |
 
 ### 設定項目
 

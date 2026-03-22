@@ -295,12 +295,6 @@ def main() -> None:
         default=None,
         help="対象媒体フィルタ（incremental では指定不可）",
     )
-    rebuild_parser.add_argument(
-        "--auto-commit",
-        action="store_true",
-        default=False,
-        help="未コミット変更がある場合に自動コミットする（incremental では指定不可）",
-    )
     # stats サブコマンド
     subparsers.add_parser("stats", help="ナレッジベースの統計情報を表示")
 
@@ -1025,19 +1019,11 @@ def run_rebuild(args: argparse.Namespace) -> None:
 
     mode: str = args.mode
     source_type: SourceType | None = args.source_type
-    auto_commit: bool = args.auto_commit
 
     # incremental + source_type のバリデーション
     if mode == "incremental" and source_type is not None:
         logger.error(
             "incremental モードでは source_type を指定できません"
-        )
-        sys.exit(1)
-
-    # incremental + auto_commit のバリデーション
-    if mode == "incremental" and auto_commit:
-        logger.error(
-            "incremental モードでは --auto-commit を指定できません"
         )
         sys.exit(1)
 
@@ -1067,15 +1053,15 @@ def run_rebuild(args: argparse.Namespace) -> None:
 
     if mode == "full":
         summary = controller.run_full_rebuild(
-            source_type=source_type, auto_commit=auto_commit,
+            source_type=source_type,
         )
     elif mode == "convert":
         summary = controller.run_convert_only(
-            source_type=source_type, auto_commit=auto_commit,
+            source_type=source_type,
         )
     elif mode == "index":
         summary = controller.run_index_only(
-            source_type=source_type, auto_commit=auto_commit,
+            source_type=source_type,
         )
     else:
         summary = controller.run_incremental()

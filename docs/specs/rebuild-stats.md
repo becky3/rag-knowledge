@@ -55,19 +55,17 @@
 |-----------|-----|------|------|
 | `mode` | str | はい | 再構築モード（下表参照） |
 | `source_type` | str | いいえ | 対象媒体フィルタ: `web`、`bluesky`、`zenn`、`local`。未指定時は全媒体 |
-| `auto_commit` | bool | いいえ | source_store に未コミット変更がある場合に自動コミットするか。`source_type` 指定時はそのディレクトリのみを対象とする。デフォルト: `false` |
 
 再構築モード:
 
 | モード値 | 対応するパイプライン操作 | `source_type` フィルタ | 用途 |
 |---------|----------------------|----------------------|------|
-| `full` | 全再構築 | 適用可 | データ破損時や大規模な設計変更時 |
-| `convert` | コンバートのみ再実行 | 適用可 | コンバーターの変換ロジック改修時 |
-| `index` | インデックスのみ再構築 | 適用可 | Embedding モデル変更時やチャンクパラメータ変更時 |
-| `incremental` | 差分更新 | 適用不可（git diff に従う） | 通常運用（明示指定は通常不要） |
+| `full` | 全再構築 | 適用可 | データ破損時や大規模な設計変更時。未コミット変更があればエラー |
+| `convert` | コンバートのみ再実行 | 適用可 | コンバーターの変換ロジック改修時。未コミット変更があればエラー |
+| `index` | インデックスのみ再構築 | 適用可 | Embedding モデル変更時やチャンクパラメータ変更時。未コミット変更があればエラー |
+| `incremental` | 差分更新 | 適用不可（git diff に従う） | 通常運用。未コミット変更は自動コミットされる |
 
 - `source_type` フィルタが適用不可のモード（`incremental`）で `source_type` が指定された場合、エラーを返す
-- `auto_commit` が適用不可のモード（`incremental`）で `auto_commit` が `true` に指定された場合、エラーを返す
 - 戻り値: 処理結果サマリ（処理件数、スキップ件数、エラー件数、所要時間）をテキストで返す
 
 #### rag_stats（拡張）
@@ -82,14 +80,13 @@
 #### rebuild コマンド
 
 ```
-uv run python -m rag.cli rebuild --mode <MODE> [--source-type <TYPE>] [--auto-commit]
+uv run python -m rag.cli rebuild --mode <MODE> [--source-type <TYPE>]
 ```
 
 | オプション | 型 | 必須 | 内容 |
 |-----------|-----|------|------|
 | `--mode` | str | はい | 再構築モード: `full`、`convert`、`index`、`incremental` |
 | `--source-type` | str | いいえ | 対象媒体フィルタ: `web`、`bluesky`、`zenn`、`local` |
-| `--auto-commit` | フラグ | いいえ | 指定時、source_store に未コミット変更がある場合に自動コミットする。`--source-type` 指定時はそのディレクトリのみを対象とする。未指定時はエラーで拒否（デフォルト動作） |
 
 MCP ツール `rag_rebuild` と同じバリデーション・振る舞いを適用する。
 
@@ -313,7 +310,6 @@ metadata.db が破損・消失している場合は、パイプライン制御�
 | source_store ディレクトリが存在しない場合 | `rag_stats` は source_store の各項目を 0 で表示する。`rag_rebuild` はエラーを返す |
 | 再構築中に別の再構築が要求された場合 | 後発の要求にエラーを返す（排他制御） |
 | `incremental` モードで `source_type` が指定された場合 | パラメータ検証エラーを返す |
-| `incremental` モードで `auto_commit` が `true` の場合 | パラメータ検証エラーを返す |
 | metadata.db が存在しない場合の `rag_stats` | パイプラインセクションを「未初期化」と表示する。source_store のファイルシステムベースの統計は表示する |
 | 再構築中にエラーが発生した場合 | パイプライン制御のエラーハンドリングに従う（エラーファイルをスキップし残りを処理続行。`pipeline_history` に履歴を追加しない） |
 

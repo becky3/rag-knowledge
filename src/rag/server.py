@@ -1234,7 +1234,6 @@ def _collect_pipeline_stats(
 async def rag_rebuild(
     mode: str,
     source_type: str | None = None,
-    auto_commit: bool = False,
     ctx: MCPContext | None = None,
 ) -> str:
     """[rag-knowledge] RAG rebuild - ナレッジベースの再構築を実行する.
@@ -1249,11 +1248,9 @@ async def rag_rebuild(
             "full" — 全再構築（データ破損時・大規模設計変更時）
             "convert" — コンバートのみ再実行（変換ロジック改修時）
             "index" — インデックスのみ再構築（Embedding モデル変更時）
-            "incremental" — 差分更新（通常運用）
+            "incremental" — 差分更新（通常運用。未コミット変更は自動コミット）
         source_type: 対象媒体フィルタ: "web", "bluesky", "zenn", "local"。
             未指定時は全媒体。incremental モードでは指定不可。
-        auto_commit: source_store に未コミット変更がある場合に自動コミットするか。
-            デフォルト: false。incremental モードでは指定不可。
 
     Returns:
         処理結果サマリ（処理件数、スキップ件数、エラー件数、所要時間）
@@ -1273,9 +1270,6 @@ async def rag_rebuild(
             "（git diff に従います）"
         )
 
-    if mode == "incremental" and auto_commit:
-        return "エラー: incremental モードでは auto_commit を指定できません"
-
     # 設定の検証
     settings = get_settings()
     if not settings.source_store_dir:
@@ -1292,7 +1286,7 @@ async def rag_rebuild(
         return "エラー: 別の再構築が実行中です"
 
     try:
-        result = await _run_rebuild_subprocess(mode, source_type, auto_commit, ctx=ctx)
+        result = await _run_rebuild_subprocess(mode, source_type, ctx=ctx)
 
         # rebuild はインデックスを全操作するため、両方リセット
         _reset_pipeline_controller()
@@ -1511,15 +1505,12 @@ async def _run_delete_subprocess(
 async def _run_rebuild_subprocess(
     mode: str,
     source_type: str | None,
-    auto_commit: bool,
     ctx: MCPContext | None = None,
 ) -> str:
     """rebuild を CLI サブプロセスで実行する."""
     args = ["--mode", mode]
     if source_type is not None:
         args.extend(["--source-type", source_type])
-    if auto_commit:
-        args.append("--auto-commit")
 
     exit_code, stdout_text, stderr_tail = await _run_worker_subprocess(
         "rebuild", args, ctx=ctx,
