@@ -371,6 +371,12 @@ def main() -> None:
     siteingest_parser.add_argument("--url-pattern", default="", help="URL フィルタパターン（正規表現）")
     siteingest_parser.add_argument("--max-pages", type=int, default=None, help="ページ数上限")
     siteingest_parser.add_argument("--force", action="store_true", help="JOBDIR を削除して再クロール")
+    siteingest_parser.add_argument(
+        "--download-only",
+        action="store_true",
+        default=False,
+        help="Scrapy クロール + Bridge まで実行し、パイプライン処理をスキップ",
+    )
 
     args = parser.parse_args()
 
@@ -1779,7 +1785,7 @@ async def run_site_ingest(args: argparse.Namespace) -> None:
 
     # パイプライン処理
     pipeline_summary = None
-    if bridge_result.ingest.placed > 0:
+    if not args.download_only and bridge_result.ingest.placed > 0:
         pipeline_summary = controller.ingest_and_index(f"ingest(web): site-ingest {url}")
 
     # 操作全体の所要時間（クロール + Bridge + パイプライン）
@@ -1792,7 +1798,9 @@ async def run_site_ingest(args: argparse.Namespace) -> None:
         f", {bridge_result.ingest.errors}件エラー"
     )
     print(f"所要時間: {elapsed:.1f}秒")
-    if pipeline_summary is not None:
+    if args.download_only:
+        print("パイプライン処理: スキップ（download_only）")
+    elif pipeline_summary is not None:
         print(f"パイプライン: {pipeline_summary.processed}件処理")
         if pipeline_summary.errors:
             print(f"パイプラインエラー: {len(pipeline_summary.errors)}件")

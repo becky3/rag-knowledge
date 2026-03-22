@@ -125,10 +125,66 @@ flowchart TD
 
 MCP 経由の場合、パイプライン処理（再構築・取り込み後のインデックス構築・削除）は `pipeline/worker.py` をサブプロセスとして実行する。C 拡張の SEGFAULT が発生してもサーバープロセスは生存し、exit code からエラーメッセージを返却する。CLI は独立プロセスのためサブプロセス化は不要。
 
+### サブプロセス進捗通知
+
+MCP ツール経由のパイプライン処理中、サブプロセスの進捗をリアルタイムで MCP クライアントに通知する。
+
+#### 通知方式
+
+2 系統の通知を並行して送信する:
+
+| 方式 | MCP メッセージ | 用途 | クライアント要件 |
+|------|--------------|------|----------------|
+| Logging notification | `notifications/message` | テキストベースの進捗メッセージ | なし（標準 MCP） |
+| Progress notification | `notifications/progress` | 数値進捗（processed / total） | `progressToken` の送信が必要。未送信時は no-op |
+
+FastMCP の `Context` オブジェクト経由で送信する。ツール関数に `ctx: Context` パラメータを追加する。
+
+#### Worker stdout プロトコル
+
+worker.py は処理中に JSON Lines 形式で stdout に出力する。各行は `type` フィールドで識別する。
+
+| `type` 値 | 出力タイミング | フィールド |
+|-----------|-------------|-----------|
+| `progress` | ファイル処理完了ごと | `processed`（int）、`total`（int）、`current`（str: 処理済みファイルパス） |
+| `result` | 処理完了時（最終行） | 既存の結果 JSON と同一（`mode`, `total_files`, `processed`, `skipped`, `errors`, `elapsed`） |
+| `error` | エラー時（最終行） | `message`（str） |
+
+親プロセス（server.py）は stdout を行単位で読み取り、`progress` 行を MCP 通知に変換し、`result` / `error` 行で処理結果を確定する。
+
+#### サーバー側の処理
+
+`_run_worker_subprocess` を行単位ストリーミングに変更する:
+
+1. `asyncio.create_subprocess_exec` で subprocess を起動（従来通り）
+2. stdout を行単位で非同期に読み取る（`communicate()` → `readline()` ループ）
+3. 各行を JSON パースし:
+   - `type: "progress"` → `ctx.info()` でログ通知 + `ctx.report_progress()` で数値通知
+   - `type: "result"` → 結果として返却
+   - `type: "error"` → エラーとして処理
+4. stderr は従来通りプロセス終了後に読み取る
+
+#### PipelineController の変更
+
+処理ループを持つメソッドに `progress_callback` パラメータを追加する:
+
+| メソッド | 対象ループ |
+|---------|-----------|
+| `run_full_rebuild` | 全レコードのコンバート + インデックス |
+| `run_convert_only` | 全レコードのコンバート |
+| `run_index_only` | 全レコードのインデックス |
+| `_process_changes` | 差分変更エントリの処理 |
+
+callback シグネチャ: `(processed: int, total: int, current: str) -> None`
+
+`ingest_and_index` および `run_incremental` も `progress_callback` パラメータを受け取り、内部的に `_process_changes` に中継する。
+
+worker.py はこの callback 内で進捗 JSON を stdout に出力する。CLI は現時点では callback を使用しない（将来対応予定）。callback 未指定時は従来通り無出力。
+
 | ファイル | 役割 |
 |-------------|------|
-| `src/rag/pipeline/worker.py` | MCP 用サブプロセスエントリポイント。`rebuild` / `ingest-and-index` / `delete` のサブコマンドを受け取りパイプライン処理を実行、結果 JSON を stdout に出力 |
-| `src/rag/server.py` | MCP ツール。パラメータ検証・排他制御を行い worker をサブプロセスで起動 |
+| `src/rag/pipeline/worker.py` | MCP 用サブプロセスエントリポイント。`rebuild` / `ingest-and-index` / `delete` のサブコマンドを受け取りパイプライン処理を実行。処理中は進捗 JSON（type: progress）、完了時は結果 JSON（type: result）を stdout に JSON Lines 形式で出力 |
+| `src/rag/server.py` | MCP ツール。パラメータ検証・排他制御を行い worker をサブプロセスで起動。stdout を行単位でストリーミングし、進捗を MCP 通知として転送 |
 | `src/rag/cli.py` | CLI コマンド。パイプライン制御を直接呼び出す（サブプロセス化なし） |
 
 ### rag_stats 出力項目

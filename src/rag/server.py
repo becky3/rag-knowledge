@@ -70,7 +70,10 @@ with contextlib.redirect_stdout(io.StringIO()):
 from py_common_lib.httpx import ConstrainedClient  # safety:allowed
 from py_common_lib.secrets import SecretNotFoundError, SecretStoreError, get_secret
 
-from mcp.server.fastmcp import FastMCP
+from mcp.server.fastmcp import Context, FastMCP
+
+# MCP Context の具象型パラメータ（ツール関数では型パラメータ不要のため Any で統一）
+MCPContext = Context[Any, Any, Any]
 
 # Windows 環境で stderr が cp932 等の場合に UTF-8 へ再構成する
 # stdout は MCP stdio プロトコルが使うため変更しない
@@ -416,7 +419,7 @@ async def rag_get_document(
 
 
 @mcp.tool()
-async def rag_add(url: str) -> str:
+async def rag_add(url: str, ctx: MCPContext | None = None) -> str:
     """[rag-knowledge] RAG add - 単一ページをナレッジベースに取り込む（非推奨: rag_site_ingest を推奨）.
 
     knowledge base, ingest, web page, crawl single URL.
@@ -447,6 +450,7 @@ async def rag_add(url: str) -> str:
 
         pipeline_summary = await _run_ingest_and_index_subprocess(
             f"ingest(web): add {url}",
+            ctx=ctx,
         )
         _reset_pipeline_controller()
         _reset_rag_service()
@@ -461,7 +465,8 @@ async def rag_add(url: str) -> str:
 
 @mcp.tool()
 async def rag_crawl(
-    url: str, pattern: str = "", depth: int | None = None
+    url: str, pattern: str = "", depth: int | None = None,
+    ctx: MCPContext | None = None,
 ) -> str:
     """[rag-knowledge] RAG crawl - リンク集ページからクロール＆一括取り込み（非推奨: rag_site_ingest を推奨）.
 
@@ -517,6 +522,7 @@ async def rag_crawl(
 
         pipeline_summary = await _run_ingest_and_index_subprocess(
             f"ingest(web): crawl {url}",
+            ctx=ctx,
         )
         _reset_pipeline_controller()
         _reset_rag_service()
@@ -609,6 +615,7 @@ async def rag_crawl_zenn(
     username: str,
     max_articles: int | None = None,
     content_type: str = "all",
+    ctx: MCPContext | None = None,
 ) -> str:
     """[rag-knowledge] RAG crawl Zenn - Zenn コンテンツを API 経由で取得し一括取り込み.
 
@@ -664,6 +671,7 @@ async def rag_crawl_zenn(
 
         pipeline_summary = await _run_ingest_and_index_subprocess(
             f"ingest(zenn): {username.strip()}",
+            ctx=ctx,
         )
         _reset_pipeline_controller()
         _reset_rag_service()
@@ -683,6 +691,7 @@ async def rag_crawl_bluesky(
     handle: str,
     max_posts: int | None = None,
     include_reposts: bool | None = None,
+    ctx: MCPContext | None = None,
 ) -> str:
     """[rag-knowledge] RAG crawl BlueSky - BlueSky 投稿を AT Protocol API 経由で取得し一括取り込み.
 
@@ -745,6 +754,7 @@ async def rag_crawl_bluesky(
 
         pipeline_summary = await _run_ingest_and_index_subprocess(
             f"ingest(bluesky): {handle}",
+            ctx=ctx,
         )
         _reset_pipeline_controller()
         _reset_rag_service()
@@ -768,6 +778,7 @@ _VALID_UPLOAD_MODES: frozenset[str] = frozenset({"fail", "replace"})
 async def rag_add_document(
     file_path: str,
     upload_mode: str = "fail",
+    ctx: MCPContext | None = None,
 ) -> str:
     """[rag-knowledge] RAG add document - ドキュメントファイルをナレッジベースに取り込む.
 
@@ -810,6 +821,7 @@ async def rag_add_document(
 
         pipeline_summary = await _run_ingest_and_index_subprocess(
             f"ingest(local): add {file_path}",
+            ctx=ctx,
         )
         _reset_pipeline_controller()
         _reset_rag_service()
@@ -829,6 +841,7 @@ async def rag_crawl_documents(
     dir_path: str,
     pattern: str = "**/*",
     upload_mode: str = "fail",
+    ctx: MCPContext | None = None,
 ) -> str:
     """[rag-knowledge] RAG crawl documents - ディレクトリ内のドキュメントを一括取り込み.
 
@@ -869,6 +882,7 @@ async def rag_crawl_documents(
 
         pipeline_summary = await _run_ingest_and_index_subprocess(
             f"ingest(local): crawl {dir_path}",
+            ctx=ctx,
         )
         _reset_pipeline_controller()
         _reset_rag_service()
@@ -889,6 +903,8 @@ async def rag_site_ingest(
     url_pattern: str = "",
     max_pages: int | None = None,
     force: bool = False,
+    download_only: bool = False,
+    ctx: MCPContext | None = None,
 ) -> str:
     """[rag-knowledge] RAG site ingest - Scrapy でサイトを一括取り込み.
 
@@ -901,6 +917,8 @@ async def rag_site_ingest(
         url_pattern: URL フィルタパターン（正規表現、任意）
         max_pages: ページ数上限（未指定時は設定値を使用）
         force: True の場合、JOBDIR を削除して最初からクロール
+        download_only: True の場合、Scrapy クロール + Bridge まで実行し、
+            パイプライン処理（コンバート・インデックス構築）をスキップする
 
     Returns:
         取り込み結果のサマリー
@@ -982,9 +1000,10 @@ async def rag_site_ingest(
 
         # パイプライン処理
         pipeline_summary: PipelineSummary | None = None
-        if bridge_result.ingest.placed > 0:
+        if not download_only and bridge_result.ingest.placed > 0:
             pipeline_summary = await _run_ingest_and_index_subprocess(
                 f"ingest(web): site-ingest {url}",
+                ctx=ctx,
             )
             _reset_pipeline_controller()
             _reset_rag_service()
@@ -1000,7 +1019,9 @@ async def rag_site_ingest(
             f", {bridge_result.ingest.errors}件エラー"
         )
         parts.append(f"所要時間: {elapsed:.1f}秒")
-        if pipeline_summary is not None:
+        if download_only:
+            parts.append("パイプライン処理: スキップ（download_only）")
+        elif pipeline_summary is not None:
             parts.append(f"パイプライン: {pipeline_summary.processed}件処理")
             if pipeline_summary.errors:
                 parts.append(f"パイプラインエラー: {len(pipeline_summary.errors)}件")
@@ -1014,7 +1035,7 @@ async def rag_site_ingest(
 
 
 @mcp.tool()
-async def rag_delete(url: str) -> str:
+async def rag_delete(url: str, ctx: MCPContext | None = None) -> str:
     """[rag-knowledge] RAG delete - ソースURL指定でナレッジから削除.
 
     knowledge base, remove source, delete document.
@@ -1034,7 +1055,7 @@ async def rag_delete(url: str) -> str:
     _reset_pipeline_controller()
 
     try:
-        result = await _run_delete_subprocess(url)
+        result = await _run_delete_subprocess(url, ctx=ctx)
         if result.get("not_found"):
             return f"該当するソースが見つかりませんでした: {url}"
 
@@ -1198,6 +1219,7 @@ async def rag_rebuild(
     mode: str,
     source_type: str | None = None,
     auto_commit: bool = False,
+    ctx: MCPContext | None = None,
 ) -> str:
     """[rag-knowledge] RAG rebuild - ナレッジベースの再構築を実行する.
 
@@ -1254,7 +1276,7 @@ async def rag_rebuild(
         return "エラー: 別の再構築が実行中です"
 
     try:
-        result = await _run_rebuild_subprocess(mode, source_type, auto_commit)
+        result = await _run_rebuild_subprocess(mode, source_type, auto_commit, ctx=ctx)
 
         # rebuild はインデックスを全操作するため、両方リセット
         _reset_pipeline_controller()
@@ -1271,14 +1293,21 @@ async def rag_rebuild(
 async def _run_worker_subprocess(
     subcommand: str,
     args: list[str],
+    ctx: MCPContext | None = None,
 ) -> tuple[int, str, str]:
     """worker.py サブコマンドをサブプロセスで実行する.
 
     C 拡張（BM25s 等）の SEGFAULT がサーバープロセスを巻き込まないよう、
     別プロセスで実行してエラーを安全にハンドリングする。
 
+    Args:
+        subcommand: worker サブコマンド名
+        args: サブコマンド引数
+        ctx: MCP Context（進捗通知用、任意）
+
     Returns:
         (exit_code, stdout_text, stderr_tail) のタプル
+        stdout_text には progress 行を除いた最終結果行のみが含まれる
     """
     cmd = [
         sys.executable, "-m", "rag.pipeline.worker",
@@ -1295,25 +1324,60 @@ async def _run_worker_subprocess(
         stderr=asyncio.subprocess.PIPE,
         env=env,
     )
+
+    result_line = ""
     try:
-        stdout_bytes, stderr_bytes = await process.communicate()
+        assert process.stdout is not None  # noqa: S101
+        while True:
+            raw = await process.stdout.readline()
+            if not raw:
+                break
+            line = raw.decode("utf-8", errors="replace").strip()
+            if not line:
+                continue
+
+            # JSON パースを試みて progress 行をフィルタ
+            try:
+                data = json.loads(line)
+                if isinstance(data, dict) and data.get("type") == "progress":
+                    if ctx is not None:
+                        processed = data.get("processed", 0)
+                        total = data.get("total", 0)
+                        current = data.get("current", "")
+                        await ctx.info(f"処理中: {processed}/{total} - {current}")
+                        await ctx.report_progress(float(processed), float(total))
+                    continue
+            except json.JSONDecodeError:
+                pass
+
+            # progress 以外の行は result_line として保持
+            # （worker は result/error を最終行に1行のみ出力する前提）
+            result_line = line
     except asyncio.CancelledError:
-        # タスクキャンセル時に子プロセスを確実に終了させる
         if process.returncode is None:
             with contextlib.suppress(ProcessLookupError):
                 process.kill()
             with contextlib.suppress(asyncio.CancelledError):
                 await process.wait()
         raise
+
+    # stderr 読み取り + wait
+    # NOTE: stderr はプロセス終了後に読み取る。worker が stderr に大量出力
+    # （64KB超）した場合、stdout readline 中にパイプバッファが満杯になり
+    # デッドロックするリスクがある。現時点では worker の stderr 出力量は
+    # 少量のため問題ないが、大規模処理で顕在化する場合は stderr の
+    # 並行読み取りへの変更を検討する。
+    stderr_bytes = await process.stderr.read() if process.stderr else b""
+    await process.wait()
+
     assert process.returncode is not None  # noqa: S101
     exit_code = process.returncode
 
-    stdout_text = stdout_bytes.decode("utf-8", errors="replace").strip() if stdout_bytes else ""
     stderr_text = stderr_bytes.decode("utf-8", errors="replace") if stderr_bytes else ""
     stderr_lines = stderr_text.rstrip().splitlines()
     stderr_tail = "\n".join(stderr_lines[-10:])
 
-    return exit_code, stdout_text, stderr_tail
+    return exit_code, result_line, stderr_tail
 
 
 def _parse_pipeline_summary(data: dict[str, Any]) -> PipelineSummary | None:
@@ -1333,7 +1397,10 @@ def _parse_pipeline_summary(data: dict[str, Any]) -> PipelineSummary | None:
         return None
 
 
-async def _run_ingest_and_index_subprocess(commit_message: str) -> PipelineSummary:
+async def _run_ingest_and_index_subprocess(
+    commit_message: str,
+    ctx: MCPContext | None = None,
+) -> PipelineSummary:
     """ingest_and_index をサブプロセスで実行し PipelineSummary を返す.
 
     Raises:
@@ -1341,6 +1408,7 @@ async def _run_ingest_and_index_subprocess(commit_message: str) -> PipelineSumma
     """
     exit_code, stdout_text, stderr_tail = await _run_worker_subprocess(
         "ingest-and-index", ["--commit-message", commit_message],
+        ctx=ctx,
     )
 
     if exit_code != 0:
@@ -1377,7 +1445,10 @@ async def _run_ingest_and_index_subprocess(commit_message: str) -> PipelineSumma
     return summary
 
 
-async def _run_delete_subprocess(source_id: str) -> dict[str, Any]:
+async def _run_delete_subprocess(
+    source_id: str,
+    ctx: MCPContext | None = None,
+) -> dict[str, Any]:
     """delete をサブプロセスで実行する.
 
     Returns:
@@ -1385,6 +1456,7 @@ async def _run_delete_subprocess(source_id: str) -> dict[str, Any]:
     """
     exit_code, stdout_text, stderr_tail = await _run_worker_subprocess(
         "delete", ["--source-id", source_id],
+        ctx=ctx,
     )
 
     if exit_code != 0:
@@ -1422,6 +1494,7 @@ async def _run_rebuild_subprocess(
     mode: str,
     source_type: str | None,
     auto_commit: bool,
+    ctx: MCPContext | None = None,
 ) -> str:
     """rebuild を CLI サブプロセスで実行する."""
     args = ["--mode", mode]
@@ -1430,7 +1503,9 @@ async def _run_rebuild_subprocess(
     if auto_commit:
         args.append("--auto-commit")
 
-    exit_code, stdout_text, stderr_tail = await _run_worker_subprocess("rebuild", args)
+    exit_code, stdout_text, stderr_tail = await _run_worker_subprocess(
+        "rebuild", args, ctx=ctx,
+    )
 
     # クラッシュ検出
     if exit_code != 0:
