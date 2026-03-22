@@ -118,13 +118,14 @@ flowchart TD
     LOCK -->|取得成功 CLI| DELEGATE
     WORKER --> DELEGATE
     DELEGATE -->|正常終了| RESULT
-    WORKER -->|異常終了| CRASH
+    DELEGATE -->|処理エラー| ERROR_PROC["エラー返却（処理エラー）"]
+    WORKER -->|クラッシュ| CRASH
     CRASH --> ERROR_CRASH["エラー返却（サーバー生存）"]
 ```
 
 MCP 経由の場合、パイプライン処理は `pipeline/worker.py` をサブプロセスとして実行する。C 拡張の SEGFAULT が発生してもサーバープロセスは生存し、exit code からエラーメッセージを返却する。CLI は独立プロセスのためサブプロセス化は不要。
 
-| 関連ファイル | 役割 |
+| ファイル | 役割 |
 |-------------|------|
 | `src/rag/pipeline/worker.py` | MCP 用サブプロセスエントリポイント。パラメータを受け取り rebuild を実行、結果 JSON を stdout に出力 |
 | `src/rag/server.py` | MCP ツール。パラメータ検証・排他制御を行い worker をサブプロセスで起動 |
