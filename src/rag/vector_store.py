@@ -441,8 +441,31 @@ class VectorStore:
         最新の HNSW インデックスがロードされる。
         """
         identifier = self._persist_directory
-        if identifier and identifier in SharedSystemClient._identifier_to_system:
-            SharedSystemClient._release_system(identifier)
-            logger.info(
-                "Cleared SharedSystemClient cache for: %s", identifier,
+        if not identifier:
+            return
+
+        try:
+            systems = getattr(SharedSystemClient, "_identifier_to_system", None)
+            refcounts = getattr(SharedSystemClient, "_identifier_to_refcount", None)
+            if systems is None or not isinstance(systems, dict):
+                logger.warning(
+                    "SharedSystemClient internals changed; "
+                    "cannot clear cache for: %s",
+                    identifier,
+                )
+                return
+
+            system = systems.pop(identifier, None)
+            if system is not None:
+                system.stop()
+                if isinstance(refcounts, dict):
+                    refcounts.pop(identifier, None)
+                logger.info(
+                    "Cleared SharedSystemClient cache for: %s", identifier,
+                )
+        except Exception:
+            logger.warning(
+                "Failed to clear SharedSystemClient cache for: %s",
+                identifier,
+                exc_info=True,
             )
