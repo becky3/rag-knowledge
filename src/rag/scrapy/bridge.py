@@ -16,6 +16,7 @@ from typing import TYPE_CHECKING
 
 from rag.pipeline.ingesters._common import IngestResult
 from rag.pipeline.ingesters.web import _needs_html_extension
+from rag.store.path_converter import url_to_path
 
 if TYPE_CHECKING:
     from rag.store.source_store import SourceStore
@@ -150,9 +151,10 @@ def import_to_source_store(
             )
 
     logger.info(
-        "Bridge 完了: %d 行処理, %d 件配置, %d 件スキップ, %d 件エラー",
+        "Bridge 完了: %d 行処理, %d 件新規配置, %d 件上書き, %d 件スキップ, %d 件エラー",
         result.total_lines,
         result.ingest.placed,
+        result.ingest.overwritten,
         result.ingest.skipped,
         result.ingest.errors,
     )
@@ -208,16 +210,26 @@ def _process_record(
     # .meta 辞書の構築
     metadata = _build_meta(record)
 
-    # source_store に配置
+    # source_store に配置（新規 vs 上書きを区別してカウント）
     try:
         ext = ".html" if _needs_html_extension(record.url) else ""
+        # NOTE: パス構築は SourceStore.place_file_from_url と同一ロジック。
+        # place_file_from_url のパス導出が変更された場合はここも追従すること。
+        rel_path = url_to_path(record.url)
+        if ext and not rel_path.endswith(ext):
+            rel_path += ext
+        is_new = not (source_store.root_dir / rel_path).exists()
+
         source_store.place_file_from_url(
             url=record.url,
             data=data,
             metadata=metadata,
             extension=ext,
         )
-        result.ingest.placed += 1
+        if is_new:
+            result.ingest.placed += 1
+        else:
+            result.ingest.overwritten += 1
     except Exception:
         logger.exception(
             "JSONL 行 %d: source_store 配置エラー: %s",
