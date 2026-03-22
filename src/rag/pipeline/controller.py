@@ -127,7 +127,8 @@ class PipelineController:
         self._git.init_repo()
 
         # 未コミット変更の自動コミット
-        self._auto_commit_for_incremental()
+        if self._git.has_uncommitted_changes():
+            self._auto_commit_for_incremental()
 
         if not self._git.has_commits():
             return PipelineSummary(
@@ -292,7 +293,7 @@ class PipelineController:
         Raises:
             RuntimeError: 未コミットの変更がある場合
         """
-        if self._git.has_commits() and self._git.has_uncommitted_changes(
+        if self._git.has_uncommitted_changes(
             path=source_type,
         ):
             msg = (

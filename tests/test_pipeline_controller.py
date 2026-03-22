@@ -684,6 +684,7 @@ class TestRunFullRebuild:
     ) -> None:
         ctrl, _, _ = controller
         ctrl.init_repo()
+        ctrl.commit("initial")
         summary = ctrl.run_full_rebuild()
         assert summary.total_files == 0
         assert summary.processed == 0
