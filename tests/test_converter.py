@@ -394,7 +394,7 @@ class TestConvertHtml:
             '<section id="module-test">'
             "<h1>Test Module</h1>"
             '<img class="align-center" src="diagram.png" '
-            'alt="Inheritance diagram" />'
+            'alt="Inheritance diagram">'
             "<p>First paragraph with important content.</p>"
             "<dl><dt>SomeClass</dt><dd>Description of the class.</dd></dl>"
             "<p>Second paragraph with more content.</p>"

@@ -30,11 +30,9 @@ logger = logging.getLogger(__name__)
 
 # HTML void 要素（自己閉じ、子要素を持てない）
 # https://html.spec.whatwg.org/multipage/syntax.html#void-elements
-_VOID_ELEMENTS = frozenset(
-    (
-        "area", "base", "br", "col", "embed", "hr", "img",
-        "input", "link", "meta", "param", "source", "track", "wbr",
-    ),
+_VOID_ELEMENTS = (
+    "area", "base", "br", "col", "embed", "hr", "img",
+    "input", "link", "meta", "param", "source", "track", "wbr",
 )
 
 
