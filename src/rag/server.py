@@ -1255,6 +1255,9 @@ async def rag_rebuild(
         _reset_rag_service()
 
         return result
+    except Exception:
+        logger.exception("再構築中にエラーが発生しました")
+        return "エラー: 再構築中にエラーが発生しました"
     finally:
         _rebuild_lock.release()
 
@@ -1308,6 +1311,15 @@ async def _run_rebuild_subprocess(
                 f"インデックスが破損している可能性があります。"
                 f"インデックスを手動削除して再実行してください。"
             )
+        # worker がエラー JSON を stdout に出力している場合はそちらを優先
+        stdout_text = stdout_bytes.decode("utf-8", errors="replace").strip()
+        if stdout_text:
+            try:
+                error_data = json.loads(stdout_text.splitlines()[-1])
+                if error_data.get("error"):
+                    return f"エラー: {error_data.get('message', '不明なエラー')}"
+            except (json.JSONDecodeError, IndexError):
+                pass
         return (
             f"エラー: 再構築プロセスが異常終了しました"
             f"（exit_code={exit_code}）\n{stderr_tail}"
@@ -1328,13 +1340,17 @@ async def _run_rebuild_subprocess(
     # PipelineSummary を再構築して既存のフォーマッタを使用
     from .pipeline.models import PipelineMode, PipelineSummary
 
-    summary = PipelineSummary(
-        mode=PipelineMode(result.get("mode", "incremental")),
-        total_files=result.get("total_files", 0),
-        processed=result.get("processed", 0),
-        skipped=result.get("skipped", 0),
-        errors=result.get("errors", []),
-    )
+    try:
+        summary = PipelineSummary(
+            mode=PipelineMode(result.get("mode", "incremental")),
+            total_files=result.get("total_files", 0),
+            processed=result.get("processed", 0),
+            skipped=result.get("skipped", 0),
+            errors=result.get("errors", []),
+        )
+    except ValueError:
+        return f"再構築完了（結果の解析に失敗）\n{stdout_text}"
+
     elapsed = result.get("elapsed", 0)
 
     return _format_rebuild_summary(summary, elapsed)

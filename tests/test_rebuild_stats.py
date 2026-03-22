@@ -469,8 +469,8 @@ class TestRagRebuild:
         with (
             patch("rag.server.get_settings", return_value=mock_settings),
             patch(
-                "rag.server._build_pipeline_controller",
-                side_effect=RuntimeError("controller build failed"),
+                "rag.server._run_rebuild_subprocess",
+                side_effect=RuntimeError("subprocess failed"),
             ),
         ):
             result = await rag_rebuild(mode="full")
@@ -489,20 +489,19 @@ class TestRagRebuild:
         mock_settings.source_store_dir = str(_source_dir)
         mock_settings.converted_store_dir = str(tmp_path / "converted")
 
-        mock_summary = PipelineSummary(
-            mode=PipelineMode.FULL_REBUILD,
-            total_files=1,
-            processed=1,
-            skipped=0,
+        mock_result = (
+            "再構築完了 (全再構築)\n"
+            "  処理件数: 1\n"
+            "  スキップ: 0\n"
+            "  エラー: 0\n"
+            "  所要時間: 0.5 秒"
         )
-        mock_controller = MagicMock()
-        mock_controller.run_full_rebuild.return_value = mock_summary
 
         with (
             patch("rag.server.get_settings", return_value=mock_settings),
             patch(
-                "rag.server._build_pipeline_controller",
-                return_value=mock_controller,
+                "rag.server._run_rebuild_subprocess",
+                return_value=mock_result,
             ),
             patch("rag.server._reset_rag_service") as mock_reset,
         ):
@@ -510,6 +509,94 @@ class TestRagRebuild:
 
         assert "再構築完了" in result
         mock_reset.assert_called_once()
+
+
+# --- _run_rebuild_subprocess ユニットテスト ---
+
+
+class TestRunRebuildSubprocess:
+    """_run_rebuild_subprocess のパース/分岐ロジックのテスト."""
+
+    @pytest.mark.asyncio
+    async def test_normal_json_result(self) -> None:
+        """正常な JSON 結果がフォーマットされること."""
+        from rag.server import _run_rebuild_subprocess
+
+        mock_process = AsyncMock()
+        mock_process.communicate.return_value = (
+            b'{"mode":"full_rebuild","total_files":5,"processed":5,'
+            b'"skipped":0,"errors":[],"elapsed":1.2}',
+            b"",
+        )
+        mock_process.returncode = 0
+
+        with patch("asyncio.create_subprocess_exec", return_value=mock_process):
+            result = await _run_rebuild_subprocess("full", None, False)
+
+        assert "再構築完了" in result
+        assert "全再構築" in result
+        assert "処理件数: 5" in result
+
+    @pytest.mark.asyncio
+    async def test_invalid_json_result(self) -> None:
+        """JSON パース失敗時にフォールバックすること."""
+        from rag.server import _run_rebuild_subprocess
+
+        mock_process = AsyncMock()
+        mock_process.communicate.return_value = (b"not json", b"")
+        mock_process.returncode = 0
+
+        with patch("asyncio.create_subprocess_exec", return_value=mock_process):
+            result = await _run_rebuild_subprocess("full", None, False)
+
+        assert "結果の解析に失敗" in result
+
+    @pytest.mark.asyncio
+    async def test_nonzero_exit_with_stderr(self) -> None:
+        """異常終了時に stderr が返されること."""
+        from rag.server import _run_rebuild_subprocess
+
+        mock_process = AsyncMock()
+        mock_process.communicate.return_value = (b"", b"RuntimeError: DB locked\n")
+        mock_process.returncode = 1
+
+        with patch("asyncio.create_subprocess_exec", return_value=mock_process):
+            result = await _run_rebuild_subprocess("full", None, False)
+
+        assert "異常終了" in result
+        assert "DB locked" in result
+
+    @pytest.mark.asyncio
+    async def test_segfault_exit_code(self) -> None:
+        """SEGFAULT exit code でクラッシュメッセージが返されること."""
+        from rag.server import _run_rebuild_subprocess
+
+        mock_process = AsyncMock()
+        mock_process.communicate.return_value = (b"", b"")
+        mock_process.returncode = -11
+
+        with patch("asyncio.create_subprocess_exec", return_value=mock_process):
+            result = await _run_rebuild_subprocess("full", None, False)
+
+        assert "クラッシュ" in result
+        assert "SEGFAULT" in result
+
+    @pytest.mark.asyncio
+    async def test_worker_error_json_used(self) -> None:
+        """worker のエラー JSON が異常終了時に活用されること."""
+        from rag.server import _run_rebuild_subprocess
+
+        mock_process = AsyncMock()
+        mock_process.communicate.return_value = (
+            b'{"error":true,"message":"source_store not found"}',
+            b"Traceback ...\n",
+        )
+        mock_process.returncode = 1
+
+        with patch("asyncio.create_subprocess_exec", return_value=mock_process):
+            result = await _run_rebuild_subprocess("full", None, False)
+
+        assert "source_store not found" in result
 
 
 # --- rag_stats MCP ツールテスト ---

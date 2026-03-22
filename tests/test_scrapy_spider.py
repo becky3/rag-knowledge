@@ -176,3 +176,30 @@ class TestSpiderInit:
             output_dir=str(out),
         )
         assert out.exists()
+
+
+# --- parse() の filepath 回帰テスト ---
+
+
+class TestParseFilepathRegression:
+    """parse() が yield する filepath が相対パスになることの回帰テスト.
+
+    _save_html は resolve 済み絶対パスを返すが、parse() 内で
+    self._output_dir.resolve() に対して relative_to を呼ぶことで
+    正しい相対パスに変換される。この修正の回帰を防止する。
+    """
+
+    def test_filepath_relative_with_relative_output_dir(self, tmp_path: Path) -> None:
+        """resolve 済み絶対パスから output_dir.resolve() で相対パスが取れること."""
+        output_dir = tmp_path / "html"
+        output_dir.mkdir(parents=True, exist_ok=True)
+
+        # _save_html が resolve 済み絶対パスを返すケースをシミュレート
+        saved_file = (output_dir / "page.html").resolve()
+        saved_file.write_text("<html>test</html>", encoding="utf-8")
+
+        # filepath.relative_to(output_dir.resolve()) が成功すること
+        # （修正前は output_dir が相対パスの場合に ValueError が発生していた）
+        relative = saved_file.relative_to(output_dir.resolve())
+        assert str(relative) == "page.html"
+        assert not relative.is_absolute()

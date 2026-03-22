@@ -30,6 +30,14 @@ def run_rebuild(args: argparse.Namespace) -> None:
     source_type: SourceType | None = args.source_type
     auto_commit: bool = args.auto_commit
 
+    # incremental モードのバリデーション（CLI と同等）
+    if mode == "incremental" and source_type is not None:
+        print(json.dumps({"error": True, "message": "incremental モードでは source_type を指定できません"}))
+        sys.exit(1)
+    if mode == "incremental" and auto_commit:
+        print(json.dumps({"error": True, "message": "incremental モードでは auto_commit を指定できません"}))
+        sys.exit(1)
+
     try:
         controller = build_pipeline_controller()
 
