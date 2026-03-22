@@ -24,6 +24,7 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import io
+import json
 import logging
 import os
 import sys
@@ -46,7 +47,6 @@ with contextlib.redirect_stdout(io.StringIO()):
     from .bm25_index import BM25Index
     from .config import get_settings
     from .embedding.factory import get_embedding_provider
-    from .ingesters.document_ingester import PdfBackendConfig
     from .rag_knowledge import (
         RAGKnowledgeService,
         format_document_response,
@@ -56,8 +56,6 @@ with contextlib.redirect_stdout(io.StringIO()):
     from .web_crawler import WebCrawler
 
     # パイプライン関連
-    from .converter import Converter
-    from .indexer import Indexer
     from .pipeline.controller import PipelineController
     from .pipeline.ingesters._common import IngestResult
     from .pipeline.ingesters.bluesky import BlueskyIngester as PipelineBlueskyIngester
@@ -181,52 +179,9 @@ async def _get_pipeline_controller() -> PipelineController:
 
 def _build_pipeline_controller() -> PipelineController:
     """パイプライン制御コントローラを構築する（ワーカースレッド用）."""
-    settings = get_settings()
-    source_store_dir = Path(settings.source_store_dir)
-    converted_store_dir = Path(settings.converted_store_dir)
-    converted_store_dir.mkdir(parents=True, exist_ok=True)
+    from .pipeline.factory import build_pipeline_controller
 
-    source_store = SourceStore(source_store_dir)
-    source_store.initialize()
-
-    pdf_config = PdfBackendConfig(
-        backend=settings.rag_pdf_backend,
-        mineru_mfd_conf_thres=settings.rag_pdf_mineru_mfd_conf_thres,
-        quality_ufffd_threshold=settings.rag_pdf_quality_ufffd_threshold,
-        quality_greek_threshold=settings.rag_pdf_quality_greek_threshold,
-        quality_cjk_min_threshold=settings.rag_pdf_quality_cjk_min_threshold,
-        quality_min_chars_per_page=settings.rag_pdf_quality_min_chars_per_page,
-        quality_sample_pages=settings.rag_pdf_quality_sample_pages,
-    )
-    converter = Converter(regen_option="force", pdf_config=pdf_config)
-
-    embedding_provider = get_embedding_provider(settings, settings.embedding_provider)
-
-    with contextlib.redirect_stdout(io.StringIO()):
-        vector_store = VectorStore(
-            embedding_provider=embedding_provider,
-            persist_directory=settings.chromadb_persist_dir,
-        )
-        bm25_index = BM25Index(
-            k1=settings.rag_bm25_k1,
-            b=settings.rag_bm25_b,
-            persist_dir=settings.bm25_persist_dir,
-        )
-
-    indexer = Indexer(
-        vector_store=vector_store,
-        bm25_index=bm25_index,
-        metadata_db=source_store.db,
-        chunk_size=settings.rag_chunk_size,
-        chunk_overlap=settings.rag_chunk_overlap,
-    )
-
-    return PipelineController(
-        source_store=source_store,
-        converted_store_dir=converted_store_dir,
-        converter=converter,
-        indexer=indexer,
-    )
+    return build_pipeline_controller()
 
 
 _safe_browsing_api_key_cache: str | None = None
@@ -1141,6 +1096,10 @@ def _format_rebuild_summary(summary: PipelineSummary, elapsed: float) -> str:
     return "\n".join(parts)
 
 
+# SEGFAULT を示す exit code（Windows: 0xC0000005, Unix: SIGSEGV=11, shell: 128+11=139）
+_SEGFAULT_EXIT_CODES: frozenset[int] = frozenset({-1073741819, -11, 139})
+
+
 def _collect_source_store_stats(
     source_store_dir: Path,
 ) -> dict[str, Any]:
@@ -1310,7 +1269,7 @@ async def _run_rebuild_subprocess(
     C 拡張（BM25s 等）の SEGFAULT がサーバープロセスを巻き込まないよう、
     別プロセスで実行してエラーを安全にハンドリングする。
     """
-    import json as json_mod
+
 
     cmd = [
         sys.executable, "-m", "rag.pipeline.worker",
@@ -1332,7 +1291,8 @@ async def _run_rebuild_subprocess(
         env=env,
     )
     stdout_bytes, stderr_bytes = await process.communicate()
-    exit_code = process.returncode or 0
+    assert process.returncode is not None  # noqa: S101
+    exit_code = process.returncode
 
     # stderr の末尾10行を保持（エラー時の診断用）
     stderr_text = stderr_bytes.decode("utf-8", errors="replace") if stderr_bytes else ""
@@ -1341,8 +1301,7 @@ async def _run_rebuild_subprocess(
 
     # クラッシュ検出
     if exit_code != 0:
-        # Windows SEGFAULT: exit code 0xC0000005 = -1073741819
-        if exit_code in (-1073741819, -11, 139):
+        if exit_code in _SEGFAULT_EXIT_CODES:
             return (
                 f"エラー: 再構築プロセスがクラッシュしました"
                 f"（SEGFAULT, exit_code={exit_code}）\n"
@@ -1362,8 +1321,8 @@ async def _run_rebuild_subprocess(
 
     last_line = stdout_text.splitlines()[-1]
     try:
-        result = json_mod.loads(last_line)
-    except json_mod.JSONDecodeError:
+        result = json.loads(last_line)
+    except json.JSONDecodeError:
         return f"再構築完了（結果の解析に失敗）\n{stdout_text}"
 
     # PipelineSummary を再構築して既存のフォーマッタを使用
