@@ -26,6 +26,33 @@ from rag.server import (
 from rag.store.metadata_db import MetadataDB
 
 
+def _make_mock_process(
+    stdout_data: bytes, stderr_data: bytes, returncode: int,
+) -> AsyncMock:
+    """readline ベースの _run_worker_subprocess 用モックプロセスを生成する."""
+    mock_process = AsyncMock()
+
+    # stdout: readline で行単位返却 → b"" で EOF
+    lines: list[bytes] = []
+    if stdout_data:
+        lines = [line + b"\n" for line in stdout_data.split(b"\n") if line]
+    lines.append(b"")  # EOF
+
+    mock_stdout = AsyncMock()
+    mock_stdout.readline = AsyncMock(side_effect=lines)
+    mock_process.stdout = mock_stdout
+
+    # stderr: read で一括返却
+    mock_stderr = AsyncMock()
+    mock_stderr.read = AsyncMock(return_value=stderr_data)
+    mock_process.stderr = mock_stderr
+
+    mock_process.returncode = returncode
+    mock_process.wait = AsyncMock()
+
+    return mock_process
+
+
 @pytest.fixture(autouse=True)
 def _reset_rag_global_state() -> None:
     """各テスト前にRAGサービスのグローバル状態をリセットする."""
@@ -391,7 +418,7 @@ class TestRagRebuild:
             result = await rag_rebuild(mode="convert", source_type="web")
 
         assert "再構築完了" in result
-        mock_subprocess.assert_called_once_with("convert", "web", False)
+        mock_subprocess.assert_called_once_with("convert", "web", False, ctx=None)
 
     @pytest.mark.asyncio
     async def test_incremental_mode(
@@ -422,7 +449,7 @@ class TestRagRebuild:
             result = await rag_rebuild(mode="incremental")
 
         assert "差分更新" in result
-        mock_subprocess.assert_called_once_with("incremental", None, False)
+        mock_subprocess.assert_called_once_with("incremental", None, False, ctx=None)
 
     @pytest.mark.asyncio
     async def test_index_only_mode(
@@ -453,7 +480,7 @@ class TestRagRebuild:
             result = await rag_rebuild(mode="index", source_type="local")
 
         assert "インデックスのみ再構築" in result
-        mock_subprocess.assert_called_once_with("index", "local", False)
+        mock_subprocess.assert_called_once_with("index", "local", False, ctx=None)
 
     @pytest.mark.asyncio
     async def test_exception_releases_lock(
@@ -522,13 +549,11 @@ class TestRunRebuildSubprocess:
         """正常な JSON 結果がフォーマットされること."""
         from rag.server import _run_rebuild_subprocess
 
-        mock_process = AsyncMock()
-        mock_process.communicate.return_value = (
-            b'{"mode":"full_rebuild","total_files":5,"processed":5,'
+        mock_process = _make_mock_process(
+            b'{"type":"result","mode":"full_rebuild","total_files":5,"processed":5,'
             b'"skipped":0,"errors":[],"elapsed":1.2}',
-            b"",
+            b"", 0,
         )
-        mock_process.returncode = 0
 
         with patch("asyncio.create_subprocess_exec", return_value=mock_process):
             result = await _run_rebuild_subprocess("full", None, False)
@@ -538,27 +563,24 @@ class TestRunRebuildSubprocess:
         assert "処理件数: 5" in result
 
     @pytest.mark.asyncio
+    @pytest.mark.asyncio
     async def test_invalid_json_result(self) -> None:
-        """JSON パース失敗時にフォールバックすること."""
+        """非 JSON 行のみの場合、結果なしとして処理されること."""
         from rag.server import _run_rebuild_subprocess
 
-        mock_process = AsyncMock()
-        mock_process.communicate.return_value = (b"not json", b"")
-        mock_process.returncode = 0
+        mock_process = _make_mock_process(b"not json", b"", 0)
 
         with patch("asyncio.create_subprocess_exec", return_value=mock_process):
             result = await _run_rebuild_subprocess("full", None, False)
 
-        assert "結果の解析に失敗" in result
+        assert "結果なし" in result
 
     @pytest.mark.asyncio
     async def test_nonzero_exit_with_stderr(self) -> None:
         """異常終了時に stderr が返されること."""
         from rag.server import _run_rebuild_subprocess
 
-        mock_process = AsyncMock()
-        mock_process.communicate.return_value = (b"", b"RuntimeError: DB locked\n")
-        mock_process.returncode = 1
+        mock_process = _make_mock_process(b"", b"RuntimeError: DB locked\n", 1)
 
         with patch("asyncio.create_subprocess_exec", return_value=mock_process):
             result = await _run_rebuild_subprocess("full", None, False)
@@ -571,9 +593,7 @@ class TestRunRebuildSubprocess:
         """SEGFAULT exit code でクラッシュメッセージが返されること."""
         from rag.server import _run_rebuild_subprocess
 
-        mock_process = AsyncMock()
-        mock_process.communicate.return_value = (b"", b"")
-        mock_process.returncode = -11
+        mock_process = _make_mock_process(b"", b"", -11)
 
         with patch("asyncio.create_subprocess_exec", return_value=mock_process):
             result = await _run_rebuild_subprocess("full", None, False)
@@ -586,12 +606,10 @@ class TestRunRebuildSubprocess:
         """worker のエラー JSON が異常終了時に活用されること."""
         from rag.server import _run_rebuild_subprocess
 
-        mock_process = AsyncMock()
-        mock_process.communicate.return_value = (
-            b'{"error":true,"message":"source_store not found"}',
-            b"Traceback ...\n",
+        mock_process = _make_mock_process(
+            b'{"type":"error","error":true,"message":"source_store not found"}',
+            b"Traceback ...\n", 1,
         )
-        mock_process.returncode = 1
 
         with patch("asyncio.create_subprocess_exec", return_value=mock_process):
             result = await _run_rebuild_subprocess("full", None, False)
@@ -610,13 +628,11 @@ class TestRunIngestAndIndexSubprocess:
         """正常な JSON 結果が PipelineSummary として返されること."""
         from rag.server import _run_ingest_and_index_subprocess
 
-        mock_process = AsyncMock()
-        mock_process.communicate.return_value = (
-            b'{"mode":"incremental","total_files":3,"processed":3,'
+        mock_process = _make_mock_process(
+            b'{"type":"result","mode":"incremental","total_files":3,"processed":3,'
             b'"skipped":0,"errors":[],"elapsed":0.5}',
-            b"",
+            b"", 0,
         )
-        mock_process.returncode = 0
 
         with patch("asyncio.create_subprocess_exec", return_value=mock_process):
             result = await _run_ingest_and_index_subprocess("test commit")
@@ -629,9 +645,7 @@ class TestRunIngestAndIndexSubprocess:
         """SEGFAULT exit code で RuntimeError が送出されること."""
         from rag.server import _run_ingest_and_index_subprocess
 
-        mock_process = AsyncMock()
-        mock_process.communicate.return_value = (b"", b"")
-        mock_process.returncode = -11
+        mock_process = _make_mock_process(b"", b"", -11)
 
         with patch("asyncio.create_subprocess_exec", return_value=mock_process):
             with pytest.raises(RuntimeError, match="SEGFAULT"):
@@ -642,9 +656,7 @@ class TestRunIngestAndIndexSubprocess:
         """異常終了時に RuntimeError が送出されること."""
         from rag.server import _run_ingest_and_index_subprocess
 
-        mock_process = AsyncMock()
-        mock_process.communicate.return_value = (b"", b"some error\n")
-        mock_process.returncode = 1
+        mock_process = _make_mock_process(b"", b"some error\n", 1)
 
         with patch("asyncio.create_subprocess_exec", return_value=mock_process):
             with pytest.raises(RuntimeError, match="異常終了"):
@@ -655,12 +667,10 @@ class TestRunIngestAndIndexSubprocess:
         """worker のエラー JSON メッセージが RuntimeError に含まれること."""
         from rag.server import _run_ingest_and_index_subprocess
 
-        mock_process = AsyncMock()
-        mock_process.communicate.return_value = (
-            b'{"error":true,"message":"DB connection failed"}',
-            b"",
+        mock_process = _make_mock_process(
+            b'{"type":"error","error":true,"message":"DB connection failed"}',
+            b"", 1,
         )
-        mock_process.returncode = 1
 
         with patch("asyncio.create_subprocess_exec", return_value=mock_process):
             with pytest.raises(RuntimeError, match="DB connection failed"):
@@ -671,9 +681,7 @@ class TestRunIngestAndIndexSubprocess:
         """stdout が空の場合に RuntimeError が送出されること."""
         from rag.server import _run_ingest_and_index_subprocess
 
-        mock_process = AsyncMock()
-        mock_process.communicate.return_value = (b"", b"")
-        mock_process.returncode = 0
+        mock_process = _make_mock_process(b"", b"", 0)
 
         with patch("asyncio.create_subprocess_exec", return_value=mock_process):
             with pytest.raises(RuntimeError, match="出力が空"):
@@ -691,13 +699,11 @@ class TestRunDeleteSubprocess:
         """削除成功時に deleted=True と PipelineSummary が返されること."""
         from rag.server import _run_delete_subprocess
 
-        mock_process = AsyncMock()
-        mock_process.communicate.return_value = (
-            b'{"deleted":true,"pipeline":{"mode":"incremental",'
+        mock_process = _make_mock_process(
+            b'{"type":"result","deleted":true,"pipeline":{"type":"result","mode":"incremental",'
             b'"total_files":1,"processed":1,"skipped":0,"errors":[],"elapsed":0.3}}',
-            b"",
+            b"", 0,
         )
-        mock_process.returncode = 0
 
         with patch("asyncio.create_subprocess_exec", return_value=mock_process):
             result = await _run_delete_subprocess("https://example.com/page")
@@ -710,9 +716,7 @@ class TestRunDeleteSubprocess:
         """該当なし時に not_found=True が返されること."""
         from rag.server import _run_delete_subprocess
 
-        mock_process = AsyncMock()
-        mock_process.communicate.return_value = (b'{"not_found":true}', b"")
-        mock_process.returncode = 0
+        mock_process = _make_mock_process(b'{"type":"result","not_found":true}', b"", 0)
 
         with patch("asyncio.create_subprocess_exec", return_value=mock_process):
             result = await _run_delete_subprocess("https://example.com/missing")
@@ -724,9 +728,7 @@ class TestRunDeleteSubprocess:
         """SEGFAULT exit code で RuntimeError が送出されること."""
         from rag.server import _run_delete_subprocess
 
-        mock_process = AsyncMock()
-        mock_process.communicate.return_value = (b"", b"")
-        mock_process.returncode = -11
+        mock_process = _make_mock_process(b"", b"", -11)
 
         with patch("asyncio.create_subprocess_exec", return_value=mock_process):
             with pytest.raises(RuntimeError, match="SEGFAULT"):
@@ -737,9 +739,7 @@ class TestRunDeleteSubprocess:
         """異常終了時に RuntimeError が送出されること."""
         from rag.server import _run_delete_subprocess
 
-        mock_process = AsyncMock()
-        mock_process.communicate.return_value = (b"", b"error trace\n")
-        mock_process.returncode = 1
+        mock_process = _make_mock_process(b"", b"error trace\n", 1)
 
         with patch("asyncio.create_subprocess_exec", return_value=mock_process):
             with pytest.raises(RuntimeError, match="異常終了"):

@@ -382,7 +382,7 @@ class TestCliSiteIngestValidation:
         """空 URL で sys.exit(1) すること."""
         from rag.cli import run_site_ingest
 
-        args = argparse.Namespace(url="", url_pattern="", max_pages=None, force=False)
+        args = argparse.Namespace(url="", url_pattern="", max_pages=None, force=False, download_only=False)
         with pytest.raises(SystemExit) as exc_info:
             await run_site_ingest(args)
         assert exc_info.value.code == 1
@@ -392,7 +392,7 @@ class TestCliSiteIngestValidation:
         """不正スキームで sys.exit(1) すること."""
         from rag.cli import run_site_ingest
 
-        args = argparse.Namespace(url="ftp://example.com", url_pattern="", max_pages=None, force=False)
+        args = argparse.Namespace(url="ftp://example.com", url_pattern="", max_pages=None, force=False, download_only=False)
         with pytest.raises(SystemExit) as exc_info:
             await run_site_ingest(args)
         assert exc_info.value.code == 1
@@ -402,7 +402,7 @@ class TestCliSiteIngestValidation:
         """プライベート IP で sys.exit(1) すること."""
         from rag.cli import run_site_ingest
 
-        args = argparse.Namespace(url="http://10.0.0.1/page", url_pattern="", max_pages=None, force=False)
+        args = argparse.Namespace(url="http://10.0.0.1/page", url_pattern="", max_pages=None, force=False, download_only=False)
         with pytest.raises(SystemExit) as exc_info:
             await run_site_ingest(args)
         assert exc_info.value.code == 1
@@ -412,7 +412,7 @@ class TestCliSiteIngestValidation:
         """不正な正規表現パターンで sys.exit(1) すること."""
         from rag.cli import run_site_ingest
 
-        args = argparse.Namespace(url="https://example.com", url_pattern="[bad(", max_pages=None, force=False)
+        args = argparse.Namespace(url="https://example.com", url_pattern="[bad(", max_pages=None, force=False, download_only=False)
         with pytest.raises(SystemExit) as exc_info:
             await run_site_ingest(args)
         assert exc_info.value.code == 1
@@ -445,7 +445,7 @@ class TestCliSiteIngestMaxPagesClamp:
             success=True,
         )
 
-        args = argparse.Namespace(url="https://example.com", url_pattern="", max_pages=-1, force=False)
+        args = argparse.Namespace(url="https://example.com", url_pattern="", max_pages=-1, force=False, download_only=False)
 
         with (
             patch.object(ScrapyRunner, "run", new_callable=AsyncMock, return_value=mock_crawl_result) as mock_run,
@@ -469,7 +469,7 @@ class TestCliSiteIngestMaxPagesClamp:
             success=True,
         )
 
-        args = argparse.Namespace(url="https://example.com", url_pattern="", max_pages=999999, force=False)
+        args = argparse.Namespace(url="https://example.com", url_pattern="", max_pages=999999, force=False, download_only=False)
 
         with (
             patch.object(ScrapyRunner, "run", new_callable=AsyncMock, return_value=mock_crawl_result) as mock_run,
@@ -496,7 +496,7 @@ class TestCliSiteIngestMaxPagesClamp:
         mock_settings = _make_cli_mock_settings()
         mock_settings.site_ingest_max_pages = 2000
 
-        args = argparse.Namespace(url="https://example.com", url_pattern="", max_pages=None, force=False)
+        args = argparse.Namespace(url="https://example.com", url_pattern="", max_pages=None, force=False, download_only=False)
 
         with (
             patch.object(ScrapyRunner, "run", new_callable=AsyncMock, return_value=mock_crawl_result) as mock_run,
@@ -524,7 +524,7 @@ class TestCliSiteIngestFlow:
             success=True,
         )
 
-        args = argparse.Namespace(url="https://example.com", url_pattern="", max_pages=10, force=False)
+        args = argparse.Namespace(url="https://example.com", url_pattern="", max_pages=10, force=False, download_only=False)
 
         with (
             patch.object(ScrapyRunner, "run", new_callable=AsyncMock, return_value=mock_crawl_result),
@@ -572,7 +572,7 @@ class TestCliSiteIngestFlow:
         mock_controller.source_store = MagicMock()
         mock_controller.ingest_and_index.return_value = mock_pipeline_summary
 
-        args = argparse.Namespace(url="https://example.com", url_pattern="", max_pages=10, force=False)
+        args = argparse.Namespace(url="https://example.com", url_pattern="", max_pages=10, force=False, download_only=False)
 
         with (
             patch.object(ScrapyRunner, "run", new_callable=AsyncMock, return_value=mock_crawl_result),
@@ -619,7 +619,7 @@ class TestCliSiteIngestFlow:
         mock_controller = MagicMock()
         mock_controller.source_store = MagicMock()
 
-        args = argparse.Namespace(url="https://example.com", url_pattern="", max_pages=10, force=False)
+        args = argparse.Namespace(url="https://example.com", url_pattern="", max_pages=10, force=False, download_only=False)
 
         with (
             patch.object(ScrapyRunner, "run", new_callable=AsyncMock, return_value=mock_crawl_result),

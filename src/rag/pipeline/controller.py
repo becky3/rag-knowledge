@@ -11,6 +11,7 @@ from __future__ import annotations
 import hashlib
 import logging
 import subprocess
+from collections.abc import Callable
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -36,6 +37,9 @@ from rag.store.resolve import resolve_source_id, resolve_title
 from rag.store.source_store import SourceStore
 
 logger = logging.getLogger(__name__)
+
+# 進捗コールバック型: (processed, total, current_file) -> None
+ProgressCallback = Callable[[int, int, str], None]
 
 # .meta を持たない媒体
 _NO_META_TYPES: frozenset[SourceType] = frozenset({"local"})
@@ -93,23 +97,28 @@ class PipelineController:
         self._git.init_repo()
         return self._git.commit(message)
 
-    def ingest_and_index(self, message: str) -> PipelineSummary:
+    def ingest_and_index(
+        self,
+        message: str,
+        progress_callback: ProgressCallback | None = None,
+    ) -> PipelineSummary:
         """インジェスター実行後の後処理を一括実行する.
 
         source_store の変更を git commit し、差分更新を実行する。
 
         Args:
             message: コミットメッセージ
+            progress_callback: 進捗コールバック
 
         Returns:
             パイプライン処理結果サマリ
         """
         self.commit(message)
-        return self.run_incremental()
+        return self.run_incremental(progress_callback=progress_callback)
 
     # --- パイプライン実行 ---
 
-    def run_incremental(self) -> PipelineSummary:
+    def run_incremental(self, progress_callback: ProgressCallback | None = None) -> PipelineSummary:
         """差分更新を実行する.
 
         last_commit_id と HEAD の差分を検知し、
@@ -165,6 +174,7 @@ class PipelineController:
 
         summary = self._process_changes(
             changes, PipelineMode.INCREMENTAL, last_commit_id, head_commit,
+            progress_callback=progress_callback,
         )
 
         # 正常完了時のみ pipeline_history に記録
@@ -182,6 +192,7 @@ class PipelineController:
         source_type: SourceType | None = None,
         *,
         auto_commit: bool = False,
+        progress_callback: ProgressCallback | None = None,
     ) -> PipelineSummary:
         """全再構築を実行する.
 
@@ -245,6 +256,8 @@ class PipelineController:
                 logger.exception("全再構築中にエラー: %s", record.file_path)
                 errors.append(record.file_path)
                 skipped += 1
+            if progress_callback is not None:
+                progress_callback(processed + skipped, len(records), record.file_path)
 
         # pipeline_history に記録（正常完了時のみ）
         to_commit = ""
@@ -321,6 +334,7 @@ class PipelineController:
         source_type: SourceType | None = None,
         *,
         auto_commit: bool = False,
+        progress_callback: ProgressCallback | None = None,
     ) -> PipelineSummary:
         """コンバートのみ再実行する.
 
@@ -378,6 +392,8 @@ class PipelineController:
                 )
                 errors.append(record.file_path)
                 skipped += 1
+            if progress_callback is not None:
+                progress_callback(processed + skipped, len(records), record.file_path)
 
         return PipelineSummary(
             mode=PipelineMode.CONVERT_ONLY,
@@ -392,6 +408,7 @@ class PipelineController:
         source_type: SourceType | None = None,
         *,
         auto_commit: bool = False,
+        progress_callback: ProgressCallback | None = None,
     ) -> PipelineSummary:
         """インデックスのみ再構築する.
 
@@ -456,6 +473,8 @@ class PipelineController:
                 )
                 errors.append(record.file_path)
                 skipped += 1
+            if progress_callback is not None:
+                progress_callback(processed + skipped, len(records), record.file_path)
 
         return PipelineSummary(
             mode=PipelineMode.INDEX_ONLY,
@@ -537,6 +556,7 @@ class PipelineController:
         mode: PipelineMode,
         from_commit_id: str,
         to_commit_id: str,
+        progress_callback: ProgressCallback | None = None,
     ) -> PipelineSummary:
         """変更エントリを処理する."""
         processed = 0
@@ -553,6 +573,8 @@ class PipelineController:
                 )
                 errors.append(entry.file_path)
                 skipped += 1
+            if progress_callback is not None:
+                progress_callback(processed + skipped, len(changes), entry.file_path)
 
         return PipelineSummary(
             mode=mode,

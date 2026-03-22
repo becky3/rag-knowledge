@@ -119,7 +119,7 @@ MCP ツール `rag_site_ingest` と CLI コマンド `site-ingest` の 2 つの�
 
 | ツール | 入力 | 振る舞い |
 |--------|------|---------|
-| `rag_site_ingest` | `url`（必須）、`url_pattern`（任意）、`max_pages`（任意）、`force`（任意） | Scrapy subprocess で対象サイトをクロールし、取得した HTML を source_store に配置後、パイプライン処理を実行する。結果サマリー（取得ページ数、エラー数、所要時間）を返す |
+| `rag_site_ingest` | `url`（必須）、`url_pattern`（任意）、`max_pages`（任意）、`force`（任意）、`download_only`（任意） | Scrapy subprocess で対象サイトをクロールし、取得した HTML を source_store に配置後、パイプライン処理を実行する（`download_only` 時はパイプライン処理をスキップ）。結果サマリー（取得ページ数、エラー数、所要時間）を返す |
 
 #### `rag_site_ingest` パラメータ
 
@@ -129,6 +129,7 @@ MCP ツール `rag_site_ingest` と CLI コマンド `site-ingest` の 2 つの�
 | `url_pattern` | str | なし | クロール対象 URL のフィルタパターン（正規表現）。未指定時は開始 URL のパスプレフィックスから自動生成する（例: `https://example.com/docs/` → `^https://example\.com/docs/`）。パスが `/` のみの場合はパターンなし（ドメイン全体が対象）。明示的に指定した場合はその値を優先する |
 | `max_pages` | int | `site_ingest_max_pages` | ページ数上限。config.toml の値を上書き可能 |
 | `force` | bool | `false` | `true` の場合、ドメインディレクトリ全体（JOBDIR、HTML、JSONL）を削除して最初からクロールする |
+| `download_only` | bool | `false` | `true` の場合、Scrapy クロール + Bridge（source_store 配置）まで実行し、パイプライン処理（converter + indexer）をスキップする。後から `rag_rebuild` で処理可能 |
 
 ### CLI コマンド
 
@@ -144,6 +145,7 @@ MCP ツール `rag_site_ingest` と CLI コマンド `site-ingest` の 2 つの�
 | `--url-pattern` | str | なし | URL フィルタパターン |
 | `--max-pages` | int | `site_ingest_max_pages` | ページ数上限 |
 | `--force` | フラグ | `false` | ドメインディレクトリ全体を削除して再クロール |
+| `--download-only` | フラグ | `false` | Scrapy クロール + Bridge まで実行し、パイプライン処理をスキップ |
 
 ### 取り込み結果の出力形式
 
@@ -358,8 +360,12 @@ sequenceDiagram
     CMD->>BRIDGE: JSONL + HTML → source_store 変換
     BRIDGE->>SS: ファイル配置 + .meta 生成
     BRIDGE->>CMD: 配置結果
-    CMD->>PC: パイプライン処理（MCP: サブプロセス経由）
-    PC->>CMD: パイプライン処理結果
+    alt download_only = false
+        CMD->>PC: パイプライン処理（MCP: サブプロセス経由）
+        PC->>CMD: パイプライン処理結果
+    else download_only = true
+        Note over CMD: パイプライン処理をスキップ
+    end
     CMD->>USER: 結果サマリー
 ```
 
@@ -404,6 +410,7 @@ Scrapy は独立した Python パッケージとして `pyproject.toml` に依�
 | Windows でのファイルロック | Scrapy プロセス終了後に JOBDIR のファイルがロックされている場合、`--force` による JOBDIR 削除が失敗する可能性がある。リトライまたは手動削除を案内する |
 | DNS リバインディングによるプライベート IP への誘導 | SSRF Middleware が各リクエストの DNS 解決結果を検証し、プライベート IP へのアクセスを `IgnoreRequest` で拒否する。該当リクエストは Scrapy の統計に失敗として記録される |
 | SSRF Middleware での DNS 解決失敗 | DNS 解決に失敗した場合、そのリクエストを `IgnoreRequest` で拒否する。ネットワーク障害等による一時的な DNS エラーは Scrapy のリトライ対象外となる |
+| `download_only` 指定時にパイプライン処理が必要な場合 | MCP: `rag_rebuild`（mode: full, source_type: web）、CLI: `uv run python -m rag.cli rebuild --mode full --source-type web` で後からパイプライン処理を実行する。incremental モードでも可（source_store への配置が git commit されていれば差分検知される） |
 
 ## 関連ドキュメント
 
