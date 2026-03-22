@@ -31,7 +31,7 @@ def _crawl_key(start_url: str, url_pattern: str) -> str:
     異なる組み合わせは異なるキーを返し、JOBDIR の分離を保証する。
     """
     raw = f"{start_url}\n{url_pattern}"
-    return hashlib.sha256(raw.encode()).hexdigest()[:8]
+    return hashlib.sha256(raw.encode()).hexdigest()[:16]
 
 
 @dataclass
@@ -85,7 +85,7 @@ class ScrapyRunner:
             allowed_domains: ドメイン制約（カンマ区切り）
             url_pattern: URL フィルタ正規表現
             max_pages: ページ数上限（None の場合はインスタンス設定値を使用）
-            force: True の場合、JOBDIR を削除して最初からクロール
+            force: True の場合、クロールディレクトリ全体を削除して最初からクロール
 
         Returns:
             クロール実行結果

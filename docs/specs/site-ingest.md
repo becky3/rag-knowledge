@@ -329,7 +329,7 @@ JSONL の各行から .meta サイドカーファイルへの変換:
 
 ### JOBDIR の分離
 
-一時保存ディレクトリは `{domain}/{crawl_key}/` の 2 階層で管理する。`crawl_key` は `start_url` と effective `url_pattern`（自動生成後の値）の SHA-256 先頭 8 文字。
+一時保存ディレクトリは `{domain}/{crawl_key}/` の 2 階層で管理する。`crawl_key` は `start_url` と effective `url_pattern`（自動生成後の値）の SHA-256 先頭 16 文字。
 
 - 同じ `start_url` + `url_pattern` の組み合わせ → 同じクロールディレクトリ → レジューム可能
 - 異なる `start_url` または `url_pattern` → 異なるクロールディレクトリ → JOBDIR のスケジューラキューが分離され、状態リークを防止

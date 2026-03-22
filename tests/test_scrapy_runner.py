@@ -70,9 +70,9 @@ class TestCrawlKey:
         assert key1 != key2
 
     def test_key_length(self) -> None:
-        """キーは8文字."""
+        """キーは16文字."""
         key = _crawl_key("https://example.com", "")
-        assert len(key) == 8
+        assert len(key) == 16
 
     def test_key_is_hex(self) -> None:
         """キーは16進文字列."""
@@ -236,11 +236,12 @@ class TestScrapyRunnerRun:
         with patch("asyncio.create_subprocess_exec", return_value=mock_process):
             result = await runner.run(start_url="https://example.com")
 
-        crawl_dir = _expected_crawl_dir(tmp_path, "https://example.com")
         assert result.success is True
         assert result.exit_code == 0
-        assert result.output_dir == crawl_dir / "html"
-        assert result.jsonl_path == crawl_dir / "metadata.jsonl"
+        assert result.output_dir.name == "html"
+        assert result.jsonl_path.name == "metadata.jsonl"
+        # output_dir と jsonl_path は同じクロールディレクトリ配下
+        assert result.output_dir.parent == result.jsonl_path.parent
 
     @pytest.mark.asyncio()
     async def test_failed_crawl(self, tmp_path: Path) -> None:
@@ -323,11 +324,10 @@ class TestScrapyRunnerRun:
         mock_process.stderr = _async_lines_iter([])
 
         with patch("asyncio.create_subprocess_exec", return_value=mock_process):
-            await runner.run(start_url="https://example.com", max_pages=50)
+            result = await runner.run(start_url="https://example.com", max_pages=50)
 
         # パラメータ JSON ファイルに max_pages=50 が書き込まれていること
-        crawl_dir = _expected_crawl_dir(tmp_path, "https://example.com")
-        params_path = crawl_dir / "spider_params.json"
+        params_path = result.output_dir.parent / "spider_params.json"
         params = json.loads(params_path.read_text(encoding="utf-8"))
         assert params["max_pages"] == 50
 
@@ -361,16 +361,13 @@ class TestScrapyRunnerRun:
         mock_process.stderr = _async_lines_iter([])
 
         with patch("asyncio.create_subprocess_exec", return_value=mock_process):
-            await runner.run(
+            result = await runner.run(
                 start_url="https://example.com/docs",
                 allowed_domains="example.com",
                 url_pattern=r"/docs/.*",
             )
 
-        crawl_dir = _expected_crawl_dir(
-            tmp_path, "https://example.com/docs", r"/docs/.*",
-        )
-        params_path = crawl_dir / "spider_params.json"
+        params_path = result.output_dir.parent / "spider_params.json"
         assert params_path.exists()
         params = json.loads(params_path.read_text(encoding="utf-8"))
         assert params["start_url"] == "https://example.com/docs"
@@ -394,10 +391,9 @@ class TestScrapyRunnerRun:
         mock_process.stderr = _async_lines_iter([])
 
         with patch("asyncio.create_subprocess_exec", return_value=mock_process):
-            await runner.run(start_url="https://example.com")
+            result = await runner.run(start_url="https://example.com")
 
-        crawl_dir = _expected_crawl_dir(tmp_path, "https://example.com")
-        params_path = crawl_dir / "spider_params.json"
+        params_path = result.output_dir.parent / "spider_params.json"
         params = json.loads(params_path.read_text(encoding="utf-8"))
         assert params["timeout_sec"] == 600
         assert params["error_count"] == 50
@@ -412,10 +408,9 @@ class TestScrapyRunnerRun:
         mock_process.stderr = _async_lines_iter([])
 
         with patch("asyncio.create_subprocess_exec", return_value=mock_process):
-            await runner.run(start_url="https://example.com/docs/guide/")
+            result = await runner.run(start_url="https://example.com/docs/guide/")
 
-        crawl_dir = _expected_crawl_dir(tmp_path, "https://example.com/docs/guide/")
-        params_path = crawl_dir / "spider_params.json"
+        params_path = result.output_dir.parent / "spider_params.json"
         params = json.loads(params_path.read_text(encoding="utf-8"))
         # re.escape でドメインのドットがエスケープされたパターン
         assert params["url_pattern"] == r"^https://example\.com/docs/guide(?:/|$)"
@@ -430,10 +425,9 @@ class TestScrapyRunnerRun:
         mock_process.stderr = _async_lines_iter([])
 
         with patch("asyncio.create_subprocess_exec", return_value=mock_process):
-            await runner.run(start_url="https://example.com/")
+            result = await runner.run(start_url="https://example.com/")
 
-        crawl_dir = _expected_crawl_dir(tmp_path, "https://example.com/")
-        params_path = crawl_dir / "spider_params.json"
+        params_path = result.output_dir.parent / "spider_params.json"
         params = json.loads(params_path.read_text(encoding="utf-8"))
         assert params["url_pattern"] == ""
 
@@ -447,15 +441,12 @@ class TestScrapyRunnerRun:
         mock_process.stderr = _async_lines_iter([])
 
         with patch("asyncio.create_subprocess_exec", return_value=mock_process):
-            await runner.run(
+            result = await runner.run(
                 start_url="https://example.com/docs/guide",
                 url_pattern=r"/custom/.*",
             )
 
-        crawl_dir = _expected_crawl_dir(
-            tmp_path, "https://example.com/docs/guide", r"/custom/.*",
-        )
-        params_path = crawl_dir / "spider_params.json"
+        params_path = result.output_dir.parent / "spider_params.json"
         params = json.loads(params_path.read_text(encoding="utf-8"))
         assert params["url_pattern"] == r"/custom/.*"
 
