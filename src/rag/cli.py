@@ -1785,7 +1785,7 @@ async def run_site_ingest(args: argparse.Namespace) -> None:
 
     # パイプライン処理
     pipeline_summary = None
-    has_changes = (bridge_result.ingest.placed + bridge_result.ingest.skipped) > 0
+    has_changes = (bridge_result.ingest.placed + bridge_result.ingest.overwritten) > 0
     if has_changes and not args.download_only:
         pipeline_summary = controller.ingest_and_index(f"ingest(web): site-ingest {url}")
     elif has_changes and args.download_only:

@@ -1000,7 +1000,7 @@ async def rag_site_ingest(
 
         # パイプライン処理
         pipeline_summary: PipelineSummary | None = None
-        has_changes = (bridge_result.ingest.placed + bridge_result.ingest.skipped) > 0
+        has_changes = (bridge_result.ingest.placed + bridge_result.ingest.overwritten) > 0
         if has_changes and not download_only:
             pipeline_summary = await _run_ingest_and_index_subprocess(
                 f"ingest(web): site-ingest {url}",

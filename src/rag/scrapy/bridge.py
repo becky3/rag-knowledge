@@ -151,9 +151,10 @@ def import_to_source_store(
             )
 
     logger.info(
-        "Bridge 完了: %d 行処理, %d 件新規配置, %d 件スキップ(既存/非200), %d 件エラー",
+        "Bridge 完了: %d 行処理, %d 件新規配置, %d 件上書き, %d 件スキップ, %d 件エラー",
         result.total_lines,
         result.ingest.placed,
+        result.ingest.overwritten,
         result.ingest.skipped,
         result.ingest.errors,
     )
@@ -228,7 +229,7 @@ def _process_record(
         if is_new:
             result.ingest.placed += 1
         else:
-            result.ingest.skipped += 1
+            result.ingest.overwritten += 1
     except Exception:
         logger.exception(
             "JSONL 行 %d: source_store 配置エラー: %s",

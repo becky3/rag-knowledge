@@ -15,6 +15,7 @@ class IngestResult:
 
     placed: int = 0
     skipped: int = 0
+    overwritten: int = 0
     errors: int = 0
     error_details: list[str] = field(default_factory=list)
 
