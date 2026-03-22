@@ -93,8 +93,18 @@ _init_lock = asyncio.Lock()
 
 
 def _reset_rag_service() -> None:
-    """グローバルな RAGKnowledgeService をリセットする."""
+    """グローバルな RAGKnowledgeService をリセットする.
+
+    SharedSystemClient キャッシュをクリアしてから破棄する。
+    サブプロセスが ChromaDB を更新した後、キャッシュが残っていると
+    古い HNSW インメモリ状態が再利用され where フィルタ付き検索が失敗する。
+    """
     global _rag_service
+    if _rag_service is not None:
+        try:
+            _rag_service.close()
+        except Exception:
+            logger.warning("Failed to close RAG service", exc_info=True)
     _rag_service = None
 
 

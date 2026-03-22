@@ -221,6 +221,10 @@ class RAGKnowledgeService:
             )
             logger.info("Hybrid search engine initialized")
 
+    def close(self) -> None:
+        """リソースを解放する."""
+        self._vector_store.close()
+
     async def crawl_preview(
         self,
         index_url: str,

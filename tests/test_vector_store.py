@@ -664,3 +664,38 @@ class TestEmbeddingMethodDispatch:
         await ephemeral_store.search("テスト", n_results=1)
 
         mock_embedding.embed_query.assert_awaited_once_with("テスト")
+
+
+class TestClose:
+    """VectorStore.close() の回帰テスト (#335)."""
+
+    def test_close_clears_shared_system_cache(
+        self,
+        mock_embedding: MockEmbeddingProvider,
+        tmp_path: object,
+    ) -> None:
+        """close() で SharedSystemClient キャッシュがクリアされること."""
+        from chromadb.api.shared_system_client import SharedSystemClient
+
+        persist_dir = str(tmp_path)
+        store = VectorStore(
+            embedding_provider=mock_embedding,
+            persist_directory=persist_dir,
+        )
+
+        # PersistentClient 作成後、キャッシュにエントリが存在する
+        systems = getattr(SharedSystemClient, "_identifier_to_system", {})
+        assert persist_dir in systems
+
+        # close() でキャッシュがクリアされる
+        store.close()
+        systems_after = getattr(SharedSystemClient, "_identifier_to_system", {})
+        assert persist_dir not in systems_after
+
+    def test_close_ephemeral_is_noop(
+        self,
+        ephemeral_store: VectorStore,
+    ) -> None:
+        """EphemeralClient の close() はエラーにならないこと."""
+        # ephemeral は persist_directory が空文字なので何もしない
+        ephemeral_store.close()  # 例外が出なければOK
