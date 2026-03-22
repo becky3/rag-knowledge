@@ -256,7 +256,7 @@ class TestMcpSiteIngestFlow:
                 max_pages=10,
                 force=False,
             )
-            assert "3件配置" in result
+            assert "3件新規配置" in result
             assert "1件スキップ" in result
             assert "パイプライン: 3件処理" in result
             mock_bridge.assert_called_once()
@@ -306,7 +306,7 @@ class TestMcpSiteIngestFlow:
                 max_pages=10,
                 force=False,
             )
-            assert "0件配置" in result
+            assert "0件新規配置" in result
             assert "5件スキップ" in result
             mock_subprocess.assert_not_called()
 
@@ -366,7 +366,7 @@ class TestMcpSiteIngestFlow:
                 max_pages=10,
                 force=False,
             )
-            assert "2件配置" in result
+            assert "2件新規配置" in result
             assert "exit_code=1" in result
             assert "部分的な結果" in result
 
@@ -583,7 +583,7 @@ class TestCliSiteIngestFlow:
 
             await run_site_ingest(args)
             captured = capsys.readouterr()
-            assert "5件配置" in captured.out
+            assert "5件新規配置" in captured.out
             assert "2件スキップ" in captured.out
             assert "1件エラー" in captured.out
             assert "パイプライン: 5件処理" in captured.out
@@ -630,7 +630,7 @@ class TestCliSiteIngestFlow:
 
             await run_site_ingest(args)
             captured = capsys.readouterr()
-            assert "0件配置" in captured.out
+            assert "0件新規配置" in captured.out
             mock_controller.ingest_and_index.assert_not_called()
 
 
