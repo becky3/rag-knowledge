@@ -1325,40 +1325,20 @@ async def _run_rebuild_subprocess(
     env = os.environ.copy()
     env["PYTHONIOENCODING"] = "utf-8"
 
-    # stderr をファイルにリダイレクト（Windows パイプ EOF 問題回避）
-    import tempfile
-    stderr_file = tempfile.NamedTemporaryFile(
-        mode="w", encoding="utf-8", suffix=".log",
-        prefix="rebuild_stderr_", delete=False,
+    process = await asyncio.create_subprocess_exec(
+        *cmd,
+        stdout=asyncio.subprocess.PIPE,
+        stdin=asyncio.subprocess.DEVNULL,
+        stderr=asyncio.subprocess.PIPE,
+        env=env,
     )
-    try:
-        process = await asyncio.create_subprocess_exec(
-            *cmd,
-            stdout=asyncio.subprocess.PIPE,
-            stdin=asyncio.subprocess.DEVNULL,
-            stderr=stderr_file,
-            env=env,
-        )
-        stdout_bytes, _ = await process.communicate()
-        exit_code = process.returncode or 0
-    finally:
-        stderr_file.close()
+    stdout_bytes, stderr_bytes = await process.communicate()
+    exit_code = process.returncode or 0
 
-    # 一時ファイル削除
-    stderr_path = Path(stderr_file.name)
-    try:
-        stderr_tail = ""
-        if stderr_path.exists():
-            stderr_text = stderr_path.read_text(encoding="utf-8", errors="replace")
-            lines = stderr_text.rstrip().splitlines()
-            stderr_tail = "\n".join(lines[-10:])
-    except OSError:
-        stderr_tail = ""
-    finally:
-        try:
-            stderr_path.unlink(missing_ok=True)
-        except OSError:
-            pass
+    # stderr の末尾10行を保持（エラー時の診断用）
+    stderr_text = stderr_bytes.decode("utf-8", errors="replace") if stderr_bytes else ""
+    stderr_lines = stderr_text.rstrip().splitlines()
+    stderr_tail = "\n".join(stderr_lines[-10:])
 
     # クラッシュ検出
     if exit_code != 0:

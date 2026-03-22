@@ -231,12 +231,13 @@ Scrapy プロセスの subprocess ラッパー。
 
 振る舞い:
 
-- `asyncio.create_subprocess_exec` で Scrapy を起動する
 - `asyncio.create_subprocess_exec` で Scrapy を起動し、インラインスクリプト内で `CrawlerProcess(settings=...)` を構成する
+- stdin は `DEVNULL` に設定する（MCP stdio モードでの親プロセス stdin 干渉を防止）
+- stderr はファイルにリダイレクトする（Twisted の子プロセス/スレッドが stderr パイプを継承し、メインプロセス終了後もパイプが閉じない Windows 固有の問題を回避）
 - JOBDIR を指定して中断再開に対応する
 - 環境変数 `PYTHONIOENCODING=utf-8` を設定する
-- Scrapy プロセスの終了を待機し、exit code で成否を判定する
-- exit code 0 以外の場合はエラーログを出力する
+- `process.wait()` でプロセスの終了を待機し、exit code で成否を判定する
+- exit code 0 以外の場合はエラーログを出力する（stderr ファイルの末尾を読み取り）
 
 Scrapy に渡す設定:
 
