@@ -332,6 +332,37 @@ def convert_json_zenn_scrap(data: dict[str, Any]) -> str | None:
     return "\n\n---\n\n".join(converted_parts)
 
 
+def convert_json_zenn_article(data: dict[str, Any]) -> str | None:
+    """Zenn 記事 JSON からテキストを抽出する.
+
+    仕様: docs/specs/converter.md「Zenn 記事」
+
+    article オブジェクトの body_html を HTML → Markdown 変換する。
+
+    Args:
+        data: 記事 JSON（article オブジェクト、またはそれを含むラッパー）
+
+    Returns:
+        Markdown テキスト、または body_html が空/存在しない場合は None
+    """
+    article = data.get("article", data)
+    if not isinstance(article, dict):
+        return None
+
+    body_html = article.get("body_html", "")
+    if not isinstance(body_html, str) or not body_html.strip():
+        return None
+
+    md_converter = _create_md_converter()
+    soup = BeautifulSoup(body_html, "html.parser")
+    for tag_name in ("script", "style"):
+        for tag in soup.find_all(tag_name):
+            tag.decompose()
+
+    md_text: str = md_converter.convert_soup(soup)
+    return md_text if md_text and md_text.strip() else None
+
+
 def passthrough_copy(source_path: Path, dest_path: Path) -> None:
     """ファイルをそのままコピーする（パススルー）.
 

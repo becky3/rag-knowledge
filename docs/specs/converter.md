@@ -116,7 +116,7 @@ source_store のディレクトリ構成をミラーする。source_store 内の
 | `web/https/example.com/docs/guide.html` | `web/https/example.com/docs/guide.md` |
 | `web/https/example.com/docs/report.pdf` | `web/https/example.com/docs/report.md` |
 | `bluesky/did：plc：xxx/2026/03/rkey.json` | `bluesky/did：plc：xxx/2026/03/rkey.md` |
-| `zenn/alice/articles/slug.html` | `zenn/alice/articles/slug.md` |
+| `zenn/alice/articles/slug.json` | `zenn/alice/articles/slug.md` |
 | `local/my-notes/memo.md` | `local/my-notes/memo.md` |
 | `local/my-notes/note.txt` | `local/my-notes/note.txt` |
 | `local/docs/guide.adoc` | `local/docs/guide.adoc` |
@@ -256,7 +256,7 @@ PDF の特性を 3 段階で評価し、バックエンドと処理モードを�
 
 ### JSON → テキスト抽出
 
-JSON ファイルから構造化テキストを抽出する。source_store に JSON 形式で保存されるのは BlueSky 投稿と Zenn スクラップ（Zenn 記事は `.html` で保存されるため HTML → Markdown 変換パスで処理される）。
+JSON ファイルから構造化テキストを抽出する。source_store に JSON 形式で保存されるのは BlueSky 投稿、Zenn 記事、Zenn スクラップ。source_type とファイルパスに応じたハンドラを選択する。
 
 #### BlueSky 投稿（source_type: bluesky）
 
@@ -324,12 +324,21 @@ Description: 外部リンクの説明文
 - 投稿テキストを先頭に配置する（検索ヒット時に最も重要な情報が先頭に来る）
 - セクションラベルは英語表記とする（LLM による検索・解釈の精度向上のため）
 
+#### Zenn 記事（source_type: zenn、articles/ 配下の JSON）
+
+Zenn 記事の JSON（`article` オブジェクト）から `body_html` を抽出し、HTML → Markdown 変換を適用する。
+
+1. `article.body_html` フィールドを取得する
+2. `body_html` が空または存在しない場合は変換をスキップする
+3. `body_html` から `script`/`style` タグを除去し、Markdown 変換ルール（ATX 見出し、テーブル保持、リンク URL 除去等）を適用する。Zenn API の `body_html` はコンテンツ本文のみを含むため、コンテンツ領域の特定は行わない
+4. .meta からタイトルを取得し、H1 見出しとして先頭に付与する（既存の `_prepend_title_from_meta` の振る舞いを維持）
+
 #### Zenn スクラップ（source_type: zenn、scraps/ 配下の JSON）
 
 Zenn スクラップの JSON（`scrap` オブジェクト）から `comments` 配列の各コメントの `body_html` を順序保持で結合し、Markdown に変換する。
 
 1. `scrap.comments` 配列をインデックス順に走査する
-2. 各コメントの `body_html` を HTML → Markdown 変換する（HTML → Markdown 変換の共通ルールを適用）
+2. 各コメントの `body_html` から `script`/`style` タグを除去し、Markdown 変換ルール（ATX 見出し、テーブル保持、リンク URL 除去等）を適用する。Zenn API の `body_html` はコンテンツ本文のみを含むため、コンテンツ領域の特定は行わない
 3. 変換後の各コメントを `---`（水平線）で区切って結合する
 
 コメントが 0 件または全コメントの `body_html` が空の場合は、変換をスキップする。converted_store に既存ファイルがある場合は削除する。パイプライン制御にスキップ結果（変換なし）を返却し、パイプライン制御がインデクサーに当該 source_id のインデックス削除を指示する。
@@ -373,6 +382,7 @@ Zenn スクラップの JSON（`scrap` オブジェクト）から `comments` �
 | PDF のテキスト抽出結果が空 | 変換をスキップし、警告ログを出力する。converted_store にはファイルを配置しない |
 | MinerU が未インストールの環境で `rag_pdf_backend` が `auto` | auto 判定で MinerU が必要と判断された場合、pymupdf4llm にフォールバックし、警告ログを出力する |
 | MinerU が未インストールの環境で `rag_pdf_backend` が `mineru` | エラーログを出力し、当該ファイルの変換をスキップする |
+| Zenn 記事 JSON に `body_html` フィールドがない、または空 | 変換をスキップし、警告ログを出力する |
 | JSON ファイルの source_type が不明 | 変換をスキップし、警告ログを出力する。JSON の変換は source_type に依存するため、source_type 情報なしでは変換できない |
 | converted_store のディレクトリが存在しない場合 | 変換時に必要なディレクトリを自動作成する |
 | パススルー対象ファイルのコピーエラー（I/O エラー等） | エラーログを出力し、当該ファイルのコピーをスキップする |
@@ -383,3 +393,4 @@ Zenn スクラップの JSON（`scrap` オブジェクト）から `comments` �
 - [source-store.md](source-store.md) — source_store 仕様
 - [pipeline-controller.md](pipeline-controller.md) — パイプライン制御仕様
 - [ingesters/bluesky.md](ingesters/bluesky.md) — BlueSky インジェスター仕様（JSON 保存形式の定義元）
+- [ingesters/zenn.md](ingesters/zenn.md) — Zenn インジェスター仕様（JSON 保存形式の定義元）

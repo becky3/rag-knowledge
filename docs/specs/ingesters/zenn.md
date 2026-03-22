@@ -39,7 +39,7 @@ Zenn（zenn.dev）の記事およびスクラップを API 経由で取得し、
 
 - **metadata.db アクセス禁止**: metadata.db に直接アクセスしない。DB 登録はパイプライン制御が .meta を読んで実行する
 - **git 操作禁止**: git 操作はパイプライン制御のみが実行する
-- **オリジナルデータの無加工保存**: 記事は Zenn API の `body_html` をそのまま HTML ファイルとして保存する。スクラップは API レスポンスの `scrap` オブジェクト（`comments` 配列を含む）をそのまま JSON ファイルとして保存する。コメントの結合・テキスト抽出はコンバーターの範疇
+- **オリジナルデータの無加工保存**: 記事は API レスポンスの `article` オブジェクトをそのまま JSON ファイルとして保存する。スクラップは API レスポンスの `scrap` オブジェクト（`comments` 配列を含む）をそのまま JSON ファイルとして保存する。`body_html` の抽出・テキスト変換はコンバーターの範疇
 - **ファイル削除禁止**: source_store 内のファイルの物理削除は一切行わない
 
 ### 外部 HTTP リクエスト
@@ -136,22 +136,22 @@ source_store/
   zenn/
     {username}/
       articles/
-        {slug}.html
-        {slug}.html.meta
+        {slug}.json
+        {slug}.json.meta
       scraps/
         {slug}.json
         {slug}.json.meta
 ```
 
-- ファイル形式: 記事は Zenn API の `body_html` を HTML ファイルとして保存。スクラップは API レスポンスの `scrap` オブジェクトを JSON ファイルとして保存
-- ファイル名: 記事はスラッグに `.html`、スクラップはスラッグに `.json` 拡張子を付与
+- ファイル形式: 記事は API レスポンスの `article` オブジェクトを JSON ファイルとして保存。スクラップは API レスポンスの `scrap` オブジェクトを JSON ファイルとして保存
+- ファイル名: スラッグに `.json` 拡張子を付与
 - .meta: データファイルと同階層に配置
 
 ### source_id とファイルパスの対応
 
 | コンテンツ種別 | source_id | ファイルパス |
 |--------------|-----------|------------|
-| 記事 | `https://zenn.dev/{username}/articles/{slug}` | `zenn/{username}/articles/{slug}.html` |
+| 記事 | `https://zenn.dev/{username}/articles/{slug}` | `zenn/{username}/articles/{slug}.json` |
 | スクラップ | `https://zenn.dev/{username}/scraps/{slug}` | `zenn/{username}/scraps/{slug}.json` |
 
 source_id はコンテンツの公開 URL であり、安定した識別子として機能する。
@@ -270,9 +270,9 @@ flowchart TD
 ### 個別記事取得とファイル配置の処理手順
 
 1. 記事詳細 API（`/api/articles/{slug}`）にリクエストを送信する
-2. レスポンスから `body_html` を取得する
-3. `body_html` をそのまま source_store に配置する（配置先: `zenn/{username}/articles/{slug}.html`）
-4. .meta サイドカーファイルを同階層に生成する（配置先: `zenn/{username}/articles/{slug}.html.meta`）
+2. レスポンスから `article` オブジェクトを取得する
+3. `article` オブジェクトをそのまま JSON として source_store に配置する（配置先: `zenn/{username}/articles/{slug}.json`）
+4. .meta サイドカーファイルを同階層に生成する（配置先: `zenn/{username}/articles/{slug}.json.meta`）
 5. 重複検出: 配置先パスにファイルが既に存在する場合は上書きする
 
 ### スクラップ取得とファイル配置の処理手順
@@ -409,7 +409,7 @@ Zenn は公式の API ドキュメントを公開していない。以下は観�
 | 記事詳細取得に失敗（404 等） | 該当記事をスキップし、他の記事の処理を続行する。エラーをログ出力する |
 | 記事一覧 API のレスポンス形式変更 | JSON パースエラーまたは必須フィールド欠落として処理を中断する。エラーの詳細をログ出力する |
 | 記事詳細 API のレスポンス形式変更 | 該当記事をスキップし、他の記事の処理を続行する。エラーの詳細をログ出力する |
-| `body_html` が空 | 該当記事をスキップする。空の HTML ファイルは source_store に配置しない |
+| `article` オブジェクトが空 | 該当記事をスキップする。空の JSON ファイルは source_store に配置しない |
 | 下書き・非公開記事 | API が公開記事のみを返すため、考慮不要 |
 | 大量記事ユーザー（480 件超 = 10 ページ超） | ページネーション走査上限（10 ページ）で打ち切る。取得済み記事を処理し、上限到達の旨を警告ログに出力する |
 | 同一記事の再取り込み | source_id（記事の公開 URL）からファイルパスを導出し、既存ファイルを上書きする |

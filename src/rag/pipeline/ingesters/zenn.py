@@ -116,15 +116,15 @@ class ZennIngester:
                 data = resp.json()
                 article = data.get("article", data)
 
-                body_html = article.get("body_html", "")
-                if not body_html:
-                    logger.info("body_html が空のためスキップ: %s", slug)
+                if not article:
+                    logger.info("article オブジェクトが空のためスキップ: %s", slug)
                     result.skipped += 1
                     continue
 
-                # ファイル配置
-                rel_path = f"zenn/{username}/articles/{slug}.html"
-                html_bytes = body_html.encode("utf-8")
+                # JSON として保存
+                rel_path = f"zenn/{username}/articles/{slug}.json"
+                json_data = json.dumps(article, ensure_ascii=False, indent=2)
+                json_bytes = json_data.encode("utf-8")
 
                 # topics の抽出
                 topics = self._extract_topics(article.get("topics", []))
@@ -149,7 +149,7 @@ class ZennIngester:
 
                 self._store.place_file(
                     source_type="zenn",
-                    data=html_bytes,
+                    data=json_bytes,
                     rel_path=rel_path,
                     metadata=metadata,
                 )

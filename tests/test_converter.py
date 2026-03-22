@@ -22,6 +22,7 @@ from rag.converter.converter import (
 from rag.converter.handlers import (
     convert_html,
     convert_json_bluesky,
+    convert_json_zenn_article,
     convert_json_zenn_scrap,
     passthrough_copy,
 )
@@ -627,6 +628,87 @@ class TestConvertJsonZennScrap:
 
 
 # ============================================================
+# Zenn 記事 JSON テキスト抽出ハンドラ
+# ============================================================
+
+
+class TestConvertJsonZennArticle:
+    """convert_json_zenn_article のテスト."""
+
+    def test_basic_article(self) -> None:
+        data = {
+            "article": {
+                "body_html": "<h2>Section</h2><p>Article body text.</p>",
+            },
+        }
+        result = convert_json_zenn_article(data)
+        assert result is not None
+        assert "Section" in result
+        assert "Article body text." in result
+
+    def test_article_without_wrapper(self) -> None:
+        """article キーなしの直接オブジェクトでも動作する."""
+        data = {
+            "body_html": "<p>Direct body.</p>",
+        }
+        result = convert_json_zenn_article(data)
+        assert result is not None
+        assert "Direct body." in result
+
+    def test_empty_body_html(self) -> None:
+        data = {"article": {"body_html": ""}}
+        result = convert_json_zenn_article(data)
+        assert result is None
+
+    def test_missing_body_html(self) -> None:
+        data = {"article": {"title": "No body"}}
+        result = convert_json_zenn_article(data)
+        assert result is None
+
+    def test_whitespace_only_body_html(self) -> None:
+        data = {"article": {"body_html": "   "}}
+        result = convert_json_zenn_article(data)
+        assert result is None
+
+    def test_html_to_markdown_conversion(self) -> None:
+        data = {
+            "article": {
+                "body_html": (
+                    "<h2>Heading</h2>"
+                    "<p>Paragraph with <strong>bold</strong> text.</p>"
+                    "<ul><li>Item 1</li><li>Item 2</li></ul>"
+                ),
+            },
+        }
+        result = convert_json_zenn_article(data)
+        assert result is not None
+        assert "## Heading" in result
+        assert "bold" in result
+        assert "Item 1" in result
+
+    def test_script_style_removed(self) -> None:
+        data = {
+            "article": {
+                "body_html": (
+                    "<p>Clean text</p>"
+                    "<script>evil()</script>"
+                    "<style>.red{color:red}</style>"
+                ),
+            },
+        }
+        result = convert_json_zenn_article(data)
+        assert result is not None
+        assert "Clean text" in result
+        assert "evil" not in result
+        assert "color" not in result
+
+    def test_article_value_not_dict(self) -> None:
+        data = {"article": "not a dict"}
+        result = convert_json_zenn_article(data)
+        assert result is None
+
+
+# ============================================================
 # パススルー
 # ============================================================
 
@@ -851,6 +933,69 @@ class TestConverterConvert:
         assert "nested" in str(result)
 
 
+    def test_convert_json_zenn_article(self, tmp_path: Path) -> None:
+        article_data = json.dumps({
+            "article": {
+                "body_html": "<h2>Section</h2><p>Article content.</p>",
+            },
+        })
+        source_dir, converted_dir = _setup_source(
+            tmp_path, "zenn/alice/articles/slug.json", article_data,
+        )
+        converter = Converter()
+        result = converter.convert(
+            "zenn/alice/articles/slug.json", source_dir, converted_dir,
+        )
+        assert result.exists()
+        text = result.read_text(encoding="utf-8")
+        assert "Section" in text
+        assert "Article content." in text
+        assert result.name == "slug.md"
+
+    def test_convert_json_zenn_article_with_title(self, tmp_path: Path) -> None:
+        """Zenn 記事 JSON 変換時に .meta のタイトルが H1 として先頭付与されること."""
+        article_data = json.dumps({
+            "article": {
+                "body_html": "<h2>Section</h2><p>Article body.</p>",
+            },
+        })
+        source_dir, converted_dir = _setup_source(
+            tmp_path, "zenn/alice/articles/slug.json", article_data,
+        )
+        # .meta ファイルを配置
+        meta_content = (
+            'source_id: "https://zenn.dev/alice/articles/slug"\n'
+            "source_type: zenn\n"
+            'title: "Sample Article Title"\n'
+            'collected_at: "2026-01-15T10:30:00+09:00"\n'
+        )
+        meta_path = source_dir / "zenn" / "alice" / "articles" / "slug.json.meta"
+        meta_path.write_text(meta_content, encoding="utf-8")
+
+        converter = Converter()
+        result = converter.convert(
+            "zenn/alice/articles/slug.json", source_dir, converted_dir,
+        )
+        text = result.read_text(encoding="utf-8")
+        assert text.startswith("# Sample Article Title")
+        assert "## Section" in text
+        assert "Article body." in text
+
+    def test_convert_json_zenn_article_empty_body(self, tmp_path: Path) -> None:
+        """Zenn 記事 JSON で body_html が空の場合は変換スキップ."""
+        article_data = json.dumps({
+            "article": {"body_html": ""},
+        })
+        source_dir, converted_dir = _setup_source(
+            tmp_path, "zenn/alice/articles/empty.json", article_data,
+        )
+        converter = Converter()
+        with pytest.raises(ConversionSkippedError, match="Empty conversion"):
+            converter.convert(
+                "zenn/alice/articles/empty.json", source_dir, converted_dir,
+            )
+
+
 # ============================================================
 # Zenn 記事タイトル付与
 # ============================================================
@@ -858,45 +1003,6 @@ class TestConverterConvert:
 
 class TestZennArticleTitlePrepend:
     """Zenn 記事の .meta からタイトルを先頭付与するテスト."""
-
-    def test_zenn_article_with_meta(self, tmp_path: Path) -> None:
-        """Zenn 記事 HTML の変換時に .meta のタイトルが H1 として先頭付与されること."""
-        html = "<html><body><h2>Section</h2><p>Article body.</p></body></html>"
-        source_dir, converted_dir = _setup_source(
-            tmp_path, "zenn/alice/articles/sample.html", html,
-        )
-        # .meta ファイルを配置
-        meta_content = (
-            'source_id: "https://zenn.dev/alice/articles/sample"\n'
-            "source_type: zenn\n"
-            'title: "Sample Article Title"\n'
-            'collected_at: "2026-01-15T10:30:00+09:00"\n'
-        )
-        meta_path = source_dir / "zenn" / "alice" / "articles" / "sample.html.meta"
-        meta_path.write_text(meta_content, encoding="utf-8")
-
-        converter = Converter()
-        result = converter.convert(
-            "zenn/alice/articles/sample.html", source_dir, converted_dir,
-        )
-        text = result.read_text(encoding="utf-8")
-        assert text.startswith("# Sample Article Title")
-        assert "## Section" in text
-        assert "Article body." in text
-
-    def test_zenn_article_without_meta(self, tmp_path: Path) -> None:
-        """Zenn 記事で .meta が存在しない場合はタイトル付与なしで変換されること."""
-        html = "<html><body><p>Content only.</p></body></html>"
-        source_dir, converted_dir = _setup_source(
-            tmp_path, "zenn/alice/articles/no-meta.html", html,
-        )
-        converter = Converter()
-        result = converter.convert(
-            "zenn/alice/articles/no-meta.html", source_dir, converted_dir,
-        )
-        text = result.read_text(encoding="utf-8")
-        assert not text.startswith("# ")
-        assert "Content only." in text
 
     def test_non_zenn_html_no_title(self, tmp_path: Path) -> None:
         """Web HTML にはタイトルが付与されないこと."""
@@ -926,26 +1032,6 @@ class TestZennArticleTitlePrepend:
         text = result.read_text(encoding="utf-8")
         assert not text.startswith("# ")
 
-    def test_zenn_article_empty_title(self, tmp_path: Path) -> None:
-        """Zenn 記事で .meta のタイトルが空の場合はタイトル付与なしで変換されること."""
-        html = "<html><body><p>Body text.</p></body></html>"
-        source_dir, converted_dir = _setup_source(
-            tmp_path, "zenn/alice/articles/empty-title.html", html,
-        )
-        meta_content = (
-            'source_id: "https://zenn.dev/alice/articles/empty-title"\n'
-            "source_type: zenn\n"
-            'title: ""\n'
-        )
-        meta_path = source_dir / "zenn" / "alice" / "articles" / "empty-title.html.meta"
-        meta_path.write_text(meta_content, encoding="utf-8")
-
-        converter = Converter()
-        result = converter.convert(
-            "zenn/alice/articles/empty-title.html", source_dir, converted_dir,
-        )
-        text = result.read_text(encoding="utf-8")
-        assert not text.startswith("# ")
 
 
 # ============================================================
