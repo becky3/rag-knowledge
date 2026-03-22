@@ -358,7 +358,7 @@ sequenceDiagram
     CMD->>BRIDGE: JSONL + HTML → source_store 変換
     BRIDGE->>SS: ファイル配置 + .meta 生成
     BRIDGE->>CMD: 配置結果
-    CMD->>PC: ingest_and_index()
+    CMD->>PC: パイプライン処理（MCP: サブプロセス経由）
     PC->>CMD: パイプライン処理結果
     CMD->>USER: 結果サマリー
 ```
