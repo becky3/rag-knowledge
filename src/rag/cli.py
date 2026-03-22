@@ -301,7 +301,6 @@ def main() -> None:
         default=False,
         help="未コミット変更がある場合に自動コミットする（incremental では指定不可）",
     )
-
     # stats サブコマンド
     subparsers.add_parser("stats", help="ナレッジベースの統計情報を表示")
 
@@ -1012,20 +1011,11 @@ def run_rebuild(args: argparse.Namespace) -> None:
     Args:
         args: コマンドライン引数
     """
-    import contextlib
-    import io
     import time
 
-    from .bm25_index import BM25Index
     from .config import get_settings
-    from .converter import Converter
-    from .embedding.factory import get_embedding_provider
-    from .indexer import Indexer
-    from .ingesters.document_ingester import PdfBackendConfig
-    from .pipeline.controller import PipelineController
+    from .pipeline.factory import build_pipeline_controller
     from .store.models import SourceType
-    from .store.source_store import SourceStore
-    from .vector_store import VectorStore
 
     mode: str = args.mode
     source_type: SourceType | None = args.source_type
@@ -1061,50 +1051,7 @@ def run_rebuild(args: argparse.Namespace) -> None:
         )
         sys.exit(1)
 
-    converted_store_dir = Path(settings.converted_store_dir)
-    converted_store_dir.mkdir(parents=True, exist_ok=True)
-
-    source_store = SourceStore(source_store_dir)
-    source_store.db.initialize()
-
-    pdf_config = PdfBackendConfig(
-        backend=settings.rag_pdf_backend,
-        mineru_mfd_conf_thres=settings.rag_pdf_mineru_mfd_conf_thres,
-        quality_ufffd_threshold=settings.rag_pdf_quality_ufffd_threshold,
-        quality_greek_threshold=settings.rag_pdf_quality_greek_threshold,
-        quality_cjk_min_threshold=settings.rag_pdf_quality_cjk_min_threshold,
-        quality_min_chars_per_page=settings.rag_pdf_quality_min_chars_per_page,
-        quality_sample_pages=settings.rag_pdf_quality_sample_pages,
-    )
-    converter = Converter(regen_option="force", pdf_config=pdf_config)
-
-    embedding_provider = get_embedding_provider(settings, settings.embedding_provider)
-
-    with contextlib.redirect_stdout(io.StringIO()):
-        vector_store = VectorStore(
-            embedding_provider=embedding_provider,
-            persist_directory=settings.chromadb_persist_dir,
-        )
-        bm25_index = BM25Index(
-            k1=settings.rag_bm25_k1,
-            b=settings.rag_bm25_b,
-            persist_dir=settings.bm25_persist_dir,
-        )
-
-    indexer = Indexer(
-        vector_store=vector_store,
-        bm25_index=bm25_index,
-        metadata_db=source_store.db,
-        chunk_size=settings.rag_chunk_size,
-        chunk_overlap=settings.rag_chunk_overlap,
-    )
-
-    controller = PipelineController(
-        source_store=source_store,
-        converted_store_dir=converted_store_dir,
-        converter=converter,
-        indexer=indexer,
-    )
+    controller = build_pipeline_controller(settings)
 
     logger.info("再構築を開始します（モード: %s）", mode)
     if source_type:

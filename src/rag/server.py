@@ -24,10 +24,11 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import io
+import json
 import logging
 import os
+import sys
 import threading
-import time
 from pathlib import Path
 from typing import Any
 
@@ -46,7 +47,6 @@ with contextlib.redirect_stdout(io.StringIO()):
     from .bm25_index import BM25Index
     from .config import get_settings
     from .embedding.factory import get_embedding_provider
-    from .ingesters.document_ingester import PdfBackendConfig
     from .rag_knowledge import (
         RAGKnowledgeService,
         format_document_response,
@@ -56,8 +56,6 @@ with contextlib.redirect_stdout(io.StringIO()):
     from .web_crawler import WebCrawler
 
     # パイプライン関連
-    from .converter import Converter
-    from .indexer import Indexer
     from .pipeline.controller import PipelineController
     from .pipeline.ingesters._common import IngestResult
     from .pipeline.ingesters.bluesky import BlueskyIngester as PipelineBlueskyIngester
@@ -66,7 +64,7 @@ with contextlib.redirect_stdout(io.StringIO()):
     from .pipeline.ingesters.zenn import ZennIngester as PipelineZennIngester
     from .pipeline.models import PipelineMode, PipelineSummary, detect_source_type
     from .store.metadata_db import MetadataDB
-    from .store.models import NULL_COMMIT_HASH, SourceType
+    from .store.models import NULL_COMMIT_HASH
     from .store.source_store import SourceStore
 
 from py_common_lib.httpx import ConstrainedClient  # safety:allowed
@@ -181,52 +179,9 @@ async def _get_pipeline_controller() -> PipelineController:
 
 def _build_pipeline_controller() -> PipelineController:
     """パイプライン制御コントローラを構築する（ワーカースレッド用）."""
-    settings = get_settings()
-    source_store_dir = Path(settings.source_store_dir)
-    converted_store_dir = Path(settings.converted_store_dir)
-    converted_store_dir.mkdir(parents=True, exist_ok=True)
+    from .pipeline.factory import build_pipeline_controller
 
-    source_store = SourceStore(source_store_dir)
-    source_store.initialize()
-
-    pdf_config = PdfBackendConfig(
-        backend=settings.rag_pdf_backend,
-        mineru_mfd_conf_thres=settings.rag_pdf_mineru_mfd_conf_thres,
-        quality_ufffd_threshold=settings.rag_pdf_quality_ufffd_threshold,
-        quality_greek_threshold=settings.rag_pdf_quality_greek_threshold,
-        quality_cjk_min_threshold=settings.rag_pdf_quality_cjk_min_threshold,
-        quality_min_chars_per_page=settings.rag_pdf_quality_min_chars_per_page,
-        quality_sample_pages=settings.rag_pdf_quality_sample_pages,
-    )
-    converter = Converter(regen_option="force", pdf_config=pdf_config)
-
-    embedding_provider = get_embedding_provider(settings, settings.embedding_provider)
-
-    with contextlib.redirect_stdout(io.StringIO()):
-        vector_store = VectorStore(
-            embedding_provider=embedding_provider,
-            persist_directory=settings.chromadb_persist_dir,
-        )
-        bm25_index = BM25Index(
-            k1=settings.rag_bm25_k1,
-            b=settings.rag_bm25_b,
-            persist_dir=settings.bm25_persist_dir,
-        )
-
-    indexer = Indexer(
-        vector_store=vector_store,
-        bm25_index=bm25_index,
-        metadata_db=source_store.db,
-        chunk_size=settings.rag_chunk_size,
-        chunk_overlap=settings.rag_chunk_overlap,
-    )
-
-    return PipelineController(
-        source_store=source_store,
-        converted_store_dir=converted_store_dir,
-        converter=converter,
-        indexer=indexer,
-    )
+    return build_pipeline_controller()
 
 
 _safe_browsing_api_key_cache: str | None = None
@@ -1141,6 +1096,12 @@ def _format_rebuild_summary(summary: PipelineSummary, elapsed: float) -> str:
     return "\n".join(parts)
 
 
+# SEGFAULT を示す exit code
+# Windows: 0xC0000005 は signed (-1073741819) / unsigned (3221225477) 両方で返りうる
+# Unix: SIGSEGV=11, shell: 128+11=139
+_SEGFAULT_EXIT_CODES: frozenset[int] = frozenset({-1073741819, 3221225477, -11, 139})
+
+
 def _collect_source_store_stats(
     source_store_dir: Path,
 ) -> dict[str, Any]:
@@ -1288,46 +1249,122 @@ async def rag_rebuild(
     if not _rebuild_lock.acquire(blocking=False):
         return "エラー: 別の再構築が実行中です"
 
-    # バリデーション済みの source_type を SourceType にキャスト
-    st: SourceType | None = source_type  # type: ignore[assignment]
-
     try:
-        def _run_rebuild() -> PipelineSummary:
-            controller = _build_pipeline_controller()
-            if mode == "full":
-                return controller.run_full_rebuild(
-                    source_type=st, auto_commit=auto_commit,
-                )
-            if mode == "convert":
-                return controller.run_convert_only(
-                    source_type=st, auto_commit=auto_commit,
-                )
-            if mode == "index":
-                return controller.run_index_only(
-                    source_type=st, auto_commit=auto_commit,
-                )
-            # mode == "incremental"
-            return controller.run_incremental()
-
-        start = time.monotonic()
-        task = asyncio.ensure_future(asyncio.to_thread(_run_rebuild))
-        try:
-            summary = await asyncio.shield(task)
-        except asyncio.CancelledError:
-            await task
-            raise
-        elapsed = time.monotonic() - start
+        result = await _run_rebuild_subprocess(mode, source_type, auto_commit)
 
         # rebuild はインデックスを全操作するため、両方リセット
         _reset_pipeline_controller()
         _reset_rag_service()
 
-        return _format_rebuild_summary(summary, elapsed)
+        return result
     except Exception:
         logger.exception("再構築中にエラーが発生しました")
         return "エラー: 再構築中にエラーが発生しました"
     finally:
         _rebuild_lock.release()
+
+
+async def _run_rebuild_subprocess(
+    mode: str,
+    source_type: str | None,
+    auto_commit: bool,
+) -> str:
+    """rebuild を CLI サブプロセスで実行する.
+
+    C 拡張（BM25s 等）の SEGFAULT がサーバープロセスを巻き込まないよう、
+    別プロセスで実行してエラーを安全にハンドリングする。
+    """
+
+
+    cmd = [
+        sys.executable, "-m", "rag.pipeline.worker",
+        "rebuild", "--mode", mode,
+    ]
+    if source_type is not None:
+        cmd.extend(["--source-type", source_type])
+    if auto_commit:
+        cmd.append("--auto-commit")
+
+    env = os.environ.copy()
+    env["PYTHONIOENCODING"] = "utf-8"
+
+    process = await asyncio.create_subprocess_exec(
+        *cmd,
+        stdout=asyncio.subprocess.PIPE,
+        stdin=asyncio.subprocess.DEVNULL,
+        stderr=asyncio.subprocess.PIPE,
+        env=env,
+    )
+    try:
+        stdout_bytes, stderr_bytes = await process.communicate()
+    except asyncio.CancelledError:
+        # タスクキャンセル時に子プロセスを確実に終了させる
+        if process.returncode is None:
+            with contextlib.suppress(ProcessLookupError):
+                process.kill()
+            with contextlib.suppress(asyncio.CancelledError):
+                await process.wait()
+        raise
+    assert process.returncode is not None  # noqa: S101
+    exit_code = process.returncode
+
+    # stderr の末尾10行を保持（エラー時の診断用）
+    stderr_text = stderr_bytes.decode("utf-8", errors="replace") if stderr_bytes else ""
+    stderr_lines = stderr_text.rstrip().splitlines()
+    stderr_tail = "\n".join(stderr_lines[-10:])
+
+    # クラッシュ検出
+    if exit_code != 0:
+        if exit_code in _SEGFAULT_EXIT_CODES:
+            return (
+                f"エラー: 再構築プロセスがクラッシュしました"
+                f"（SEGFAULT, exit_code={exit_code}）\n"
+                f"インデックスが破損している可能性があります。"
+                f"インデックスを手動削除して再実行してください。"
+            )
+        # worker がエラー JSON を stdout に出力している場合はそちらを優先
+        stdout_text = stdout_bytes.decode("utf-8", errors="replace").strip()
+        if stdout_text:
+            try:
+                error_data = json.loads(stdout_text.splitlines()[-1])
+                if error_data.get("error"):
+                    return f"エラー: {error_data.get('message', '不明なエラー')}"
+            except (json.JSONDecodeError, IndexError):
+                pass
+        return (
+            f"エラー: 再構築プロセスが異常終了しました"
+            f"（exit_code={exit_code}）\n{stderr_tail}"
+        )
+
+    # 正常終了: stdout の最終行を JSON としてパース
+    # （BM25s 等が stdout に警告を出す場合があるため、最終行のみを対象にする）
+    stdout_text = stdout_bytes.decode("utf-8", errors="replace").strip()
+    if not stdout_text:
+        return "再構築完了（結果なし）"
+
+    last_line = stdout_text.splitlines()[-1]
+    try:
+        result = json.loads(last_line)
+    except json.JSONDecodeError:
+        return f"再構築完了（結果の解析に失敗）\n{stdout_text}"
+
+    # PipelineSummary を再構築して既存のフォーマッタを使用
+    from .pipeline.models import PipelineMode, PipelineSummary
+
+    try:
+        summary = PipelineSummary(
+            mode=PipelineMode(result.get("mode", "incremental")),
+            total_files=result.get("total_files", 0),
+            processed=result.get("processed", 0),
+            skipped=result.get("skipped", 0),
+            errors=result.get("errors", []),
+        )
+    except ValueError:
+        return f"再構築完了（結果の解析に失敗）\n{stdout_text}"
+
+    elapsed = result.get("elapsed", 0)
+
+    return _format_rebuild_summary(summary, elapsed)
 
 
 @mcp.tool()

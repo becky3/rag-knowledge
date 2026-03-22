@@ -23,6 +23,8 @@
 | `src/rag/embedding/` | Embedding プロバイダー抽象化（ローカル / OpenAI）とファクトリ |
 | `src/rag/ingesters/` | インジェスタープラグイン（BaseIngester 抽象基底・IngestedContent 共通モデル・WebIngester・ZennIngester・DocumentIngester・BlueskyIngester） |
 | `src/rag/pipeline/` | パイプライン制御（git 操作・差分検知・ステージ間連携・4モード実行） |
+| `src/rag/pipeline/worker.py` | MCP 用サブプロセスエントリポイント（`python -m rag.pipeline.worker` で起動、クラッシュ耐性確保） |
+| `src/rag/pipeline/factory.py` | PipelineController のファクトリ関数（server/cli/worker 共通） |
 | `src/rag/pipeline/ingesters/` | 新アーキテクチャ用インジェスター（source_store へのファイル配置 + .meta 生成） |
 | `src/rag/store/` | source_store 管理（ファイル配置・.meta 読み書き・metadata.db 操作・URL パス変換） |
 

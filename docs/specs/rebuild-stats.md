@@ -32,6 +32,7 @@
 - **パイプライン制御への委譲**: 再構築の実行ロジックはパイプライン制御に委譲する。本コンポーネントは MCP/CLI インターフェースの提供とパラメータの検証のみを担当する
 - **再構築中の排他制御**: 再構築処理は同時に1つのみ実行可能とする。実行中に別の再構築要求を受けた場合はエラーを返す
 - **全再構築のコスト認知**: 全再構築およびインデックスのみ再構築は Embedding API を呼び出すため、データ量に比例したコストが発生する。MCP ツール・CLI の説明文にこの旨を明記し、利用者が意図せず大量の API 呼び出しを行わないようにする
+- **MCP サーバーのクラッシュ耐性**: MCP ツール `rag_rebuild` はパイプライン処理をサブプロセスで実行する。C 拡張（BM25s 等）の SEGFAULT が発生しても MCP サーバープロセスは生存し、エラーメッセージをクライアントに返却する。CLI は独立プロセスのため対策不要
 
 本コンポーネント自体は外部 API 通信を行わないが、再構築実行時にパイプラインを通じて Embedding API 等の外部通信が発生する。外部 API の安全制約は各ステージの仕様に従うため、想定プロファイル・安全制約セクションは省略する。
 
@@ -98,20 +99,37 @@ MCP ツール `rag_rebuild` と同じバリデーション・振る舞いを適�
 
 ```mermaid
 flowchart TD
-    ENTRY["MCP / CLI"]
+    ENTRY_MCP["MCP rag_rebuild"]
+    ENTRY_CLI["CLI rebuild"]
     VALIDATE["パラメータ検証"]
     LOCK["排他ロック取得"]
     LOCK_FAIL["エラー: 別の再構築が実行中"]
+    WORKER["pipeline worker（サブプロセス）"]
     DELEGATE["パイプライン制御に委譲"]
+    CRASH["クラッシュ検出（exit code）"]
     RESULT["処理結果サマリを返却"]
 
-    ENTRY --> VALIDATE
+    ENTRY_MCP --> VALIDATE
+    ENTRY_CLI --> VALIDATE
     VALIDATE -->|不正| ERROR["エラー返却"]
     VALIDATE -->|正常| LOCK
     LOCK -->|取得失敗| LOCK_FAIL
-    LOCK -->|取得成功| DELEGATE
-    DELEGATE --> RESULT
+    LOCK -->|取得成功 MCP| WORKER
+    LOCK -->|取得成功 CLI| DELEGATE
+    WORKER --> DELEGATE
+    DELEGATE -->|正常終了| RESULT
+    DELEGATE -->|処理エラー| ERROR_PROC["エラー返却（処理エラー）"]
+    WORKER -->|クラッシュ| CRASH
+    CRASH --> ERROR_CRASH["エラー返却（サーバー生存）"]
 ```
+
+MCP 経由の場合、パイプライン処理は `pipeline/worker.py` をサブプロセスとして実行する。C 拡張の SEGFAULT が発生してもサーバープロセスは生存し、exit code からエラーメッセージを返却する。CLI は独立プロセスのためサブプロセス化は不要。
+
+| ファイル | 役割 |
+|-------------|------|
+| `src/rag/pipeline/worker.py` | MCP 用サブプロセスエントリポイント。パラメータを受け取り rebuild を実行、結果 JSON を stdout に出力 |
+| `src/rag/server.py` | MCP ツール。パラメータ検証・排他制御を行い worker をサブプロセスで起動 |
+| `src/rag/cli.py` | CLI コマンド。パイプライン制御を直接呼び出す（サブプロセス化なし） |
 
 ### rag_stats 出力項目
 

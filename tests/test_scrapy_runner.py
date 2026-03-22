@@ -178,7 +178,6 @@ class TestScrapyRunnerRun:
 
         mock_process = AsyncMock()
         mock_process.wait.return_value = 0
-        mock_process.stderr = _async_lines_iter([b"INFO: Spider closed\n"])
 
         with patch("asyncio.create_subprocess_exec", return_value=mock_process):
             result = await runner.run(start_url="https://example.com")
@@ -195,9 +194,19 @@ class TestScrapyRunnerRun:
 
         mock_process = AsyncMock()
         mock_process.wait.return_value = 1
-        mock_process.stderr = _async_lines_iter([b"ERROR: Something failed\n"])
 
-        with patch("asyncio.create_subprocess_exec", return_value=mock_process):
+        # stderr はファイルリダイレクト方式のため、
+        # subprocess 起動時に stderr.log にエラーを書き込む
+        domain_dir = tmp_path / "example.com"
+
+        async def fake_exec(*args, **kwargs):
+            domain_dir.mkdir(parents=True, exist_ok=True)
+            stderr_file = kwargs.get("stderr")
+            if stderr_file and hasattr(stderr_file, "write"):
+                stderr_file.write("ERROR: Something failed\n")
+            return mock_process
+
+        with patch("asyncio.create_subprocess_exec", side_effect=fake_exec):
             result = await runner.run(start_url="https://example.com")
 
         assert result.success is False
@@ -211,7 +220,6 @@ class TestScrapyRunnerRun:
 
         mock_process = AsyncMock()
         mock_process.wait.return_value = 0
-        mock_process.stderr = _async_lines_iter([])
 
         with patch("asyncio.create_subprocess_exec", return_value=mock_process):
             await runner.run(start_url="https://docs.example.com/guide")
