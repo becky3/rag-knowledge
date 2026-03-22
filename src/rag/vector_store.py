@@ -12,6 +12,7 @@ from typing import cast
 from urllib.parse import urlparse
 
 import chromadb
+from chromadb.api.shared_system_client import SharedSystemClient
 from chromadb.api.types import Embeddings
 from chromadb.config import Settings as ChromaSettings
 
@@ -427,3 +428,21 @@ class VectorStore:
             "source_count": len(source_urls),
             "sources": sources,
         }
+
+    def close(self) -> None:
+        """リソースを解放し、SharedSystemClient キャッシュをクリアする.
+
+        ChromaDB の SharedSystemClient は persist_directory をキーにして
+        System インスタンスをキャッシュする。サブプロセスが DB を更新した後、
+        このキャッシュが残っていると古い HNSW インメモリ状態が再利用され、
+        where フィルタ付き query() が失敗する。
+
+        close() 後に新しい PersistentClient を作成すると、ディスクから
+        最新の HNSW インデックスがロードされる。
+        """
+        identifier = self._persist_directory
+        if identifier and identifier in SharedSystemClient._identifier_to_system:
+            SharedSystemClient._release_system(identifier)
+            logger.info(
+                "Cleared SharedSystemClient cache for: %s", identifier,
+            )
