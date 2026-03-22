@@ -128,7 +128,7 @@ MCP ツール `rag_site_ingest` と CLI コマンド `site-ingest` の 2 つの�
 | `url` | str | — | クロール開始 URL（必須） |
 | `url_pattern` | str | なし | クロール対象 URL のフィルタパターン（正規表現）。未指定時は開始 URL のパスプレフィックスから自動生成する（例: `https://example.com/docs/` → `^https://example\.com/docs/`）。パスが `/` のみの場合はパターンなし（ドメイン全体が対象）。明示的に指定した場合はその値を優先する |
 | `max_pages` | int | `site_ingest_max_pages` | ページ数上限。config.toml の値を上書き可能 |
-| `force` | bool | `false` | `true` の場合、ドメインディレクトリ全体（JOBDIR、HTML、JSONL）を削除して最初からクロールする |
+| `force` | bool | `false` | `true` の場合、クロールディレクトリ全体（JOBDIR、HTML、JSONL）を削除して最初からクロールする |
 | `download_only` | bool | `false` | `true` の場合、Scrapy クロール + Bridge（source_store 配置 + git commit）まで実行し、パイプライン処理（converter + indexer）をスキップする。source_store への commit は実行されるため、後から `rag_rebuild`（incremental）で差分処理可能 |
 
 ### CLI コマンド
@@ -144,7 +144,7 @@ MCP ツール `rag_site_ingest` と CLI コマンド `site-ingest` の 2 つの�
 | `url`（位置引数） | str | — | クロール開始 URL |
 | `--url-pattern` | str | なし | URL フィルタパターン |
 | `--max-pages` | int | `site_ingest_max_pages` | ページ数上限 |
-| `--force` | フラグ | `false` | ドメインディレクトリ全体を削除して再クロール |
+| `--force` | フラグ | `false` | クロールディレクトリ全体を削除して再クロール |
 | `--download-only` | フラグ | `false` | Scrapy クロール + Bridge（source_store 配置 + git commit）まで実行し、パイプライン処理をスキップ |
 
 ### 取り込み結果の出力形式
@@ -342,7 +342,7 @@ JSONL の各行から .meta サイドカーファイルへの変換:
 | JSONL メタデータ | `{SITE_INGEST_TEMP_DIR}/{domain}/{crawl_key}/metadata.jsonl` |
 | JOBDIR | `{SITE_INGEST_TEMP_DIR}/{domain}/{crawl_key}/jobdir/` |
 
-`SITE_INGEST_TEMP_DIR` のデフォルト値は `.tmp/site_ingest`。`crawl_key` は `start_url` + effective `url_pattern` から生成される 8 文字のハッシュ。
+`SITE_INGEST_TEMP_DIR` のデフォルト値は `.tmp/site_ingest`。`crawl_key` の詳細は「JOBDIR の分離」セクションを参照。
 
 ### 処理フロー
 
