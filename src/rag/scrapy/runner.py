@@ -10,6 +10,7 @@ JOBDIR 指定で中断再開に対応する。
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import json
 import logging
 import os
@@ -21,6 +22,16 @@ from pathlib import Path
 from urllib.parse import urlparse
 
 logger = logging.getLogger(__name__)
+
+
+def _crawl_key(start_url: str, url_pattern: str) -> str:
+    """クロールパラメータから一意のキーを生成する.
+
+    同じ start_url + url_pattern の組み合わせは同じキーを返す。
+    異なる組み合わせは異なるキーを返し、JOBDIR の分離を保証する。
+    """
+    raw = f"{start_url}\n{url_pattern}"
+    return hashlib.sha256(raw.encode()).hexdigest()[:8]
 
 
 @dataclass
@@ -92,30 +103,34 @@ class ScrapyRunner:
                 url_pattern = f"^{re.escape(base_prefix)}(?:/|$)"
                 logger.info("url_pattern を自動生成: %s", url_pattern)
 
-        # ドメインから一時保存ディレクトリを決定
+        # ドメイン + クロールキーから一時保存ディレクトリを決定
+        # クロールキー: start_url + effective url_pattern のハッシュ
+        # 同じパラメータなら同じディレクトリ（レジューム可能）、
+        # 異なるパラメータなら別ディレクトリ（JOBDIR 状態リーク防止）
         domain = parsed.hostname or "unknown"
-        domain_dir = self._temp_dir / domain
+        key = _crawl_key(start_url, url_pattern)
+        crawl_dir = self._temp_dir / domain / key
 
-        html_dir = domain_dir / "html"
-        jsonl_path = domain_dir / "metadata.jsonl"
-        jobdir = domain_dir / "jobdir"
+        html_dir = crawl_dir / "html"
+        jsonl_path = crawl_dir / "metadata.jsonl"
+        jobdir = crawl_dir / "jobdir"
 
-        # --force: ドメインディレクトリ全体をクリア（html/, metadata.jsonl, jobdir/）
-        if force and domain_dir.exists():
-            logger.info("--force: ドメインディレクトリを削除します: %s", domain_dir)
+        # --force: クロールディレクトリ全体をクリア（html/, metadata.jsonl, jobdir/）
+        if force and crawl_dir.exists():
+            logger.info("--force: クロールディレクトリを削除します: %s", crawl_dir)
             try:
-                shutil.rmtree(domain_dir)
+                shutil.rmtree(crawl_dir)
             except OSError as exc:
-                msg = f"--force 指定時にドメインディレクトリの削除に失敗しました: {domain_dir}"
+                msg = f"--force 指定時にクロールディレクトリの削除に失敗しました: {crawl_dir}"
                 logger.error(msg, exc_info=True)
                 raise RuntimeError(msg) from exc
 
         # ディレクトリ準備
         html_dir.mkdir(parents=True, exist_ok=True)
-        domain_dir.mkdir(parents=True, exist_ok=True)
+        crawl_dir.mkdir(parents=True, exist_ok=True)
 
         # パラメータを JSON ファイルに書き出し（コードインジェクション防止）
-        params_path = domain_dir / "spider_params.json"
+        params_path = crawl_dir / "spider_params.json"
         params = {
             "start_url": start_url,
             "allowed_domains": allowed_domains,
@@ -147,7 +162,7 @@ class ScrapyRunner:
 
         # stderr をファイルにリダイレクト（Windows で Twisted の子プロセス/スレッドが
         # stderr パイプを継承し、メインプロセス終了後もパイプが閉じない問題を回避）
-        stderr_path = domain_dir / "stderr.log"
+        stderr_path = crawl_dir / "stderr.log"
         stderr_file = open(stderr_path, "w", encoding="utf-8")  # noqa: SIM115
         try:
             process = await asyncio.create_subprocess_exec(
