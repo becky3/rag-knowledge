@@ -1382,7 +1382,7 @@ def _build_cli_pipeline_controller() -> tuple[
     from .converter import Converter
     from .embedding.factory import get_embedding_provider
     from .indexer import Indexer
-    from .ingesters.document_ingester import PdfBackendConfig
+    from .converter.pdf_extractor import PdfBackendConfig
     from .pipeline.controller import PipelineController
     from .store.source_store import SourceStore
     from .vector_store import VectorStore

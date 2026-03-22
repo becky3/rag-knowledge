@@ -19,14 +19,12 @@ from .chunker import chunk_text
 from .content_detector import ContentType, detect_content_type
 from .converter.converter import get_converted_rel_path
 from .heading_chunker import chunk_by_headings
-from .ingesters.base_ingester import IngestedContent
 from .table_chunker import chunk_table_data
 from .vector_store import DocumentChunk, VectorStore
 
 if TYPE_CHECKING:
     from .bm25_index import BM25Index
     from .hybrid_search import HybridSearchEngine
-    from .ingesters.web_ingester import WebIngester
     from .safe_browsing import SafeBrowsingClient
     from py_common_lib.httpx import ConstrainedClient
     from .web_crawler import CrawlPreviewPage, CrawledPage, WebCrawler
@@ -179,7 +177,6 @@ class RAGKnowledgeService:
         vector_weight: float = 1.0,
         min_combined_score: float | None = None,
         debug_log_enabled: bool = False,
-        web_ingester: WebIngester | None = None,
     ) -> None:
         """RAGKnowledgeServiceを初期化する.
 
@@ -195,7 +192,6 @@ class RAGKnowledgeService:
             vector_weight: ベクトル検索の重み（ハイブリッド検索用）
             min_combined_score: combined_scoreの下限閾値（None=フィルタなし）
             debug_log_enabled: RAGデバッグログの有効/無効
-            web_ingester: WebIngester（オプション、指定時はingest_page/ingest_from_indexで使用）
         """
         self._vector_store = vector_store
         self._web_crawler = web_crawler
@@ -207,7 +203,6 @@ class RAGKnowledgeService:
         self._hybrid_search_enabled = hybrid_search_enabled
         self._min_combined_score = min_combined_score
         self._debug_log_enabled = debug_log_enabled
-        self._web_ingester = web_ingester
         self._hybrid_search_engine: HybridSearchEngine | None = None
 
         # ハイブリッド検索エンジンの初期化
@@ -254,8 +249,6 @@ class RAGKnowledgeService:
     ) -> dict[str, int]:
         """リンク集ページから一括取り込み.
 
-        WebIngester が設定されている場合はそちらを経由する。
-
         Args:
             index_url: リンク集ページのURL
             url_pattern: 正規表現パターンでリンクをフィルタリング（任意）
@@ -271,106 +264,11 @@ class RAGKnowledgeService:
             SafetyCheckError: Safe Browsing APIでfail_open=False設定時、
                 API障害が発生した場合に送出される
         """
-        # WebIngester 経由
-        if self._web_ingester is not None:
-            return await self._ingest_from_index_via_ingester(
-                index_url, url_pattern, progress_callback
-            )
-
-        # レガシーパス（WebIngester 未設定時）
-        return await self._ingest_from_index_legacy(
+        return await self._ingest_from_index_impl(
             index_url, url_pattern, progress_callback
         )
 
-    async def _ingest_from_index_via_ingester(
-        self,
-        index_url: str,
-        url_pattern: str,
-        progress_callback: Callable[[int, int], Awaitable[None]] | None,
-    ) -> dict[str, int]:
-        """WebIngester 経由でリンク集ページから一括取り込みする.
-
-        Args:
-            index_url: リンク集ページのURL
-            url_pattern: 正規表現パターンでリンクをフィルタリング
-            progress_callback: 進捗コールバック関数
-
-        Returns:
-            {"pages_crawled": N, "chunks_stored": M, "errors": E, "unsafe_urls": U}
-        """
-        assert self._web_ingester is not None
-
-        # リンク集ページから URL を発見
-        urls = await self._web_ingester.discover(
-            index_url, url_pattern=url_pattern
-        )
-        if not urls:
-            logger.warning("No URLs found in index page: %s", index_url)
-            return {"pages_crawled": 0, "chunks_stored": 0, "errors": 0, "unsafe_urls": 0}
-
-        # Safe Browsing フィルタリング
-        safe_urls = await self._web_ingester.filter_safe_urls(urls)
-        unsafe_count = len(urls) - len(safe_urls)
-
-        if not safe_urls:
-            logger.warning("No safe URLs to crawl after Safe Browsing check")
-            return {"pages_crawled": 0, "chunks_stored": 0, "errors": 0, "unsafe_urls": unsafe_count}
-
-        # 並行クロール（進捗報告付き、Safe Browsing チェック済みなのでスキップ）
-        total_urls = len(safe_urls)
-        tasks = [
-            asyncio.create_task(
-                self._web_ingester.fetch_single(url, skip_safety_check=True)
-            )
-            for url in safe_urls
-        ]
-
-        contents: list[IngestedContent] = []
-        completed_count = 0
-        for coro in asyncio.as_completed(tasks):
-            try:
-                content = await coro
-            except Exception:
-                logger.exception("Failed to fetch content in batch")
-                content = None
-            completed_count += 1
-            if content is not None:
-                contents.append(content)
-
-            if progress_callback:
-                try:
-                    await progress_callback(completed_count, total_urls)
-                except Exception:
-                    logger.debug("Progress callback failed", exc_info=True)
-
-        # 各コンテンツをチャンキングして保存
-        total_chunks = 0
-        errors = len(safe_urls) - len(contents)
-
-        for content in contents:
-            try:
-                chunks_stored = await self.ingest_content(content)
-                total_chunks += chunks_stored
-            except Exception:
-                logger.exception("Failed to ingest content: %s", content.source_id)
-                errors += 1
-
-        logger.info(
-            "Ingested from index: pages=%d, chunks=%d, errors=%d, unsafe=%d",
-            len(contents),
-            total_chunks,
-            errors,
-            unsafe_count,
-        )
-
-        return {
-            "pages_crawled": len(contents),
-            "chunks_stored": total_chunks,
-            "errors": errors,
-            "unsafe_urls": unsafe_count,
-        }
-
-    async def _ingest_from_index_legacy(
+    async def _ingest_from_index_impl(
         self,
         index_url: str,
         url_pattern: str,
@@ -388,11 +286,11 @@ class RAGKnowledgeService:
         """
         # 共有 ConstrainedClient で操作全体のバジェットを管理
         async with self._web_crawler.create_client() as client:
-            return await self._ingest_from_index_legacy_with_client(
+            return await self._ingest_from_index_impl_with_client(
                 index_url, url_pattern, progress_callback, client
             )
 
-    async def _ingest_from_index_legacy_with_client(
+    async def _ingest_from_index_impl_with_client(
         self,
         index_url: str,
         url_pattern: str,
@@ -494,8 +392,6 @@ class RAGKnowledgeService:
         同一URLの再取り込み時は、まず add_documents() による upsert を行い、
         その後 delete_stale_chunks() で不要になったチャンクを削除する。
 
-        WebIngester が設定されている場合はそちらを経由する。
-
         Args:
             url: 取り込むページのURL
 
@@ -505,14 +401,6 @@ class RAGKnowledgeService:
         Raises:
             ValueError: URL検証に失敗した場合、またはURLが危険と判定された場合
         """
-        # WebIngester 経由
-        if self._web_ingester is not None:
-            content = await self._web_ingester.fetch_single(url)
-            if content is None:
-                return 0
-            return await self.ingest_content(content)
-
-        # レガシーパス（WebIngester 未設定時）
         # URL検証を先に行い、失敗時は例外を投げる（ユーザーにエラー理由を伝えるため）
         # 戻り値（正規化済みURL）を以降の処理で使用
         validated_url = self._web_crawler.validate_url(url)
@@ -606,81 +494,6 @@ class RAGKnowledgeService:
                 )
 
         logger.info("Ingested page %s: %d chunks", normalized_url, count)
-        return count
-
-    async def ingest_content(self, content: IngestedContent) -> int:
-        """IngestedContent をチャンキングして保存する.
-
-        content.skip_chunking が True の場合、チャンキングをスキップし
-        テキスト全体を 1 チャンクとして保存する。
-
-        Args:
-            content: 取り込み済みコンテンツ
-
-        Returns:
-            保存されたチャンク数
-        """
-        # テキストをスマートチャンキング（skip_chunking 時は 1 チャンクで格納）
-        if content.skip_chunking:
-            chunks = [content.text] if content.text.strip() else []
-        else:
-            chunks = self._smart_chunk(content.text)
-
-        if not chunks:
-            logger.info("No chunks generated for content: %s", content.source_id)
-            return 0
-
-        # source_id からフラグメントを除去して正規化
-        normalized_url, _ = urldefrag(content.source_id)
-
-        # DocumentChunk に変換
-        url_hash = hashlib.sha256(normalized_url.encode()).hexdigest()[:16]
-
-        # 共通メタデータ + source_type + カスタムメタデータ（custom: プレフィックス）
-        base_metadata: dict[str, str | int | float | bool] = {
-            "source_id": normalized_url,
-            "title": content.title,
-            "crawled_at": content.ingested_at,
-            "source_type": content.source_type,
-        }
-        for key, value in content.metadata.items():
-            if isinstance(value, (str, int, float, bool)):
-                base_metadata[f"custom:{key}"] = value
-            else:
-                base_metadata[f"custom:{key}"] = str(value)
-
-        document_chunks = [
-            DocumentChunk(
-                id=f"{url_hash}_{i}",
-                text=chunk,
-                metadata={**base_metadata, "chunk_index": i},
-            )
-            for i, chunk in enumerate(chunks)
-        ]
-        new_ids = {chunk.id for chunk in document_chunks}
-
-        # ベクトルストアに upsert
-        count = await self._vector_store.add_documents(document_chunks)
-
-        # upsert 成功後、古いチャンクを削除
-        await self._vector_store.delete_stale_chunks(normalized_url, new_ids)
-
-        # BM25 インデックスにも追加
-        if self._bm25_index is not None:
-            bm25_docs = [
-                (chunk.id, chunk.text, normalized_url, content.source_type)
-                for chunk in document_chunks
-            ]
-            try:
-                self._bm25_index.add_documents(bm25_docs)
-                logger.debug("Added %d documents to BM25 index", len(bm25_docs))
-            except Exception:
-                logger.warning(
-                    "Failed to add documents to BM25 index for %s", normalized_url,
-                    exc_info=True,
-                )
-
-        logger.info("Ingested content %s: %d chunks", normalized_url, count)
         return count
 
     async def retrieve(self, query: str, n_results: int = 5) -> RAGRetrievalResult:

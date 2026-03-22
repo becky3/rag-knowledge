@@ -89,7 +89,7 @@ MCP クライアントからの rag_search ツール呼び出し。入力パラ�
 
 メタデータの後に空行を挟み、チャンクテキストを出力する。
 
-レスポンスの Source 値は、[source-store.md](source-store.md) で定義された `source_id` を使用する。既存のチャンクメタデータフィールド `source_url` は新アーキテクチャでは `source_id` に読み替える。媒体ごとの `source_id` 形式は source-store.md の「source_id の決定方式」テーブルを参照。
+レスポンスの Source 値は、[source-store.md](source-store.md) で定義された `source_id` を使用する。媒体ごとの `source_id` 形式は source-store.md の「source_id の決定方式」テーブルを参照。
 この値をそのまま rag_get_document の `source_id` パラメータとして使用できる。
 
 **レスポンス形式例（ベクトル検索結果 2 件 + BM25 検索結果 1 件）:**

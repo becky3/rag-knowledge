@@ -136,10 +136,10 @@ git-flow ベースのブランチ戦略を採用。詳細は `~/.claude/docs/spe
 
 - [RAG ナレッジ](docs/specs/rag-knowledge.md)
 - [検索レスポンス + 全文取得](docs/specs/search-response.md)
-- [Zenn インジェスター](docs/specs/zenn-ingester.md)
-- [BlueSky インジェスター](docs/specs/bluesky-ingester.md)
-- [ドキュメントインジェスター](docs/specs/document-ingester.md)
 - [source_store](docs/specs/source-store.md)
+- [パイプライン制御](docs/specs/pipeline-controller.md)
+- [コンバーター](docs/specs/converter.md)
+- [インデクサー](docs/specs/indexer.md)
 - [サイト一括取り込み（Scrapy）](docs/specs/site-ingest.md)
 
 ### Claude Code 拡張（agentic）

@@ -53,9 +53,6 @@
 | 仕様書 | 実装モジュール |
 |---|---|
 | `rag-knowledge.md` | `src/rag/` 全体 |
-| `zenn-ingester.md` | `src/rag/ingesters/zenn_ingester.py` |
-| `document-ingester.md` | `src/rag/ingesters/document_ingester.py` |
-| `bluesky-ingester.md` | `src/rag/ingesters/bluesky_ingester.py` |
 | `source-store.md` | `src/rag/store/` |
 | `pipeline-controller.md` | `src/rag/pipeline/` |
 | `ingesters/common.md` | `src/rag/pipeline/ingesters/_common.py` |

@@ -159,7 +159,6 @@ def _build_rag_service() -> RAGKnowledgeService:
         vector_weight=settings.rag_vector_weight,
         min_combined_score=settings.rag_min_combined_score,
         debug_log_enabled=settings.rag_debug_log_enabled,
-        web_ingester=None,
     )
 
 
