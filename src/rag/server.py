@@ -157,8 +157,14 @@ _pipeline_lock = asyncio.Lock()
 
 
 def _reset_pipeline_controller() -> None:
-    """グローバルな PipelineController をリセットする."""
+    """グローバルな PipelineController をリセットする.
+
+    既存インスタンスが保持する SQLite 接続等を解放してから破棄する。
+    """
     global _pipeline_controller
+    if _pipeline_controller is not None:
+        with contextlib.suppress(Exception):
+            _pipeline_controller.source_store.close()
     _pipeline_controller = None
 
 
@@ -1327,10 +1333,11 @@ def _parse_pipeline_summary(data: dict[str, Any]) -> PipelineSummary | None:
         return None
 
 
-async def _run_ingest_and_index_subprocess(commit_message: str) -> PipelineSummary | None:
+async def _run_ingest_and_index_subprocess(commit_message: str) -> PipelineSummary:
     """ingest_and_index をサブプロセスで実行し PipelineSummary を返す.
 
-    エラー時は None を返しログに記録する。
+    Raises:
+        RuntimeError: サブプロセスの異常終了・クラッシュ・結果パース失敗時
     """
     exit_code, stdout_text, stderr_tail = await _run_worker_subprocess(
         "ingest-and-index", ["--commit-message", commit_message],
@@ -1338,30 +1345,36 @@ async def _run_ingest_and_index_subprocess(commit_message: str) -> PipelineSumma
 
     if exit_code != 0:
         if exit_code in _SEGFAULT_EXIT_CODES:
-            logger.error("ingest-and-index がクラッシュしました (SEGFAULT, exit_code=%d)", exit_code)
-            return None
+            raise RuntimeError(
+                f"ingest-and-index がクラッシュしました (SEGFAULT, exit_code={exit_code})"
+            )
         # worker がエラー JSON を出力している場合
         if stdout_text:
             try:
                 error_data = json.loads(stdout_text.splitlines()[-1])
                 if error_data.get("error"):
-                    logger.error("ingest-and-index エラー: %s", error_data.get("message"))
+                    raise RuntimeError(
+                        f"ingest-and-index エラー: {error_data.get('message', '不明なエラー')}"
+                    )
             except (json.JSONDecodeError, IndexError):
                 pass
-        logger.error("ingest-and-index 異常終了 (exit_code=%d)\n%s", exit_code, stderr_tail)
-        return None
+        raise RuntimeError(
+            f"ingest-and-index 異常終了 (exit_code={exit_code})\n{stderr_tail}"
+        )
 
     if not stdout_text:
-        return None
+        raise RuntimeError("ingest-and-index の出力が空です")
 
     last_line = stdout_text.splitlines()[-1]
     try:
         result = json.loads(last_line)
-    except json.JSONDecodeError:
-        logger.error("ingest-and-index の結果パースに失敗: %s", stdout_text)
-        return None
+    except json.JSONDecodeError as exc:
+        raise RuntimeError(f"ingest-and-index の結果パースに失敗: {stdout_text}") from exc
 
-    return _parse_pipeline_summary(result)
+    summary = _parse_pipeline_summary(result)
+    if summary is None:
+        raise RuntimeError(f"ingest-and-index の結果解析に失敗: {stdout_text}")
+    return summary
 
 
 async def _run_delete_subprocess(source_id: str) -> dict[str, Any]:
