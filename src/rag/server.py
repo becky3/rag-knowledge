@@ -439,9 +439,10 @@ async def rag_add(url: str) -> str:
         if ingest_result.placed == 0 and ingest_result.errors == 0:
             return f"取り込み対象がありませんでした: {url}"
 
-        pipeline_summary = await asyncio.to_thread(
-            controller.ingest_and_index, f"ingest(web): add {url}",
+        pipeline_summary = await _run_ingest_and_index_subprocess(
+            f"ingest(web): add {url}",
         )
+        _reset_pipeline_controller()
         _reset_rag_service()
 
         return _format_ingest_response(ingest_result, pipeline_summary, context=url)
@@ -508,9 +509,10 @@ async def rag_crawl(
         if ingest_result.placed == 0 and ingest_result.errors == 0:
             return f"対象ページが見つかりませんでした: {url}"
 
-        pipeline_summary = await asyncio.to_thread(
-            controller.ingest_and_index, f"ingest(web): crawl {url}",
+        pipeline_summary = await _run_ingest_and_index_subprocess(
+            f"ingest(web): crawl {url}",
         )
+        _reset_pipeline_controller()
         _reset_rag_service()
 
         return _format_ingest_response(ingest_result, pipeline_summary, context=url)
@@ -654,10 +656,10 @@ async def rag_crawl_zenn(
         if ingest_result.placed == 0 and ingest_result.errors == 0:
             return f"コンテンツが見つかりませんでした（ユーザー: {username}）"
 
-        pipeline_summary = await asyncio.to_thread(
-            controller.ingest_and_index,
+        pipeline_summary = await _run_ingest_and_index_subprocess(
             f"ingest(zenn): {username.strip()}",
         )
+        _reset_pipeline_controller()
         _reset_rag_service()
 
         return _format_ingest_response(
@@ -735,10 +737,10 @@ async def rag_crawl_bluesky(
         if ingest_result.placed == 0 and ingest_result.errors == 0:
             return f"投稿が見つかりませんでした（ハンドル: {handle}）"
 
-        pipeline_summary = await asyncio.to_thread(
-            controller.ingest_and_index,
+        pipeline_summary = await _run_ingest_and_index_subprocess(
             f"ingest(bluesky): {handle}",
         )
+        _reset_pipeline_controller()
         _reset_rag_service()
 
         return _format_ingest_response(
@@ -800,9 +802,10 @@ async def rag_add_document(
         if ingest_result.errors > 0:
             return f"エラー: {ingest_result.error_details[0]}"
 
-        pipeline_summary = await asyncio.to_thread(
-            controller.ingest_and_index, f"ingest(local): add {file_path}",
+        pipeline_summary = await _run_ingest_and_index_subprocess(
+            f"ingest(local): add {file_path}",
         )
+        _reset_pipeline_controller()
         _reset_rag_service()
 
         return _format_ingest_response(
@@ -858,9 +861,10 @@ async def rag_crawl_documents(
         if ingest_result.placed == 0 and ingest_result.errors == 0:
             return f"対象ファイルが見つかりませんでした（ディレクトリ: {dir_path}）"
 
-        pipeline_summary = await asyncio.to_thread(
-            controller.ingest_and_index, f"ingest(local): crawl {dir_path}",
+        pipeline_summary = await _run_ingest_and_index_subprocess(
+            f"ingest(local): crawl {dir_path}",
         )
+        _reset_pipeline_controller()
         _reset_rag_service()
 
         return _format_ingest_response(
@@ -973,9 +977,10 @@ async def rag_site_ingest(
         # パイプライン処理
         pipeline_summary: PipelineSummary | None = None
         if bridge_result.ingest.placed > 0:
-            pipeline_summary = await asyncio.to_thread(
-                controller.ingest_and_index, f"ingest(web): site-ingest {url}",
+            pipeline_summary = await _run_ingest_and_index_subprocess(
+                f"ingest(web): site-ingest {url}",
             )
+            _reset_pipeline_controller()
             _reset_rag_service()
 
         # 操作全体の所要時間（クロール + Bridge + パイプライン）
@@ -1021,25 +1026,18 @@ async def rag_delete(url: str) -> str:
     # ディスク上のインデックスを更新していても反映されない。
     # delete 前にコントローラをリセットし、最新のディスク状態をロードする。
     _reset_pipeline_controller()
-    controller = await _get_pipeline_controller()
 
     try:
-        source_id = url
-
-        def _do_delete() -> PipelineSummary | None:
-            try:
-                controller.source_store.remove_file(source_id)
-            except KeyError:
-                return None
-            return controller.ingest_and_index(f"delete: {source_id}")
-
-        result = await asyncio.to_thread(_do_delete)
-        if result is None:
+        result = await _run_delete_subprocess(url)
+        if result.get("not_found"):
             return f"該当するソースが見つかりませんでした: {url}"
 
+        _reset_pipeline_controller()
         _reset_rag_service()
-        if result.errors:
-            errors_text = "; ".join(result.errors)
+
+        pipeline = result.get("pipeline")
+        if pipeline and pipeline.errors:
+            errors_text = "; ".join(pipeline.errors)
             return f"削除しましたが、パイプラインでエラーが発生しました: {url} ({errors_text})"
         return f"削除しました: {url}"
     except Exception:
@@ -1264,26 +1262,22 @@ async def rag_rebuild(
         _rebuild_lock.release()
 
 
-async def _run_rebuild_subprocess(
-    mode: str,
-    source_type: str | None,
-    auto_commit: bool,
-) -> str:
-    """rebuild を CLI サブプロセスで実行する.
+async def _run_worker_subprocess(
+    subcommand: str,
+    args: list[str],
+) -> tuple[int, str, str]:
+    """worker.py サブコマンドをサブプロセスで実行する.
 
     C 拡張（BM25s 等）の SEGFAULT がサーバープロセスを巻き込まないよう、
     別プロセスで実行してエラーを安全にハンドリングする。
+
+    Returns:
+        (exit_code, stdout_text, stderr_tail) のタプル
     """
-
-
     cmd = [
         sys.executable, "-m", "rag.pipeline.worker",
-        "rebuild", "--mode", mode,
+        subcommand, *args,
     ]
-    if source_type is not None:
-        cmd.extend(["--source-type", source_type])
-    if auto_commit:
-        cmd.append("--auto-commit")
 
     env = os.environ.copy()
     env["PYTHONIOENCODING"] = "utf-8"
@@ -1308,10 +1302,122 @@ async def _run_rebuild_subprocess(
     assert process.returncode is not None  # noqa: S101
     exit_code = process.returncode
 
-    # stderr の末尾10行を保持（エラー時の診断用）
+    stdout_text = stdout_bytes.decode("utf-8", errors="replace").strip() if stdout_bytes else ""
     stderr_text = stderr_bytes.decode("utf-8", errors="replace") if stderr_bytes else ""
     stderr_lines = stderr_text.rstrip().splitlines()
     stderr_tail = "\n".join(stderr_lines[-10:])
+
+    return exit_code, stdout_text, stderr_tail
+
+
+def _parse_pipeline_summary(data: dict[str, Any]) -> PipelineSummary | None:
+    """JSON dict から PipelineSummary を復元する.
+
+    パース失敗時は None を返す。
+    """
+    try:
+        return PipelineSummary(
+            mode=PipelineMode(data.get("mode", "incremental")),
+            total_files=data.get("total_files", 0),
+            processed=data.get("processed", 0),
+            skipped=data.get("skipped", 0),
+            errors=data.get("errors", []),
+        )
+    except ValueError:
+        return None
+
+
+async def _run_ingest_and_index_subprocess(commit_message: str) -> PipelineSummary | None:
+    """ingest_and_index をサブプロセスで実行し PipelineSummary を返す.
+
+    エラー時は None を返しログに記録する。
+    """
+    exit_code, stdout_text, stderr_tail = await _run_worker_subprocess(
+        "ingest-and-index", ["--commit-message", commit_message],
+    )
+
+    if exit_code != 0:
+        if exit_code in _SEGFAULT_EXIT_CODES:
+            logger.error("ingest-and-index がクラッシュしました (SEGFAULT, exit_code=%d)", exit_code)
+            return None
+        # worker がエラー JSON を出力している場合
+        if stdout_text:
+            try:
+                error_data = json.loads(stdout_text.splitlines()[-1])
+                if error_data.get("error"):
+                    logger.error("ingest-and-index エラー: %s", error_data.get("message"))
+            except (json.JSONDecodeError, IndexError):
+                pass
+        logger.error("ingest-and-index 異常終了 (exit_code=%d)\n%s", exit_code, stderr_tail)
+        return None
+
+    if not stdout_text:
+        return None
+
+    last_line = stdout_text.splitlines()[-1]
+    try:
+        result = json.loads(last_line)
+    except json.JSONDecodeError:
+        logger.error("ingest-and-index の結果パースに失敗: %s", stdout_text)
+        return None
+
+    return _parse_pipeline_summary(result)
+
+
+async def _run_delete_subprocess(source_id: str) -> dict[str, Any]:
+    """delete をサブプロセスで実行する.
+
+    Returns:
+        {"not_found": True} or {"deleted": True, "pipeline": PipelineSummary | None}
+    """
+    exit_code, stdout_text, stderr_tail = await _run_worker_subprocess(
+        "delete", ["--source-id", source_id],
+    )
+
+    if exit_code != 0:
+        if exit_code in _SEGFAULT_EXIT_CODES:
+            raise RuntimeError(f"delete プロセスがクラッシュしました (SEGFAULT, exit_code={exit_code})")
+        if stdout_text:
+            try:
+                error_data = json.loads(stdout_text.splitlines()[-1])
+                if error_data.get("error"):
+                    raise RuntimeError(error_data.get("message", "不明なエラー"))
+            except (json.JSONDecodeError, IndexError):
+                pass
+        raise RuntimeError(f"delete プロセスが異常終了しました (exit_code={exit_code})\n{stderr_tail}")
+
+    if not stdout_text:
+        raise RuntimeError("delete プロセスの出力が空です")
+
+    last_line = stdout_text.splitlines()[-1]
+    try:
+        result = json.loads(last_line)
+    except json.JSONDecodeError as exc:
+        raise RuntimeError(f"delete の結果パースに失敗: {stdout_text}") from exc
+
+    if result.get("not_found"):
+        return {"not_found": True}
+
+    # pipeline summary の復元
+    pipeline_data = result.get("pipeline", {})
+    pipeline_summary = _parse_pipeline_summary(pipeline_data) if pipeline_data else None
+
+    return {"deleted": True, "pipeline": pipeline_summary}
+
+
+async def _run_rebuild_subprocess(
+    mode: str,
+    source_type: str | None,
+    auto_commit: bool,
+) -> str:
+    """rebuild を CLI サブプロセスで実行する."""
+    args = ["--mode", mode]
+    if source_type is not None:
+        args.extend(["--source-type", source_type])
+    if auto_commit:
+        args.append("--auto-commit")
+
+    exit_code, stdout_text, stderr_tail = await _run_worker_subprocess("rebuild", args)
 
     # クラッシュ検出
     if exit_code != 0:
@@ -1323,7 +1429,6 @@ async def _run_rebuild_subprocess(
                 f"インデックスを手動削除して再実行してください。"
             )
         # worker がエラー JSON を stdout に出力している場合はそちらを優先
-        stdout_text = stdout_bytes.decode("utf-8", errors="replace").strip()
         if stdout_text:
             try:
                 error_data = json.loads(stdout_text.splitlines()[-1])
@@ -1338,7 +1443,6 @@ async def _run_rebuild_subprocess(
 
     # 正常終了: stdout の最終行を JSON としてパース
     # （BM25s 等が stdout に警告を出す場合があるため、最終行のみを対象にする）
-    stdout_text = stdout_bytes.decode("utf-8", errors="replace").strip()
     if not stdout_text:
         return "再構築完了（結果なし）"
 
@@ -1348,18 +1452,8 @@ async def _run_rebuild_subprocess(
     except json.JSONDecodeError:
         return f"再構築完了（結果の解析に失敗）\n{stdout_text}"
 
-    # PipelineSummary を再構築して既存のフォーマッタを使用
-    from .pipeline.models import PipelineMode, PipelineSummary
-
-    try:
-        summary = PipelineSummary(
-            mode=PipelineMode(result.get("mode", "incremental")),
-            total_files=result.get("total_files", 0),
-            processed=result.get("processed", 0),
-            skipped=result.get("skipped", 0),
-            errors=result.get("errors", []),
-        )
-    except ValueError:
+    summary = _parse_pipeline_summary(result)
+    if summary is None:
         return f"再構築完了（結果の解析に失敗）\n{stdout_text}"
 
     elapsed = result.get("elapsed", 0)
