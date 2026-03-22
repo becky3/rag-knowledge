@@ -5,25 +5,79 @@
 テスト方針:
 - subprocess ラッパーのモックテスト（Scrapy プロセスの起動・終了・エラーハンドリング）
 - _build_spider_script の設定値埋め込み（JSON ファイル経由）
-- ディレクトリ構造の準備（domain_dir, html_dir, jobdir）
-- --force オプションによる JOBDIR 削除
+- ディレクトリ構造の準備（crawl_dir, html_dir, jobdir）
+- --force オプションによるクロールディレクトリ削除
+- クロールキーによる JOBDIR 分離
 """
 
 from __future__ import annotations
 
 import json
+import re
 from pathlib import Path
 from unittest.mock import AsyncMock, patch
+from urllib.parse import urlparse
 
 import pytest
 
-from rag.scrapy.runner import CrawlResult, ScrapyRunner
+from rag.scrapy.runner import CrawlResult, ScrapyRunner, _crawl_key
 
 
 async def _async_lines_iter(lines: list[bytes]):
     """AsyncMock の stderr 用の非同期イテレータ."""
     for line in lines:
         yield line
+
+
+def _expected_crawl_dir(
+    tmp_path: Path, start_url: str, url_pattern: str = "",
+) -> Path:
+    """テスト用: runner.run() と同じロジックでクロールディレクトリを計算する."""
+    parsed = urlparse(start_url)
+    effective_pattern = url_pattern
+    if not effective_pattern:
+        path = parsed.path.rstrip("/")
+        if path and path != "/":
+            base_prefix = f"{parsed.scheme}://{parsed.hostname}{path}"
+            effective_pattern = f"^{re.escape(base_prefix)}(?:/|$)"
+    domain = parsed.hostname or "unknown"
+    key = _crawl_key(start_url, effective_pattern)
+    return tmp_path / domain / key
+
+
+# --- _crawl_key テスト ---
+
+
+class TestCrawlKey:
+    """クロールキー生成のテスト."""
+
+    def test_same_params_same_key(self) -> None:
+        """同じパラメータは同じキーを返す."""
+        key1 = _crawl_key("https://example.com/a", "/a/.*")
+        key2 = _crawl_key("https://example.com/a", "/a/.*")
+        assert key1 == key2
+
+    def test_different_start_url_different_key(self) -> None:
+        """異なる start_url は異なるキーを返す."""
+        key1 = _crawl_key("https://example.com/a", "")
+        key2 = _crawl_key("https://example.com/b", "")
+        assert key1 != key2
+
+    def test_different_url_pattern_different_key(self) -> None:
+        """異なる url_pattern は異なるキーを返す."""
+        key1 = _crawl_key("https://example.com", "/a/.*")
+        key2 = _crawl_key("https://example.com", "/b/.*")
+        assert key1 != key2
+
+    def test_key_length(self) -> None:
+        """キーは16文字."""
+        key = _crawl_key("https://example.com", "")
+        assert len(key) == 16
+
+    def test_key_is_hex(self) -> None:
+        """キーは16進文字列."""
+        key = _crawl_key("https://example.com", "")
+        int(key, 16)  # hex でなければ ValueError
 
 
 # --- CrawlResult テスト ---
@@ -184,8 +238,10 @@ class TestScrapyRunnerRun:
 
         assert result.success is True
         assert result.exit_code == 0
-        assert result.output_dir == tmp_path / "example.com" / "html"
-        assert result.jsonl_path == tmp_path / "example.com" / "metadata.jsonl"
+        assert result.output_dir.name == "html"
+        assert result.jsonl_path.name == "metadata.jsonl"
+        # output_dir と jsonl_path は同じクロールディレクトリ配下
+        assert result.output_dir.parent == result.jsonl_path.parent
 
     @pytest.mark.asyncio()
     async def test_failed_crawl(self, tmp_path: Path) -> None:
@@ -195,12 +251,7 @@ class TestScrapyRunnerRun:
         mock_process = AsyncMock()
         mock_process.wait.return_value = 1
 
-        # stderr はファイルリダイレクト方式のため、
-        # subprocess 起動時に stderr.log にエラーを書き込む
-        domain_dir = tmp_path / "example.com"
-
         async def fake_exec(*args, **kwargs):
-            domain_dir.mkdir(parents=True, exist_ok=True)
             stderr_file = kwargs.get("stderr")
             if stderr_file and hasattr(stderr_file, "write"):
                 stderr_file.write("ERROR: Something failed\n")
@@ -222,28 +273,31 @@ class TestScrapyRunnerRun:
         mock_process.wait.return_value = 0
 
         with patch("asyncio.create_subprocess_exec", return_value=mock_process):
-            await runner.run(start_url="https://docs.example.com/guide")
+            result = await runner.run(start_url="https://docs.example.com/guide")
 
-        # ドメインベースのディレクトリが作成される
-        assert (tmp_path / "docs.example.com" / "html").exists()
+        # クロールキーベースのディレクトリが作成される
+        assert result.output_dir.exists()
+        assert result.output_dir.name == "html"
+        # ドメインディレクトリの下にクロールキーディレクトリがある
+        assert result.output_dir.parent.parent.name == "docs.example.com"
 
     @pytest.mark.asyncio()
-    async def test_force_deletes_domain_dir(self, tmp_path: Path) -> None:
-        """--force でドメインディレクトリ全体が削除されること."""
+    async def test_force_deletes_crawl_dir(self, tmp_path: Path) -> None:
+        """--force でクロールディレクトリが削除されること."""
         runner = ScrapyRunner(temp_dir=tmp_path)
 
-        domain_dir = tmp_path / "example.com"
+        crawl_dir = _expected_crawl_dir(tmp_path, "https://example.com")
 
         # 事前に JOBDIR, html/, metadata.jsonl を作成
-        jobdir = domain_dir / "jobdir"
+        jobdir = crawl_dir / "jobdir"
         jobdir.mkdir(parents=True)
         (jobdir / "requests.seen").write_text("data", encoding="utf-8")
 
-        html_dir = domain_dir / "html"
+        html_dir = crawl_dir / "html"
         html_dir.mkdir(parents=True)
         (html_dir / "page.html").write_text("<html>old</html>", encoding="utf-8")
 
-        jsonl_path = domain_dir / "metadata.jsonl"
+        jsonl_path = crawl_dir / "metadata.jsonl"
         jsonl_path.write_text('{"url":"old"}\n', encoding="utf-8")
 
         mock_process = AsyncMock()
@@ -270,10 +324,10 @@ class TestScrapyRunnerRun:
         mock_process.stderr = _async_lines_iter([])
 
         with patch("asyncio.create_subprocess_exec", return_value=mock_process):
-            await runner.run(start_url="https://example.com", max_pages=50)
+            result = await runner.run(start_url="https://example.com", max_pages=50)
 
         # パラメータ JSON ファイルに max_pages=50 が書き込まれていること
-        params_path = tmp_path / "example.com" / "spider_params.json"
+        params_path = result.output_dir.parent / "spider_params.json"
         params = json.loads(params_path.read_text(encoding="utf-8"))
         assert params["max_pages"] == 50
 
@@ -307,13 +361,13 @@ class TestScrapyRunnerRun:
         mock_process.stderr = _async_lines_iter([])
 
         with patch("asyncio.create_subprocess_exec", return_value=mock_process):
-            await runner.run(
+            result = await runner.run(
                 start_url="https://example.com/docs",
                 allowed_domains="example.com",
                 url_pattern=r"/docs/.*",
             )
 
-        params_path = tmp_path / "example.com" / "spider_params.json"
+        params_path = result.output_dir.parent / "spider_params.json"
         assert params_path.exists()
         params = json.loads(params_path.read_text(encoding="utf-8"))
         assert params["start_url"] == "https://example.com/docs"
@@ -337,9 +391,9 @@ class TestScrapyRunnerRun:
         mock_process.stderr = _async_lines_iter([])
 
         with patch("asyncio.create_subprocess_exec", return_value=mock_process):
-            await runner.run(start_url="https://example.com")
+            result = await runner.run(start_url="https://example.com")
 
-        params_path = tmp_path / "example.com" / "spider_params.json"
+        params_path = result.output_dir.parent / "spider_params.json"
         params = json.loads(params_path.read_text(encoding="utf-8"))
         assert params["timeout_sec"] == 600
         assert params["error_count"] == 50
@@ -354,9 +408,9 @@ class TestScrapyRunnerRun:
         mock_process.stderr = _async_lines_iter([])
 
         with patch("asyncio.create_subprocess_exec", return_value=mock_process):
-            await runner.run(start_url="https://example.com/docs/guide/")
+            result = await runner.run(start_url="https://example.com/docs/guide/")
 
-        params_path = tmp_path / "example.com" / "spider_params.json"
+        params_path = result.output_dir.parent / "spider_params.json"
         params = json.loads(params_path.read_text(encoding="utf-8"))
         # re.escape でドメインのドットがエスケープされたパターン
         assert params["url_pattern"] == r"^https://example\.com/docs/guide(?:/|$)"
@@ -371,9 +425,9 @@ class TestScrapyRunnerRun:
         mock_process.stderr = _async_lines_iter([])
 
         with patch("asyncio.create_subprocess_exec", return_value=mock_process):
-            await runner.run(start_url="https://example.com/")
+            result = await runner.run(start_url="https://example.com/")
 
-        params_path = tmp_path / "example.com" / "spider_params.json"
+        params_path = result.output_dir.parent / "spider_params.json"
         params = json.loads(params_path.read_text(encoding="utf-8"))
         assert params["url_pattern"] == ""
 
@@ -387,11 +441,113 @@ class TestScrapyRunnerRun:
         mock_process.stderr = _async_lines_iter([])
 
         with patch("asyncio.create_subprocess_exec", return_value=mock_process):
-            await runner.run(
+            result = await runner.run(
                 start_url="https://example.com/docs/guide",
                 url_pattern=r"/custom/.*",
             )
 
-        params_path = tmp_path / "example.com" / "spider_params.json"
+        params_path = result.output_dir.parent / "spider_params.json"
         params = json.loads(params_path.read_text(encoding="utf-8"))
         assert params["url_pattern"] == r"/custom/.*"
+
+
+# --- JOBDIR 分離テスト ---
+
+
+class TestJobdirIsolation:
+    """異なるクロール設定間の JOBDIR 分離テスト."""
+
+    @pytest.mark.asyncio()
+    async def test_different_start_url_different_jobdir(self, tmp_path: Path) -> None:
+        """同一ドメインでも異なる start_url は異なる JOBDIR を使用する."""
+        runner = ScrapyRunner(temp_dir=tmp_path)
+
+        mock_process = AsyncMock()
+        mock_process.wait.return_value = 0
+
+        with patch("asyncio.create_subprocess_exec", return_value=mock_process):
+            result_a = await runner.run(
+                start_url="https://example.com/a.html",
+                url_pattern="a",
+            )
+            result_b = await runner.run(
+                start_url="https://example.com/b.html",
+                url_pattern="b",
+            )
+
+        # 出力ディレクトリが異なること
+        assert result_a.output_dir != result_b.output_dir
+        # どちらも同一ドメインの下にあること
+        assert result_a.output_dir.parent.parent.name == "example.com"
+        assert result_b.output_dir.parent.parent.name == "example.com"
+
+    @pytest.mark.asyncio()
+    async def test_different_url_pattern_different_jobdir(self, tmp_path: Path) -> None:
+        """同じ start_url でも異なる url_pattern は異なる JOBDIR を使用する."""
+        runner = ScrapyRunner(temp_dir=tmp_path)
+
+        mock_process = AsyncMock()
+        mock_process.wait.return_value = 0
+
+        with patch("asyncio.create_subprocess_exec", return_value=mock_process):
+            result_a = await runner.run(
+                start_url="https://example.com",
+                url_pattern="/docs/.*",
+            )
+            result_b = await runner.run(
+                start_url="https://example.com",
+                url_pattern="/api/.*",
+            )
+
+        assert result_a.output_dir != result_b.output_dir
+
+    @pytest.mark.asyncio()
+    async def test_same_params_same_directory(self, tmp_path: Path) -> None:
+        """同じパラメータは同じディレクトリを使用する（レジューム可能）."""
+        runner = ScrapyRunner(temp_dir=tmp_path)
+
+        mock_process = AsyncMock()
+        mock_process.wait.return_value = 0
+
+        with patch("asyncio.create_subprocess_exec", return_value=mock_process):
+            result_1 = await runner.run(
+                start_url="https://example.com/docs",
+                url_pattern="/docs/.*",
+            )
+            result_2 = await runner.run(
+                start_url="https://example.com/docs",
+                url_pattern="/docs/.*",
+            )
+
+        assert result_1.output_dir == result_2.output_dir
+        assert result_1.jsonl_path == result_2.jsonl_path
+
+    @pytest.mark.asyncio()
+    async def test_force_does_not_affect_other_crawl(self, tmp_path: Path) -> None:
+        """--force は対象クロールのディレクトリのみ削除し、他のクロールに影響しない."""
+        runner = ScrapyRunner(temp_dir=tmp_path)
+
+        mock_process = AsyncMock()
+        mock_process.wait.return_value = 0
+
+        # 1回目のクロール（a.html）を実行してファイルを作成
+        with patch("asyncio.create_subprocess_exec", return_value=mock_process):
+            result_a = await runner.run(
+                start_url="https://example.com/a.html",
+                url_pattern="a",
+            )
+
+        # a のクロールディレクトリにダミーファイルを作成
+        marker_file = result_a.output_dir / "marker.html"
+        marker_file.write_text("data", encoding="utf-8")
+
+        # 2回目のクロール（b.html）を --force で実行
+        with patch("asyncio.create_subprocess_exec", return_value=mock_process):
+            await runner.run(
+                start_url="https://example.com/b.html",
+                url_pattern="b",
+                force=True,
+            )
+
+        # a のマーカーファイルは影響を受けていない
+        assert marker_file.exists()

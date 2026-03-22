@@ -128,7 +128,7 @@ MCP ツール `rag_site_ingest` と CLI コマンド `site-ingest` の 2 つの�
 | `url` | str | — | クロール開始 URL（必須） |
 | `url_pattern` | str | なし | クロール対象 URL のフィルタパターン（正規表現）。未指定時は開始 URL のパスプレフィックスから自動生成する（例: `https://example.com/docs/` → `^https://example\.com/docs/`）。パスが `/` のみの場合はパターンなし（ドメイン全体が対象）。明示的に指定した場合はその値を優先する |
 | `max_pages` | int | `site_ingest_max_pages` | ページ数上限。config.toml の値を上書き可能 |
-| `force` | bool | `false` | `true` の場合、ドメインディレクトリ全体（JOBDIR、HTML、JSONL）を削除して最初からクロールする |
+| `force` | bool | `false` | `true` の場合、クロールディレクトリ全体（JOBDIR、HTML、JSONL）を削除して最初からクロールする |
 | `download_only` | bool | `false` | `true` の場合、Scrapy クロール + Bridge（source_store 配置 + git commit）まで実行し、パイプライン処理（converter + indexer）をスキップする。source_store への commit は実行されるため、後から `rag_rebuild`（incremental）で差分処理可能 |
 
 ### CLI コマンド
@@ -144,7 +144,7 @@ MCP ツール `rag_site_ingest` と CLI コマンド `site-ingest` の 2 つの�
 | `url`（位置引数） | str | — | クロール開始 URL |
 | `--url-pattern` | str | なし | URL フィルタパターン |
 | `--max-pages` | int | `site_ingest_max_pages` | ページ数上限 |
-| `--force` | フラグ | `false` | ドメインディレクトリ全体を削除して再クロール |
+| `--force` | フラグ | `false` | クロールディレクトリ全体を削除して再クロール |
 | `--download-only` | フラグ | `false` | Scrapy クロール + Bridge（source_store 配置 + git commit）まで実行し、パイプライン処理をスキップ |
 
 ### 取り込み結果の出力形式
@@ -251,7 +251,7 @@ Scrapy に渡す設定:
 | `CLOSESPIDER_PAGECOUNT` | `max_pages` パラメータまたは `site_ingest_max_pages`（config.toml） |
 | `CLOSESPIDER_TIMEOUT` | `site_ingest_timeout_sec`（config.toml） |
 | `CLOSESPIDER_ERRORCOUNT` | `site_ingest_error_count`（config.toml） |
-| `JOBDIR` | 一時保存ディレクトリ内の `jobdir/` |
+| `JOBDIR` | クロールディレクトリ内の `jobdir/`（`{domain}/{crawl_key}/jobdir/`） |
 | `FEEDS` | JSONL 出力パス |
 | `DOWNLOADER_MIDDLEWARES` | SSRF Middleware を有効化（優先度 50） |
 | `LOG_LEVEL` | `INFO` |
@@ -325,17 +325,24 @@ JSONL の各行から .meta サイドカーファイルへの変換:
 - JOBDIR にスケジューラキューと重複フィルタが永続化される
 - 同じ JOBDIR で再実行すると、処理済み URL をスキップして続きから取得
 - JOBDIR のレジュームは「重複スキップ付き再クロール」として動作する（Scrapy Issue #4106）。プロセス強制終了時にキューが失われる場合がある
-- `--force` オプション指定時はドメインディレクトリ全体（JOBDIR、HTML、JSONL）を削除して最初からクロールする
+- `--force` オプション指定時はクロールディレクトリ全体（JOBDIR、HTML、JSONL）を削除して最初からクロールする
+
+### JOBDIR の分離
+
+一時保存ディレクトリは `{domain}/{crawl_key}/` の 2 階層で管理する。`crawl_key` は `start_url` と effective `url_pattern`（自動生成後の値）の SHA-256 先頭 16 文字。
+
+- 同じ `start_url` + `url_pattern` の組み合わせ → 同じクロールディレクトリ → レジューム可能
+- 異なる `start_url` または `url_pattern` → 異なるクロールディレクトリ → JOBDIR のスケジューラキューが分離され、状態リークを防止
 
 ### 一時保存ディレクトリ
 
 | 内容 | パス |
 |------|------|
-| HTML ファイル | `{SITE_INGEST_TEMP_DIR}/{domain}/html/` |
-| JSONL メタデータ | `{SITE_INGEST_TEMP_DIR}/{domain}/metadata.jsonl` |
-| JOBDIR | `{SITE_INGEST_TEMP_DIR}/{domain}/jobdir/` |
+| HTML ファイル | `{SITE_INGEST_TEMP_DIR}/{domain}/{crawl_key}/html/` |
+| JSONL メタデータ | `{SITE_INGEST_TEMP_DIR}/{domain}/{crawl_key}/metadata.jsonl` |
+| JOBDIR | `{SITE_INGEST_TEMP_DIR}/{domain}/{crawl_key}/jobdir/` |
 
-`SITE_INGEST_TEMP_DIR` のデフォルト値は `.tmp/site_ingest`。
+`SITE_INGEST_TEMP_DIR` のデフォルト値は `.tmp/site_ingest`。`crawl_key` の詳細は「JOBDIR の分離」セクションを参照。
 
 ### 処理フロー
 
@@ -412,6 +419,7 @@ Scrapy は独立した Python パッケージとして `pyproject.toml` に依�
 | DNS リバインディングによるプライベート IP への誘導 | SSRF Middleware が各リクエストの DNS 解決結果を検証し、プライベート IP へのアクセスを `IgnoreRequest` で拒否する。該当リクエストは Scrapy の統計に失敗として記録される |
 | SSRF Middleware での DNS 解決失敗 | DNS 解決に失敗した場合、そのリクエストを `IgnoreRequest` で拒否する。ネットワーク障害等による一時的な DNS エラーは Scrapy のリトライ対象外となる |
 | `download_only` 指定時にパイプライン処理が必要な場合 | MCP: `rag_rebuild`（mode: full, source_type: web）、CLI: `uv run python -m rag.cli rebuild --mode full --source-type web` で後からパイプライン処理を実行する。incremental モードでも可（source_store への配置が git commit されていれば差分検知される） |
+| 同一ドメインへの異なるパラメータでの複数回クロール | クロールキー（`start_url` + effective `url_pattern` のハッシュ）により JOBDIR が分離されるため、前回クロールの URL キューが残留しない |
 
 ## 関連ドキュメント
 
