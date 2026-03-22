@@ -26,6 +26,7 @@ import contextlib
 import io
 import logging
 import os
+import sys
 import threading
 import time
 from pathlib import Path
@@ -1288,46 +1289,117 @@ async def rag_rebuild(
     if not _rebuild_lock.acquire(blocking=False):
         return "エラー: 別の再構築が実行中です"
 
-    # バリデーション済みの source_type を SourceType にキャスト
-    st: SourceType | None = source_type  # type: ignore[assignment]
-
     try:
-        def _run_rebuild() -> PipelineSummary:
-            controller = _build_pipeline_controller()
-            if mode == "full":
-                return controller.run_full_rebuild(
-                    source_type=st, auto_commit=auto_commit,
-                )
-            if mode == "convert":
-                return controller.run_convert_only(
-                    source_type=st, auto_commit=auto_commit,
-                )
-            if mode == "index":
-                return controller.run_index_only(
-                    source_type=st, auto_commit=auto_commit,
-                )
-            # mode == "incremental"
-            return controller.run_incremental()
-
-        start = time.monotonic()
-        task = asyncio.ensure_future(asyncio.to_thread(_run_rebuild))
-        try:
-            summary = await asyncio.shield(task)
-        except asyncio.CancelledError:
-            await task
-            raise
-        elapsed = time.monotonic() - start
+        result = await _run_rebuild_subprocess(mode, source_type, auto_commit)
 
         # rebuild はインデックスを全操作するため、両方リセット
         _reset_pipeline_controller()
         _reset_rag_service()
 
-        return _format_rebuild_summary(summary, elapsed)
-    except Exception:
-        logger.exception("再構築中にエラーが発生しました")
-        return "エラー: 再構築中にエラーが発生しました"
+        return result
     finally:
         _rebuild_lock.release()
+
+
+async def _run_rebuild_subprocess(
+    mode: str,
+    source_type: str | None,
+    auto_commit: bool,
+) -> str:
+    """rebuild を CLI サブプロセスで実行する.
+
+    C 拡張（BM25s 等）の SEGFAULT がサーバープロセスを巻き込まないよう、
+    別プロセスで実行してエラーを安全にハンドリングする。
+    """
+    import json as json_mod
+
+    cmd = [
+        sys.executable, "-m", "rag.pipeline.worker",
+        "rebuild", "--mode", mode,
+    ]
+    if source_type is not None:
+        cmd.extend(["--source-type", source_type])
+    if auto_commit:
+        cmd.append("--auto-commit")
+
+    env = os.environ.copy()
+    env["PYTHONIOENCODING"] = "utf-8"
+
+    # stderr をファイルにリダイレクト（Windows パイプ EOF 問題回避）
+    import tempfile
+    stderr_file = tempfile.NamedTemporaryFile(
+        mode="w", encoding="utf-8", suffix=".log",
+        prefix="rebuild_stderr_", delete=False,
+    )
+    try:
+        process = await asyncio.create_subprocess_exec(
+            *cmd,
+            stdout=asyncio.subprocess.PIPE,
+            stdin=asyncio.subprocess.DEVNULL,
+            stderr=stderr_file,
+            env=env,
+        )
+        stdout_bytes, _ = await process.communicate()
+        exit_code = process.returncode or 0
+    finally:
+        stderr_file.close()
+
+    # 一時ファイル削除
+    stderr_path = Path(stderr_file.name)
+    try:
+        stderr_tail = ""
+        if stderr_path.exists():
+            stderr_text = stderr_path.read_text(encoding="utf-8", errors="replace")
+            lines = stderr_text.rstrip().splitlines()
+            stderr_tail = "\n".join(lines[-10:])
+    except OSError:
+        stderr_tail = ""
+    finally:
+        try:
+            stderr_path.unlink(missing_ok=True)
+        except OSError:
+            pass
+
+    # クラッシュ検出
+    if exit_code != 0:
+        # Windows SEGFAULT: exit code 0xC0000005 = -1073741819
+        if exit_code in (-1073741819, -11, 139):
+            return (
+                f"エラー: 再構築プロセスがクラッシュしました"
+                f"（SEGFAULT, exit_code={exit_code}）\n"
+                f"インデックスが破損している可能性があります。"
+                f"インデックスを手動削除して再実行してください。"
+            )
+        return (
+            f"エラー: 再構築プロセスが異常終了しました"
+            f"（exit_code={exit_code}）\n{stderr_tail}"
+        )
+
+    # 正常終了: stdout の最終行を JSON としてパース
+    # （BM25s 等が stdout に警告を出す場合があるため、最終行のみを対象にする）
+    stdout_text = stdout_bytes.decode("utf-8", errors="replace").strip()
+    if not stdout_text:
+        return "再構築完了（結果なし）"
+
+    last_line = stdout_text.splitlines()[-1]
+    try:
+        result = json_mod.loads(last_line)
+    except json_mod.JSONDecodeError:
+        return f"再構築完了（結果の解析に失敗）\n{stdout_text}"
+
+    # PipelineSummary を再構築して既存のフォーマッタを使用
+    from .pipeline.models import PipelineMode, PipelineSummary
+
+    summary = PipelineSummary(
+        mode=PipelineMode(result.get("mode", "incremental")),
+        total_files=result.get("total_files", 0),
+        processed=result.get("processed", 0),
+        skipped=result.get("skipped", 0),
+        errors=result.get("errors", []),
+    )
+    elapsed = result.get("elapsed", 0)
+
+    return _format_rebuild_summary(summary, elapsed)
 
 
 @mcp.tool()

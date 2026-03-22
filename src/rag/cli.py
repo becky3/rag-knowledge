@@ -301,7 +301,6 @@ def main() -> None:
         default=False,
         help="未コミット変更がある場合に自動コミットする（incremental では指定不可）",
     )
-
     # stats サブコマンド
     subparsers.add_parser("stats", help="ナレッジベースの統計情報を表示")
 
