@@ -103,7 +103,8 @@ uv run python -m rag.cli evaluate \
 ## テスト
 
 ```bash
-uv run pytest
+uv run pytest          # pytest-xdist で自動並列実行（-n auto）
+uv run pytest -n0      # シングルプロセスで実行（デバッグ時）
 uv run ruff check .
 uv run mypy src
 ```
