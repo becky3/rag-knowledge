@@ -8,7 +8,7 @@
 - スクラップの取得と配置
 - content_type="all" で両方取得
 - .meta サイドカーファイルの生成
-- body_html が空の記事のスキップ
+- article オブジェクトが空の記事のスキップ
 """
 
 from __future__ import annotations
@@ -241,20 +241,23 @@ class TestCrawlArticles:
         assert result.placed == 1
         assert result.errors == 0
 
-        # ファイル検証
-        html_path = (
-            source_store.root_dir / "zenn" / "testuser" / "articles" / "test-article.html"
+        # JSON ファイル検証
+        json_path = (
+            source_store.root_dir / "zenn" / "testuser" / "articles" / "test-article.json"
         )
-        assert html_path.exists()
-        assert html_path.read_text(encoding="utf-8") == "<p>Article content</p>"
+        assert json_path.exists()
+        data = json.loads(json_path.read_text(encoding="utf-8"))
+        assert data["slug"] == "test-article"
+        assert data["body_html"] == "<p>Article content</p>"
 
-    async def test_empty_body_html_skipped(
+    async def test_empty_article_skipped(
         self, source_store: SourceStore
     ) -> None:
-        """body_html が空の記事がスキップされること."""
+        """article オブジェクトが空の記事がスキップされること."""
+        empty_response = {"article": {}}
         client = _make_mock_client([
             _make_article_list_response(["empty-article"]),
-            _make_article_detail_response("empty-article", body_html=""),
+            empty_response,
         ])
 
         ingester = ZennIngester(source_store, max_articles=3)
@@ -290,7 +293,7 @@ class TestCrawlArticles:
             / "zenn"
             / "testuser"
             / "articles"
-            / "test-article.html.meta"
+            / "test-article.json.meta"
         )
         assert meta_path.exists()
         meta = yaml.safe_load(meta_path.read_text(encoding="utf-8"))

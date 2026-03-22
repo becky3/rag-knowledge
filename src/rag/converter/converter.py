@@ -20,6 +20,7 @@ from typing import Literal
 from rag.converter.handlers import (
     convert_html,
     convert_json_bluesky,
+    convert_json_zenn_article,
     convert_json_zenn_scrap,
     convert_pdf,
     passthrough_copy,
@@ -370,6 +371,9 @@ class Converter:
 
         if source_type == "bluesky":
             return convert_json_bluesky(data)
+
+        if source_type == "zenn" and "/articles/" in file_path:
+            return convert_json_zenn_article(data)
 
         if source_type == "zenn" and "/scraps/" in file_path:
             return convert_json_zenn_scrap(data)
