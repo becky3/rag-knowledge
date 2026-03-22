@@ -59,6 +59,7 @@ follow_imports = "skip"
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
 addopts = "-n auto"
+required_plugins = ["pytest-xdist"]
 
 # PyTorch CUDA index（mineru-cuda extra 専用。CUDA 12.4 環境向け）
 [[tool.uv.index]]

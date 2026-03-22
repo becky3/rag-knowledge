@@ -42,18 +42,16 @@ class GitOperations:
     def init_repo(self) -> None:
         """git リポジトリを初期化する.
 
-        初回呼び出し時のみ実際の初期化処理を実行する。
-        2回目以降はスキップする（同一インスタンス内）。
-        .gitignore で metadata.db を除外する。
+        git init は初回呼び出し時のみ実行する（同一インスタンス内）。
+        .gitignore の補正はファイルI/Oのみのため毎回実行する。
         """
-        if self._initialized:
-            return
-        git_dir = self._repo_dir / ".git"
-        if not git_dir.exists():
-            self._run(["git", "init"])
-        # .gitignore 設定（既存リポジトリでも補正）
+        if not self._initialized:
+            git_dir = self._repo_dir / ".git"
+            if not git_dir.exists():
+                self._run(["git", "init"])
+            self._initialized = True
+        # .gitignore 設定（既存リポジトリでも毎回補正）
         self._ensure_gitignore()
-        self._initialized = True
 
     def commit(self, message: str, path: str | None = None) -> str | None:
         """ステージング + コミット.
