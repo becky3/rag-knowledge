@@ -145,28 +145,28 @@ class ScrapyRunner:
             self._delay_sec,
         )
 
-        # subprocess 起動（stdout は /dev/null、stderr のみ末尾を保持）
-        process = await asyncio.create_subprocess_exec(
-            sys.executable,
-            "-c",
-            spider_script,
-            stdout=asyncio.subprocess.DEVNULL,
-            stderr=asyncio.subprocess.PIPE,
-            env=env,
-        )
+        # stderr をファイルにリダイレクト（Windows で Twisted の子プロセス/スレッドが
+        # stderr パイプを継承し、メインプロセス終了後もパイプが閉じない問題を回避）
+        stderr_path = domain_dir / "stderr.log"
+        stderr_file = open(stderr_path, "w", encoding="utf-8")  # noqa: SIM115
+        try:
+            process = await asyncio.create_subprocess_exec(
+                sys.executable,
+                "-c",
+                spider_script,
+                stdout=asyncio.subprocess.DEVNULL,
+                stdin=asyncio.subprocess.DEVNULL,
+                stderr=stderr_file,
+                env=env,
+            )
+            exit_code = await process.wait()
+        finally:
+            stderr_file.close()
 
-        # stderr をストリーミングで読み、末尾20行のみ保持
-        stderr_lines: list[str] = []
-        max_tail = 20
-        assert process.stderr is not None  # noqa: S101
-        async for raw_line in process.stderr:
-            line = raw_line.decode("utf-8", errors="replace").rstrip()
-            stderr_lines.append(line)
-            if len(stderr_lines) > max_tail:
-                stderr_lines.pop(0)
-
-        exit_code = await process.wait()
-        stderr_tail = "\n".join(stderr_lines)
+        # stderr ファイルから末尾20行を読み取り
+        stderr_text = stderr_path.read_text(encoding="utf-8", errors="replace")
+        stderr_lines = stderr_text.rstrip().splitlines()
+        stderr_tail = "\n".join(stderr_lines[-20:])
 
         if exit_code != 0:
             logger.error(

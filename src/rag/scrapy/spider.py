@@ -137,7 +137,7 @@ class SiteSpider(scrapy.Spider):  # type: ignore[misc]
             "status": response.status,
             "depth": response.meta.get("depth", 0),
             "collected_at": datetime.now(timezone.utc).isoformat(),
-            "filepath": str(filepath.relative_to(self._output_dir)),
+            "filepath": str(filepath.relative_to(self._output_dir.resolve())),
         }
 
         # リンクを辿る
