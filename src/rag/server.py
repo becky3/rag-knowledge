@@ -1336,23 +1336,25 @@ async def _run_worker_subprocess(
             if not line:
                 continue
 
-            # JSON パースを試みて progress 行をフィルタ
+            # JSON パースを試みて type フィールドで分岐
             try:
                 data = json.loads(line)
-                if isinstance(data, dict) and data.get("type") == "progress":
-                    if ctx is not None:
-                        processed = data.get("processed", 0)
-                        total = data.get("total", 0)
-                        current = data.get("current", "")
-                        await ctx.info(f"処理中: {processed}/{total} - {current}")
-                        await ctx.report_progress(float(processed), float(total))
-                    continue
+                if isinstance(data, dict):
+                    msg_type = data.get("type")
+                    if msg_type == "progress":
+                        if ctx is not None:
+                            processed = data.get("processed", 0)
+                            total = data.get("total", 0)
+                            current = data.get("current", "")
+                            await ctx.info(f"処理中: {processed}/{total} - {current}")
+                            await ctx.report_progress(float(processed), float(total))
+                        continue
+                    # result/error のみ最終結果として保持（ログ等の非JSON行で上書きしない）
+                    if msg_type in {"result", "error"}:
+                        result_line = line
             except json.JSONDecodeError:
+                # 非 JSON 行（ログ等）は result_line を上書きしない
                 pass
-
-            # progress 以外の行は result_line として保持
-            # （worker は result/error を最終行に1行のみ出力する前提）
-            result_line = line
     except asyncio.CancelledError:
         if process.returncode is None:
             with contextlib.suppress(ProcessLookupError):

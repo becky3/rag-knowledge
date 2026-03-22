@@ -220,4 +220,3 @@ reports/
 .claude/settings.local.json
 .claude/*.lock
 scheduled_tasks.lock
-.claude/scheduled_tasks.lock

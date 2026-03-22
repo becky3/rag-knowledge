@@ -550,7 +550,7 @@ class TestRunRebuildSubprocess:
         from rag.server import _run_rebuild_subprocess
 
         mock_process = _make_mock_process(
-            b'{"mode":"full_rebuild","total_files":5,"processed":5,'
+            b'{"type":"result","mode":"full_rebuild","total_files":5,"processed":5,'
             b'"skipped":0,"errors":[],"elapsed":1.2}',
             b"", 0,
         )
@@ -563,8 +563,9 @@ class TestRunRebuildSubprocess:
         assert "処理件数: 5" in result
 
     @pytest.mark.asyncio
+    @pytest.mark.asyncio
     async def test_invalid_json_result(self) -> None:
-        """JSON パース失敗時にフォールバックすること."""
+        """非 JSON 行のみの場合、結果なしとして処理されること."""
         from rag.server import _run_rebuild_subprocess
 
         mock_process = _make_mock_process(b"not json", b"", 0)
@@ -572,7 +573,7 @@ class TestRunRebuildSubprocess:
         with patch("asyncio.create_subprocess_exec", return_value=mock_process):
             result = await _run_rebuild_subprocess("full", None, False)
 
-        assert "結果の解析に失敗" in result
+        assert "結果なし" in result
 
     @pytest.mark.asyncio
     async def test_nonzero_exit_with_stderr(self) -> None:
@@ -606,7 +607,7 @@ class TestRunRebuildSubprocess:
         from rag.server import _run_rebuild_subprocess
 
         mock_process = _make_mock_process(
-            b'{"error":true,"message":"source_store not found"}',
+            b'{"type":"error","error":true,"message":"source_store not found"}',
             b"Traceback ...\n", 1,
         )
 
@@ -628,7 +629,7 @@ class TestRunIngestAndIndexSubprocess:
         from rag.server import _run_ingest_and_index_subprocess
 
         mock_process = _make_mock_process(
-            b'{"mode":"incremental","total_files":3,"processed":3,'
+            b'{"type":"result","mode":"incremental","total_files":3,"processed":3,'
             b'"skipped":0,"errors":[],"elapsed":0.5}',
             b"", 0,
         )
@@ -667,7 +668,7 @@ class TestRunIngestAndIndexSubprocess:
         from rag.server import _run_ingest_and_index_subprocess
 
         mock_process = _make_mock_process(
-            b'{"error":true,"message":"DB connection failed"}',
+            b'{"type":"error","error":true,"message":"DB connection failed"}',
             b"", 1,
         )
 
@@ -699,7 +700,7 @@ class TestRunDeleteSubprocess:
         from rag.server import _run_delete_subprocess
 
         mock_process = _make_mock_process(
-            b'{"deleted":true,"pipeline":{"mode":"incremental",'
+            b'{"type":"result","deleted":true,"pipeline":{"type":"result","mode":"incremental",'
             b'"total_files":1,"processed":1,"skipped":0,"errors":[],"elapsed":0.3}}',
             b"", 0,
         )
@@ -715,7 +716,7 @@ class TestRunDeleteSubprocess:
         """該当なし時に not_found=True が返されること."""
         from rag.server import _run_delete_subprocess
 
-        mock_process = _make_mock_process(b'{"not_found":true}', b"", 0)
+        mock_process = _make_mock_process(b'{"type":"result","not_found":true}', b"", 0)
 
         with patch("asyncio.create_subprocess_exec", return_value=mock_process):
             result = await _run_delete_subprocess("https://example.com/missing")
