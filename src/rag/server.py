@@ -1031,6 +1031,7 @@ async def rag_site_ingest(
         parts: list[str] = []
         parts.append(
             f"サイト取り込み完了: {bridge_result.ingest.placed}件新規配置"
+            f", {bridge_result.ingest.overwritten}件上書き"
             f", {bridge_result.ingest.skipped}件スキップ"
             f", {bridge_result.ingest.errors}件エラー"
         )
