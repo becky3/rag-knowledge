@@ -13,6 +13,7 @@ from pathlib import Path
 from unittest.mock import patch
 
 import pytest
+from bs4 import BeautifulSoup
 
 from rag.converter.converter import (
     ConversionSkippedError,
@@ -20,6 +21,7 @@ from rag.converter.converter import (
     get_converted_rel_path,
 )
 from rag.converter.handlers import (
+    _fix_void_elements,
     convert_html,
     convert_json_bluesky,
     convert_json_zenn_article,
@@ -376,6 +378,117 @@ class TestConvertHtml:
         assert "Name" in result
         assert "Value" in result
         assert "|" in result
+
+    def test_void_element_img_children_unwrapped(self, tmp_path: Path) -> None:
+        """img タグが後続コンテンツを飲み込んだ場合でも本文が保持される (#336).
+
+        html.parser は特定の HTML 構造で <img> を自己閉じとして認識しない
+        ケースがある（Python docs pathlib.html で再現）。この場合、後続の
+        全コンテンツが img の子ノードとして解析され、convert_img() で
+        alt テキストのみが返却されるため本文が消失する。
+        """
+        # Python docs pathlib.html の構造を模擬
+        # section > h1 > img(class付き) > 大量の後続コンテンツ
+        html = (
+            "<html><body>"
+            '<section id="module-test">'
+            "<h1>Test Module</h1>"
+            '<img class="align-center" src="diagram.png" '
+            'alt="Inheritance diagram">'
+            "<p>First paragraph with important content.</p>"
+            "<dl><dt>SomeClass</dt><dd>Description of the class.</dd></dl>"
+            "<p>Second paragraph with more content.</p>"
+            "</section>"
+            "</body></html>"
+        )
+        html_file = tmp_path / "test.html"
+        html_file.write_text(html, encoding="utf-8")
+
+        result = convert_html(html_file)
+        assert result is not None
+        assert "First paragraph" in result
+        assert "Second paragraph" in result
+        assert "SomeClass" in result
+        assert "Test Module" in result
+
+    def test_void_element_br_children_unwrapped(self, tmp_path: Path) -> None:
+        """br タグが後続コンテンツを飲み込んだ場合でも本文が保持される (#336)."""
+        html = (
+            "<html><body>"
+            "<p>Before break.<br>After break.</p>"
+            "</body></html>"
+        )
+        html_file = tmp_path / "test.html"
+        html_file.write_text(html, encoding="utf-8")
+
+        result = convert_html(html_file)
+        assert result is not None
+        assert "Before break." in result
+        assert "After break." in result
+
+    def test_void_element_no_children_unchanged(self, tmp_path: Path) -> None:
+        """自己閉じの void 要素は変更されない."""
+        html = (
+            "<html><body>"
+            '<img src="logo.png" alt="Logo" />'
+            "<p>Content after self-closed img.</p>"
+            "</body></html>"
+        )
+        html_file = tmp_path / "test.html"
+        html_file.write_text(html, encoding="utf-8")
+
+        result = convert_html(html_file)
+        assert result is not None
+        assert "Content after self-closed img." in result
+
+
+class TestFixVoidElements:
+    """_fix_void_elements の単体テスト (#336)."""
+
+    def test_img_with_children(self) -> None:
+        """img の子ノードが親に巻き上げられる."""
+
+        # html.parser の誤解析を模擬: img 要素に子ノードがある状態を構築
+        soup = BeautifulSoup('<div><img src="x.png" alt="X"></div>', "html.parser")
+        img = soup.find("img")
+        assert img is not None
+        p = soup.new_tag("p")
+        p.string = "Body text"
+        img.append(p)
+
+        # 前提: img に子がある
+        assert img.find("p") is not None
+
+        _fix_void_elements(soup)
+
+        # 修正後: img に子がなく、p が div の直接子になっている
+        img_after = soup.find("img")
+        assert img_after is not None
+        assert not img_after.contents
+        p_tag = soup.find("p")
+        assert p_tag is not None
+        assert p_tag.parent.name == "div"
+
+    def test_multiple_void_elements(self) -> None:
+        """複数の void 要素が同時に修正される."""
+
+        html = '<div><img src="a.png"><p>After img</p><hr><p>After hr</p></div>'
+        soup = BeautifulSoup(html, "html.parser")
+        _fix_void_elements(soup)
+
+        paragraphs = soup.find_all("p")
+        assert len(paragraphs) == 2
+        assert "After img" in paragraphs[0].get_text()
+        assert "After hr" in paragraphs[1].get_text()
+
+    def test_no_void_elements(self) -> None:
+        """void 要素がない場合は何も変更しない."""
+
+        html = "<div><p>Normal content</p><span>More</span></div>"
+        soup = BeautifulSoup(html, "html.parser")
+        original = str(soup)
+        _fix_void_elements(soup)
+        assert str(soup) == original
 
 
 # ============================================================

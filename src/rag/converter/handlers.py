@@ -26,6 +26,31 @@ from rag.markdown import RagMarkdownConverter
 
 logger = logging.getLogger(__name__)
 
+# --- HTML void 要素修正 ---
+
+# HTML void 要素（自己閉じ、子要素を持てない）
+# https://html.spec.whatwg.org/multipage/syntax.html#void-elements
+_VOID_ELEMENTS = (
+    "area", "base", "br", "col", "embed", "hr", "img",
+    "input", "link", "meta", "param", "source", "track", "wbr",
+)
+
+
+def _fix_void_elements(soup: BeautifulSoup) -> None:
+    """html.parser が void 要素の子として誤解析したノードを親に巻き上げる.
+
+    html.parser は <img> 等の void 要素を自己閉じとして認識しない場合があり、
+    後続コンテンツが void 要素の子ノードとして解析される。
+    この前処理で void 要素の子を親要素に移動し、DOM ツリーを修正する。
+    """
+    for el in soup.find_all(_VOID_ELEMENTS):
+        if not el.contents:
+            continue
+        # 子ノードを逆順で void 要素の直後に移動（順序を保持）
+        for child in reversed(list(el.contents)):
+            el.insert_after(child)
+
+
 # --- HTML コンテンツ領域特定 ---
 
 # セマンティックタグ（優先順）
@@ -205,6 +230,9 @@ def convert_html(source_path: Path) -> str | None:
 
     soup = BeautifulSoup(html_text, "html.parser")
 
+    # html.parser が void 要素の子として誤解析したノードを修正
+    _fix_void_elements(soup)
+
     # コンテンツ領域の特定
     content_area = _find_content_area(soup)
 
@@ -318,6 +346,7 @@ def convert_json_zenn_scrap(data: dict[str, Any]) -> str | None:
             continue
 
         soup = BeautifulSoup(body_html, "html.parser")
+        _fix_void_elements(soup)
         for tag_name in ("script", "style"):
             for tag in soup.find_all(tag_name):
                 tag.decompose()
@@ -355,6 +384,7 @@ def convert_json_zenn_article(data: dict[str, Any]) -> str | None:
 
     md_converter = _create_md_converter()
     soup = BeautifulSoup(body_html, "html.parser")
+    _fix_void_elements(soup)
     for tag_name in ("script", "style"):
         for tag in soup.find_all(tag_name):
             tag.decompose()
