@@ -9,6 +9,7 @@ git 操作はパイプライン制御のみが実行する。
 from __future__ import annotations
 
 import logging
+import os
 import subprocess
 from pathlib import Path
 
@@ -25,22 +26,34 @@ metadata.db-shm
 class GitOperations:
     """source_store の git リポジトリ操作."""
 
+    # パイプライン用の git user 設定（環境変数で注入）
+    _GIT_USER_ENV = {
+        "GIT_AUTHOR_NAME": "rag-pipeline",
+        "GIT_AUTHOR_EMAIL": "rag-pipeline@localhost",
+        "GIT_COMMITTER_NAME": "rag-pipeline",
+        "GIT_COMMITTER_EMAIL": "rag-pipeline@localhost",
+    }
+
     def __init__(self, repo_dir: Path) -> None:
         self._repo_dir = repo_dir
+        self._initialized = False
+        self._env = {**os.environ, **self._GIT_USER_ENV}
 
     def init_repo(self) -> None:
         """git リポジトリを初期化する.
 
-        既に初期化済みの場合も .gitignore と user 設定を補正する。
+        初回呼び出し時のみ実際の初期化処理を実行する。
+        2回目以降はスキップする（同一インスタンス内）。
         .gitignore で metadata.db を除外する。
         """
+        if self._initialized:
+            return
         git_dir = self._repo_dir / ".git"
         if not git_dir.exists():
             self._run(["git", "init"])
         # .gitignore 設定（既存リポジトリでも補正）
         self._ensure_gitignore()
-        # パイプライン用のローカル git user 設定
-        self._ensure_git_user()
+        self._initialized = True
 
     def commit(self, message: str, path: str | None = None) -> str | None:
         """ステージング + コミット.
@@ -184,25 +197,18 @@ class GitOperations:
             content += _GITIGNORE_CONTENT
             gitignore.write_text(content, encoding="utf-8")
 
-    def _ensure_git_user(self) -> None:
-        """パイプライン用のローカル git user 設定を保証する."""
-        try:
-            self._run(["git", "config", "user.name"])
-        except subprocess.CalledProcessError:
-            self._run(["git", "config", "user.name", "rag-pipeline"])
-        try:
-            self._run(["git", "config", "user.email"])
-        except subprocess.CalledProcessError:
-            self._run(["git", "config", "user.email", "rag-pipeline@localhost"])
-
     def _run(self, cmd: list[str]) -> subprocess.CompletedProcess[str]:
-        """git コマンドを実行する."""
+        """git コマンドを実行する.
+
+        GIT_AUTHOR_*/GIT_COMMITTER_* 環境変数で user 設定を注入する。
+        git config による設定が不要になり、subprocess 呼び出しを削減する。
+        """
         return subprocess.run(
             cmd,
             cwd=str(self._repo_dir),
             capture_output=True,
-            text=True,
             check=True,
             encoding="utf-8",
             stdin=subprocess.DEVNULL,
+            env=self._env,
         )

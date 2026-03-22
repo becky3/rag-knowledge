@@ -68,8 +68,9 @@ class TestInitRepo:
         # .gitignore から metadata.db を除去
         gitignore = git_repo / ".gitignore"
         gitignore.write_text("*.tmp\n", encoding="utf-8")
-        # 再度 init_repo → 補正される
-        ops.init_repo()
+        # 新インスタンスで init_repo → 補正される
+        ops2 = GitOperations(git_repo)
+        ops2.init_repo()
         content = gitignore.read_text(encoding="utf-8")
         assert "*.tmp" in content
         assert "metadata.db" in content
@@ -81,8 +82,9 @@ class TestInitRepo:
         ops.init_repo()
         gitignore = git_repo / ".gitignore"
         original = gitignore.read_text(encoding="utf-8")
-        # 再度 init → 変更なし
-        ops.init_repo()
+        # 新インスタンスで init → 変更なし
+        ops2 = GitOperations(git_repo)
+        ops2.init_repo()
         assert gitignore.read_text(encoding="utf-8") == original
 
 
