@@ -418,7 +418,7 @@ class TestRagRebuild:
             result = await rag_rebuild(mode="convert", source_type="web")
 
         assert "再構築完了" in result
-        mock_subprocess.assert_called_once_with("convert", "web", False, ctx=None)
+        mock_subprocess.assert_called_once_with("convert", "web", ctx=None)
 
     @pytest.mark.asyncio
     async def test_incremental_mode(
@@ -449,7 +449,7 @@ class TestRagRebuild:
             result = await rag_rebuild(mode="incremental")
 
         assert "差分更新" in result
-        mock_subprocess.assert_called_once_with("incremental", None, False, ctx=None)
+        mock_subprocess.assert_called_once_with("incremental", None, ctx=None)
 
     @pytest.mark.asyncio
     async def test_index_only_mode(
@@ -480,7 +480,7 @@ class TestRagRebuild:
             result = await rag_rebuild(mode="index", source_type="local")
 
         assert "インデックスのみ再構築" in result
-        mock_subprocess.assert_called_once_with("index", "local", False, ctx=None)
+        mock_subprocess.assert_called_once_with("index", "local", ctx=None)
 
     @pytest.mark.asyncio
     async def test_exception_releases_lock(
@@ -556,7 +556,7 @@ class TestRunRebuildSubprocess:
         )
 
         with patch("asyncio.create_subprocess_exec", return_value=mock_process):
-            result = await _run_rebuild_subprocess("full", None, False)
+            result = await _run_rebuild_subprocess("full", None)
 
         assert "再構築完了" in result
         assert "全再構築" in result
@@ -571,7 +571,7 @@ class TestRunRebuildSubprocess:
         mock_process = _make_mock_process(b"not json", b"", 0)
 
         with patch("asyncio.create_subprocess_exec", return_value=mock_process):
-            result = await _run_rebuild_subprocess("full", None, False)
+            result = await _run_rebuild_subprocess("full", None)
 
         assert "結果なし" in result
 
@@ -583,7 +583,7 @@ class TestRunRebuildSubprocess:
         mock_process = _make_mock_process(b"", b"RuntimeError: DB locked\n", 1)
 
         with patch("asyncio.create_subprocess_exec", return_value=mock_process):
-            result = await _run_rebuild_subprocess("full", None, False)
+            result = await _run_rebuild_subprocess("full", None)
 
         assert "異常終了" in result
         assert "DB locked" in result
@@ -596,7 +596,7 @@ class TestRunRebuildSubprocess:
         mock_process = _make_mock_process(b"", b"", -11)
 
         with patch("asyncio.create_subprocess_exec", return_value=mock_process):
-            result = await _run_rebuild_subprocess("full", None, False)
+            result = await _run_rebuild_subprocess("full", None)
 
         assert "クラッシュ" in result
         assert "SEGFAULT" in result
@@ -612,7 +612,7 @@ class TestRunRebuildSubprocess:
         )
 
         with patch("asyncio.create_subprocess_exec", return_value=mock_process):
-            result = await _run_rebuild_subprocess("full", None, False)
+            result = await _run_rebuild_subprocess("full", None)
 
         assert "source_store not found" in result
 
