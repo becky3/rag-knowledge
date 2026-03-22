@@ -593,7 +593,9 @@ class TestImportToSourceStore:
             source_store=source_store,
         )
 
-        assert result.ingest.placed == 2
+        # 1件目は新規配置、2件目は既存上書き（skipped）
+        assert result.ingest.placed == 1
+        assert result.ingest.skipped == 1
 
         # 最後の配置が有効
         record = source_store.db.get_source("https://example.com/page")

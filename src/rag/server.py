@@ -1000,13 +1000,19 @@ async def rag_site_ingest(
 
         # パイプライン処理
         pipeline_summary: PipelineSummary | None = None
-        if not download_only and bridge_result.ingest.placed > 0:
+        has_changes = (bridge_result.ingest.placed + bridge_result.ingest.skipped) > 0
+        if has_changes and not download_only:
             pipeline_summary = await _run_ingest_and_index_subprocess(
                 f"ingest(web): site-ingest {url}",
                 ctx=ctx,
             )
             _reset_pipeline_controller()
             _reset_rag_service()
+        elif has_changes and download_only:
+            # download_only でもコミットは実行する（パイプライン処理のみスキップ）
+            await asyncio.to_thread(
+                controller.commit, f"ingest(web): site-ingest {url} (download_only)",
+            )
 
         # 操作全体の所要時間（クロール + Bridge + パイプライン）
         elapsed = time_mod.monotonic() - start_time
@@ -1014,7 +1020,7 @@ async def rag_site_ingest(
         # 結果サマリー構築
         parts: list[str] = []
         parts.append(
-            f"サイト取り込み完了: {bridge_result.ingest.placed}件配置"
+            f"サイト取り込み完了: {bridge_result.ingest.placed}件新規配置"
             f", {bridge_result.ingest.skipped}件スキップ"
             f", {bridge_result.ingest.errors}件エラー"
         )

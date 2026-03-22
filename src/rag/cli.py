@@ -375,7 +375,7 @@ def main() -> None:
         "--download-only",
         action="store_true",
         default=False,
-        help="Scrapy クロール + Bridge まで実行し、パイプライン処理をスキップ",
+        help="Scrapy クロール + Bridge（source_store 配置 + git commit）まで実行し、パイプライン処理をスキップ",
     )
 
     args = parser.parse_args()
@@ -1785,15 +1785,19 @@ async def run_site_ingest(args: argparse.Namespace) -> None:
 
     # パイプライン処理
     pipeline_summary = None
-    if not args.download_only and bridge_result.ingest.placed > 0:
+    has_changes = (bridge_result.ingest.placed + bridge_result.ingest.skipped) > 0
+    if has_changes and not args.download_only:
         pipeline_summary = controller.ingest_and_index(f"ingest(web): site-ingest {url}")
+    elif has_changes and args.download_only:
+        # download_only でもコミットは実行する（パイプライン処理のみスキップ）
+        controller.commit(f"ingest(web): site-ingest {url} (download_only)")
 
     # 操作全体の所要時間（クロール + Bridge + パイプライン）
     elapsed = time_mod.monotonic() - start_time
 
     # 結果表示
     print(
-        f"サイト取り込み完了: {bridge_result.ingest.placed}件配置"
+        f"サイト取り込み完了: {bridge_result.ingest.placed}件新規配置"
         f", {bridge_result.ingest.skipped}件スキップ"
         f", {bridge_result.ingest.errors}件エラー"
     )
