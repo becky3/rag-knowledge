@@ -21,11 +21,15 @@ import logging
 import sys
 import time
 from pathlib import Path
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from rag.pipeline.controller import PipelineController
 
 logger = logging.getLogger(__name__)
 
 
-def _build_pipeline_controller():
+def _build_pipeline_controller() -> PipelineController:
     """CLI の run_rebuild と同じ初期化ロジックでコントローラを構築する."""
     from rag.bm25_index import BM25Index
     from rag.config import get_settings
@@ -88,8 +92,10 @@ def _build_pipeline_controller():
 
 def run_rebuild(args: argparse.Namespace) -> None:
     """rebuild を実行し、結果 JSON を stdout に出力する."""
+    from rag.store.models import SourceType
+
     mode: str = args.mode
-    source_type: str | None = args.source_type
+    source_type: SourceType | None = args.source_type
     auto_commit: bool = args.auto_commit
 
     controller = _build_pipeline_controller()

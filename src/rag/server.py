@@ -28,7 +28,6 @@ import logging
 import os
 import sys
 import threading
-import time
 from pathlib import Path
 from typing import Any
 
@@ -67,7 +66,7 @@ with contextlib.redirect_stdout(io.StringIO()):
     from .pipeline.ingesters.zenn import ZennIngester as PipelineZennIngester
     from .pipeline.models import PipelineMode, PipelineSummary, detect_source_type
     from .store.metadata_db import MetadataDB
-    from .store.models import NULL_COMMIT_HASH, SourceType
+    from .store.models import NULL_COMMIT_HASH
     from .store.source_store import SourceStore
 
 from py_common_lib.httpx import ConstrainedClient  # safety:allowed
