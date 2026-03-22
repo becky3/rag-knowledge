@@ -1096,8 +1096,10 @@ def _format_rebuild_summary(summary: PipelineSummary, elapsed: float) -> str:
     return "\n".join(parts)
 
 
-# SEGFAULT を示す exit code（Windows: 0xC0000005, Unix: SIGSEGV=11, shell: 128+11=139）
-_SEGFAULT_EXIT_CODES: frozenset[int] = frozenset({-1073741819, -11, 139})
+# SEGFAULT を示す exit code
+# Windows: 0xC0000005 は signed (-1073741819) / unsigned (3221225477) 両方で返りうる
+# Unix: SIGSEGV=11, shell: 128+11=139
+_SEGFAULT_EXIT_CODES: frozenset[int] = frozenset({-1073741819, 3221225477, -11, 139})
 
 
 def _collect_source_store_stats(
@@ -1293,7 +1295,16 @@ async def _run_rebuild_subprocess(
         stderr=asyncio.subprocess.PIPE,
         env=env,
     )
-    stdout_bytes, stderr_bytes = await process.communicate()
+    try:
+        stdout_bytes, stderr_bytes = await process.communicate()
+    except asyncio.CancelledError:
+        # タスクキャンセル時に子プロセスを確実に終了させる
+        if process.returncode is None:
+            with contextlib.suppress(ProcessLookupError):
+                process.kill()
+            with contextlib.suppress(asyncio.CancelledError):
+                await process.wait()
+        raise
     assert process.returncode is not None  # noqa: S101
     exit_code = process.returncode
 

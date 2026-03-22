@@ -189,17 +189,44 @@ class TestParseFilepathRegression:
     正しい相対パスに変換される。この修正の回帰を防止する。
     """
 
-    def test_filepath_relative_with_relative_output_dir(self, tmp_path: Path) -> None:
-        """resolve 済み絶対パスから output_dir.resolve() で相対パスが取れること."""
+    def test_parse_yields_relative_filepath(self, tmp_path: Path) -> None:
+        """parse() が yield するアイテムの filepath が相対パスであること."""
+        from unittest.mock import MagicMock, patch
+
+        # 相対パスで output_dir を設定（回帰の再現条件）
         output_dir = tmp_path / "html"
         output_dir.mkdir(parents=True, exist_ok=True)
 
-        # _save_html が resolve 済み絶対パスを返すケースをシミュレート
-        saved_file = (output_dir / "page.html").resolve()
-        saved_file.write_text("<html>test</html>", encoding="utf-8")
+        spider = SiteSpider.__new__(SiteSpider)
+        spider.name = "site_spider"
+        spider._url_pattern = None
+        spider._output_dir = output_dir
+        spider._page_count = 0
+        spider._error_count = 0
 
-        # filepath.relative_to(output_dir.resolve()) が成功すること
-        # （修正前は output_dir が相対パスの場合に ValueError が発生していた）
-        relative = saved_file.relative_to(output_dir.resolve())
-        assert str(relative) == "page.html"
-        assert not relative.is_absolute()
+        # _save_html が resolve 済み絶対パスを返す（実装の実際の挙動）
+        resolved_file = (output_dir / "page.html").resolve()
+        resolved_file.write_text("<html><title>Test</title></html>", encoding="utf-8")
+
+        # parse() に渡すモック Response
+        mock_headers = MagicMock()
+        mock_headers.get.return_value = b"text/html; charset=utf-8"
+
+        mock_response = MagicMock()
+        mock_response.url = "https://example.com/page.html"
+        mock_response.status = 200
+        mock_response.body = b"<html><title>Test</title></html>"
+        mock_response.headers = mock_headers
+        mock_response.meta = {"depth": 0}
+        mock_response.css.return_value.get.return_value = "Test"
+        mock_response.css.return_value.getall.return_value = []
+
+        # _save_html を resolve 済み絶対パスを返すようにパッチ
+        with patch.object(spider, "_save_html", return_value=resolved_file):
+            items = list(spider.parse(mock_response))
+
+        # parse() が yield したアイテムの filepath が相対パスであること
+        data_items = [i for i in items if isinstance(i, dict)]
+        assert len(data_items) == 1
+        assert data_items[0]["filepath"] == "page.html"
+        assert not Path(data_items[0]["filepath"]).is_absolute()
