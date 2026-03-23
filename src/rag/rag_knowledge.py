@@ -837,7 +837,7 @@ class RAGKnowledgeService:
 
 # テキストファイルとして扱う拡張子
 _TEXT_EXTENSIONS: frozenset[str] = frozenset(
-    {".md", ".txt", ".adoc", ".html", ".json"}
+    {".md", ".txt", ".adoc", ".html", ".htm", ".json"}
 )
 
 

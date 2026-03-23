@@ -877,6 +877,9 @@ class TestGetConvertedRelPath:
     def test_html_to_md(self) -> None:
         assert get_converted_rel_path("web/example/page.html") == "web/example/page.md"
 
+    def test_htm_to_md(self) -> None:
+        assert get_converted_rel_path("web/example/page.htm") == "web/example/page.md"
+
     def test_pdf_to_md(self) -> None:
         assert get_converted_rel_path("web/doc/report.pdf") == "web/doc/report.md"
 
@@ -934,6 +937,23 @@ class TestConverterConvert:
         text = result.read_text(encoding="utf-8")
         assert "Title" in text
         assert "Content." in text
+        # 出力拡張子が .md
+        assert result.name == "page.md"
+
+    def test_convert_htm(self, tmp_path: Path) -> None:
+        """`.htm` 拡張子のファイルが HTML として変換されること (#346)."""
+        html = "<html><body><h1>Title</h1><p>HTM Content.</p></body></html>"
+        source_dir, converted_dir = _setup_source(
+            tmp_path, "web/example/page.htm", html,
+        )
+        converter = Converter()
+        result = converter.convert(
+            "web/example/page.htm", source_dir, converted_dir,
+        )
+        assert result.exists()
+        text = result.read_text(encoding="utf-8")
+        assert "Title" in text
+        assert "HTM Content." in text
         # 出力拡張子が .md
         assert result.name == "page.md"
 
