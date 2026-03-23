@@ -50,7 +50,12 @@ def build_pipeline_controller(
         quality_min_chars_per_page=settings.rag_pdf_quality_min_chars_per_page,
         quality_sample_pages=settings.rag_pdf_quality_sample_pages,
     )
-    converter = Converter(regen_option="force", pdf_config=pdf_config)
+    converter = Converter(
+        regen_option="force",
+        pdf_config=pdf_config,
+        youtube_merge_gap_sec=settings.rag_youtube_merge_gap_sec,
+        youtube_merge_max_chars=settings.rag_youtube_merge_max_chars,
+    )
 
     embedding_provider = get_embedding_provider(settings, settings.embedding_provider)
 

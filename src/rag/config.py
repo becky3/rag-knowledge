@@ -72,6 +72,10 @@ class _EnvLoader(BaseSettings):
     # デバッグ
     rag_debug_log_enabled: bool
 
+    # YouTube インジェスター（Whisper）
+    rag_youtube_whisper_model: str = "base"
+    rag_youtube_whisper_device: Literal["cuda", "cpu"] = "cuda"
+
     # サイト一括取り込み
     site_ingest_temp_dir: str = ".tmp/site_ingest"
 
@@ -105,6 +109,8 @@ class RAGSettings(BaseModel):
     rag_http_port: int = Field(ge=1, le=65535)
     rag_dns_rebinding_protection: bool
     rag_debug_log_enabled: bool
+    rag_youtube_whisper_model: str
+    rag_youtube_whisper_device: Literal["cuda", "cpu"]
     site_ingest_temp_dir: str
 
     # --- config.toml から取得（共通設定値） ---
@@ -181,8 +187,6 @@ class RAGSettings(BaseModel):
     rag_youtube_max_videos: int = Field(ge=1, le=500)
     rag_youtube_request_interval: float = Field(ge=0.1, le=60.0)
     rag_youtube_request_timeout: int = Field(ge=1, le=120)
-    rag_youtube_whisper_model: str
-    rag_youtube_whisper_device: Literal["cuda", "cpu"]
     rag_youtube_transcript_languages: list[str] = Field(min_length=1)
     rag_youtube_merge_gap_sec: float = Field(ge=0.1, le=60.0)
     rag_youtube_merge_max_chars: int = Field(ge=50, le=2000)

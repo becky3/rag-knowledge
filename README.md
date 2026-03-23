@@ -97,7 +97,7 @@ YouTube インジェスターは非公式 API（youtube-transcript-api）を使�
 
 **推奨運用:**
 - プレイリスト一括取り込み時は `--max-videos` で段階的に取り込む（1 回あたり 10〜20 動画推奨）
-- `rag_youtube_request_interval`（デフォルト: 1.0 秒）を短くしすぎない
+- `rag_youtube_request_interval`（デフォルト: 5.0 秒）を短くしすぎない
 - IP ブロックが発生した場合は時間を置いて再実行する
 
 ## RAG 評価 CLI

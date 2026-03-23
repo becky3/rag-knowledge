@@ -77,15 +77,21 @@ class Converter:
         *,
         regen_option: RegenOption = "skip",
         pdf_config: PdfBackendConfig | None = None,
+        youtube_merge_gap_sec: float = 2.0,
+        youtube_merge_max_chars: int = 300,
     ) -> None:
         """Converter を初期化する.
 
         Args:
             regen_option: 再生成オプション（デフォルト: skip）
             pdf_config: PDF バックエンド設定
+            youtube_merge_gap_sec: YouTube スニペット結合の間隔閾値（秒）
+            youtube_merge_max_chars: YouTube スニペット結合の最大文字数
         """
         self._regen_option = regen_option
         self._pdf_config = pdf_config or PdfBackendConfig()
+        self._youtube_merge_gap_sec = youtube_merge_gap_sec
+        self._youtube_merge_max_chars = youtube_merge_max_chars
 
     # --- ConverterProtocol 実装 ---
 
@@ -372,12 +378,10 @@ class Converter:
             return convert_json_bluesky(data)
 
         if source_type == "youtube":
-            from rag.config import get_settings
-            settings = get_settings()
             return convert_json_youtube(
                 data,
-                merge_gap_sec=settings.rag_youtube_merge_gap_sec,
-                merge_max_chars=settings.rag_youtube_merge_max_chars,
+                merge_gap_sec=self._youtube_merge_gap_sec,
+                merge_max_chars=self._youtube_merge_max_chars,
             )
 
         if source_type == "zenn" and "/articles/" in file_path:
