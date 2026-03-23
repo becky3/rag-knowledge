@@ -107,6 +107,7 @@ Web ページを HTTP 経由で取得し、source_store にファイルを配置
 - 取得した HTTP レスポンスボディを生バイト列のまま source_store に配置する。エンコーディング変換やテキスト加工は行わない
 - テキスト変換（HTML → Markdown）はコンバーターの責務であり、インジェスターでは行わない
 - .meta サイドカーファイルにはタイトル（`<title>` タグから抽出）を含める。タイトル抽出のためにレスポンスボディをメモリ上でデコードするが、保存対象は生バイト列である
+- コンバーターが拡張子ベースで変換方式を決定するため、URL パスが Web インジェスターの既知拡張子（`.html`, `.htm`, `.pdf`, `.json`, `.md`, `.txt`, `.adoc`）を持たない場合、source_store 配置時にファイル名末尾に `.html` を付与する。既知拡張子を持つ URL にはそのまま配置する
 
 ## 外部連携
 
@@ -481,14 +482,15 @@ flowchart TD
 
 URL から source_store 内のファイルパスへの変換は [source-store.md](../source-store.md) の「URL パス変換規則」に従う。
 
-変換例:
+変換例（`.html` 拡張子付与を含む）:
 
-| URL | source_store 内パス |
-|-----|-------------------|
-| `https://example.com/docs/guide` | `web/https/example.com/docs/guide` |
-| `https://example.com/docs/guide.html` | `web/https/example.com/docs/guide.html` |
-| `https://example.com/docs/guide?lang=ja` | `web/https/example.com/docs/guide？lang=ja` |
-| `http://localhost:8080/api/docs` | `web/http/localhost：8080/api/docs` |
+| URL | source_store 内パス | 備考 |
+|-----|-------------------|------|
+| `https://example.com/docs/guide` | `web/https/example.com/docs/guide.html` | 拡張子なし → `.html` 付与 |
+| `https://example.com/docs/guide.html` | `web/https/example.com/docs/guide.html` | 既知拡張子 → そのまま |
+| `https://example.com/docs/guide.pdf` | `web/https/example.com/docs/guide.pdf` | 既知拡張子 → そのまま |
+| `https://example.com/docs/guide?lang=ja` | `web/https/example.com/docs/guide？lang=ja.html` | 拡張子なし → `.html` 付与 |
+| `http://localhost:8080/api/docs` | `web/http/localhost：8080/api/docs.html` | 拡張子なし → `.html` 付与 |
 
 ### .meta サイドカーファイル生成
 
