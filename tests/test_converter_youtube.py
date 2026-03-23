@@ -169,3 +169,18 @@ class TestConvertJsonYoutube:
         result = convert_json_youtube(data, merge_gap_sec=2.0, merge_max_chars=1000)
         assert result is not None
         assert "[00:00] AAABBBCCC" in result
+
+    def test_none_upload_date_and_duration(self) -> None:
+        """upload_date や duration が None でもクラッシュしないことを検証する."""
+        data = {
+            "video_id": "test_id_0001",
+            "title": "Test",
+            "uploader": "Tester",
+            "upload_date": None,
+            "duration": None,
+            "snippets": [{"start": 0.0, "end": 1.0, "text": "Hello"}],
+        }
+        result = convert_json_youtube(data)
+        assert result is not None
+        assert "# Test" in result
+        assert "[00:00] Hello" in result

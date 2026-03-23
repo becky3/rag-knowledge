@@ -568,11 +568,15 @@ def convert_json_youtube(
     Returns:
         Markdown テキスト（スニペットがない場合はヘッダーのみの Markdown）
     """
-    video_id = data.get("video_id", "")
+    video_id = data.get("video_id") or ""
     title = data.get("title") or "(Untitled)"
-    uploader = data.get("uploader", "")
-    upload_date = _format_upload_date(data.get("upload_date", ""))
-    duration = data.get("duration", 0)
+    uploader = data.get("uploader") or ""
+    upload_date_raw = data.get("upload_date") or ""
+    upload_date = _format_upload_date(upload_date_raw)
+    try:
+        duration = int(data.get("duration", 0) or 0)
+    except (TypeError, ValueError):
+        duration = 0
     snippets: list[dict[str, Any]] = data.get("snippets", [])
 
     # ヘッダー

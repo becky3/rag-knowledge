@@ -14,6 +14,7 @@ import logging
 import re
 import shutil
 import tempfile
+import threading
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 from urllib.parse import parse_qs, urlparse
@@ -130,6 +131,7 @@ class YoutubeIngester:
         self._transcript_languages = transcript_languages or ["ja", "en"]
         self._max_duration = max_duration
         self._whisper_model_instance: Any = None  # 遅延初期化キャッシュ
+        self._whisper_lock = threading.Lock()  # スレッドセーフなモデルアクセス
 
     async def ingest_video(
         self,
@@ -190,15 +192,17 @@ class YoutubeIngester:
             return result
 
         # JSON データ構築
-        channel_id = metadata.get("channel_id") or "unknown"
+        raw_channel_id = metadata.get("channel_id") or "unknown"
+        # パストラバーサル防止: 安全な文字のみ許可
+        channel_id = re.sub(r"[^A-Za-z0-9_-]", "_", raw_channel_id) if raw_channel_id != "unknown" else "unknown"
         json_data: dict[str, Any] = {
             "video_id": video_id,
-            "title": metadata.get("title", ""),
+            "title": metadata.get("title") or "",
             "channel_id": channel_id,
-            "uploader": metadata.get("uploader", ""),
-            "upload_date": metadata.get("upload_date", ""),
+            "uploader": metadata.get("uploader") or "",
+            "upload_date": metadata.get("upload_date") or "",
             "duration": duration,
-            "description": metadata.get("description", ""),
+            "description": metadata.get("description") or "",
             "transcript_source": transcript_source,
             "language": language,
             "snippets": snippets,
@@ -219,12 +223,12 @@ class YoutubeIngester:
         meta_dict: dict[str, Any] = {
             "source_id": source_id,
             "source_type": "youtube",
-            "title": metadata.get("title", ""),
+            "title": metadata.get("title") or "",
             "collected_at": now_iso(),
             "video_id": video_id,
             "channel_id": metadata.get("channel_id") or "unknown",
-            "uploader": metadata.get("uploader", ""),
-            "upload_date": metadata.get("upload_date", ""),
+            "uploader": metadata.get("uploader") or "",
+            "upload_date": metadata.get("upload_date") or "",
             "duration": metadata.get("duration") or 0,
             "transcript_source": transcript_source,
         }
@@ -449,29 +453,30 @@ class YoutubeIngester:
                     f"{file_size_mb:.0f}MB > {MAX_AUDIO_FILE_SIZE_MB}MB"
                 )
 
-            # faster-whisper で文字起こし（モデルは遅延初期化 + キャッシュ）
+            # faster-whisper で文字起こし（モデルは遅延初期化 + キャッシュ、Lock で排他）
             def _transcribe() -> tuple[list[dict[str, Any]], str]:
-                if self._whisper_model_instance is None:
-                    self._whisper_model_instance = WhisperModel(
-                        self._whisper_model_name,
-                        device=self._whisper_device,
-                        compute_type="float16" if self._whisper_device == "cuda" else "int8",
+                with self._whisper_lock:
+                    if self._whisper_model_instance is None:
+                        self._whisper_model_instance = WhisperModel(
+                            self._whisper_model_name,
+                            device=self._whisper_device,
+                            compute_type="float16" if self._whisper_device == "cuda" else "int8",
+                        )
+                    model = self._whisper_model_instance
+                    segments, info = model.transcribe(
+                        audio_path,
+                        language=self._transcript_languages[0],
+                        beam_size=5,
+                        vad_filter=True,
                     )
-                model = self._whisper_model_instance
-                segments, info = model.transcribe(
-                    audio_path,
-                    language=self._transcript_languages[0],
-                    beam_size=5,
-                    vad_filter=True,
-                )
-                snippets: list[dict[str, Any]] = []
-                for seg in segments:
-                    snippets.append({
-                        "start": seg.start,
-                        "end": seg.end,
-                        "text": seg.text.strip(),
-                    })
-                return snippets, info.language if hasattr(info, "language") else self._transcript_languages[0]
+                    snippets: list[dict[str, Any]] = []
+                    for seg in segments:
+                        snippets.append({
+                            "start": seg.start,
+                            "end": seg.end,
+                            "text": seg.text.strip(),
+                        })
+                    return snippets, info.language if hasattr(info, "language") else self._transcript_languages[0]
 
             return await loop.run_in_executor(None, _transcribe)
         finally:
