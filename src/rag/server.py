@@ -326,7 +326,7 @@ async def rag_search(
     Args:
         query: 検索クエリ（ユーザーの質問からキーワードを抽出して構成する）
         n_results: 各エンジンから取得する結果数（未指定時は設定値を使用）
-        source_type: ソース種別フィルタ（"web", "zenn", "bluesky", "youtube", "local", "journal"）。
+        source_type: ソース種別フィルタ（"web", "zenn", "bluesky", "youtube", "aozora", "local", "journal"）。
             指定時はそのソース種別のチャンクのみを検索対象とする。未指定時は全種別を検索。
         filters: メタデータフィルタ（JSON 形式）。.meta のカスタムフィールドで検索結果を絞り込む。
             完全一致フィルタ。例: '{"repository": "rag-knowledge"}'
@@ -1471,12 +1471,14 @@ async def rag_crawl_aozora(
         if ingest_result.placed == 0 and ingest_result.errors == 0 and ingest_result.skipped == 0:
             return f"対象作品が見つかりませんでした（人物ID: {person_id}）"
 
-        pipeline_summary = await _run_ingest_and_index_subprocess(
-            f"ingest(aozora): person_id={person_id}",
-            ctx=ctx,
-        )
-        _reset_pipeline_controller()
-        _reset_rag_service()
+        pipeline_summary = None
+        if ingest_result.placed > 0:
+            pipeline_summary = await _run_ingest_and_index_subprocess(
+                f"ingest(aozora): person_id={person_id}",
+                ctx=ctx,
+            )
+            _reset_pipeline_controller()
+            _reset_rag_service()
 
         return _format_ingest_response(
             ingest_result, pipeline_summary, context=f"人物ID: {person_id}",
@@ -1689,7 +1691,7 @@ async def rag_rebuild(
             "convert" — コンバートのみ再実行（変換ロジック改修時）
             "index" — インデックスのみ再構築（Embedding モデル変更時）
             "incremental" — 差分更新（通常運用。未コミット変更は自動コミット）
-        source_type: 対象媒体フィルタ: "web", "bluesky", "zenn", "youtube", "local"。
+        source_type: 対象媒体フィルタ: "web", "bluesky", "zenn", "youtube", "aozora", "local", "journal"。
             未指定時は全媒体。incremental モードでは指定不可。
 
     Returns:
