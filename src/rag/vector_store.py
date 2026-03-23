@@ -497,12 +497,20 @@ class VectorStore:
             chunk_ids: 更新対象のチャンク ID リスト
             metadatas: 対応するメタデータのリスト
         """
-        for chunk_id, meta in zip(chunk_ids, metadatas):
-            await asyncio.to_thread(
-                self._collection.update,
-                ids=[chunk_id],
-                metadatas=[meta],
+        if len(chunk_ids) != len(metadatas):
+            raise ValueError(
+                f"update_metadata: length mismatch: "
+                f"chunk_ids={len(chunk_ids)}, metadatas={len(metadatas)}"
             )
+
+        if not chunk_ids:
+            return
+
+        await asyncio.to_thread(
+            self._collection.update,
+            ids=chunk_ids,
+            metadatas=metadatas,
+        )
 
     async def clear(self) -> None:
         """コレクションを削除して再作成する（全データクリア）."""
