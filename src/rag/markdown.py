@@ -26,3 +26,11 @@ class RagMarkdownConverter(MarkdownConverter):  # type: ignore[misc]
         """画像タグはalt属性のみ保持（RAGでは画像不要）."""
         alt: str = el.attrs.get("alt", None) or ""
         return alt
+
+    def convert_rt(self, el: Any, text: str, convert_as_inline: bool) -> str:
+        """ふりがな（rt）を半角括弧付きで保持する."""
+        return f"({text})" if text.strip() else ""
+
+    def convert_rp(self, el: Any, text: str, convert_as_inline: bool) -> str:
+        """ルビ括弧（rp）を除去する（rt ハンドラで半角括弧を付与するため）."""
+        return ""

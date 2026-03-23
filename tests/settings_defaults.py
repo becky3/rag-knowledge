@@ -72,6 +72,10 @@ TEST_SETTINGS_DEFAULTS: dict[str, object] = {
     "rag_pdf_quality_cjk_min_threshold": 0.05,
     "rag_pdf_quality_min_chars_per_page": 10,
     "rag_pdf_quality_sample_pages": 10,
+    # 青空文庫インジェスター
+    "rag_aozora_max_works": 200,
+    "rag_aozora_request_interval": 1.0,
+    "rag_aozora_request_timeout": 30,
     # サイト一括取り込み（Scrapy subprocess）
     "site_ingest_temp_dir": ".tmp/site_ingest",
     "site_ingest_delay_sec": 0.1,

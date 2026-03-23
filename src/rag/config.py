@@ -192,6 +192,11 @@ class RAGSettings(BaseModel):
     rag_youtube_merge_max_chars: int = Field(ge=50, le=2000)
     rag_youtube_max_duration: int = Field(ge=60, le=86400)
 
+    # 青空文庫インジェスター
+    rag_aozora_max_works: int = Field(ge=1, le=500)
+    rag_aozora_request_interval: float = Field(ge=0.1, le=60.0)
+    rag_aozora_request_timeout: int = Field(ge=1, le=120)
+
     # BlueSky インジェスター
     rag_bluesky_appview_url: str
     rag_bluesky_max_posts: int = Field(ge=1, le=1000)

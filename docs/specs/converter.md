@@ -144,6 +144,7 @@ id/class パターンの一致判定:
 
 - 部分一致（大文字小文字を区別しない）で判定する
 - id パターンは長いパターンから順に試行する（具体的なパターンを優先）
+- テキストが空の要素はスキップし、次の候補を試行する（空の `<div id="contents">` 等による誤検出を防止）
 
 id パターン一覧（試行順）:
 
@@ -168,6 +169,8 @@ class パターン一覧（試行順）:
 |---------|---------|
 | `main-content` | `class="main-content"` |
 | `main_content` | `class="main_content"` |
+| `main_text` | `class="main_text"`（青空文庫 XHTML 等） |
+| `main-text` | `class="main-text"` |
 | `content-wrap` | `class="content-wrap"` |
 | `content_wrap` | `class="content_wrap"` |
 | `page-container` | `class="page-container"` |
@@ -213,6 +216,7 @@ class パターンベースの除去（部分一致、大文字小文字を区�
 - リンク: URL を除去し、リンクテキストのみを保持する。チャンクサイズの節約のため。引用 URL はメタデータ側で管理する
 - 画像: ALT テキストのみを保持する（ALT テキストがない場合は空文字列）
 - エスケープ: アンダースコア・アスタリスクのエスケープを無効化する（Markdown としての自然な表示を優先）
+- ruby タグ: 漢字テキストを保持し、ふりがな（`<rt>`）を半角括弧付きで付与する（例: `髯(ひげ)`）。括弧要素（`<rp>`）は除去する。ふりがなを残すことで読みによる検索を可能にする
 
 ### PDF テキスト抽出
 
