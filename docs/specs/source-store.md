@@ -115,6 +115,7 @@ flowchart TD
     SS --> WEB["web/"]
     SS --> BS["bluesky/"]
     SS --> ZENN["zenn/"]
+    SS --> YT["youtube/"]
     SS --> DOT_GIT[".git/"]
 
     LOCAL --> L_USER["my-notes/ 等"]
@@ -142,6 +143,7 @@ flowchart TD
 - **web/**: Web インジェスターが URL ベースのパス構成で自動配置
 - **bluesky/**: BlueSky インジェスターが DID + 年月で階層化して自動配置
 - **zenn/**: Zenn インジェスターがユーザー名 + コンテンツ種別（articles/scraps）で階層化して自動配置
+- **youtube/**: YouTube インジェスターがチャンネル ID で階層化して自動配置
 
 ### converted_store のディレクトリ構成
 
@@ -157,6 +159,7 @@ converted_store は source_store のディレクトリ構成をミラーする�
 | web | URL | URL 自体が安定識別子 | `https://example.com/docs/guide` |
 | bluesky | AT URI | AT Protocol の安定識別子 | `at://did:plc:xxx/app.bsky.feed.post/rkey` |
 | zenn | Zenn 記事 URL | URL が安定識別子 | `https://zenn.dev/user/articles/slug` |
+| youtube | YouTube 動画 URL | video_id が一意識別子 | `https://www.youtube.com/watch?v=xxxxxxxxxxx` |
 
 ### URL パス変換規則
 

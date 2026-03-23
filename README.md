@@ -17,6 +17,7 @@
 | **クロールプレビュー** | クロール対象ページのタイトル・URL 一覧を事前確認 |
 | **Zenn インジェスター** | Zenn 記事を API 経由で取得・ナレッジベースに取り込み |
 | **BlueSky インジェスター** | BlueSky 投稿を AT Protocol API 経由で取得・ナレッジベースに取り込み |
+| **YouTube インジェスター** | YouTube 動画の字幕・音声文字起こしを取得・ナレッジベースに取り込み |
 | **ドキュメントインジェスター** | テキストドキュメント（Markdown、テキスト、PDF、AsciiDoc）をナレッジベースに取り込み |
 | **サイト一括取り込み（Scrapy）** | Scrapy subprocess による大規模サイトの一括取り込み |
 | **制約付き HTTP クライアント** | バジェット・サーキットブレーカー・レート制限を統合した安全な HTTP アクセス（py-common-lib 提供） |
@@ -42,6 +43,9 @@
 | HTML 解析 | BeautifulSoup4 |
 | HTML→Markdown 変換 | markdownify |
 | PDF テキスト抽出 | pymupdf4llm / MinerU (optional, PyTorch CUDA 推奨) |
+| YouTube 字幕取得 | youtube-transcript-api |
+| YouTube メタデータ・音声DL | yt-dlp |
+| 音声文字起こし | faster-whisper |
 | Web クローラー（大規模サイト） | Scrapy |
 | YAML パーサー | PyYAML |
 

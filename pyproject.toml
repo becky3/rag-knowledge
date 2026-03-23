@@ -22,6 +22,9 @@ dependencies = [
     "tzdata>=2024.1",
     "pymupdf4llm>=0.0.17",
     "py-common-lib",
+    "youtube-transcript-api>=1.0,<2",
+    "yt-dlp>=2024.0",
+    "faster-whisper>=1.0,<2",
 ]
 
 [project.optional-dependencies]
@@ -53,6 +56,11 @@ follow_imports = "skip"
 
 [[tool.mypy.overrides]]
 module = ["mineru", "mineru.*", "torch", "torch.*"]
+ignore_missing_imports = true
+follow_imports = "skip"
+
+[[tool.mypy.overrides]]
+module = ["youtube_transcript_api", "youtube_transcript_api.*", "yt_dlp", "yt_dlp.*", "faster_whisper", "faster_whisper.*"]
 ignore_missing_imports = true
 follow_imports = "skip"
 

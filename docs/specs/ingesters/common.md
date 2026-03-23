@@ -11,6 +11,7 @@
 | Web | [web.md](web.md) |
 | BlueSky | [bluesky.md](bluesky.md) |
 | Zenn | [zenn.md](zenn.md) |
+| YouTube | [youtube.md](youtube.md) |
 | Local | [local.md](local.md) |
 
 スコープ:
@@ -87,6 +88,8 @@
 | クロールプレビュー | web | `rag_crawl_preview` | クロール対象のタイトル・URL 一覧を返す（配置なし） |
 | BlueSky 投稿取り込み | bluesky | `rag_crawl_bluesky` | タイムラインから投稿を取得して配置 |
 | Zenn コンテンツ取り込み | zenn | `rag_crawl_zenn` | Zenn API から記事・スクラップを取得して配置 |
+| YouTube 単一動画取り込み | youtube | `rag_add_youtube` | 単一動画の字幕/文字起こしを取得して配置 |
+| YouTube プレイリスト一括取り込み | youtube | `rag_crawl_youtube` | プレイリスト内の動画を一括取得して配置 |
 | 単一ドキュメント取り込み | local | `rag_add_document` | 指定ファイルを local/ にコピー |
 | ディレクトリ一括取り込み | local | `rag_crawl_documents` | glob パターンで検索してコピー |
 
@@ -187,6 +190,7 @@ flowchart TB
 | web | URL | URL パス変換規則で一意に決定 | 上書き |
 | bluesky | AT URI | DID + 年月 + rkey で一意に決定 | スキップ |
 | zenn | Zenn URL | username + slug で一意に決定 | 上書き |
+| youtube | YouTube 動画 URL | channel_id + video_id で一意に決定 | 上書き |
 | local | 相対パス | ユーザー指定パスで一意に決定 | 上書き |
 
 重複検出の手順:
