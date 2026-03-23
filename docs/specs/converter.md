@@ -28,8 +28,8 @@
 
 ## 制約
 
-- **ファイル形式の判定は拡張子ベース**: source_store 内のファイル拡張子で変換方式を決定する。拡張子が同一であれば source_type（web, bluesky, zenn, local）に関わらず同じ変換方式を適用する。ただし、source_type 固有の前処理が必要な場合は source_type に応じた分岐を許容する
-- **source_type の判定**: ファイルの source_store 内トップレベルディレクトリから判定する（`web/`, `bluesky/`, `zenn/`, `local/`）
+- **ファイル形式の判定は拡張子ベース**: source_store 内のファイル拡張子で変換方式を決定する。拡張子が同一であれば source_type（web, bluesky, zenn, youtube, local）に関わらず同じ変換方式を適用する。ただし、source_type 固有の前処理が必要な場合は source_type に応じた分岐を許容する
+- **source_type の判定**: ファイルの source_store 内トップレベルディレクトリから判定する（`web/`, `bluesky/`, `zenn/`, `youtube/`, `local/`）
 - **変換対象外ファイル**: `.meta` サイドカーファイルおよび `metadata.db` は変換対象外とする（スキップする）
 - **変換結果は UTF-8 テキスト**: 変換処理（HTML → Markdown、PDF テキスト抽出、JSON → テキスト）の出力は UTF-8 エンコーディングとする。パススルーファイルはバイト列コピーであり、この制約の対象外（元のエンコーディングをそのまま保持する）
 - **converted_store は git 管理しない**: 再生成可能な派生データであるため、git 管理対象外とする
@@ -370,6 +370,8 @@ Zenn スクラップの JSON（`scrap` オブジェクト）から `comments` �
 | `rag_pdf_quality_cjk_min_threshold` | float | `config.toml` | CJK 文字率の下限閾値 | `0.05` |
 | `rag_pdf_quality_min_chars_per_page` | int | `config.toml` | ページあたり最低文字数 | `10` |
 | `rag_pdf_quality_sample_pages` | int | `config.toml` | 品質サンプリングページ数 | `10` |
+| `rag_youtube_merge_gap_sec` | float | `config.toml` | YouTube スニペット結合の間隔閾値（秒）。この秒数以上の間隔があるスニペット間で段落を分割する | `2.0` |
+| `rag_youtube_merge_max_chars` | int | `config.toml` | YouTube スニペット結合の最大文字数。超過時は次の区切りポイントで分割する | `300` |
 
 `CONVERTED_STORE_DIR` は [pipeline-controller.md](pipeline-controller.md) の設定項目で定義済み。
 

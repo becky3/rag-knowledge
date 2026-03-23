@@ -50,7 +50,7 @@ metadata.db、converted_store、検索インデックスは全て source_store �
 
 ### .meta サイドカーファイル
 
-- 自動取り込み媒体（web、bluesky、zenn）のファイルには `.meta` サイドカーファイルを同階層に配置する
+- 自動取り込み媒体（web、bluesky、zenn、youtube）のファイルには `.meta` サイドカーファイルを同階層に配置する
 - local 媒体は `.meta` 不要。sources テーブルの各フィールドは以下から導出する:
   - `title`: ファイル名（拡張子除去）
   - `created_at`: git の初回コミット日時
@@ -115,6 +115,7 @@ flowchart TD
     SS --> WEB["web/"]
     SS --> BS["bluesky/"]
     SS --> ZENN["zenn/"]
+    SS --> YT["youtube/"]
     SS --> DOT_GIT[".git/"]
 
     LOCAL --> L_USER["my-notes/ 等"]
@@ -142,6 +143,7 @@ flowchart TD
 - **web/**: Web インジェスターが URL ベースのパス構成で自動配置
 - **bluesky/**: BlueSky インジェスターが DID + 年月で階層化して自動配置
 - **zenn/**: Zenn インジェスターがユーザー名 + コンテンツ種別（articles/scraps）で階層化して自動配置
+- **youtube/**: YouTube インジェスターがチャンネル ID で階層化して自動配置
 
 ### converted_store のディレクトリ構成
 
@@ -157,6 +159,7 @@ converted_store は source_store のディレクトリ構成をミラーする�
 | web | URL | URL 自体が安定識別子 | `https://example.com/docs/guide` |
 | bluesky | AT URI | AT Protocol の安定識別子 | `at://did:plc:xxx/app.bsky.feed.post/rkey` |
 | zenn | Zenn 記事 URL | URL が安定識別子 | `https://zenn.dev/user/articles/slug` |
+| youtube | YouTube 動画 URL | video_id が一意識別子 | `https://www.youtube.com/watch?v=xxxxxxxxxxx` |
 
 ### URL パス変換規則
 
@@ -220,7 +223,7 @@ URL: `http://localhost:8080/api/docs`
 | フィールド | 型 | 内容 |
 |-----------|-----|------|
 | `source_id` | str | ソース識別子 |
-| `source_type` | str | 媒体種別（`web`, `bluesky`, `zenn`）。`local` は .meta を持たないため含まない |
+| `source_type` | str | 媒体種別（`web`, `bluesky`, `zenn`, `youtube`）。`local` は .meta を持たないため含まない |
 | `title` | str | コンテンツのタイトル |
 | `collected_at` | str | 取り込みタイムスタンプ（ISO 8601） |
 
@@ -339,7 +342,7 @@ source_store 内の全ファイルのメタデータ索引。
 | カラム | 型 | 制約 | 内容 |
 |--------|-----|------|------|
 | `source_id` | TEXT | PRIMARY KEY | ソース識別子 |
-| `source_type` | TEXT | NOT NULL | 媒体種別（`web`, `bluesky`, `zenn`, `local`） |
+| `source_type` | TEXT | NOT NULL | 媒体種別（`web`, `bluesky`, `zenn`, `youtube`, `local`） |
 | `file_path` | TEXT | NOT NULL, UNIQUE | source_store 内の相対パス |
 | `title` | TEXT | NOT NULL | コンテンツのタイトル |
 | `status` | TEXT | NOT NULL, DEFAULT 'active' | `active` または `deleted` |

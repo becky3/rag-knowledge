@@ -8,7 +8,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any, Literal
 
-SourceType = Literal["web", "bluesky", "zenn", "local"]
+SourceType = Literal["web", "bluesky", "zenn", "youtube", "local"]
 SourceStatus = Literal["active", "deleted"]
 
 # git null commit hash（初回パイプライン実行時の from_commit_id）

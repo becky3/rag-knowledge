@@ -161,7 +161,7 @@ def main() -> None:
     )
     rebuild_parser.add_argument(
         "--source-type",
-        choices=["web", "bluesky", "zenn", "local"],
+        choices=["web", "bluesky", "zenn", "youtube", "local"],
         default=None,
     )
 

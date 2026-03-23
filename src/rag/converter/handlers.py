@@ -527,3 +527,129 @@ def passthrough_copy(source_path: Path, dest_path: Path) -> None:
     """
     dest_path.parent.mkdir(parents=True, exist_ok=True)
     shutil.copy2(source_path, dest_path)
+
+
+# --- YouTube JSON 変換 ---
+
+
+def _format_timestamp_yt(seconds: float, has_hours: bool) -> str:
+    """秒数をタイムスタンプ文字列に変換する."""
+    total = int(seconds)
+    h = total // 3600
+    m = (total % 3600) // 60
+    s = total % 60
+    if has_hours:
+        return f"[{h:d}:{m:02d}:{s:02d}]"
+    return f"[{m:02d}:{s:02d}]"
+
+
+def _format_upload_date(upload_date: Any) -> str:
+    """YYYYMMDD → YYYY-MM-DD に変換する."""
+    if upload_date is None:
+        return ""
+    s = str(upload_date).strip()
+    if len(s) == 8 and s.isdigit():
+        return f"{s[:4]}-{s[4:6]}-{s[6:8]}"
+    return s
+
+
+def convert_json_youtube(
+    data: dict[str, Any],
+    *,
+    merge_gap_sec: float = 2.0,
+    merge_max_chars: int = 300,
+) -> str | None:
+    """YouTube JSON をスニペット結合した Markdown に変換する.
+
+    仕様: docs/specs/ingesters/youtube.md（コンバーター対応セクション）
+
+    Args:
+        data: パース済み JSON dict
+        merge_gap_sec: スニペット結合の間隔閾値（秒）
+        merge_max_chars: スニペット結合の最大文字数
+
+    Returns:
+        Markdown テキスト（スニペットがない場合はヘッダーのみの Markdown）
+    """
+    video_id = data.get("video_id") or ""
+    title = data.get("title") or "(Untitled)"
+    uploader = data.get("uploader") or ""
+    upload_date_raw = data.get("upload_date") or ""
+    upload_date = _format_upload_date(upload_date_raw)
+    try:
+        duration = int(data.get("duration", 0) or 0)
+    except (TypeError, ValueError):
+        duration = 0
+    snippets: list[dict[str, Any]] = data.get("snippets", [])
+
+    # ヘッダー
+    lines: list[str] = [
+        f"# {title}",
+        "",
+        f"投稿者: {uploader}",
+        f"公開日: {upload_date}",
+        f"動画URL: https://www.youtube.com/watch?v={video_id}",
+        "",
+        "---",
+        "",
+    ]
+
+    if not snippets or not isinstance(snippets, list):
+        return "\n".join(lines).rstrip() + "\n"
+
+    # 不正な要素をフィルタ（dict 以外をスキップ）
+    snippets = [s for s in snippets if isinstance(s, dict)]
+    if not snippets:
+        return "\n".join(lines).rstrip() + "\n"
+
+    # タイムスタンプ形式の決定
+    has_hours = duration >= 3600
+
+    # スニペット結合
+    paragraphs: list[tuple[float, str]] = []
+    current_text = ""
+    try:
+        current_start = float(snippets[0].get("start", 0.0))
+        prev_end = float(snippets[0].get("end", 0.0))
+    except (TypeError, ValueError):
+        current_start = 0.0
+        prev_end = 0.0
+
+    for i, snippet in enumerate(snippets):
+        try:
+            s_start = float(snippet.get("start", 0.0))
+        except (TypeError, ValueError):
+            continue
+        s_text = str(snippet.get("text", ""))
+
+        if i == 0:
+            current_text = s_text
+            prev_end = snippet.get("end", 0.0)
+            continue
+
+        gap = s_start - prev_end
+        if gap >= merge_gap_sec or len(current_text) + len(s_text) > merge_max_chars:
+            # 段落を確定
+            paragraphs.append((current_start, current_text))
+            current_text = s_text
+            current_start = s_start
+        else:
+            current_text += s_text
+
+        # end 時刻の逆転（YouTube 自動生成字幕で発生）に備え max で追跡
+        try:
+            prev_end = max(prev_end, float(snippet.get("end", 0.0)))
+        except (TypeError, ValueError):
+            pass
+
+    # 最後の段落
+    if current_text:
+        paragraphs.append((current_start, current_text))
+
+    # 段落をフォーマット
+    for start, text in paragraphs:
+        ts = _format_timestamp_yt(start, has_hours)
+        lines.append(f"{ts} {text}")
+        lines.append("")
+
+    return "\n".join(lines).rstrip() + "\n"

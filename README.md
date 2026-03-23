@@ -17,6 +17,7 @@
 | **クロールプレビュー** | クロール対象ページのタイトル・URL 一覧を事前確認 |
 | **Zenn インジェスター** | Zenn 記事を API 経由で取得・ナレッジベースに取り込み |
 | **BlueSky インジェスター** | BlueSky 投稿を AT Protocol API 経由で取得・ナレッジベースに取り込み |
+| **YouTube インジェスター** | YouTube 動画の字幕・音声文字起こしを取得・ナレッジベースに取り込み |
 | **ドキュメントインジェスター** | テキストドキュメント（Markdown、テキスト、PDF、AsciiDoc）をナレッジベースに取り込み |
 | **サイト一括取り込み（Scrapy）** | Scrapy subprocess による大規模サイトの一括取り込み |
 | **制約付き HTTP クライアント** | バジェット・サーキットブレーカー・レート制限を統合した安全な HTTP アクセス（py-common-lib 提供） |
@@ -42,6 +43,9 @@
 | HTML 解析 | BeautifulSoup4 |
 | HTML→Markdown 変換 | markdownify |
 | PDF テキスト抽出 | pymupdf4llm / MinerU (optional, PyTorch CUDA 推奨) |
+| YouTube 字幕取得 | youtube-transcript-api |
+| YouTube メタデータ・音声DL | yt-dlp |
+| 音声文字起こし | faster-whisper |
 | Web クローラー（大規模サイト） | Scrapy |
 | YAML パーサー | PyYAML |
 
@@ -80,6 +84,21 @@ uv run python -m rag.server
 # CLI
 uv run python -m rag.cli --help
 ```
+
+## YouTube インジェスター利用時の注意
+
+YouTube インジェスターは非公式 API（youtube-transcript-api）を使用して字幕を取得する。短時間に多数のリクエストを送ると YouTube に IP をブロックされる場合がある。
+
+**実測データ（ローカル PC 環境）:**
+- 約 20 動画を 30 分間で取り込んだ時点で字幕取得 API（youtube-transcript-api）の IP ブロックが発生
+- ブロックは字幕取得 API（youtube-transcript-api）のみに影響し、メタデータ取得・音声ダウンロード（yt-dlp）は継続動作
+- IP ブロック時は Whisper フォールバックせずエラーとしてスキップされる（品質低下防止のため）
+- ブロックは一時的（通常は数十分〜数時間で解除）
+
+**推奨運用:**
+- プレイリスト一括取り込み時は `--max-videos` で段階的に取り込む（1 回あたり 10〜20 動画推奨）
+- `rag_youtube_request_interval`（デフォルト: 1.0 秒）を短くしすぎない
+- IP ブロックが発生した場合は時間を置いて再実行する
 
 ## RAG 評価 CLI
 

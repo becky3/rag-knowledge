@@ -61,6 +61,7 @@ with contextlib.redirect_stdout(io.StringIO()):
     from .pipeline.ingesters.bluesky import BlueskyIngester as PipelineBlueskyIngester
     from .pipeline.ingesters.local import LocalIngester as PipelineLocalIngester
     from .pipeline.ingesters.web import WebIngester as PipelineWebIngester
+    from .pipeline.ingesters.youtube import YoutubeIngester as PipelineYoutubeIngester
     from .pipeline.ingesters.zenn import ZennIngester as PipelineZennIngester
     from .pipeline.models import PipelineMode, PipelineSummary, detect_source_type
     from .store.metadata_db import MetadataDB
@@ -280,7 +281,7 @@ def _get_supported_extensions() -> list[str]:
 
 # --- MCP ツール定義 ---
 
-_VALID_SOURCE_TYPES: frozenset[str] = frozenset({"web", "zenn", "bluesky", "local"})
+_VALID_SOURCE_TYPES: frozenset[str] = frozenset({"web", "zenn", "bluesky", "youtube", "local"})
 
 
 def _format_chunk_position(chunk_index: int, total_chunks: int) -> str:
@@ -315,7 +316,7 @@ async def rag_search(
     Args:
         query: 検索クエリ（ユーザーの質問からキーワードを抽出して構成する）
         n_results: 各エンジンから取得する結果数（未指定時は設定値を使用）
-        source_type: ソース種別フィルタ（"web", "zenn", "bluesky", "local"）。
+        source_type: ソース種別フィルタ（"web", "zenn", "bluesky", "youtube", "local"）。
             指定時はそのソース種別のチャンクのみを検索対象とする。未指定時は全種別を検索。
 
     Returns:
@@ -780,6 +781,142 @@ async def rag_crawl_bluesky(
         return f"エラー: BlueSky 投稿の取り込みに失敗しました（ハンドル: {handle}）"
 
 
+@mcp.tool()
+async def rag_add_youtube(
+    video_url: str,
+    ctx: MCPContext | None = None,
+) -> str:
+    """[rag-knowledge] RAG add YouTube - YouTube 動画の字幕/文字起こしを取り込む.
+
+    knowledge base, YouTube, video, transcript, subtitle, ingest.
+    YouTube 動画の字幕または音声文字起こしを取得し、ナレッジベースに取り込む。
+
+    Args:
+        video_url: YouTube 動画 URL（youtube.com/watch?v= または youtu.be/ 形式）
+
+    Returns:
+        取り込み結果のサマリーテキスト
+    """
+    if not video_url or not video_url.strip():
+        return "エラー: video_url を指定してください"
+
+    video_url = video_url.strip()
+    settings = get_settings()
+
+    controller = await _get_pipeline_controller()
+    youtube_ingester = PipelineYoutubeIngester(
+        controller.source_store,
+        max_videos=settings.rag_youtube_max_videos,
+        request_interval=settings.rag_youtube_request_interval,
+        request_timeout=settings.rag_youtube_request_timeout,
+        whisper_model=settings.rag_youtube_whisper_model,
+        whisper_device=settings.rag_youtube_whisper_device,
+        transcript_languages=settings.rag_youtube_transcript_languages,
+        max_duration=settings.rag_youtube_max_duration,
+    )
+
+    try:
+        ingest_result = await youtube_ingester.ingest_video(video_url)
+
+        if ingest_result.placed == 0:
+            return ingest_result.summary(context=f"動画: {video_url}")
+
+        pipeline_summary = await _run_ingest_and_index_subprocess(
+            f"ingest(youtube): {video_url}",
+            ctx=ctx,
+        )
+        _reset_pipeline_controller()
+        _reset_rag_service()
+
+        return _format_ingest_response(
+            ingest_result, pipeline_summary, context=f"動画: {video_url}",
+        )
+    except (ValueError, TypeError) as e:
+        return f"エラー: {e}"
+    except Exception:
+        logger.exception(
+            "Failed to ingest YouTube video: %s", video_url
+        )
+        return f"エラー: YouTube 動画の取り込みに失敗しました: {video_url}"
+
+
+@mcp.tool()
+async def rag_crawl_youtube(
+    playlist_url: str,
+    max_videos: int | None = None,
+    ctx: MCPContext | None = None,
+) -> str:
+    """[rag-knowledge] RAG crawl YouTube playlist - YouTube プレイリストの動画を一括取り込み.
+
+    knowledge base, YouTube, playlist, video, transcript, ingest, crawl.
+    YouTube プレイリスト内の動画の字幕/文字起こしを一括取得し、ナレッジベースに取り込む。
+
+    Args:
+        playlist_url: YouTube プレイリスト URL（youtube.com/playlist?list= 形式）
+        max_videos: 取得する最大動画数（未指定時は設定値を使用、許容範囲: 1〜500）
+
+    Returns:
+        取り込み結果のサマリーテキスト
+    """
+    settings = get_settings()
+
+    if max_videos is None:
+        max_videos = settings.rag_youtube_max_videos
+
+    if not isinstance(max_videos, int) or isinstance(max_videos, bool):
+        return f"エラー: max_videos は整数で指定してください（入力値: {max_videos!r}）"
+    if max_videos <= 0:
+        return f"エラー: max_videos は正の整数で指定してください（入力値: {max_videos}）"
+    from .pipeline.ingesters.youtube import MAX_VIDEOS_HARD_LIMIT as _YT_MAX
+    if max_videos > _YT_MAX:
+        logger.warning("max_videos (%d) が上限 %d を超えています。クランプします", max_videos, _YT_MAX)
+        max_videos = _YT_MAX
+
+    if not playlist_url or not playlist_url.strip():
+        return "エラー: playlist_url を指定してください"
+
+    playlist_url = playlist_url.strip()
+
+    controller = await _get_pipeline_controller()
+    youtube_ingester = PipelineYoutubeIngester(
+        controller.source_store,
+        max_videos=max_videos,
+        request_interval=settings.rag_youtube_request_interval,
+        request_timeout=settings.rag_youtube_request_timeout,
+        whisper_model=settings.rag_youtube_whisper_model,
+        whisper_device=settings.rag_youtube_whisper_device,
+        transcript_languages=settings.rag_youtube_transcript_languages,
+        max_duration=settings.rag_youtube_max_duration,
+    )
+
+    try:
+        ingest_result = await youtube_ingester.crawl_playlist(
+            playlist_url,
+            max_videos=max_videos,
+        )
+
+        if ingest_result.placed == 0:
+            return ingest_result.summary(context=f"プレイリスト: {playlist_url}")
+
+        pipeline_summary = await _run_ingest_and_index_subprocess(
+            f"ingest(youtube-playlist): {playlist_url}",
+            ctx=ctx,
+        )
+        _reset_pipeline_controller()
+        _reset_rag_service()
+
+        return _format_ingest_response(
+            ingest_result, pipeline_summary, context=f"プレイリスト: {playlist_url}",
+        )
+    except (ValueError, TypeError) as e:
+        return f"エラー: {e}"
+    except Exception:
+        logger.exception(
+            "Failed to crawl YouTube playlist: %s", playlist_url
+        )
+        return f"エラー: YouTube プレイリストの取り込みに失敗しました: {playlist_url}"
+
+
 _VALID_UPLOAD_MODES: frozenset[str] = frozenset({"fail", "replace"})
 
 
@@ -1094,7 +1231,7 @@ _VALID_REBUILD_MODES: frozenset[str] = frozenset({
     "full", "convert", "index", "incremental",
 })
 _VALID_PIPELINE_SOURCE_TYPES: frozenset[str] = frozenset({
-    "web", "bluesky", "zenn", "local",
+    "web", "bluesky", "zenn", "youtube", "local",
 })
 _rebuild_lock = threading.Lock()
 
@@ -1249,7 +1386,7 @@ async def rag_rebuild(
             "convert" — コンバートのみ再実行（変換ロジック改修時）
             "index" — インデックスのみ再構築（Embedding モデル変更時）
             "incremental" — 差分更新（通常運用。未コミット変更は自動コミット）
-        source_type: 対象媒体フィルタ: "web", "bluesky", "zenn", "local"。
+        source_type: 対象媒体フィルタ: "web", "bluesky", "zenn", "youtube", "local"。
             未指定時は全媒体。incremental モードでは指定不可。
 
     Returns:

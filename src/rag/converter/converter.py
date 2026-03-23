@@ -20,6 +20,7 @@ from typing import Literal
 from rag.converter.handlers import (
     convert_html,
     convert_json_bluesky,
+    convert_json_youtube,
     convert_json_zenn_article,
     convert_json_zenn_scrap,
     passthrough_copy,
@@ -369,6 +370,15 @@ class Converter:
 
         if source_type == "bluesky":
             return convert_json_bluesky(data)
+
+        if source_type == "youtube":
+            from rag.config import get_settings
+            settings = get_settings()
+            return convert_json_youtube(
+                data,
+                merge_gap_sec=settings.rag_youtube_merge_gap_sec,
+                merge_max_chars=settings.rag_youtube_merge_max_chars,
+            )
 
         if source_type == "zenn" and "/articles/" in file_path:
             return convert_json_zenn_article(data)

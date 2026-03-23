@@ -291,7 +291,7 @@ def main() -> None:
     )
     rebuild_parser.add_argument(
         "--source-type",
-        choices=["web", "bluesky", "zenn", "local"],
+        choices=["web", "bluesky", "zenn", "youtube", "local"],
         default=None,
         help="対象媒体フィルタ（incremental では指定不可）",
     )
@@ -315,7 +315,7 @@ def main() -> None:
     )
     search_parser.add_argument(
         "--source-type",
-        choices=["web", "bluesky", "zenn", "local"],
+        choices=["web", "bluesky", "zenn", "youtube", "local"],
         default=None,
         help="ソース種別フィルタ",
     )
@@ -335,6 +335,15 @@ def main() -> None:
     crawl_parser.add_argument("url", help="リンク集ページのURL")
     crawl_parser.add_argument("--pattern", default="", help="URLフィルタリング用の正規表現パターン（depth >= 2 の場合は必須）")
     crawl_parser.add_argument("--depth", type=int, default=None, help="クロール深度（1〜10。未指定時は設定値を使用）")
+
+    # ingest-youtube: YouTube 単一動画取り込み
+    yt_parser = subparsers.add_parser("ingest-youtube", help="YouTube 動画を取り込み")
+    yt_parser.add_argument("video_url", help="YouTube 動画 URL")
+
+    # ingest-youtube-playlist: YouTube プレイリスト一括取り込み
+    ytpl_parser = subparsers.add_parser("ingest-youtube-playlist", help="YouTube プレイリストを一括取り込み")
+    ytpl_parser.add_argument("playlist_url", help="YouTube プレイリスト URL")
+    ytpl_parser.add_argument("--max-videos", type=int, default=None, help="取得する最大動画数")
 
     # crawl-bluesky: BlueSky 取り込み
     bs_parser = subparsers.add_parser("crawl-bluesky", help="BlueSky 投稿を一括取り込み")
@@ -381,6 +390,8 @@ def main() -> None:
         "crawl-preview": run_crawl_preview,
         "add": run_add,
         "crawl": run_crawl,
+        "ingest-youtube": run_ingest_youtube,
+        "ingest-youtube-playlist": run_ingest_youtube_playlist,
         "crawl-bluesky": run_crawl_bluesky,
         "crawl-zenn": run_crawl_zenn,
         "add-document": run_add_document,
@@ -1555,6 +1566,73 @@ async def run_crawl(args: argparse.Namespace) -> None:
 
     pipeline_summary = controller.ingest_and_index(f"ingest(web): crawl {args.url}")
     _print_ingest_result(ingest_result, pipeline_summary, context=args.url)
+
+
+async def run_ingest_youtube(args: argparse.Namespace) -> None:
+    """YouTube 単一動画取り込み."""
+    from .pipeline.ingesters.youtube import YoutubeIngester
+
+    controller, settings = _build_cli_pipeline_controller()
+
+    youtube_ingester = YoutubeIngester(
+        controller.source_store,
+        max_videos=settings.rag_youtube_max_videos,
+        request_interval=settings.rag_youtube_request_interval,
+        request_timeout=settings.rag_youtube_request_timeout,
+        whisper_model=settings.rag_youtube_whisper_model,
+        whisper_device=settings.rag_youtube_whisper_device,
+        transcript_languages=settings.rag_youtube_transcript_languages,
+        max_duration=settings.rag_youtube_max_duration,
+    )
+
+    try:
+        ingest_result = await youtube_ingester.ingest_video(args.video_url)
+    except (ValueError, TypeError) as e:
+        logger.error("エラー: %s", e)
+        sys.exit(1)
+
+    if ingest_result.placed == 0:
+        _print_ingest_result(ingest_result, None, context=f"動画: {args.video_url}")
+        return
+
+    pipeline_summary = controller.ingest_and_index(f"ingest(youtube): {args.video_url}")
+    _print_ingest_result(ingest_result, pipeline_summary, context=f"動画: {args.video_url}")
+
+
+async def run_ingest_youtube_playlist(args: argparse.Namespace) -> None:
+    """YouTube プレイリスト一括取り込み."""
+    from .pipeline.ingesters.youtube import YoutubeIngester
+
+    controller, settings = _build_cli_pipeline_controller()
+
+    max_videos = args.max_videos if args.max_videos is not None else settings.rag_youtube_max_videos
+
+    youtube_ingester = YoutubeIngester(
+        controller.source_store,
+        max_videos=max_videos,
+        request_interval=settings.rag_youtube_request_interval,
+        request_timeout=settings.rag_youtube_request_timeout,
+        whisper_model=settings.rag_youtube_whisper_model,
+        whisper_device=settings.rag_youtube_whisper_device,
+        transcript_languages=settings.rag_youtube_transcript_languages,
+        max_duration=settings.rag_youtube_max_duration,
+    )
+
+    try:
+        ingest_result = await youtube_ingester.crawl_playlist(
+            args.playlist_url,
+            max_videos=max_videos,
+        )
+    except (ValueError, TypeError) as e:
+        logger.error("エラー: %s", e)
+        sys.exit(1)
+
+    if ingest_result.placed == 0:
+        _print_ingest_result(ingest_result, None, context=f"プレイリスト: {args.playlist_url}")
+        return
+
+    pipeline_summary = controller.ingest_and_index(f"ingest(youtube-playlist): {args.playlist_url}")
+    _print_ingest_result(ingest_result, pipeline_summary, context=f"プレイリスト: {args.playlist_url}")
 
 
 async def run_crawl_bluesky(args: argparse.Namespace) -> None:

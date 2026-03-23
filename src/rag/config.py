@@ -177,6 +177,17 @@ class RAGSettings(BaseModel):
     rag_pdf_quality_min_chars_per_page: int = Field(ge=1, le=10000)
     rag_pdf_quality_sample_pages: int = Field(ge=1, le=100)
 
+    # YouTube インジェスター
+    rag_youtube_max_videos: int = Field(ge=1, le=500)
+    rag_youtube_request_interval: float = Field(ge=0.1, le=60.0)
+    rag_youtube_request_timeout: int = Field(ge=1, le=120)
+    rag_youtube_whisper_model: str
+    rag_youtube_whisper_device: Literal["cuda", "cpu"]
+    rag_youtube_transcript_languages: list[str] = Field(min_length=1)
+    rag_youtube_merge_gap_sec: float = Field(ge=0.1, le=60.0)
+    rag_youtube_merge_max_chars: int = Field(ge=50, le=2000)
+    rag_youtube_max_duration: int = Field(ge=60, le=86400)
+
     # BlueSky インジェスター
     rag_bluesky_appview_url: str
     rag_bluesky_max_posts: int = Field(ge=1, le=1000)
