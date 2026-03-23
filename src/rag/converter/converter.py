@@ -22,11 +22,10 @@ from rag.converter.handlers import (
     convert_json_bluesky,
     convert_json_zenn_article,
     convert_json_zenn_scrap,
-    convert_pdf,
     passthrough_copy,
 )
 from rag.converter.normalize import normalize_text
-from rag.ingesters.document_ingester import DocumentIngester, PdfBackendConfig
+from rag.converter.pdf_extractor import PdfBackendConfig, extract_pdf
 from rag.pipeline.models import detect_source_type
 from rag.store.meta import read_meta
 from rag.store.models import SourceType
@@ -84,9 +83,7 @@ class Converter:
             pdf_config: PDF バックエンド設定
         """
         self._regen_option = regen_option
-        self._doc_ingester = DocumentIngester(
-            pdf_config=pdf_config or PdfBackendConfig(),
-        )
+        self._pdf_config = pdf_config or PdfBackendConfig()
 
     # --- ConverterProtocol 実装 ---
 
@@ -329,7 +326,7 @@ class Converter:
             return convert_html(source_path)
 
         if ext == ".pdf":
-            return convert_pdf(source_path, self._doc_ingester)
+            return extract_pdf(source_path, self._pdf_config)
 
         if ext == ".json":
             return self._convert_json(source_path, file_path)

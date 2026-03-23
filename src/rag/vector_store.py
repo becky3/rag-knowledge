@@ -469,3 +469,66 @@ class VectorStore:
                 identifier,
                 exc_info=True,
             )
+
+    async def get_chunk_ids_for_source(self, source_id: str) -> list[str]:
+        """source_id に紐づく全チャンク ID を取得する.
+
+        Args:
+            source_id: ソース識別子
+
+        Returns:
+            チャンク ID のリスト
+        """
+        result = await asyncio.to_thread(
+            self._collection.get,
+            where={"source_id": source_id},
+            include=[],
+        )
+        return list(result["ids"]) if result["ids"] else []
+
+    async def update_metadata(
+        self,
+        chunk_ids: list[str],
+        metadatas: list[dict[str, str | int | float | bool]],
+    ) -> None:
+        """チャンクのメタデータのみ更新する（Embedding/ドキュメントは維持）.
+
+        Args:
+            chunk_ids: 更新対象のチャンク ID リスト
+            metadatas: 対応するメタデータのリスト
+        """
+        if len(chunk_ids) != len(metadatas):
+            raise ValueError(
+                f"update_metadata: length mismatch: "
+                f"chunk_ids={len(chunk_ids)}, metadatas={len(metadatas)}"
+            )
+
+        if not chunk_ids:
+            return
+
+        await asyncio.to_thread(
+            self._collection.update,
+            ids=chunk_ids,
+            metadatas=metadatas,
+        )
+
+    async def clear(self) -> None:
+        """コレクションを削除して再作成する（全データクリア）."""
+        collection_name = self._collection_name
+
+        def _clear_sync() -> None:
+            self._client.delete_collection(collection_name)
+            self._collection = self._client.get_or_create_collection(
+                name=collection_name,
+                metadata={"hnsw:space": "cosine"},
+            )
+
+        await asyncio.to_thread(_clear_sync)
+
+    async def is_embedding_available(self) -> bool:
+        """Embedding プロバイダーの疎通を確認する.
+
+        Returns:
+            接続可能なら True
+        """
+        return await self._embedding.is_available()

@@ -133,6 +133,7 @@ MCP サーバーが公開する 13 個のツール。
 | rag_crawl_documents | dir_path、pattern（任意） | 指定ディレクトリ内のドキュメントファイルを glob パターンで検索し、一括でナレッジベースに取り込む。同一ファイルの再取り込み時は `source_id`（file URI）の一致で検出し、既存の知識を最新に置き換える |
 | rag_site_ingest | url、url_pattern（任意）、max_pages（任意）、force（任意） | Scrapy subprocess で対象サイトをクロールし、source_store に配置後、パイプライン処理を実行する。大規模サイト向け（上限 50,000 ページ）。詳細は [site-ingest.md](site-ingest.md) を参照 |
 | rag_delete | URL | ソース URL 指定でナレッジを論理削除する。metadata.db のステータスを `deleted` に変更し、検索インデックスから該当チャンクを削除する。source_store 内のファイルは削除しない |
+| rag_rebuild | mode、source_type（任意） | パイプラインの再構築を実行する。mode: `full`（全再構築）、`convert`（コンバートのみ再実行）、`index`（インデックスのみ再構築）、`incremental`（差分更新）。source_type 指定時はその媒体のみ対象。詳細は [rebuild-stats.md](rebuild-stats.md) を参照 |
 | rag_stats | なし | 統計情報（総チャンク数、ソース URL 数）と蓄積データ概要（ドメイン別ソース URL 一覧・タイトル）を返す。表示件数上限は `RAG_STATS_MAX_SOURCES` で制御する |
 
 ### 取り込みツールの出力形式
@@ -165,7 +166,7 @@ rag_search はベクトル検索と BM25 検索の生結果をチャンク単位
 
 ## コンポーネント構成
 
-### 全体アーキテクチャ
+### 全体アーキテクチャ（3段パイプライン）
 
 ```mermaid
 flowchart TB
@@ -173,56 +174,77 @@ flowchart TB
 
     subgraph MCP["MCP サーバー"]
         TOOLS["ツール定義"]
-        subgraph Service["ナレッジサービス"]
-            INGEST["取り込み"]
-            RETRIEVE["検索"]
+        RETRIEVE["検索"]
+    end
+
+    subgraph Pipeline["パイプライン"]
+        PC["PipelineController"]
+
+        subgraph Stage1["Stage 1: インジェスター"]
+            ING_WEB["Web"]
+            ING_ZENN["Zenn"]
+            ING_BS["BlueSky"]
+            ING_LOCAL["Local"]
+            ING_SITE["Scrapy"]
+        end
+
+        SS["source_store (git管理)"]
+
+        subgraph Stage2["Stage 2: コンバーター"]
+            CONV["Converter"]
+        end
+
+        CS["converted_store"]
+
+        subgraph Stage3["Stage 3: インデクサー"]
+            IDX["Indexer"]
         end
     end
 
-    subgraph Ingesters["インジェスター"]
-        WING["WebIngester"]
-    end
-
-    CRAWLER["Web クローラー"]
-
     subgraph Safety["制約付き中間ライブラリ (py-common-lib)"]
         CC["ConstrainedClient"]
-        BT["BudgetTracker"]
-        CB["CircuitBreaker"]
     end
 
-    CHUNKER["チャンカー"]
-    VECTOR["ベクトルストア"]
+    VECTOR["ベクトルストア (ChromaDB)"]
     BM25["BM25 インデックス"]
     EMBED["Embedding プロバイダー"]
-    WEB["対象 Web サイト"]
+    WEB["対象 Web サイト / API"]
 
     CLIENT -->|stdio / http| TOOLS
-    TOOLS --> Service
-    Service --> Ingesters
-    WING --> CRAWLER
-    CRAWLER --> CC
-    CC --> WEB
-    Service --> CHUNKER
-    Service --> VECTOR
-    Service --> BM25
+    TOOLS --> PC
+    TOOLS --> RETRIEVE
+    PC --> Stage1
+    Stage1 --> SS
+    SS --> PC
+    PC --> CONV
+    CONV --> CS
+    CS --> PC
+    PC --> IDX
+    IDX --> VECTOR
+    IDX --> BM25
     VECTOR --> EMBED
+    RETRIEVE --> VECTOR
+    RETRIEVE --> BM25
+    Stage1 --> CC
+    CC --> WEB
 ```
 
-### 取り込みフロー
+### 取り込みフロー（3段パイプライン）
 
 ```mermaid
 flowchart LR
-    CRAWL["Web クローラー"] --> DETECT["コンテンツタイプ検出"]
+    ING["インジェスター"] -->|ファイル配置| SS["source_store"]
+    SS -->|git diff| PC["PipelineController"]
+    PC --> CONV["コンバーター"]
+    CONV -->|テキスト変換| CS["converted_store"]
+    CS --> IDX["インデクサー"]
+    IDX -->|チャンキング| DETECT["コンテンツタイプ検出"]
     DETECT -->|通常テキスト| CP["テキストチャンカー"]
     DETECT -->|テーブル| CT["テーブルチャンカー"]
     DETECT -->|見出し付きテキスト| CH["見出しチャンカー"]
-    CP --> VS["ベクトルストア"]
+    CP --> VS["ベクトルストア + BM25"]
     CT --> VS
     CH --> VS
-    CP --> BM["BM25 インデックス"]
-    CT --> BM
-    CH --> BM
 ```
 
 ### チャンクメタデータ
@@ -235,21 +257,21 @@ flowchart LR
 
 | フィールド | 型 | 内容 |
 |-----------|-----|------|
-| `source_url` | str | ソース識別子（URL、file URI、AT URI 等）。フラグメント除去済み |
+| `source_id` | str | ソース識別子（URL、file URI、AT URI 等）。フラグメント除去済み |
 | `title` | str | コンテンツのタイトル |
 | `chunk_index` | int | チャンクの連番（0 始まり） |
-| `crawled_at` | str | 取り込みタイムスタンプ（ISO 8601） |
+| `collected_at` | str | 取り込みタイムスタンプ（ISO 8601） |
 | `source_type` | str | データソース種別（`"web"`, `"zenn"`, `"bluesky"`, `"local"`） |
 
 #### カスタムフィールド
 
 インジェスター固有のメタデータ。`custom:` プレフィックスを付与して共通フィールドと名前空間を分離する。
 
-各インジェスターが `IngestedContent.metadata` に格納した全フィールドを `custom:{キー名}` として保存する。
+各ソースの `.meta` ファイルに格納された追加フィールドを `custom:{キー名}` として保存する。
 
 #### 型変換ルール
 
-ChromaDB のメタデータ値は `str | int | float | bool` のみ許容される。`IngestedContent.metadata` の値が許容型でない場合、以下のルールで変換する。
+ChromaDB のメタデータ値は `str | int | float | bool` のみ許容される。`.meta` ファイルの値が許容型でない場合、以下のルールで変換する。
 
 | 元の型 | 変換 | 例 |
 |--------|------|-----|
@@ -264,6 +286,7 @@ ChromaDB のメタデータ値は `str | int | float | bool` のみ許容され�
 
 > **実装ステータス**: 未実装。本セクションは設計仕様であり、後続フェーズで実装予定。
 > 現状のチャンカーは Markdown モードのみ対応している。
+> 実装時は [indexer.md](indexer.md) に移設すること（チャンキングはインデクサーの責務）。
 
 見出しチャンカー・テーブルチャンカーは、入力ファイルの形式に応じて構文認識を切り替える。構文モードは取り込みフロー図のコンテンツタイプ検出とは直交する概念であり、各チャンカーがモードパラメータに基づいて内部的に構文認識（見出し記法、テーブル記法等）を切り替える。
 
@@ -343,9 +366,10 @@ flowchart LR
 
 | コンポーネント | 役割 |
 | --- | --- |
-| ナレッジサービス | 取り込み・検索・削除のオーケストレーション |
-| インジェスター基盤 | データソースの抽象化（BaseIngester / IngestedContent） |
-| WebIngester | Web ページ取り込み用インジェスター。WebCrawler に委譲し、Safe Browsing チェックを統合する |
+| PipelineController | 3段パイプラインのオーケストレーション。source_store の git 操作、差分検知、ステージ間連携を一元管理する |
+| インジェスター群 | データソースからファイルを取得し source_store に配置する（Web / Zenn / BlueSky / Local / Scrapy） |
+| コンバーター | source_store のファイルを converted_store のテキスト（Markdown）に変換する |
+| インデクサー | converted_store のテキストからチャンキング・Embedding・インデックス構築を行う |
 | Web クローラー | ページの取得と本文テキスト抽出。SSRF 対策・robots.txt 遵守を含む |
 | コンテンツタイプ検出 | テキストの種類（通常・テーブル・見出し付きテキスト）を判定する |
 | テキストチャンカー | 段落・文・文字数の優先順で分割する。チャンク間にオーバーラップを適用する |
@@ -397,6 +421,11 @@ flowchart LR
 
 ## 関連ドキュメント
 
-- [zenn-ingester.md](zenn-ingester.md) — Zenn インジェスター仕様
-- [bluesky-ingester.md](bluesky-ingester.md) — BlueSky インジェスター仕様
-- [document-ingester.md](document-ingester.md) — ドキュメントインジェスター仕様
+- [source-store.md](source-store.md) — source_store 仕様
+- [pipeline-controller.md](pipeline-controller.md) — パイプライン制御仕様
+- [converter.md](converter.md) — コンバーター仕様
+- [indexer.md](indexer.md) — インデクサー仕様
+- [ingesters/common.md](ingesters/common.md) — インジェスター共通仕様
+- [search-response.md](search-response.md) — 検索レスポンス + 全文取得仕様
+- [rebuild-stats.md](rebuild-stats.md) — 再構築・統計・バックアップ仕様
+- [site-ingest.md](site-ingest.md) — サイト一括取り込み仕様

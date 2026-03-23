@@ -133,8 +133,10 @@ class Indexer:
         self._add_to_indices(source_id, chunk_texts, metadata)
 
         # stale チャンクを削除
-        self._delete_stale_chromadb(source_id, new_chunk_ids)
-        self._delete_stale_bm25(source_id, new_chunk_ids)
+        _run_async(
+            self._vector_store.delete_stale_chunks(source_id, new_chunk_ids),
+        )
+        self._bm25.delete_stale_docs(source_id, new_chunk_ids)
 
         logger.info(
             "インデックスを更新: %s (%d チャンク)", source_id, len(chunk_texts),
@@ -146,7 +148,7 @@ class Indexer:
         Args:
             source_id: ソース識別子
         """
-        self._delete_chromadb_by_source_id(source_id)
+        _run_async(self._vector_store.delete_by_source(source_id))
         self._bm25.delete_by_source(source_id)
         logger.info("インデックスから削除: %s", source_id)
 
@@ -161,7 +163,9 @@ class Indexer:
             source_id: ソース識別子
             metadata: ソースメタデータ
         """
-        chunk_ids = self._get_chunk_ids_for_source(source_id)
+        chunk_ids = _run_async(
+            self._vector_store.get_chunk_ids_for_source(source_id),
+        )
         if not chunk_ids:
             logger.warning(
                 "メタデータ更新対象のチャンクが存在しません: %s", source_id,
@@ -169,14 +173,13 @@ class Indexer:
             return
 
         total_chunks = len(chunk_ids)
+        metadatas = []
         for chunk_id in chunk_ids:
             chunk_index = parse_chunk_index(chunk_id)
             meta = build_chunk_metadata(metadata, chunk_index, total_chunks)
-            # ChromaDB の update でメタデータのみ更新（Embedding/ドキュメントは維持）
-            self._vector_store._collection.update(
-                ids=[chunk_id],
-                metadatas=[meta],
-            )
+            metadatas.append(meta)
+
+        _run_async(self._vector_store.update_metadata(chunk_ids, metadatas))
 
         logger.info(
             "メタデータを更新: %s (%d チャンク)", source_id, total_chunks,
@@ -206,7 +209,7 @@ class Indexer:
         """
         if self._embedding_checked:
             return
-        available = _run_async(self._vector_store._embedding.is_available())
+        available = _run_async(self._vector_store.is_embedding_available())
         if not available:
             msg = "Embedding プロバイダーに接続できません"
             raise ConnectionError(msg)
@@ -270,98 +273,10 @@ class Indexer:
         # BM25 に追加
         self._bm25.add_documents(bm25_docs)
 
-    # --- ChromaDB ヘルパー（source_id ベース） ---
-    # 既存 VectorStore は source_url ベースの操作しか公開していないため、
-    # source_id ベースの操作には ChromaDB コレクションに直接アクセスする。
-    # 後続の統合フェーズで VectorStore に公開メソッドを追加して解消予定。
-
-    def _get_chunk_ids_for_source(self, source_id: str) -> list[str]:
-        """source_id に紐づく全チャンク ID を ChromaDB から取得する."""
-        result = self._vector_store._collection.get(
-            where={"source_id": source_id},
-            include=[],
-        )
-        return list(result["ids"]) if result["ids"] else []
-
-    def _delete_chromadb_by_source_id(self, source_id: str) -> None:
-        """source_id に紐づく全チャンクを ChromaDB から削除する."""
-        ids = self._get_chunk_ids_for_source(source_id)
-        if ids:
-            self._vector_store._collection.delete(ids=ids)
-            logger.debug(
-                "ChromaDB から %d チャンクを削除: %s", len(ids), source_id,
-            )
-
-    def _delete_stale_chromadb(
-        self,
-        source_id: str,
-        valid_ids: set[str],
-    ) -> None:
-        """ChromaDB から stale チャンクを削除する."""
-        all_ids = self._get_chunk_ids_for_source(source_id)
-        stale_ids = [id_ for id_ in all_ids if id_ not in valid_ids]
-        if stale_ids:
-            self._vector_store._collection.delete(ids=stale_ids)
-            logger.debug(
-                "ChromaDB から stale チャンク %d 件を削除: %s",
-                len(stale_ids), source_id,
-            )
-
-    def _delete_stale_bm25(
-        self,
-        source_id: str,
-        valid_ids: set[str],
-    ) -> None:
-        """BM25 から stale チャンクを削除する.
-
-        BM25Index は source_id ベースの部分削除メソッドを持たないため、
-        内部データを直接操作する。_needs_rebuild=True → _save() の順で呼ぶことで
-        _rebuild_index() が _doc_ids を _documents.keys() から再構築し整合性を保証する。
-        後続の統合フェーズで BM25Index に公開メソッドを追加して解消予定。
-        """
-        stale_ids = [
-            doc_id
-            for doc_id, src in list(self._bm25._doc_source_map.items())
-            if src == source_id and doc_id not in valid_ids
-        ]
-        for doc_id in stale_ids:
-            self._bm25._documents.pop(doc_id, None)
-            self._bm25._doc_source_map.pop(doc_id, None)
-            self._bm25._doc_source_type_map.pop(doc_id, None)
-
-        if stale_ids:
-            self._bm25._needs_rebuild = True
-            self._bm25._save()
-            logger.debug(
-                "BM25 から stale チャンク %d 件を削除: %s",
-                len(stale_ids), source_id,
-            )
-
     def _clear_all(self) -> None:
-        """全インデックスをクリアする.
-
-        既存の VectorStore / BM25Index に clear 公開メソッドがないため
-        内部データを直接操作する。後続の統合フェーズで解消予定。
-        """
-        # ChromaDB: コレクションを削除して再作成
-        collection_name = self._vector_store._collection_name
-        self._vector_store._client.delete_collection(collection_name)
-        self._vector_store._collection = (
-            self._vector_store._client.get_or_create_collection(
-                name=collection_name,
-                metadata={"hnsw:space": "cosine"},
-            )
-        )
-
-        # BM25: 全データをクリア
-        self._bm25._documents.clear()
-        self._bm25._doc_source_map.clear()
-        self._bm25._doc_source_type_map.clear()
-        self._bm25._doc_ids.clear()
-        self._bm25._bm25 = None
-        self._bm25._needs_rebuild = True
-        self._bm25._save()
-
+        """全インデックスをクリアする."""
+        _run_async(self._vector_store.clear())
+        self._bm25.clear()
         logger.info("全インデックスをクリアしました")
 
     def _clear_by_source_type(self, source_type: SourceType) -> None:

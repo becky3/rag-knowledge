@@ -1009,9 +1009,8 @@ class TestConverterConvert:
             tmp_path, "web/doc/report.pdf", b"%PDF-1.4 dummy",
         )
         converter = Converter()
-        with patch.object(
-            converter._doc_ingester,
-            "_extract_pdf",
+        with patch(
+            "rag.converter.converter.extract_pdf",
             return_value="# PDF Content\n\nExtracted text.",
         ):
             result = converter.convert(
@@ -1279,8 +1278,8 @@ class TestConverterEdgeCases:
             tmp_path, "web/empty.pdf", b"%PDF-1.4",
         )
         converter = Converter()
-        with patch.object(
-            converter._doc_ingester, "_extract_pdf", return_value=None,
+        with patch(
+            "rag.converter.converter.extract_pdf", return_value=None,
         ):
             with pytest.raises(ConversionSkippedError, match="Empty conversion"):
                 converter.convert("web/empty.pdf", source_dir, converted_dir)

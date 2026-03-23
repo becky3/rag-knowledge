@@ -14,7 +14,7 @@ from rag.config import RAGSettings, get_settings
 from rag.converter import Converter
 from rag.embedding.factory import get_embedding_provider
 from rag.indexer import Indexer
-from rag.ingesters.document_ingester import PdfBackendConfig
+from rag.converter.pdf_extractor import PdfBackendConfig
 from rag.pipeline.controller import PipelineController
 from rag.store.source_store import SourceStore
 from rag.vector_store import VectorStore

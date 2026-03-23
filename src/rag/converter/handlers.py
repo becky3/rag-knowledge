@@ -16,12 +16,6 @@ from typing import Any
 from bs4 import BeautifulSoup, Tag
 from charset_normalizer import from_bytes
 
-from rag.ingesters.bluesky_ingester import (
-    REASON_REPOST,
-    _extract_quote_text_from_view_embed,
-    _extract_text_from_post,
-)
-from rag.ingesters.document_ingester import DocumentIngester
 from rag.markdown import RagMarkdownConverter
 
 logger = logging.getLogger(__name__)
@@ -245,22 +239,153 @@ def convert_html(source_path: Path) -> str | None:
     return result
 
 
-def convert_pdf(
-    source_path: Path,
-    doc_ingester: DocumentIngester,
-) -> str | None:
-    """PDF ファイルからテキストを抽出する.
 
-    既存の DocumentIngester の PDF 抽出ロジックを再利用する。
+# --- BlueSky テキスト抽出ヘルパー ---
+
+REASON_REPOST = "app.bsky.feed.defs#reasonRepost"
+"""リポスト理由の $type"""
+
+
+def _extract_text_from_post(value: dict[str, Any]) -> str:
+    """投稿レコードからテキストを構造化して抽出する.
+
+    仕様: docs/specs/ingesters/bluesky.md「テキスト抽出」
+
+    構造:
+    1. 投稿テキスト（先頭）
+    2. 画像/動画 ALT テキスト（[Image ALT] / [Video ALT] プレフィックス）
+    3. リンクカード（[Link Card] セクション）
+
+    引用元テキストは呼び出し元で [Quote] セクションとして追加する。
 
     Args:
-        source_path: PDF ファイルの絶対パス
-        doc_ingester: DocumentIngester インスタンス（PDF設定を保持）
+        value: 投稿レコードの value/record オブジェクト
 
     Returns:
-        Markdown テキスト、または抽出失敗/空の場合は None
+        構造化されたプレーンテキスト
     """
-    return doc_ingester._extract_pdf(source_path)  # noqa: SLF001
+    sections: list[str] = []
+
+    # 1. 投稿テキスト（先頭）
+    text = value.get("text", "")
+    if text:
+        sections.append(text)
+
+    # 2-3. embed からメディア情報を抽出
+    embed = value.get("embed")
+    if isinstance(embed, dict):
+        media_sections = _extract_embed_sections(embed)
+        sections.extend(media_sections)
+
+    return "\n\n".join(sections)
+
+
+def _extract_embed_sections(embed: dict[str, Any]) -> list[str]:
+    """embed オブジェクトから構造化セクションを抽出する.
+
+    Args:
+        embed: embed オブジェクト
+
+    Returns:
+        構造化セクションのリスト
+    """
+    embed_type = embed.get("$type", "")
+
+    if embed_type == "app.bsky.embed.recordWithMedia":
+        media = embed.get("media")
+        if isinstance(media, dict):
+            return _extract_media_sections(media)
+        return []
+
+    return _extract_media_sections(embed)
+
+
+def _extract_media_sections(media: dict[str, Any]) -> list[str]:
+    """メディアオブジェクトから構造化セクションを抽出する.
+
+    Args:
+        media: メディアオブジェクト（embed または embed.media）
+
+    Returns:
+        構造化セクションのリスト
+    """
+    sections: list[str] = []
+
+    # 画像 ALT テキスト
+    images = media.get("images")
+    if isinstance(images, list):
+        alt_texts = [
+            img.get("alt", "")
+            for img in images
+            if isinstance(img, dict) and img.get("alt", "")
+        ]
+        if alt_texts:
+            sections.append("[Image ALT] " + "\n".join(alt_texts))
+
+    # 動画 ALT テキスト
+    video_alt = media.get("alt", "")
+    if video_alt:
+        sections.append(f"[Video ALT] {video_alt}")
+
+    # リンクカード
+    external = media.get("external")
+    if isinstance(external, dict):
+        card_parts: list[str] = ["[Link Card]"]
+        ext_title = external.get("title", "")
+        if ext_title:
+            card_parts.append(f"Title: {ext_title}")
+        ext_uri = external.get("uri", "")
+        if ext_uri:
+            card_parts.append(f"URL: {ext_uri}")
+        ext_desc = external.get("description", "")
+        if ext_desc:
+            card_parts.append(f"Description: {ext_desc}")
+        if len(card_parts) > 1:
+            sections.append("\n".join(card_parts))
+
+    return sections
+
+
+def _extract_quote_text_from_view_embed(
+    view_embed: dict[str, Any] | None,
+) -> str | None:
+    """view embed（post.embed）から引用元テキストを取得する.
+
+    getAuthorFeed のレスポンスでは引用元テキストが post.embed に展開済み。
+
+    パス:
+    - app.bsky.embed.record#view → post.embed.record.value.text
+    - app.bsky.embed.recordWithMedia#view → post.embed.record.record.value.text
+
+    Args:
+        view_embed: post.embed オブジェクト（view 版）
+
+    Returns:
+        引用元テキスト、または引用なし/非投稿引用時は None
+    """
+    if not isinstance(view_embed, dict):
+        return None
+
+    embed_type = view_embed.get("$type", "")
+
+    if embed_type == "app.bsky.embed.record#view":
+        record = view_embed.get("record")
+        if isinstance(record, dict):
+            value = record.get("value")
+            if isinstance(value, dict):
+                text = value.get("text", "")
+                return text if text else None
+    elif embed_type == "app.bsky.embed.recordWithMedia#view":
+        record = view_embed.get("record")
+        if isinstance(record, dict):
+            inner_record = record.get("record")
+            if isinstance(inner_record, dict):
+                value = inner_record.get("value")
+                if isinstance(value, dict):
+                    text = value.get("text", "")
+                    return text if text else None
+
+    return None
 
 
 def convert_json_bluesky(data: dict[str, Any]) -> str | None:

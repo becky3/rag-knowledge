@@ -262,6 +262,42 @@ class BM25Index:
         """
         return self._doc_source_type_map.get(doc_id)
 
+    def delete_stale_docs(self, source_id: str, valid_ids: set[str]) -> int:
+        """ソースのドキュメントのうち、valid_ids に含まれないものを削除する.
+
+        Args:
+            source_id: ソース識別子
+            valid_ids: 保持する ID セット（これ以外を削除）
+
+        Returns:
+            削除件数
+        """
+        stale_ids = [
+            doc_id
+            for doc_id, src in list(self._doc_source_map.items())
+            if src == source_id and doc_id not in valid_ids
+        ]
+        for doc_id in stale_ids:
+            self._documents.pop(doc_id, None)
+            self._doc_source_map.pop(doc_id, None)
+            self._doc_source_type_map.pop(doc_id, None)
+
+        if stale_ids:
+            self._needs_rebuild = True
+            self._save()
+
+        return len(stale_ids)
+
+    def clear(self) -> None:
+        """全データをクリアして永続化する."""
+        self._documents.clear()
+        self._doc_source_map.clear()
+        self._doc_source_type_map.clear()
+        self._doc_ids.clear()
+        self._bm25 = None
+        self._needs_rebuild = True
+        self._save()
+
     def _rebuild_index(self) -> None:
         """BM25インデックスを再構築する."""
         try:
