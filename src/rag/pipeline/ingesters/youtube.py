@@ -165,8 +165,15 @@ class YoutubeIngester:
             result.error_details.append(f"メタデータ取得失敗: {video_id}: {e}")
             return result
 
-        # 動画長チェック
+        # 動画長チェック（duration 不明時はスキップ — 長時間音声DL防止）
         duration = metadata.get("duration") or 0
+        if not duration:
+            logger.warning(
+                "動画長が不明です (video_id=%s)。スキップします",
+                video_id,
+            )
+            result.skipped += 1
+            return result
         if duration > self._max_duration:
             logger.warning(
                 "動画長が上限を超えています (video_id=%s, duration=%ds, max=%ds)",

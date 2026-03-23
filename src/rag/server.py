@@ -867,6 +867,9 @@ async def rag_crawl_youtube(
         return f"エラー: max_videos は整数で指定してください（入力値: {max_videos!r}）"
     if max_videos <= 0:
         return f"エラー: max_videos は正の整数で指定してください（入力値: {max_videos}）"
+    if max_videos > 500:
+        logger.warning("max_videos (%d) が上限 500 を超えています。500 にクランプします", max_videos)
+        max_videos = 500
 
     if not playlist_url or not playlist_url.strip():
         return "エラー: playlist_url を指定してください"

@@ -182,8 +182,8 @@ class RAGSettings(BaseModel):
     rag_youtube_request_interval: float = Field(ge=0.1, le=60.0)
     rag_youtube_request_timeout: int = Field(ge=1, le=120)
     rag_youtube_whisper_model: str
-    rag_youtube_whisper_device: str
-    rag_youtube_transcript_languages: list[str]
+    rag_youtube_whisper_device: Literal["cuda", "cpu"]
+    rag_youtube_transcript_languages: list[str] = Field(min_length=1)
     rag_youtube_merge_gap_sec: float = Field(ge=0.1, le=60.0)
     rag_youtube_merge_max_chars: int = Field(ge=50, le=2000)
     rag_youtube_max_duration: int = Field(ge=60, le=86400)

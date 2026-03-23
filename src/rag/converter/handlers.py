@@ -594,6 +594,11 @@ def convert_json_youtube(
         "",
     ]
 
+    if not snippets or not isinstance(snippets, list):
+        return "\n".join(lines).rstrip() + "\n"
+
+    # 不正な要素をフィルタ（dict 以外をスキップ）
+    snippets = [s for s in snippets if isinstance(s, dict)]
     if not snippets:
         return "\n".join(lines).rstrip() + "\n"
 
