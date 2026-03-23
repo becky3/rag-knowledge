@@ -205,6 +205,13 @@ rag_pdf_quality_greek_threshold = 0.15
 rag_pdf_quality_cjk_min_threshold = 0.05
 rag_pdf_quality_min_chars_per_page = 10
 rag_pdf_quality_sample_pages = 10
+rag_youtube_max_videos = 100
+rag_youtube_request_interval = 5.0
+rag_youtube_request_timeout = 30
+rag_youtube_transcript_languages = ["ja", "en"]
+rag_youtube_merge_gap_sec = 2.0
+rag_youtube_merge_max_chars = 300
+rag_youtube_max_duration = 14400
 site_ingest_delay_sec = 0.1
 site_ingest_max_pages = 10000
 site_ingest_download_timeout = 30
@@ -226,6 +233,8 @@ site_ingest_error_count = 10
             "RAG_HTTP_PORT": "8081",
             "RAG_DNS_REBINDING_PROTECTION": "true",
             "RAG_DEBUG_LOG_ENABLED": "false",
+            "RAG_YOUTUBE_WHISPER_MODEL": "base",
+            "RAG_YOUTUBE_WHISPER_DEVICE": "cpu",
             "SITE_INGEST_TEMP_DIR": ".tmp/site_ingest",
         }
         defaults.update(overrides)

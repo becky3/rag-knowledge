@@ -47,13 +47,23 @@ rag_search のレスポンスをチャンク単位の返却に変更し、全文
 
 #### トリガー
 
-MCP クライアントからの rag_search ツール呼び出し。入力パラメータは既存仕様から変更なし。
+MCP クライアントからの rag_search ツール呼び出し。
 
 | パラメータ | 型 | 必須 | 内容 |
 |-----------|-----|------|------|
 | `query` | str | Yes | 検索キーワード |
 | `n_results` | int | No | エンジンあたりの結果件数 |
-| `source_type` | str | No | ソース種別フィルタ |
+| `source_type` | str | No | ソース種別フィルタ（`"web"`, `"zenn"`, `"bluesky"`, `"youtube"`, `"local"`, `"journal"`） |
+| `filters` | str (JSON) | No | カスタムメタデータフィルタ（JSON オブジェクト形式）。`.meta` の extra フィールドで検索結果を絞り込む。完全一致。例: `'{"repository": "rag-knowledge"}'` |
+
+#### フィルタの動作
+
+`filters` は `.meta` サイドカーのカスタムフィールドによる絞り込みを行う。内部的にはキーに `custom:` プレフィックスを付与し、ChromaDB の `where` 句と BM25 のポストフィルタに適用する。
+
+- `source_type` と `filters` は併用可能。両方指定時は AND 条件として結合する
+- `filters` のキーにはユーザーが `custom:` プレフィックスを付ける必要はない（内部で自動付与）
+- `filters` が無効な JSON またはオブジェクト型でない場合はエラーメッセージを返す
+- `filters` 未指定時はフィルタなし（全件対象）
 
 #### 振る舞い
 

@@ -5,7 +5,7 @@
 外部 Web ページから収集した知識をベクトル DB に蓄積し、
 MCP クライアントからのクエリに対して関連情報を検索・提供する
 RAG（Retrieval-Augmented Generation）基盤。
-MCP サーバーとして独立動作し、13 個のツールを提供する。
+MCP サーバーとして独立動作し、16 個のツールを提供する。
 
 スコープ:
 
@@ -118,19 +118,22 @@ MCP サーバーとして独立動作し、13 個のツールを提供する。
 
 ### MCP ツール
 
-MCP サーバーが公開する 13 個のツール。
+MCP サーバーが公開する 16 個のツール。
 
 | ツール | 入力 | 振る舞い |
 | --- | --- | --- |
-| rag_search | クエリ、件数、source_type（任意） | ベクトル検索と BM25 の生結果をチャンク単位で返す。各結果にスコア・Source・Title・Chunk位置・Typeのメタデータを含める。`source_type` 指定時はそのソース種別のチャンクのみを検索対象とする。詳細は [search-response.md](search-response.md) を参照 |
+| rag_search | クエリ、件数、source_type（任意）、filters（任意） | ベクトル検索と BM25 の生結果をチャンク単位で返す。各結果にスコア・Source・Title・Chunk位置・Typeのメタデータを含める。`source_type` 指定時はそのソース種別のチャンクのみを検索対象とする。`filters` 指定時はカスタムメタデータで絞り込む（JSON オブジェクト、完全一致）。詳細は [search-response.md](search-response.md) を参照 |
 | rag_get_document | source_id、format（任意） | ソース全文を取得する。`format=text` で変換済みテキスト（converted_store）、`format=original` でオリジナル（source_store）を返す。MCP 経由では `rag_max_response_chars` でトランケーションを行う。詳細は [search-response.md](search-response.md) を参照 |
 | rag_add | URL | 単一ページをクロールして取り込む。同一 URL の再取り込み時は既存の知識を最新に置き換える |
 | rag_crawl | URL、パターン | リンク集ページから一括クロールして取り込む。同一ドメインのみ対象 |
 | rag_crawl_preview | URL、パターン | リンク集ページからクロール対象ページのタイトルと URL の一覧を返す。取り込みは行わない |
 | rag_crawl_zenn | username、max_articles（任意） | 指定ユーザーの Zenn 記事を API 経由で取得し、ナレッジベースに取り込む。同一記事の再取り込み時は `source_id`（記事の公開 URL）の一致で検出し、既存の知識を最新に置き換える |
 | rag_crawl_bluesky | handle、max_posts（任意）、include_reposts（任意） | 指定ユーザーの BlueSky 投稿を AT Protocol API 経由で取得し、ナレッジベースに取り込む。max_posts はタイムライン全体（リポスト含む）に適用。BlueSky は投稿編集不可のため、既存 `source_id` と一致する投稿はスキップする（上書き不要） |
+| rag_add_youtube | video_url | 単一 YouTube 動画の字幕/文字起こしを取得し、ナレッジベースに取り込む。詳細は [ingesters/youtube.md](ingesters/youtube.md) を参照 |
+| rag_crawl_youtube | playlist_url、max_videos（任意） | YouTube プレイリスト内の動画を一括取り込みする。詳細は [ingesters/youtube.md](ingesters/youtube.md) を参照 |
 | rag_add_document | file_path | 単一ドキュメントファイルを読み取り、ナレッジベースに取り込む。同一ファイルの再取り込み時は `source_id`（file URI）の一致で検出し、既存の知識を最新に置き換える |
 | rag_crawl_documents | dir_path、pattern（任意） | 指定ディレクトリ内のドキュメントファイルを glob パターンで検索し、一括でナレッジベースに取り込む。同一ファイルの再取り込み時は `source_id`（file URI）の一致で検出し、既存の知識を最新に置き換える |
+| rag_add_journal | title、body、repository、entry_id（任意） | ジャーナルエントリを source_store に配置し、パイプライン処理でインデックスに取り込む。詳細は [ingesters/journal.md](ingesters/journal.md) を参照 |
 | rag_site_ingest | url、url_pattern（任意）、max_pages（任意）、force（任意） | Scrapy subprocess で対象サイトをクロールし、source_store に配置後、パイプライン処理を実行する。大規模サイト向け（上限 50,000 ページ）。詳細は [site-ingest.md](site-ingest.md) を参照 |
 | rag_delete | URL | ソース URL 指定でナレッジを論理削除する。metadata.db のステータスを `deleted` に変更し、検索インデックスから該当チャンクを削除する。source_store 内のファイルは削除しない |
 | rag_rebuild | mode、source_type（任意） | パイプラインの再構築を実行する。mode: `full`（全再構築）、`convert`（コンバートのみ再実行）、`index`（インデックスのみ再構築）、`incremental`（差分更新）。source_type 指定時はその媒体のみ対象。詳細は [rebuild-stats.md](rebuild-stats.md) を参照 |
@@ -138,7 +141,7 @@ MCP サーバーが公開する 13 個のツール。
 
 ### 取り込みツールの出力形式
 
-取り込みツール（rag_add、rag_crawl、rag_crawl_zenn、rag_crawl_bluesky、rag_add_document、rag_crawl_documents、rag_site_ingest）は、source_store への配置結果とパイプライン処理結果を統合したサマリーを返す。配置結果には配置ファイル数・スキップ数・エラー数を含み、パイプライン処理結果にはコンバート・インデックス構築の処理件数を含む。rag_crawl_preview は source_store への配置を行わないため本出力形式の対象外。
+取り込みツール（rag_add、rag_crawl、rag_crawl_zenn、rag_crawl_bluesky、rag_add_youtube、rag_crawl_youtube、rag_add_document、rag_crawl_documents、rag_add_journal、rag_site_ingest）は、source_store への配置結果とパイプライン処理結果を統合したサマリーを返す。配置結果には配置ファイル数・スキップ数・エラー数を含み、パイプライン処理結果にはコンバート・インデックス構築の処理件数を含む。rag_crawl_preview は source_store への配置を行わないため本出力形式の対象外。
 
 ### 検索結果の設計
 
@@ -261,7 +264,7 @@ flowchart LR
 | `title` | str | コンテンツのタイトル |
 | `chunk_index` | int | チャンクの連番（0 始まり） |
 | `collected_at` | str | 取り込みタイムスタンプ（ISO 8601） |
-| `source_type` | str | データソース種別（`"web"`, `"zenn"`, `"bluesky"`, `"local"`） |
+| `source_type` | str | データソース種別（`"web"`, `"zenn"`, `"bluesky"`, `"youtube"`, `"local"`, `"journal"`） |
 
 #### カスタムフィールド
 

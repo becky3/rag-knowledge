@@ -1295,5 +1295,5 @@ class TestRetrieveRawResults:
             where={"source_type": "bluesky"},
         )
         mock_bm25.search.assert_called_once_with(
-            "test", n_results=3, source_type="bluesky",
+            "test", n_results=3, source_type="bluesky", filters=None,
         )

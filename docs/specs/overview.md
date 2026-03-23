@@ -29,6 +29,7 @@ RAG Knowledge は、外部 Web ページから収集した知識をベクトル 
 | 19 | 再構築・統計・バックアップ | パイプライン再構築の MCP/CLI 公開・統計拡張・バックアップ手順 | [rebuild-stats.md](rebuild-stats.md) |
 | 20 | サイト一括取り込み（Scrapy subprocess） | Scrapy subprocess による大規模サイトの一括取り込み | [site-ingest.md](site-ingest.md) |
 | 21 | YouTube インジェスター | YouTube 動画の字幕・音声文字起こし取得 | [ingesters/youtube.md](ingesters/youtube.md) |
+| 22 | Journal インジェスター | 開発ジャーナルの登録・検索 | [ingesters/journal.md](ingesters/journal.md) |
 
 ## 3. 技術スタック
 
