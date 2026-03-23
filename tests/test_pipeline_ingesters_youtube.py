@@ -144,7 +144,7 @@ def _make_snippets() -> list[dict[str, Any]]:
 class TestIngestVideo:
     @pytest.mark.asyncio()
     async def test_successful_subtitle_ingest(self, source_store: Any) -> None:
-        """字幕取得成功時のファイル配置を検証する."""
+        """字幕取得成功時に place_file が正しく呼ばれることを検証する."""
         ingester = YoutubeIngester(source_store, max_duration=14400)
 
         metadata = _make_metadata()
@@ -164,20 +164,22 @@ class TestIngestVideo:
         assert result.placed == 1
         assert result.errors == 0
 
-        # JSON ファイルの検証
-        json_path = source_store.root_dir / "youtube" / "UCtest123456789012345" / "JV3KOJ_Z4Vs.json"
-        assert json_path.exists()
-        data = json.loads(json_path.read_text(encoding="utf-8"))
+        # place_file の呼び出し検証
+        source_store.place_file.assert_called_once()
+        call_kwargs = source_store.place_file.call_args
+        assert call_kwargs.kwargs["source_type"] == "youtube"
+        assert call_kwargs.kwargs["rel_path"] == "youtube/UCtest123456789012345/JV3KOJ_Z4Vs.json"
+
+        # JSON データの検証
+        data = json.loads(call_kwargs.kwargs["data"].decode("utf-8"))
         assert data["video_id"] == "JV3KOJ_Z4Vs"
         assert data["transcript_source"] == "subtitle"
         assert len(data["snippets"]) == 3
 
-        # .meta ファイルの検証
-        meta_path = json_path.parent / "JV3KOJ_Z4Vs.json.meta"
-        assert meta_path.exists()
-        meta_content = meta_path.read_text(encoding="utf-8")
-        assert "source_type: youtube" in meta_content
-        assert "video_id: JV3KOJ_Z4Vs" in meta_content
+        # メタデータの検証
+        meta = call_kwargs.kwargs["metadata"]
+        assert meta["source_type"] == "youtube"
+        assert meta["video_id"] == "JV3KOJ_Z4Vs"
 
     @pytest.mark.asyncio()
     async def test_duration_exceeded_skipped(self, source_store: Any) -> None:
@@ -210,7 +212,7 @@ class TestIngestVideo:
 
     @pytest.mark.asyncio()
     async def test_unknown_channel_id_fallback(self, source_store: Any) -> None:
-        """channel_id が取得できない場合のフォールバックを検証する."""
+        """channel_id が取得できない場合に unknown がフォールバック値として使われることを検証する."""
         ingester = YoutubeIngester(source_store)
 
         metadata = _make_metadata()
@@ -229,8 +231,9 @@ class TestIngestVideo:
             result = await ingester.ingest_video("https://www.youtube.com/watch?v=JV3KOJ_Z4Vs")
 
         assert result.placed == 1
-        json_path = source_store.root_dir / "youtube" / "unknown" / "JV3KOJ_Z4Vs.json"
-        assert json_path.exists()
+        call_kwargs = source_store.place_file.call_args
+        assert call_kwargs.kwargs["rel_path"] == "youtube/unknown/JV3KOJ_Z4Vs.json"
+        assert call_kwargs.kwargs["metadata"]["channel_id"] == "unknown"
 
     @pytest.mark.asyncio()
     async def test_whisper_model_recorded(self, source_store: Any) -> None:
@@ -252,11 +255,10 @@ class TestIngestVideo:
             result = await ingester.ingest_video("https://www.youtube.com/watch?v=JV3KOJ_Z4Vs")
 
         assert result.placed == 1
-        json_path = source_store.root_dir / "youtube" / "UCtest123456789012345" / "JV3KOJ_Z4Vs.json"
-        data = json.loads(json_path.read_text(encoding="utf-8"))
+        call_kwargs = source_store.place_file.call_args
+        data = json.loads(call_kwargs.kwargs["data"].decode("utf-8"))
         assert data["transcript_source"] == "whisper"
         assert data["whisper_model"] == "base"
-
 
     @pytest.mark.asyncio()
     async def test_overwritten_count_on_reingest(self, source_store: Any) -> None:
@@ -266,7 +268,7 @@ class TestIngestVideo:
         metadata = _make_metadata()
         snippets = _make_snippets()
 
-        # 1 回目
+        # 1 回目: dest.exists() が False → overwritten=0
         with (
             patch.object(ingester, "_fetch_metadata", new_callable=AsyncMock, return_value=metadata),
             patch.object(ingester, "_fetch_transcript", new_callable=AsyncMock, return_value=(snippets, "subtitle", "ja")),
@@ -275,7 +277,11 @@ class TestIngestVideo:
         assert result1.placed == 1
         assert result1.overwritten == 0
 
-        # 2 回目（同一動画）
+        # 2 回目: dest に実ファイルを作成して exists() が True になるようにする
+        dest = source_store.root_dir / "youtube" / "UCtest123456789012345" / "JV3KOJ_Z4Vs.json"
+        dest.parent.mkdir(parents=True, exist_ok=True)
+        dest.write_text("{}", encoding="utf-8")
+
         with (
             patch.object(ingester, "_fetch_metadata", new_callable=AsyncMock, return_value=metadata),
             patch.object(ingester, "_fetch_transcript", new_callable=AsyncMock, return_value=(snippets, "subtitle", "ja")),

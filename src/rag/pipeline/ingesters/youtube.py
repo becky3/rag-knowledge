@@ -125,10 +125,11 @@ class YoutubeIngester:
         self._max_videos = _validate_max_videos(max_videos)
         self._request_interval = max(request_interval, MIN_REQUEST_INTERVAL)
         self._request_timeout = request_timeout
-        self._whisper_model = whisper_model
+        self._whisper_model_name = whisper_model
         self._whisper_device = whisper_device
         self._transcript_languages = transcript_languages or ["ja", "en"]
         self._max_duration = max_duration
+        self._whisper_model_instance: Any = None  # 遅延初期化キャッシュ
 
     async def ingest_video(
         self,
@@ -203,31 +204,48 @@ class YoutubeIngester:
             "snippets": snippets,
         }
         if transcript_source == "whisper":
-            json_data["whisper_model"] = self._whisper_model
+            json_data["whisper_model"] = self._whisper_model_name
 
-        # source_store 配置
+        # source_store 配置（place_file 経由で配置・.meta 生成を統一）
         rel_path = f"youtube/{channel_id}/{video_id}.json"
-        dest = self._store.root_dir / rel_path
-        dest.parent.mkdir(parents=True, exist_ok=True)
+        json_str = json.dumps(json_data, ensure_ascii=False, indent=2)
+        data_bytes = json_str.encode("utf-8")
 
         # 重複チェック（上書き方式なので overwritten を記録。書き込み前に判定）
+        dest = self._store.root_dir / rel_path
         is_overwrite = dest.exists()
 
-        json_str = json.dumps(json_data, ensure_ascii=False, indent=2)
-        dest.write_text(json_str, encoding="utf-8")
+        source_id = f"https://www.youtube.com/watch?v={video_id}"
+        meta_dict: dict[str, Any] = {
+            "source_id": source_id,
+            "source_type": "youtube",
+            "title": metadata.get("title", ""),
+            "collected_at": now_iso(),
+            "video_id": video_id,
+            "channel_id": metadata.get("channel_id") or "unknown",
+            "uploader": metadata.get("uploader", ""),
+            "upload_date": metadata.get("upload_date", ""),
+            "duration": metadata.get("duration") or 0,
+            "transcript_source": transcript_source,
+        }
+        if playlist_id:
+            meta_dict["playlist_id"] = playlist_id
+
+        try:
+            self._store.place_file(
+                source_type="youtube",
+                data=data_bytes,
+                rel_path=rel_path,
+                metadata=meta_dict,
+            )
+        except Exception:
+            logger.exception("動画の配置に失敗しました: %s", rel_path)
+            result.errors += 1
+            result.error_details.append(f"配置失敗: {rel_path}")
+            return result
 
         if is_overwrite:
             result.overwritten += 1
-
-        # .meta サイドカーファイル生成
-        meta_path = dest.parent / f"{video_id}.json.meta"
-        meta_content = self._build_meta(
-            video_id=video_id,
-            metadata=metadata,
-            transcript_source=transcript_source,
-            playlist_id=playlist_id,
-        )
-        meta_path.write_text(meta_content, encoding="utf-8")
 
         result.placed += 1
         logger.info(
@@ -273,7 +291,8 @@ class YoutubeIngester:
 
         # 各動画を順次処理
         consecutive_errors = 0
-        for i, entry in enumerate(video_entries[:effective_max]):
+        entries_to_process = video_entries[:effective_max]
+        for i, entry in enumerate(entries_to_process):
             video_id = entry.get("id", "")
             if not video_id:
                 result.errors += 1
@@ -317,8 +336,8 @@ class YoutubeIngester:
                 )
                 break
 
-            # リクエスト間隔待機
-            if i < len(video_entries) - 1:
+            # リクエスト間隔待機（次の動画がある場合のみ）
+            if i < len(entries_to_process) - 1:
                 await asyncio.sleep(self._request_interval)
 
         return result
@@ -430,13 +449,15 @@ class YoutubeIngester:
                     f"{file_size_mb:.0f}MB > {MAX_AUDIO_FILE_SIZE_MB}MB"
                 )
 
-            # faster-whisper で文字起こし
+            # faster-whisper で文字起こし（モデルは遅延初期化 + キャッシュ）
             def _transcribe() -> tuple[list[dict[str, Any]], str]:
-                model = WhisperModel(
-                    self._whisper_model,
-                    device=self._whisper_device,
-                    compute_type="float16" if self._whisper_device == "cuda" else "int8",
-                )
+                if self._whisper_model_instance is None:
+                    self._whisper_model_instance = WhisperModel(
+                        self._whisper_model_name,
+                        device=self._whisper_device,
+                        compute_type="float16" if self._whisper_device == "cuda" else "int8",
+                    )
+                model = self._whisper_model_instance
                 segments, info = model.transcribe(
                     audio_path,
                     language=self._transcript_languages[0],
@@ -511,35 +532,3 @@ class YoutubeIngester:
 
         return await loop.run_in_executor(None, _expand)
 
-    def _build_meta(
-        self,
-        *,
-        video_id: str,
-        metadata: dict[str, Any],
-        transcript_source: str,
-        playlist_id: str | None,
-    ) -> str:
-        """YAML 形式の .meta サイドカーファイルを生成する."""
-        import yaml
-
-        meta: dict[str, Any] = {
-            "source_id": f"https://www.youtube.com/watch?v={video_id}",
-            "source_type": "youtube",
-            "title": metadata.get("title", ""),
-            "collected_at": now_iso(),
-            "video_id": video_id,
-            "channel_id": metadata.get("channel_id", "unknown"),
-            "uploader": metadata.get("uploader", ""),
-            "upload_date": metadata.get("upload_date", ""),
-            "duration": metadata.get("duration", 0),
-            "transcript_source": transcript_source,
-        }
-        if playlist_id:
-            meta["playlist_id"] = playlist_id
-
-        return yaml.dump(
-            meta,
-            allow_unicode=True,
-            default_flow_style=False,
-            sort_keys=False,
-        )

@@ -281,7 +281,7 @@ def _get_supported_extensions() -> list[str]:
 
 # --- MCP ツール定義 ---
 
-_VALID_SOURCE_TYPES: frozenset[str] = frozenset({"web", "zenn", "bluesky", "local"})
+_VALID_SOURCE_TYPES: frozenset[str] = frozenset({"web", "zenn", "bluesky", "youtube", "local"})
 
 
 def _format_chunk_position(chunk_index: int, total_chunks: int) -> str:

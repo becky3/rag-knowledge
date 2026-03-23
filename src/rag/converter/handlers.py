@@ -566,7 +566,7 @@ def convert_json_youtube(
         merge_max_chars: スニペット結合の最大文字数
 
     Returns:
-        Markdown テキスト（空の場合は None）
+        Markdown テキスト（スニペットがない場合はヘッダーのみの Markdown）
     """
     video_id = data.get("video_id", "")
     title = data.get("title") or "(Untitled)"
