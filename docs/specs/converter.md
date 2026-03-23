@@ -68,6 +68,7 @@
 | 拡張子 | 入力形式 | 出力形式 | 出力拡張子 | 変換方式 |
 |--------|---------|---------|-----------|---------|
 | `.html` | HTML | Markdown | `.md` | HTML → Markdown 変換 |
+| `.htm` | HTML | Markdown | `.md` | HTML → Markdown 変換（`.html` と同一処理） |
 | `.pdf` | PDF | Markdown | `.md` | PDF テキスト抽出 |
 | `.json` | JSON | Markdown | `.md` | source_type に応じた構造化テキスト抽出 |
 | `.md` | Markdown | Markdown | `.md` | パススルー（コピー） |
@@ -94,7 +95,7 @@ flowchart TD
     OUTPUT["converted_store に配置"]
 
     INPUT --> EXT
-    EXT -->|.html| HTML
+    EXT -->|.html, .htm| HTML
     EXT -->|.pdf| PDF
     EXT -->|.json| JSON
     EXT -->|.md, .txt, .adoc| PASS

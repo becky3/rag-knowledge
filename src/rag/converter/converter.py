@@ -37,6 +37,7 @@ RegenOption = Literal["skip", "if_modified", "force"]
 # 拡張子 → 出力拡張子のマッピング（変換対象）
 _EXTENSION_OUTPUT_MAP: dict[str, str] = {
     ".html": ".md",
+    ".htm": ".md",
     ".pdf": ".md",
     ".json": ".md",
 }
@@ -322,7 +323,7 @@ class Converter:
         Returns:
             変換後テキスト、または失敗時は None
         """
-        if ext == ".html":
+        if ext in (".html", ".htm"):
             return convert_html(source_path)
 
         if ext == ".pdf":
