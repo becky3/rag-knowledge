@@ -107,6 +107,12 @@ BlueSky（AT Protocol）の投稿を API 経由で取得し、source_store に�
 
 プレビュー機能は提供しない。BlueSky の投稿一覧は公開情報（`https://bsky.app/profile/{handle}` で閲覧可能）であり、取り込み前の確認は BlueSky 上で直接行える。
 
+### CLI コマンド
+
+| コマンド | 引数 | 振る舞い |
+|---------|------|---------|
+| `crawl-bluesky` | `handle`、`--max-posts`（任意）、`--include-reposts`（任意） | `rag_crawl_bluesky` と同等の処理を CLI から実行する |
+
 ### 設定項目
 
 | 設定項目 | 型 | 保管先 | デフォルト | 許容範囲 | 内容 |
@@ -248,27 +254,27 @@ source_store/
 
 共通フィールド:
 
-| フィールド | 導出元 |
-|-----------|--------|
-| `source_id` | `at://{post.author.did}/app.bsky.feed.post/{rkey}` |
-| `source_type` | `"bluesky"` |
-| `title` | `post.record.text` の先頭 50 文字（50 文字を超える場合は末尾に `...` を付加） |
-| `collected_at` | 取り込み実行時のタイムスタンプ（ISO 8601） |
+| フィールド | 型 | 内容 | 値の取得元 |
+|-----------|-----|------|-----------|
+| `source_id` | str | ソース識別子 | `at://{post.author.did}/app.bsky.feed.post/{rkey}` |
+| `source_type` | str | 媒体種別 | 固定値 `"bluesky"` |
+| `title` | str | 投稿タイトル | `post.record.text` の先頭 50 文字（50 文字を超える場合は末尾に `...` を付加） |
+| `collected_at` | str | 取り込みタイムスタンプ（ISO 8601） | 取り込み実行時の現在時刻 |
 
 媒体別フィールド:
 
-| フィールド | 型 | 導出元 |
-|-----------|-----|--------|
-| `handle` | str | `post.author.handle`（元投稿者のハンドル。リポスト時も元投稿者） |
-| `did` | str | `post.author.did` |
-| `rkey` | str | `post.uri` の末尾パス |
-| `url` | str | `https://bsky.app/profile/{handle}/post/{rkey}` |
-| `created_at` | str | `post.record.createdAt`（ISO 8601） |
-| `has_images` | bool | `post.record.embed` に画像データが含まれるか |
-| `has_video` | bool | `post.record.embed` に動画データが含まれるか |
-| `has_external_link` | bool | `post.record.embed` に外部リンクが含まれるか |
-| `is_reply` | bool | `post.record.reply` が存在するか |
-| `is_repost` | bool | フィードアイテムの `reason.$type` が `app.bsky.feed.defs#reasonRepost` か |
+| フィールド | 型 | 内容 | 値の取得元 |
+|-----------|-----|------|-----------|
+| `handle` | str | 元投稿者のハンドル（リポスト時も元投稿者） | `post.author.handle` |
+| `did` | str | 元投稿者の DID | `post.author.did` |
+| `rkey` | str | レコードキー | `post.uri` の末尾パス |
+| `url` | str | 投稿の Web URL | `https://bsky.app/profile/{handle}/post/{rkey}` |
+| `created_at` | str | 投稿日時（ISO 8601） | `post.record.createdAt` |
+| `has_images` | bool | 画像添付の有無 | `post.record.embed` に画像データが含まれるか |
+| `has_video` | bool | 動画添付の有無 | `post.record.embed` に動画データが含まれるか |
+| `has_external_link` | bool | 外部リンクの有無 | `post.record.embed` に外部リンクが含まれるか |
+| `is_reply` | bool | リプライかどうか | `post.record.reply` が存在するか |
+| `is_repost` | bool | リポストかどうか | フィードアイテムの `reason.$type` が `app.bsky.feed.defs#reasonRepost` か |
 
 .meta ファイル例:
 

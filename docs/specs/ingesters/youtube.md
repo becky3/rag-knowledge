@@ -259,24 +259,24 @@ source_store/
 
 共通フィールド:
 
-| フィールド | 導出元 |
-|-----------|--------|
-| `source_id` | `https://www.youtube.com/watch?v={video_id}` |
-| `source_type` | `"youtube"` |
-| `title` | 動画タイトル |
-| `collected_at` | 取り込み実行時のタイムスタンプ（ISO 8601） |
+| フィールド | 型 | 内容 | 値の取得元 |
+|-----------|-----|------|-----------|
+| `source_id` | str | ソース識別子 | `https://www.youtube.com/watch?v={video_id}` |
+| `source_type` | str | 媒体種別 | 固定値 `"youtube"` |
+| `title` | str | 動画タイトル | yt-dlp メタデータの `title` フィールド |
+| `collected_at` | str | 取り込みタイムスタンプ（ISO 8601） | 取り込み実行時の現在時刻 |
 
 媒体別フィールド:
 
-| フィールド | 型 | 導出元 |
-|-----------|-----|--------|
-| `video_id` | str | YouTube 動画 ID |
-| `channel_id` | str | チャンネル ID（`UC...` 形式） |
-| `uploader` | str | チャンネル名 |
-| `upload_date` | str | 公開日（`YYYYMMDD`） |
-| `duration` | int | 動画長（秒） |
-| `transcript_source` | str | `"subtitle"` または `"whisper"` |
-| `playlist_id` | str | プレイリスト経由の場合のプレイリスト ID（任意） |
+| フィールド | 型 | 内容 | 値の取得元 |
+|-----------|-----|------|-----------|
+| `video_id` | str | YouTube 動画 ID | yt-dlp メタデータの `id` フィールド |
+| `channel_id` | str | チャンネル ID（`UC...` 形式） | yt-dlp メタデータの `channel_id` フィールド |
+| `uploader` | str | チャンネル名 | yt-dlp メタデータの `uploader` フィールド |
+| `upload_date` | str | 公開日（`YYYYMMDD`） | yt-dlp メタデータの `upload_date` フィールド |
+| `duration` | int | 動画長（秒） | yt-dlp メタデータの `duration` フィールド |
+| `transcript_source` | str | テキスト取得元 | `"subtitle"` または `"whisper"` |
+| `playlist_id` | str | プレイリスト ID（任意） | プレイリスト経由の場合のプレイリスト ID |
 
 .meta ファイル例:
 
