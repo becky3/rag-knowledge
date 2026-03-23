@@ -73,8 +73,8 @@ class _EnvLoader(BaseSettings):
     rag_debug_log_enabled: bool
 
     # YouTube インジェスター（Whisper）
-    rag_youtube_whisper_model: str
-    rag_youtube_whisper_device: Literal["cuda", "cpu"]
+    rag_youtube_whisper_model: str = "base"
+    rag_youtube_whisper_device: Literal["cuda", "cpu"] = "cuda"
 
     # サイト一括取り込み
     site_ingest_temp_dir: str = ".tmp/site_ingest"
