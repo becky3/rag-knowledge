@@ -144,6 +144,7 @@ id/class パターンの一致判定:
 
 - 部分一致（大文字小文字を区別しない）で判定する
 - id パターンは長いパターンから順に試行する（具体的なパターンを優先）
+- テキストが空の要素はスキップし、次の候補を試行する（空の `<div id="contents">` 等による誤検出を防止）
 
 id パターン一覧（試行順）:
 
@@ -168,6 +169,8 @@ class パターン一覧（試行順）:
 |---------|---------|
 | `main-content` | `class="main-content"` |
 | `main_content` | `class="main_content"` |
+| `main_text` | `class="main_text"`（青空文庫 XHTML 等） |
+| `main-text` | `class="main-text"` |
 | `content-wrap` | `class="content-wrap"` |
 | `content_wrap` | `class="content_wrap"` |
 | `page-container` | `class="page-container"` |

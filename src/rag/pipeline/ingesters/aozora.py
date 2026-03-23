@@ -36,9 +36,6 @@ GITHUB_RAW_BASE = (
     "https://raw.githubusercontent.com/aozorabunko/aozorabunko/master"
 )
 
-# 青空文庫公式 URL のベース
-AOZORA_BASE_URL = "https://www.aozora.gr.jp"
-
 # カタログの source_store 内の相対パス
 CATALOG_REL_PATH = "aozora/catalog.csv"
 

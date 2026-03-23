@@ -1468,7 +1468,7 @@ async def rag_crawl_aozora(
                 client=client,
             )
 
-        if ingest_result.placed == 0 and ingest_result.errors == 0:
+        if ingest_result.placed == 0 and ingest_result.errors == 0 and ingest_result.skipped == 0:
             return f"対象作品が見つかりませんでした（人物ID: {person_id}）"
 
         pipeline_summary = await _run_ingest_and_index_subprocess(
