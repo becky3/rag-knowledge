@@ -45,6 +45,7 @@ os.environ.setdefault("ANONYMIZED_TELEMETRY", "False")
 # bm25s が "resource module not available on Windows" を stdout に print する
 # 問題への対策として、import 時に stdout を抑制する。
 from .config import ensure_utf8_streams
+from .filter_parser import parse_filters
 
 with contextlib.redirect_stdout(io.StringIO()):
     from .bm25_index import BM25Index
@@ -323,8 +324,9 @@ async def rag_search(
         n_results: 各エンジンから取得する結果数（未指定時は設定値を使用）
         source_type: ソース種別フィルタ（"web", "zenn", "bluesky", "youtube", "local", "journal"）。
             指定時はそのソース種別のチャンクのみを検索対象とする。未指定時は全種別を検索。
-        filters: メタデータフィルタ（JSON 形式）。.meta のカスタムフィールドで検索結果を絞り込む。
-            完全一致フィルタ。例: '{"repository": "rag-knowledge"}'
+        filters: メタデータフィルタ（key=value 形式、カンマ区切りで複数指定可）。
+            .meta のカスタムフィールドで検索結果を絞り込む。完全一致。
+            例: "repository=rag-knowledge" / "repository=rag-knowledge,tag=dev"
             未指定時はフィルタなし。
 
     Returns:
@@ -338,21 +340,12 @@ async def rag_search(
         return f"無効な source_type: {source_type!r}（有効値: {valid}）"
 
     # filters パラメータのパース
-    parsed_filters: dict[str, str | int | float | bool] | None = None
+    parsed_filters: dict[str, str] | None = None
     if filters is not None:
         try:
-            parsed_filters = json.loads(filters)
-            if not isinstance(parsed_filters, dict):
-                return "エラー: filters は JSON オブジェクト形式で指定してください（例: '{\"repository\": \"rag-knowledge\"}'）"
-            allowed_types = (str, int, float, bool)
-            for key, value in parsed_filters.items():
-                if not isinstance(value, allowed_types):
-                    return (
-                        f"エラー: filters の値は str/int/float/bool のみサポートされています。"
-                        f" キー {key!r} に不正な型 {type(value).__name__} が指定されています"
-                    )
-        except json.JSONDecodeError:
-            return "エラー: filters の JSON パースに失敗しました"
+            parsed_filters = parse_filters(filters)
+        except ValueError as e:
+            return f"エラー: {e}"
 
     service = await _get_rag_service()
     if n_results is None:

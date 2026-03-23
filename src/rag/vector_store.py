@@ -506,11 +506,13 @@ class VectorStore:
         if not chunk_ids:
             return
 
-        await asyncio.to_thread(
-            self._collection.update,
-            ids=chunk_ids,
-            metadatas=metadatas,
-        )
+        def _update_sync() -> None:
+            self._collection.update(
+                ids=chunk_ids,
+                metadatas=metadatas,  # type: ignore[arg-type]
+            )
+
+        await asyncio.to_thread(_update_sync)
 
     async def clear(self) -> None:
         """コレクションを削除して再作成する（全データクリア）."""

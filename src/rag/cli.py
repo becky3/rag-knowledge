@@ -17,6 +17,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, TypedDict
 from urllib.parse import urldefrag
 
+from .filter_parser import parse_filters
 from .evaluation import (
     EvaluationReport,
     FailureTag,
@@ -322,7 +323,7 @@ def main() -> None:
     search_parser.add_argument(
         "--filters",
         default=None,
-        help='メタデータフィルタ（JSON 形式、例: \'{"repository": "rag-knowledge"}\'）',
+        help="メタデータフィルタ（key=value 形式、例: 'repository=rag-knowledge'）",
     )
 
     # delete サブコマンド
@@ -1296,23 +1297,12 @@ def run_search(args: argparse.Namespace) -> None:
     source_type: str | None = args.source_type
 
     # filters パラメータのパース
-    parsed_filters: dict[str, str | int | float | bool] | None = None
+    parsed_filters: dict[str, str] | None = None
     if args.filters is not None:
         try:
-            parsed_filters = json.loads(args.filters)
-            if not isinstance(parsed_filters, dict):
-                print("エラー: --filters は JSON オブジェクト形式で指定してください")
-                return
-            allowed_types = (str, int, float, bool)
-            for key, value in parsed_filters.items():
-                if not isinstance(value, allowed_types):
-                    print(
-                        f"エラー: --filters の値は str/int/float/bool のみ使用できます"
-                        f"（キー {key!r} に不正な型 {type(value).__name__}）"
-                    )
-                    return
-        except json.JSONDecodeError:
-            print("エラー: --filters の JSON パースに失敗しました")
+            parsed_filters = parse_filters(args.filters)
+        except ValueError as e:
+            print(f"エラー: {e}")
             return
 
     raw = _asyncio.run(

@@ -641,7 +641,7 @@ class RAGKnowledgeService:
         query: str,
         n_results: int = 5,
         source_type: str | None = None,
-        filters: dict[str, str | int | float | bool] | None = None,
+        filters: dict[str, str] | None = None,
     ) -> RawSearchResults:
         """ベクトル検索・BM25検索の生結果を個別に返す（準Agentic Search用）.
 
@@ -755,7 +755,7 @@ class RAGKnowledgeService:
     @staticmethod
     def _build_where_clause(
         source_type: str | None,
-        filters: dict[str, str | int | float | bool] | None,
+        filters: dict[str, str] | None,
     ) -> dict[str, Any] | None:
         """ChromaDB の where 句を構築する.
 
@@ -782,8 +782,8 @@ class RAGKnowledgeService:
 
     @staticmethod
     def _build_bm25_filters(
-        filters: dict[str, str | int | float | bool],
-    ) -> dict[str, str | int | float | bool]:
+        filters: dict[str, str],
+    ) -> dict[str, str]:
         """BM25 用のフィルタ辞書を構築する.
 
         キーに custom: プレフィックスを付与する（ChromaDB メタデータのキーと一致させる）。

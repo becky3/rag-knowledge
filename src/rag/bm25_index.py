@@ -154,7 +154,7 @@ class BM25Index:
         query: str,
         n_results: int = 10,
         source_type: str | None = None,
-        filters: dict[str, str | int | float | bool] | None = None,
+        filters: dict[str, str] | None = None,
     ) -> list[BM25Result]:
         """クエリでキーワード検索を実行する.
 
@@ -224,11 +224,18 @@ class BM25Index:
     @staticmethod
     def _matches_filters(
         metadata: dict[str, str | int | float | bool],
-        filters: dict[str, str | int | float | bool],
+        filters: dict[str, str],
     ) -> bool:
-        """メタデータがフィルタ条件に完全一致するか判定する."""
+        """メタデータがフィルタ条件に一致するか判定する.
+
+        フィルタ値（常に文字列）とメタデータ値を大文字変換して比較する。
+        これにより、メタデータの型（int/bool 等）や大文字小文字の違いを吸収する。
+        """
         for key, value in filters.items():
-            if metadata.get(key) != value:
+            meta_value = metadata.get(key)
+            if meta_value is None:
+                return False
+            if str(meta_value).upper() != value.upper():
                 return False
         return True
 

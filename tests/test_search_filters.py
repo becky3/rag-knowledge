@@ -10,6 +10,56 @@ from pathlib import Path
 import pytest
 
 from rag.bm25_index import BM25Index
+from rag.filter_parser import parse_filters
+
+
+class TestParseFilters:
+    """_parse_filters のテスト."""
+
+    def test_single_key_value(self) -> None:
+        """単一 key=value のパース."""
+        result = parse_filters("repository=rag-knowledge")
+        assert result == {"repository": "rag-knowledge"}
+
+    def test_multiple_key_values(self) -> None:
+        """複数 key=value のパース."""
+        result = parse_filters("repository=rag-knowledge,tag=dev")
+        assert result == {"repository": "rag-knowledge", "tag": "dev"}
+
+    def test_whitespace_trimmed(self) -> None:
+        """前後の空白がトリムされる."""
+        result = parse_filters(" repository = rag-knowledge , tag = dev ")
+        assert result == {"repository": "rag-knowledge", "tag": "dev"}
+
+    def test_empty_string_returns_empty_dict(self) -> None:
+        """空文字列は空 dict."""
+        result = parse_filters("")
+        assert result == {}
+
+    def test_value_with_equals(self) -> None:
+        """値に = が含まれる場合（最初の = で分割）."""
+        result = parse_filters("expr=a=b")
+        assert result == {"expr": "a=b"}
+
+    def test_missing_equals_raises(self) -> None:
+        """= を含まないペアはエラー."""
+        with pytest.raises(ValueError, match="不正なフィルタ形式"):
+            parse_filters("invalid-filter")
+
+    def test_empty_key_raises(self) -> None:
+        """キーが空の場合はエラー."""
+        with pytest.raises(ValueError, match="フィルタのキーが空です"):
+            parse_filters("=value")
+
+    def test_empty_value_allowed(self) -> None:
+        """値が空は許容."""
+        result = parse_filters("key=")
+        assert result == {"key": ""}
+
+    def test_trailing_comma_ignored(self) -> None:
+        """末尾カンマは無視."""
+        result = parse_filters("repository=rag-knowledge,")
+        assert result == {"repository": "rag-knowledge"}
 
 
 class TestBM25MetadataMap:
@@ -213,6 +263,34 @@ class TestBM25MatchesFilters:
             {"custom:repository": "rag-knowledge", "custom:author": "bob"},
         ) is False
 
+    def test_case_insensitive_match(self) -> None:
+        """大文字小文字を区別しない比較."""
+        assert BM25Index._matches_filters(
+            {"custom:repository": "Rag-Knowledge"},
+            {"custom:repository": "rag-knowledge"},
+        ) is True
+
+    def test_int_metadata_matches_string_filter(self) -> None:
+        """int メタデータが文字列フィルタにマッチする."""
+        assert BM25Index._matches_filters(
+            {"custom:duration": 42},
+            {"custom:duration": "42"},
+        ) is True
+
+    def test_bool_metadata_matches_string_filter(self) -> None:
+        """bool メタデータが文字列フィルタにマッチする（大文字小文字不問）."""
+        assert BM25Index._matches_filters(
+            {"custom:closed": True},
+            {"custom:closed": "true"},
+        ) is True
+
+    def test_bool_false_matches(self) -> None:
+        """bool False が 'false' にマッチする."""
+        assert BM25Index._matches_filters(
+            {"custom:closed": False},
+            {"custom:closed": "false"},
+        ) is True
+
 
 class TestBM25MetadataPersistence:
     """BM25Index のメタデータ永続化テスト."""
@@ -263,7 +341,7 @@ class TestBuildWhereClause:
     def _build(
         self,
         source_type: str | None = None,
-        filters: dict[str, str | int | float | bool] | None = None,
+        filters: dict[str, str] | None = None,
     ) -> dict | None:
         from rag.rag_knowledge import RAGKnowledgeService
         return RAGKnowledgeService._build_where_clause(source_type, filters)
@@ -311,8 +389,8 @@ class TestBuildBM25Filters:
     """RAGKnowledgeService._build_bm25_filters のテスト."""
 
     def _build(
-        self, filters: dict[str, str | int | float | bool],
-    ) -> dict[str, str | int | float | bool]:
+        self, filters: dict[str, str],
+    ) -> dict[str, str]:
         from rag.rag_knowledge import RAGKnowledgeService
         return RAGKnowledgeService._build_bm25_filters(filters)
 
@@ -328,9 +406,3 @@ class TestBuildBM25Filters:
             "custom:repository": "rag-knowledge",
             "custom:author": "alice",
         }
-
-    def test_preserves_value_types(self) -> None:
-        """値の型が保持される."""
-        result = self._build({"count": 42, "enabled": True})
-        assert result["custom:count"] == 42
-        assert result["custom:enabled"] is True
