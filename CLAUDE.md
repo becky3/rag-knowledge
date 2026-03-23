@@ -31,6 +31,28 @@ MCP サーバー enabled 中は、**同じ DB に対する CLI 操作・テス�
 
 MCP を disable → CLI `rebuild --mode full` で復旧する。
 
+### worktree コードでの MCP 動作確認
+
+worktree で開発中のコードを MCP サーバーとして動作確認する手順:
+
+1. `.mcp.json` の `args` に `--directory` を追加し、worktree の絶対パスを指定する:
+
+   ```json
+   "args": ["--directory", "D:\\GitHub\\becky3\\rag-knowledge-wt-XXX", "run", "python", "-m", "rag.server"]
+   ```
+
+2. worktree の `.env` でストレージパスを絶対パスに変更する（相対パスだとメインリポジトリのストレージを参照してしまう）:
+
+   ```
+   CHROMADB_PERSIST_DIR=D:/GitHub/becky3/rag-knowledge-wt-XXX/.tmp/test_chroma_db
+   ```
+
+3. `/mcp` で disable → enable（プロセス再起動が必要。reconnect では `.env` が再読み込みされない）
+
+4. 動作確認完了後、`.mcp.json` を元に戻す（`--directory` を削除）
+
+注意: `--directory .` は MCP サーバー起動時の cwd に依存するため使用不可。絶対パスを指定すること。
+
 ## Claude Code 拡張機能
 
 ### 自律呼び出しルール（プロジェクト固有）
