@@ -22,10 +22,7 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-from rag.pipeline.ingesters.aozora import (
-    MAX_WORKS_HARD_LIMIT,
-    AozoraIngester,
-)
+from rag.pipeline.ingesters.aozora import AozoraIngester
 from rag.store.source_store import SourceStore
 
 

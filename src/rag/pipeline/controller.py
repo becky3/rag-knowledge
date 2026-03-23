@@ -48,6 +48,7 @@ _NO_META_TYPES: frozenset[SourceType] = frozenset({"local"})
 _PIPELINE_EXCLUDE_FILES: frozenset[str] = frozenset({
     ".gitignore",
     "aozora/catalog.csv",
+    "aozora/catalog.csv.meta",
 })
 
 

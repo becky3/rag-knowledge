@@ -2041,6 +2041,9 @@ async def run_update_aozora_catalog(args: argparse.Namespace) -> None:
         logger.error("エラー: %s", e)
         sys.exit(1)
 
+    # カタログはパイプライン処理対象外だが、未コミット変更が残ると
+    # 後続の rebuild で失敗するためコミットしておく
+    controller.commit("update_aozora_catalog")
     print(result_text)
 
 

@@ -1305,6 +1305,9 @@ async def rag_update_aozora_catalog(
             request_interval=settings.rag_aozora_request_interval,
         ) as client:
             result_text = await aozora_ingester.update_catalog(client=client)
+        # カタログはパイプライン処理対象外だが、未コミット変更が残ると
+        # 後続の rebuild で失敗するためコミットしておく
+        controller.commit("update_aozora_catalog")
         return result_text
     except (ValueError, TypeError) as e:
         return f"エラー: {e}"
