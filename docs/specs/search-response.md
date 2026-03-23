@@ -54,7 +54,7 @@ MCP クライアントからの rag_search ツール呼び出し。
 | `query` | str | Yes | 検索キーワード |
 | `n_results` | int | No | エンジンあたりの結果件数 |
 | `source_type` | str | No | ソース種別フィルタ（`"web"`, `"zenn"`, `"bluesky"`, `"youtube"`, `"local"`, `"journal"`） |
-| `filters` | str (JSON) | No | カスタムメタデータフィルタ（JSON オブジェクト形式）。`.meta` の extra フィールドで検索結果を絞り込む。完全一致。例: `'{"repository": "rag-knowledge"}'` |
+| `filters` | str | No | カスタムメタデータフィルタ（`key=value` 形式、複数指定時はカンマ区切り）。`.meta` の extra フィールドで検索結果を絞り込む。完全一致。例: `repository=rag-knowledge` / `repository=rag-knowledge,tag=dev` |
 
 #### フィルタの動作
 
@@ -62,8 +62,10 @@ MCP クライアントからの rag_search ツール呼び出し。
 
 - `source_type` と `filters` は併用可能。両方指定時は AND 条件として結合する
 - `filters` のキーにはユーザーが `custom:` プレフィックスを付ける必要はない（内部で自動付与）
-- `filters` が無効な JSON またはオブジェクト型でない場合はエラーメッセージを返す
+- `filters` のパース形式: `key=value` をカンマ区切り。値は全て文字列として扱う
+- `filters` が不正な形式（`=` を含まないペアがある等）の場合はエラーメッセージを返す
 - `filters` 未指定時はフィルタなし（全件対象）
+- フィルタ比較: BM25 側はメタデータ値を文字列変換・大文字化して比較する（大文字小文字を区別しない。int/bool 等の非文字列カスタムフィールドにもマッチする）。ChromaDB 側は `where` 句による完全一致（型・大文字小文字を区別する）
 
 #### 振る舞い
 
