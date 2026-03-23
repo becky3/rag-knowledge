@@ -28,7 +28,12 @@ class IngestResult:
             parts.append(f"エラー: {self.errors}件")
         if context:
             parts.append(f"（{context}）")
-        return " / ".join(parts)
+        result = " / ".join(parts)
+        if self.error_details:
+            result += "\n" + "\n".join(
+                f"  - {detail}" for detail in self.error_details
+            )
+        return result
 
 
 def now_iso() -> str:
