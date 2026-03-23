@@ -14,7 +14,7 @@ from rag.filter_parser import parse_filters
 
 
 class TestParseFilters:
-    """_parse_filters のテスト."""
+    """parse_filters のテスト."""
 
     def test_single_key_value(self) -> None:
         """単一 key=value のパース."""

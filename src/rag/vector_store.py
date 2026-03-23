@@ -13,7 +13,7 @@ from urllib.parse import urlparse
 
 import chromadb
 from chromadb.api.shared_system_client import SharedSystemClient
-from chromadb.api.types import Embeddings
+from chromadb.api.types import Embeddings, Metadatas
 from chromadb.config import Settings as ChromaSettings
 
 from .embedding.base import EmbeddingProvider
@@ -506,13 +506,11 @@ class VectorStore:
         if not chunk_ids:
             return
 
-        def _update_sync() -> None:
-            self._collection.update(
-                ids=chunk_ids,
-                metadatas=metadatas,  # type: ignore[arg-type]
-            )
-
-        await asyncio.to_thread(_update_sync)
+        await asyncio.to_thread(
+            self._collection.update,
+            ids=chunk_ids,
+            metadatas=cast(Metadatas, metadatas),
+        )
 
     async def clear(self) -> None:
         """コレクションを削除して再作成する（全データクリア）."""
