@@ -287,14 +287,16 @@ class TestIngestVideo:
 
     @pytest.mark.asyncio()
     async def test_api_error_does_not_fallback_to_whisper(self, source_store: Any) -> None:
-        """API エラー（IP ブロック等）では Whisper フォールバックせずエラーになることを検証する."""
-        from youtube_transcript_api import YouTubeTranscriptApi  # safety:allowed
+        """API エラー（IP ブロック等）では Whisper フォールバックせずエラーになることを検証する.
 
+        _fetch_subtitle をパッチして RequestBlocked を投げさせることで、
+        _fetch_transcript 内の例外フィルタリング（TranscriptsDisabled/NoTranscriptFound のみ
+        Whisper フォールバック）が正しく動作することを検証する。
+        """
         ingester = YoutubeIngester(source_store, max_duration=14400)
         metadata = _make_metadata()
 
-        # youtube-transcript-api の RequestBlocked を模擬
-        from youtube_transcript_api._errors import RequestBlocked
+        from youtube_transcript_api import RequestBlocked
 
         with (
             patch.object(ingester, "_fetch_metadata", new_callable=AsyncMock, return_value=metadata),
@@ -314,7 +316,7 @@ class TestIngestVideo:
     @pytest.mark.asyncio()
     async def test_transcripts_disabled_triggers_whisper_fallback(self, source_store: Any) -> None:
         """TranscriptsDisabled では Whisper フォールバックが発動することを検証する."""
-        from youtube_transcript_api._errors import TranscriptsDisabled
+        from youtube_transcript_api import TranscriptsDisabled
 
         ingester = YoutubeIngester(source_store, max_duration=14400)
         metadata = _make_metadata()

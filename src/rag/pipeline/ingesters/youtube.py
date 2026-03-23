@@ -114,7 +114,7 @@ class YoutubeIngester:
         source_store: SourceStore,
         *,
         max_videos: int = 100,
-        request_interval: float = 2.0,
+        request_interval: float = 1.0,
         request_timeout: int = 30,
         whisper_model: str = "base",
         whisper_device: str = "cuda",
@@ -122,7 +122,7 @@ class YoutubeIngester:
         max_duration: int = 14400,
     ) -> None:
         self._store = source_store
-        self._max_videos = max_videos
+        self._max_videos = _validate_max_videos(max_videos)
         self._request_interval = max(request_interval, MIN_REQUEST_INTERVAL)
         self._request_timeout = request_timeout
         self._whisper_model = whisper_model
@@ -154,6 +154,9 @@ class YoutubeIngester:
         try:
             metadata = await self._fetch_metadata(video_id)
         except Exception as e:
+            # プログラミングエラーは伝播させる
+            if isinstance(e, (TypeError, AttributeError, ImportError)):
+                raise
             logger.error("メタデータ取得失敗 (video_id=%s): %s", video_id, e)
             result.errors += 1
             result.error_details.append(f"メタデータ取得失敗: {video_id}: {e}")
@@ -177,6 +180,9 @@ class YoutubeIngester:
                 video_id
             )
         except Exception as e:
+            # プログラミングエラーは伝播させる
+            if isinstance(e, (TypeError, AttributeError, ImportError)):
+                raise
             logger.error("字幕/文字起こし失敗 (video_id=%s): %s", video_id, e)
             result.errors += 1
             result.error_details.append(f"字幕/文字起こし失敗: {video_id}: {e}")
@@ -268,7 +274,7 @@ class YoutubeIngester:
         # 各動画を順次処理
         consecutive_errors = 0
         for i, entry in enumerate(video_entries[:effective_max]):
-            video_id = entry.get("id") or entry.get("url", "")
+            video_id = entry.get("id", "")
             if not video_id:
                 result.errors += 1
                 result.error_details.append(f"動画 ID が取得できません: entry #{i}")

@@ -58,6 +58,7 @@
 | `ingesters/common.md` | `src/rag/pipeline/ingesters/_common.py` |
 | `ingesters/web.md` | `src/rag/pipeline/ingesters/web.py` |
 | `ingesters/bluesky.md` | `src/rag/pipeline/ingesters/bluesky.py` |
+| `ingesters/youtube.md` | `src/rag/pipeline/ingesters/youtube.py` |
 | `ingesters/zenn.md` | `src/rag/pipeline/ingesters/zenn.py` |
 | `ingesters/local.md` | `src/rag/pipeline/ingesters/local.py` |
 

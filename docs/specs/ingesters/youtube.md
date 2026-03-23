@@ -86,7 +86,7 @@ youtube-transcript-api と yt-dlp はそれぞれ独自の HTTP クライアン�
 | 項目 | 内容 |
 |------|------|
 | 最悪ケースリクエスト数 | 1（プレイリスト展開）+ 500 × 3（各動画: メタデータ + 字幕 + 音声DL）= 1501。実際は大半が字幕ありのため ≈ 1001 |
-| 最悪ケース所要時間 | 500 × 2.0 秒（デフォルト間隔）= 1000 秒。操作全体タイムアウト 600 秒を超える可能性があるため、タイムアウトは動画単位で適用し操作全体には適用しない |
+| 最悪ケース所要時間 | 500 × 1.0 秒（デフォルト間隔）= 500 秒 + 字幕取得/Whisper 処理時間。プレイリスト一括取り込みは最大 500 動画 × リクエスト間隔で長時間かかるため、操作全体タイムアウトは設けず、動画単位タイムアウト + サーキットブレーカーで安全性を担保する |
 | 想定エラー率 | 個別動画の失敗はスキップして続行。5 回連続失敗でサーキットブレーカー発動 |
 
 ## 安全制約
@@ -102,8 +102,8 @@ youtube-transcript-api と yt-dlp はそれぞれ独自の HTTP クライアン�
 | サーキットブレーカー閾値 | ハードリミット | 5 回連続失敗（インジェスター側で独自実装。ConstrainedClient 非使用） | 引き上げ不可（引き下げ可） |
 | 取得動画数 | 設定値 | 許容範囲 1〜500、デフォルト 100 | 範囲内で変更可 |
 | リクエストタイムアウト | 設定値 | 許容範囲 1〜120 秒、デフォルト 30 秒 | 範囲内で変更可 |
-| リクエスト間隔 | 設定値 | 許容範囲 0.5〜60 秒、デフォルト 2.0 秒 | 範囲内で変更可 |
-| 動画長上限 | 設定値 | デフォルト 14400 秒（4 時間） | 変更可 |
+| リクエスト間隔 | 設定値 | 許容範囲 0.1〜60 秒、デフォルト 1.0 秒 | 範囲内で変更可 |
+| 動画長上限 | 設定値 | 許容範囲 60〜86400 秒、デフォルト 14400 秒（4 時間） | 範囲内で変更可 |
 | 生 HTTP クライアント利用禁止 | CI チェック | youtube-transcript-api、yt-dlp はライブラリ内部の HTTP クライアントを使用するため、この制約の例外とする。`# safety:allowed` コメントで明示する | 許可例外あり |
 
 テスト実行時の安全な値: 動画取得上限 3 件で実行する。異常値テスト（0、負数、上限超過）を含めること。
@@ -274,6 +274,21 @@ source_store/
 | `transcript_source` | str | `"subtitle"` または `"whisper"` |
 | `playlist_id` | str | プレイリスト経由の場合のプレイリスト ID（任意） |
 
+.meta ファイル例:
+
+```yaml
+source_id: "https://www.youtube.com/watch?v=xxxxxxxxxxx"
+source_type: youtube
+title: "Sample Video Title"
+collected_at: "2026-03-23T10:30:00+09:00"
+video_id: "xxxxxxxxxxx"
+channel_id: "UCxxxxxxxxxxxxxxxxxxxxxxx"
+uploader: "Sample Channel Name"
+upload_date: "20240901"
+duration: 120
+transcript_source: "subtitle"
+```
+
 ### 単一動画取り込みフロー
 
 ```mermaid
@@ -300,6 +315,7 @@ flowchart TD
     SUBTITLE --> SUB_OK
     SUB_OK -->|"はい"| BUILD
     SUB_OK -->|"字幕なし（TranscriptsDisabled/NoTranscriptFound）"| WHISPER
+    SUB_OK -->|"API エラー"| ERROR
     WHISPER --> BUILD
     BUILD --> PLACE
     PLACE --> NOTIFY
@@ -345,6 +361,8 @@ flowchart TD
 | 動画が非公開・削除済み | yt-dlp がエラーを返す。エラーログに記録してスキップする |
 | 年齢制限付き動画 | yt-dlp がエラーを返す。エラーログに記録してスキップする |
 | 音声ファイルが 500 MB を超える | yt-dlp のメタデータ `filesize_approx` で事前チェック。超過時は警告ログ + スキップ |
+| `filesize_approx` が取得できない場合 | サイズチェックをスキップしてダウンロードを試行する。動画長上限（`rag_youtube_max_duration`）で間接的にサイズを制限する |
+| タイトルが空または None の場合 | コンバーターが `"(Untitled)"` をフォールバック値として使用する |
 | プレイリストが空 | 展開結果 0 件。placed=0 で正常終了する |
 | 同一 video_id が複数の URL で指定された場合 | video_id でファイルパスが一意に決まるため、後から処理した方が上書きする |
 | channel_id が取得できない場合 | `"unknown"` をフォールバック値として使用する |
