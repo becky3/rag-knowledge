@@ -150,8 +150,8 @@ youtube-transcript-api と yt-dlp はそれぞれ独自の HTTP クライアン�
 | `rag_youtube_max_videos` | 整数 | `config.toml` | 100 | 1〜500 | プレイリスト取得時の最大動画数 |
 | `rag_youtube_request_interval` | 小数 | `config.toml` | 1.0 | 0.1〜60 | リクエスト間の最低間隔（秒） |
 | `rag_youtube_request_timeout` | 整数 | `config.toml` | 30 | 1〜120 | リクエストタイムアウト（秒） |
-| `rag_youtube_whisper_model` | 文字列 | `config.toml` | `"base"` | Whisper モデル名 | faster-whisper のモデル名 |
-| `rag_youtube_whisper_device` | 文字列 | `config.toml` | `"cuda"` | `"cuda"` / `"cpu"` | faster-whisper のデバイス |
+| `rag_youtube_whisper_model` | 文字列 | `.env` | `"base"` | Whisper モデル名 | faster-whisper のモデル名 |
+| `rag_youtube_whisper_device` | 文字列 | `.env` | `"cuda"` | `"cuda"` / `"cpu"` | faster-whisper のデバイス |
 | `rag_youtube_transcript_languages` | リスト | `config.toml` | `["ja", "en"]` | 言語コードのリスト | 字幕取得の優先言語 |
 | `rag_youtube_max_duration` | 整数 | `config.toml` | 14400 | 60〜86400 | 動画長上限（秒） |
 
