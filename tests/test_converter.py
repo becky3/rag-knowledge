@@ -441,6 +441,57 @@ class TestConvertHtml:
         assert result is not None
         assert "Content after self-closed img." in result
 
+    def test_ruby_tag_keeps_kanji_with_reading(self, tmp_path: Path) -> None:
+        """ruby タグで漢字を保持し、ふりがなを半角括弧付きで残す."""
+        html = (
+            "<html><body>"
+            "<p><ruby><rb>吾輩</rb><rt>わがはい</rt></ruby>は猫である</p>"
+            "</body></html>"
+        )
+        html_file = tmp_path / "test.html"
+        html_file.write_text(html, encoding="utf-8")
+
+        result = convert_html(html_file)
+        assert result is not None
+        assert "吾輩" in result
+        assert "(わがはい)" in result
+        assert "猫" in result
+
+    def test_ruby_tag_with_rp(self, tmp_path: Path) -> None:
+        """rp 括弧付きの ruby タグでも漢字+半角括弧ふりがなを保持する."""
+        html = (
+            "<html><body>"
+            "<p><ruby>漢字<rp>(</rp><rt>かんじ</rt><rp>)</rp></ruby></p>"
+            "</body></html>"
+        )
+        html_file = tmp_path / "test.html"
+        html_file.write_text(html, encoding="utf-8")
+
+        result = convert_html(html_file)
+        assert result is not None
+        assert "漢字" in result
+        assert "(かんじ)" in result
+
+    def test_ruby_tag_multiple(self, tmp_path: Path) -> None:
+        """複数の ruby タグが連続する場合も正しく処理する."""
+        html = (
+            "<html><body>"
+            "<p>"
+            "<ruby><rb>青空</rb><rt>あおぞら</rt></ruby>"
+            "<ruby><rb>文庫</rb><rt>ぶんこ</rt></ruby>"
+            "</p>"
+            "</body></html>"
+        )
+        html_file = tmp_path / "test.html"
+        html_file.write_text(html, encoding="utf-8")
+
+        result = convert_html(html_file)
+        assert result is not None
+        assert "青空" in result
+        assert "文庫" in result
+        assert "(あおぞら)" in result
+        assert "(ぶんこ)" in result
+
 
 class TestFixVoidElements:
     """_fix_void_elements の単体テスト (#336)."""

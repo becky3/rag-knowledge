@@ -68,6 +68,8 @@ _CONTENT_ID_PATTERNS = (
 _CONTENT_CLASS_PATTERNS = (
     "main-content",
     "main_content",
+    "main_text",
+    "main-text",
     "content-wrap",
     "content_wrap",
     "page-container",
@@ -143,13 +145,13 @@ def _find_content_area(soup: BeautifulSoup) -> Tag | BeautifulSoup:
     # 3. id パターンマッチ（長いパターンから = 具体的なパターン優先）
     for regex in _COMPILED_ID_PATTERNS:
         found = soup.find(id=regex)
-        if isinstance(found, Tag):
+        if isinstance(found, Tag) and found.get_text(strip=True):
             return found
 
     # 4. class パターンマッチ
     for regex in _COMPILED_CLASS_PATTERNS:
         found = soup.find(class_=regex)
-        if isinstance(found, Tag):
+        if isinstance(found, Tag) and found.get_text(strip=True):
             return found
 
     # 5-6. テキスト密度フォールバック → body 最終フォールバック

@@ -54,6 +54,16 @@ TEST_SETTINGS_DEFAULTS: dict[str, object] = {
     "rag_bluesky_request_timeout": 30,
     "rag_bluesky_request_interval": 1.0,
     "rag_bluesky_include_reposts": True,
+    # YouTube インジェスター
+    "rag_youtube_whisper_model": "base",
+    "rag_youtube_whisper_device": "cpu",
+    "rag_youtube_max_videos": 100,
+    "rag_youtube_request_interval": 5.0,
+    "rag_youtube_request_timeout": 30,
+    "rag_youtube_transcript_languages": ["ja", "en"],
+    "rag_youtube_merge_gap_sec": 2.0,
+    "rag_youtube_merge_max_chars": 300,
+    "rag_youtube_max_duration": 14400,
     # PDF バックエンド
     "rag_pdf_backend": "auto",
     "rag_pdf_mineru_mfd_conf_thres": 0.6,
@@ -62,6 +72,10 @@ TEST_SETTINGS_DEFAULTS: dict[str, object] = {
     "rag_pdf_quality_cjk_min_threshold": 0.05,
     "rag_pdf_quality_min_chars_per_page": 10,
     "rag_pdf_quality_sample_pages": 10,
+    # 青空文庫インジェスター
+    "rag_aozora_max_works": 200,
+    "rag_aozora_request_interval": 1.0,
+    "rag_aozora_request_timeout": 30,
     # サイト一括取り込み（Scrapy subprocess）
     "site_ingest_temp_dir": ".tmp/site_ingest",
     "site_ingest_delay_sec": 0.1,

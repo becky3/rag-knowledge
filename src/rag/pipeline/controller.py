@@ -45,7 +45,10 @@ ProgressCallback = Callable[[int, int, str], None]
 _NO_META_TYPES: frozenset[SourceType] = frozenset({"local"})
 
 # パイプライン処理対象外のファイル（git メタデータ等）
-_PIPELINE_EXCLUDE_FILES: frozenset[str] = frozenset({".gitignore"})
+_PIPELINE_EXCLUDE_FILES: frozenset[str] = frozenset({
+    ".gitignore",
+    "aozora/catalog.csv",
+})
 
 
 class PipelineController:
@@ -466,7 +469,7 @@ class PipelineController:
         all_files = self._git.list_all_files()
         entries: list[ChangeEntry] = []
         for f in all_files:
-            if f == ".gitignore":
+            if f in _PIPELINE_EXCLUDE_FILES:
                 continue
             if f.endswith(".meta"):
                 continue
@@ -488,7 +491,7 @@ class PipelineController:
         meta_files: list[tuple[str, str, str]] = []
 
         for status_char, file_path, old_path in raw_diff:
-            if file_path == ".gitignore":
+            if file_path in _PIPELINE_EXCLUDE_FILES:
                 continue
             if file_path.endswith(".meta"):
                 meta_files.append((status_char, file_path, old_path))

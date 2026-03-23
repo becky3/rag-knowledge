@@ -291,7 +291,7 @@ def main() -> None:
     )
     rebuild_parser.add_argument(
         "--source-type",
-        choices=["web", "bluesky", "zenn", "youtube", "local"],
+        choices=["web", "bluesky", "zenn", "youtube", "aozora", "local"],
         default=None,
         help="対象媒体フィルタ（incremental では指定不可）",
     )
@@ -315,7 +315,7 @@ def main() -> None:
     )
     search_parser.add_argument(
         "--source-type",
-        choices=["web", "bluesky", "zenn", "youtube", "local"],
+        choices=["web", "bluesky", "zenn", "youtube", "aozora", "local"],
         default=None,
         help="ソース種別フィルタ",
     )
@@ -381,6 +381,24 @@ def main() -> None:
         help="Scrapy クロール + Bridge（source_store 配置 + git commit）まで実行し、パイプライン処理をスキップ",
     )
 
+    # update-aozora-catalog: 青空文庫カタログ更新
+    subparsers.add_parser("update-aozora-catalog", help="青空文庫カタログを更新")
+
+    # search-aozora: 青空文庫カタログ検索
+    search_aozora_parser = subparsers.add_parser("search-aozora", help="青空文庫カタログを検索")
+    search_aozora_parser.add_argument("--author", default=None, help="著者名（部分一致）")
+    search_aozora_parser.add_argument("--title", default=None, help="作品タイトル（部分一致）")
+    search_aozora_parser.add_argument("--limit", type=int, default=20, help="最大表示件数（デフォルト: 20）")
+
+    # ingest-aozora: 青空文庫作品取り込み
+    ingest_aozora_parser = subparsers.add_parser("ingest-aozora", help="青空文庫の作品を取り込み")
+    ingest_aozora_parser.add_argument("book_id", help="青空文庫の作品 ID")
+
+    # ingest-aozora-author: 青空文庫著者一括取り込み
+    ingest_aozora_author_parser = subparsers.add_parser("ingest-aozora-author", help="青空文庫の著者作品を一括取り込み")
+    ingest_aozora_author_parser.add_argument("person_id", help="著者の人物 ID（search-aozora で確認）")
+    ingest_aozora_author_parser.add_argument("--max-works", type=int, default=None, help="取得する最大作品数")
+
     args = parser.parse_args()
 
     # コマンドディスパッチ（sync / async 統一）
@@ -397,6 +415,9 @@ def main() -> None:
         "add-document": run_add_document,
         "crawl-documents": run_crawl_documents,
         "site-ingest": run_site_ingest,
+        "update-aozora-catalog": run_update_aozora_catalog,
+        "ingest-aozora": run_ingest_aozora,
+        "ingest-aozora-author": run_ingest_aozora_author,
     }
     _SYNC_COMMANDS: dict[str, object] = {
         "get-document": run_get_document,
@@ -404,6 +425,7 @@ def main() -> None:
         "stats": run_stats,
         "search": run_search,
         "delete": run_delete,
+        "search-aozora": run_search_aozora,
     }
 
     if args.command in _ASYNC_COMMANDS:
@@ -1880,6 +1902,118 @@ async def run_site_ingest(args: argparse.Namespace) -> None:
             print(f"パイプラインエラー: {len(pipeline_summary.errors)}件")
     if not crawl_result.success:
         print(f"Scrapy exit_code={crawl_result.exit_code}（部分的な結果）")
+
+
+async def run_update_aozora_catalog(args: argparse.Namespace) -> None:
+    """青空文庫カタログ更新."""
+    from .pipeline.ingesters.aozora import AozoraIngester
+
+    from py_common_lib.httpx import ConstrainedClient  # safety:allowed
+
+    controller, settings = _build_cli_pipeline_controller()
+
+    aozora_ingester = AozoraIngester(controller.source_store)
+
+    try:
+        async with ConstrainedClient(
+            request_timeout=settings.rag_aozora_request_timeout,
+            request_interval=settings.rag_aozora_request_interval,
+        ) as client:
+            result_text = await aozora_ingester.update_catalog(client=client)
+    except (ValueError, TypeError) as e:
+        logger.error("エラー: %s", e)
+        sys.exit(1)
+
+    print(result_text)
+
+
+def run_search_aozora(args: argparse.Namespace) -> None:
+    """青空文庫カタログ検索."""
+    from .pipeline.ingesters.aozora import AozoraIngester
+
+    controller, _settings = _build_cli_pipeline_controller()
+
+    aozora_ingester = AozoraIngester(controller.source_store)
+
+    try:
+        results = aozora_ingester.search(
+            author=args.author,
+            title=args.title,
+            limit=args.limit,
+        )
+    except (ValueError, TypeError) as e:
+        logger.error("エラー: %s", e)
+        sys.exit(1)
+
+    if not results:
+        print("検索結果: 0件")
+        return
+
+    print(f"検索結果: {len(results)}件")
+    for r in results:
+        print(
+            f"  [{r['book_id']}] {r['title']} / "
+            f"[{r['person_id']}] {r['author']} ({r['copyright']})"
+        )
+
+
+async def run_ingest_aozora(args: argparse.Namespace) -> None:
+    """青空文庫作品取り込み."""
+    from .pipeline.ingesters.aozora import AozoraIngester
+
+    from py_common_lib.httpx import ConstrainedClient  # safety:allowed
+
+    controller, settings = _build_cli_pipeline_controller()
+
+    aozora_ingester = AozoraIngester(controller.source_store)
+
+    try:
+        async with ConstrainedClient(
+            request_timeout=settings.rag_aozora_request_timeout,
+            request_interval=settings.rag_aozora_request_interval,
+        ) as client:
+            ingest_result = await aozora_ingester.add_work(
+                args.book_id, client=client,
+            )
+    except (ValueError, TypeError) as e:
+        logger.error("エラー: %s", e)
+        sys.exit(1)
+
+    pipeline_summary = controller.ingest_and_index(f"ingest(aozora): book_id={args.book_id}")
+    _print_ingest_result(ingest_result, pipeline_summary, context=f"作品ID: {args.book_id}")
+
+
+async def run_ingest_aozora_author(args: argparse.Namespace) -> None:
+    """青空文庫著者一括取り込み."""
+    from .pipeline.ingesters.aozora import AozoraIngester
+
+    from py_common_lib.httpx import ConstrainedClient  # safety:allowed
+
+    controller, settings = _build_cli_pipeline_controller()
+
+    max_works = args.max_works if args.max_works is not None else settings.rag_aozora_max_works
+
+    aozora_ingester = AozoraIngester(
+        controller.source_store,
+        max_works=max_works,
+    )
+
+    try:
+        async with ConstrainedClient(
+            request_timeout=settings.rag_aozora_request_timeout,
+            request_interval=settings.rag_aozora_request_interval,
+        ) as client:
+            ingest_result = await aozora_ingester.crawl_author(
+                args.person_id,
+                max_works=max_works,
+                client=client,
+            )
+    except (ValueError, TypeError) as e:
+        logger.error("エラー: %s", e)
+        sys.exit(1)
+
+    pipeline_summary = controller.ingest_and_index(f"ingest(aozora): person_id={args.person_id}")
+    _print_ingest_result(ingest_result, pipeline_summary, context=f"著者ID: {args.person_id}")
 
 
 if __name__ == "__main__":

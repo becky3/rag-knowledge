@@ -61,6 +61,7 @@
 | `ingesters/youtube.md` | `src/rag/pipeline/ingesters/youtube.py` |
 | `ingesters/zenn.md` | `src/rag/pipeline/ingesters/zenn.py` |
 | `ingesters/local.md` | `src/rag/pipeline/ingesters/local.py` |
+| `ingesters/aozora.md` | `src/rag/pipeline/ingesters/aozora.py` |
 
 ### Claude Code 拡張
 

@@ -3,7 +3,7 @@
 仕様: docs/specs/rag-knowledge.md, docs/specs/search-response.md
 独立リポジトリとして動作する。
 
-FastMCP を使用して 13 個の RAG ツールを公開する:
+FastMCP を使用して 19 個の RAG ツールを公開する:
 - rag_search: ナレッジベース検索（チャンク単位返却）
 - rag_get_document: ソース全文取得
 - rag_add: 単一ページをナレッジベースに取り込み
@@ -11,9 +11,15 @@ FastMCP を使用して 13 個の RAG ツールを公開する:
 - rag_crawl_preview: クロール対象ページのプレビュー（タイトル・URL一覧）
 - rag_crawl_zenn: Zenn 記事の一括取り込み
 - rag_crawl_bluesky: BlueSky 投稿の一括取り込み
+- rag_add_youtube: YouTube 単一動画の取り込み
+- rag_crawl_youtube: YouTube チャンネル/プレイリストの一括取り込み
 - rag_add_document: ドキュメントファイルをナレッジベースに取り込み
 - rag_crawl_documents: ディレクトリ内ドキュメントを一括取り込み
 - rag_site_ingest: Scrapy によるサイト一括取り込み（大規模サイト向け）
+- rag_update_aozora_catalog: 青空文庫カタログ更新
+- rag_search_aozora: 青空文庫カタログ検索
+- rag_add_aozora: 青空文庫作品の単一取り込み
+- rag_crawl_aozora: 青空文庫著者作品の一括取り込み
 - rag_delete: ソースURL指定でナレッジから論理削除
 - rag_rebuild: ナレッジベースの再構築
 - rag_stats: ナレッジベースの統計情報を表示
@@ -58,6 +64,7 @@ with contextlib.redirect_stdout(io.StringIO()):
     # パイプライン関連
     from .pipeline.controller import PipelineController
     from .pipeline.ingesters._common import IngestResult
+    from .pipeline.ingesters.aozora import AozoraIngester as PipelineAozoraIngester
     from .pipeline.ingesters.bluesky import BlueskyIngester as PipelineBlueskyIngester
     from .pipeline.ingesters.local import LocalIngester as PipelineLocalIngester
     from .pipeline.ingesters.web import WebIngester as PipelineWebIngester
@@ -281,7 +288,7 @@ def _get_supported_extensions() -> list[str]:
 
 # --- MCP ツール定義 ---
 
-_VALID_SOURCE_TYPES: frozenset[str] = frozenset({"web", "zenn", "bluesky", "youtube", "local"})
+_VALID_SOURCE_TYPES: frozenset[str] = frozenset({"web", "zenn", "bluesky", "youtube", "local", "aozora"})
 
 
 def _format_chunk_position(chunk_index: int, total_chunks: int) -> str:
@@ -1185,6 +1192,212 @@ async def rag_site_ingest(
     except Exception:
         logger.exception("Failed to site-ingest: %s", url)
         return f"エラー: サイト取り込みに失敗しました。URL: {url}"
+
+
+@mcp.tool()
+async def rag_update_aozora_catalog(
+    ctx: MCPContext | None = None,
+) -> str:
+    """[rag-knowledge] RAG update Aozora catalog - 青空文庫の作品カタログを更新.
+
+    knowledge base, Aozora, aozora bunko, catalog, update, CSV.
+    青空文庫の作品カタログ CSV をダウンロードし、source_store に配置する。
+    前回カタログとの差分から新着・更新作品を検出して結果を返す。
+
+    Returns:
+        カタログ更新結果のサマリーテキスト
+    """
+    settings = get_settings()
+
+    controller = await _get_pipeline_controller()
+    aozora_ingester = PipelineAozoraIngester(controller.source_store)
+
+    try:
+        async with ConstrainedClient(
+            request_timeout=settings.rag_aozora_request_timeout,
+            request_interval=settings.rag_aozora_request_interval,
+        ) as client:
+            result_text = await aozora_ingester.update_catalog(client=client)
+        return result_text
+    except (ValueError, TypeError) as e:
+        return f"エラー: {e}"
+    except Exception:
+        logger.exception("Failed to update Aozora catalog")
+        return "エラー: 青空文庫カタログの更新に失敗しました"
+
+
+@mcp.tool()
+async def rag_search_aozora(
+    author: str | None = None,
+    title: str | None = None,
+    limit: int = 20,
+) -> str:
+    """[rag-knowledge] RAG search Aozora catalog - 青空文庫カタログを検索.
+
+    knowledge base, Aozora, aozora bunko, search, catalog, author, title.
+    ローカルカタログ CSV を著者名・作品名で部分一致検索する。ネットワークアクセス不要。
+
+    Args:
+        author: 著者名（部分一致検索）
+        title: 作品タイトル（部分一致検索）
+        limit: 最大表示件数（デフォルト: 20、許容範囲: 1〜100）
+
+    Returns:
+        検索結果リスト（作品 ID、タイトル、著者名、著作権フラグ）
+    """
+    controller = await _get_pipeline_controller()
+    aozora_ingester = PipelineAozoraIngester(controller.source_store)
+
+    try:
+        results = aozora_ingester.search(
+            author=author,
+            title=title,
+            limit=limit,
+        )
+    except (ValueError, TypeError) as e:
+        return f"エラー: {e}"
+
+    if not results:
+        parts = []
+        if author:
+            parts.append(f"著者: {author}")
+        if title:
+            parts.append(f"タイトル: {title}")
+        return f"検索結果: 0件（{', '.join(parts)}）"
+
+    lines = [f"検索結果: {len(results)}件", ""]
+    for r in results:
+        lines.append(
+            f"- [{r['book_id']}] {r['title']} / {r['author']} "
+            f"({r['copyright']})"
+        )
+    return "\n".join(lines)
+
+
+@mcp.tool()
+async def rag_add_aozora(
+    book_id: str,
+    ctx: MCPContext | None = None,
+) -> str:
+    """[rag-knowledge] RAG add Aozora - 青空文庫の作品を取り込み.
+
+    knowledge base, Aozora, aozora bunko, ingest, book, work.
+    指定作品の XHTML を取得し、ナレッジベースに取り込む。著作権フリーの作品のみ対応。
+
+    Args:
+        book_id: 青空文庫の作品 ID（カタログ検索で取得）
+
+    Returns:
+        取り込み結果のサマリーテキスト
+    """
+    if not book_id or not book_id.strip():
+        return "エラー: book_id を指定してください"
+
+    book_id = book_id.strip()
+    settings = get_settings()
+
+    controller = await _get_pipeline_controller()
+    aozora_ingester = PipelineAozoraIngester(controller.source_store)
+
+    try:
+        async with ConstrainedClient(
+            request_timeout=settings.rag_aozora_request_timeout,
+            request_interval=settings.rag_aozora_request_interval,
+        ) as client:
+            ingest_result = await aozora_ingester.add_work(
+                book_id, client=client,
+            )
+
+        if ingest_result.placed == 0:
+            return ingest_result.summary(context=f"作品ID: {book_id}")
+
+        pipeline_summary = await _run_ingest_and_index_subprocess(
+            f"ingest(aozora): book_id={book_id}",
+            ctx=ctx,
+        )
+        _reset_pipeline_controller()
+        _reset_rag_service()
+
+        return _format_ingest_response(
+            ingest_result, pipeline_summary, context=f"作品ID: {book_id}",
+        )
+    except (ValueError, TypeError) as e:
+        return f"エラー: {e}"
+    except Exception:
+        logger.exception("Failed to add Aozora work: %s", book_id)
+        return f"エラー: 青空文庫作品の取り込みに失敗しました（作品ID: {book_id}）"
+
+
+@mcp.tool()
+async def rag_crawl_aozora(
+    person_id: str,
+    max_works: int | None = None,
+    ctx: MCPContext | None = None,
+) -> str:
+    """[rag-knowledge] RAG crawl Aozora - 青空文庫の著者作品を一括取り込み.
+
+    knowledge base, Aozora, aozora bunko, ingest, crawl, author, works, person.
+    指定著者（人物 ID）の著作権フリー作品を一括取り込みする。
+
+    Args:
+        person_id: 著者の人物 ID（rag_search_aozora で確認可能）
+        max_works: 取得する最大作品数（未指定時は設定値を使用、許容範囲: 1〜500）
+
+    Returns:
+        取り込み結果のサマリーテキスト
+    """
+    settings = get_settings()
+
+    if max_works is None:
+        max_works = settings.rag_aozora_max_works
+
+    if not isinstance(max_works, int) or isinstance(max_works, bool):
+        return f"エラー: max_works は整数で指定してください（入力値: {max_works!r}）"
+    if max_works <= 0:
+        return f"エラー: max_works は正の整数で指定してください（入力値: {max_works}）"
+
+    if not person_id or not person_id.strip():
+        return "エラー: person_id を指定してください"
+
+    person_id = person_id.strip()
+
+    controller = await _get_pipeline_controller()
+    aozora_ingester = PipelineAozoraIngester(
+        controller.source_store,
+        max_works=max_works,
+    )
+
+    try:
+        async with ConstrainedClient(
+            request_timeout=settings.rag_aozora_request_timeout,
+            request_interval=settings.rag_aozora_request_interval,
+        ) as client:
+            ingest_result = await aozora_ingester.crawl_author(
+                person_id,
+                max_works=max_works,
+                client=client,
+            )
+
+        if ingest_result.placed == 0 and ingest_result.errors == 0:
+            return f"対象作品が見つかりませんでした（人物ID: {person_id}）"
+
+        pipeline_summary = await _run_ingest_and_index_subprocess(
+            f"ingest(aozora): person_id={person_id}",
+            ctx=ctx,
+        )
+        _reset_pipeline_controller()
+        _reset_rag_service()
+
+        return _format_ingest_response(
+            ingest_result, pipeline_summary, context=f"人物ID: {person_id}",
+        )
+    except (ValueError, TypeError) as e:
+        return f"エラー: {e}"
+    except Exception:
+        logger.exception(
+            "Failed to crawl Aozora works for person_id: %s", person_id
+        )
+        return f"エラー: 青空文庫作品の取り込みに失敗しました（人物ID: {person_id}）"
 
 
 @mcp.tool()

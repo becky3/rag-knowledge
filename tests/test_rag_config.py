@@ -198,6 +198,16 @@ rag_bluesky_max_posts = 200
 rag_bluesky_request_timeout = 30
 rag_bluesky_request_interval = 1.0
 rag_bluesky_include_reposts = true
+rag_youtube_max_videos = 100
+rag_youtube_request_interval = 5.0
+rag_youtube_request_timeout = 30
+rag_youtube_transcript_languages = ["ja", "en"]
+rag_youtube_merge_gap_sec = 2.0
+rag_youtube_merge_max_chars = 300
+rag_youtube_max_duration = 14400
+rag_aozora_max_works = 200
+rag_aozora_request_interval = 1.0
+rag_aozora_request_timeout = 30
 rag_pdf_backend = "auto"
 rag_pdf_mineru_mfd_conf_thres = 0.6
 rag_pdf_quality_ufffd_threshold = 0.10
@@ -226,6 +236,8 @@ site_ingest_error_count = 10
             "RAG_HTTP_PORT": "8081",
             "RAG_DNS_REBINDING_PROTECTION": "true",
             "RAG_DEBUG_LOG_ENABLED": "false",
+            "RAG_YOUTUBE_WHISPER_MODEL": "base",
+            "RAG_YOUTUBE_WHISPER_DEVICE": "cpu",
             "SITE_INGEST_TEMP_DIR": ".tmp/site_ingest",
         }
         defaults.update(overrides)

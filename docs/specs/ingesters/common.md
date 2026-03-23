@@ -12,6 +12,7 @@
 | BlueSky | [bluesky.md](bluesky.md) |
 | Zenn | [zenn.md](zenn.md) |
 | YouTube | [youtube.md](youtube.md) |
+| 青空文庫 | [aozora.md](aozora.md) |
 | Local | [local.md](local.md) |
 
 スコープ:
@@ -90,6 +91,10 @@
 | Zenn コンテンツ取り込み | zenn | `rag_crawl_zenn` | Zenn API から記事・スクラップを取得して配置 |
 | YouTube 単一動画取り込み | youtube | `rag_add_youtube` | 単一動画の字幕/文字起こしを取得して配置 |
 | YouTube プレイリスト一括取り込み | youtube | `rag_crawl_youtube` | プレイリスト内の動画を一括取得して配置 |
+| カタログ更新 | aozora | `rag_update_aozora_catalog` | 作品カタログ CSV をダウンロードして配置 |
+| 作品検索 | aozora | `rag_search_aozora` | カタログから著者名・作品名で検索（配置なし） |
+| 単一作品取り込み | aozora | `rag_add_aozora` | 指定作品の XHTML を取得して配置 |
+| 著者一括取り込み | aozora | `rag_crawl_aozora` | 著者の全作品（著作権フリー）を一括取得して配置 |
 | 単一ドキュメント取り込み | local | `rag_add_document` | 指定ファイルを local/ にコピー |
 | ディレクトリ一括取り込み | local | `rag_crawl_documents` | glob パターンで検索してコピー |
 
@@ -127,6 +132,7 @@ flowchart TB
         WING["WebIngester"]
         ZING["ZennIngester"]
         BING["BlueskyIngester"]
+        AING["AozoraIngester"]
         DING["LocalIngester"]
     end
 
@@ -153,6 +159,8 @@ flowchart TB
     CC --> WEB
     CC --> AT_API
     CC --> ZENN_API
+    AING --> CC
+    CC --> AOZORA["aozora.gr.jp / GitHub Raw"]
     DING --> FS
 
     Ingesters -->|ファイル配置 + .meta| SS
@@ -191,6 +199,7 @@ flowchart TB
 | bluesky | AT URI | DID + 年月 + rkey で一意に決定 | スキップ |
 | zenn | Zenn URL | username + slug で一意に決定 | 上書き |
 | youtube | YouTube 動画 URL | channel_id + video_id で一意に決定 | 上書き |
+| aozora | 青空文庫 URL | person_id + book_id で一意に決定 | スキップ |
 | local | 相対パス | ユーザー指定パスで一意に決定 | 上書き |
 
 重複検出の手順:

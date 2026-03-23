@@ -81,6 +81,11 @@ rag_bluesky_request_timeout = 30
 rag_bluesky_request_interval = 1.0
 rag_bluesky_include_reposts = true
 
+# 青空文庫インジェスター
+rag_aozora_max_works = 200
+rag_aozora_request_interval = 1.0
+rag_aozora_request_timeout = 30
+
 # サイト一括取り込み（Scrapy subprocess）
 site_ingest_delay_sec = 0.1
 site_ingest_max_pages = 10000

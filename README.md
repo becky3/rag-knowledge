@@ -20,6 +20,7 @@
 | **YouTube インジェスター** | YouTube 動画の字幕・音声文字起こしを取得・ナレッジベースに取り込み |
 | **ドキュメントインジェスター** | テキストドキュメント（Markdown、テキスト、PDF、AsciiDoc）をナレッジベースに取り込み |
 | **サイト一括取り込み（Scrapy）** | Scrapy subprocess による大規模サイトの一括取り込み |
+| **青空文庫インジェスター** | 青空文庫の著作権切れ作品をカタログ検索・取り込み |
 | **制約付き HTTP クライアント** | バジェット・サーキットブレーカー・レート制限を統合した安全な HTTP アクセス（py-common-lib 提供） |
 
 ## 動作環境
@@ -160,6 +161,7 @@ git-flow ベースのブランチ戦略を採用。詳細は `~/.claude/docs/spe
 - [コンバーター](docs/specs/converter.md)
 - [インデクサー](docs/specs/indexer.md)
 - [サイト一括取り込み（Scrapy）](docs/specs/site-ingest.md)
+- [青空文庫インジェスター](docs/specs/ingesters/aozora.md)
 
 ### Claude Code 拡張（agentic）
 
