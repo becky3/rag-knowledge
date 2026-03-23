@@ -440,6 +440,8 @@ class SourceStore:
             return "bluesky"
         if rel_path.startswith("zenn/"):
             return "zenn"
+        if rel_path.startswith("journal/"):
+            return "journal"
         return "local"
 
     @staticmethod

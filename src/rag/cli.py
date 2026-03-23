@@ -291,7 +291,7 @@ def main() -> None:
     )
     rebuild_parser.add_argument(
         "--source-type",
-        choices=["web", "bluesky", "zenn", "youtube", "local"],
+        choices=["web", "bluesky", "zenn", "youtube", "local", "journal"],
         default=None,
         help="対象媒体フィルタ（incremental では指定不可）",
     )
@@ -315,9 +315,14 @@ def main() -> None:
     )
     search_parser.add_argument(
         "--source-type",
-        choices=["web", "bluesky", "zenn", "youtube", "local"],
+        choices=["web", "bluesky", "zenn", "youtube", "local", "journal"],
         default=None,
         help="ソース種別フィルタ",
+    )
+    search_parser.add_argument(
+        "--filters",
+        default=None,
+        help='メタデータフィルタ（JSON 形式、例: \'{"repository": "rag-knowledge"}\'）',
     )
 
     # delete サブコマンド
@@ -381,6 +386,18 @@ def main() -> None:
         help="Scrapy クロール + Bridge（source_store 配置 + git commit）まで実行し、パイプライン処理をスキップ",
     )
 
+    # add-journal: 単一ジャーナルエントリの登録
+    aj_parser = subparsers.add_parser("add-journal", help="ジャーナルエントリをナレッジベースに登録")
+    aj_parser.add_argument("--title", "-t", required=True, help="エントリタイトル")
+    aj_parser.add_argument("--body", "-b", required=True, help="本文（Markdown）。@ファイルパス で本文をファイルから読み込み")
+    aj_parser.add_argument("--repository", "-r", required=True, help="リポジトリ名")
+    aj_parser.add_argument("--entry-id", "-e", default=None, help="エントリ識別子（省略時は自動生成）")
+
+    # migrate-journal: 既存ジャーナルファイルの一括取り込み
+    mj_parser = subparsers.add_parser("migrate-journal", help="既存ジャーナルファイルを source_store に一括配置")
+    mj_parser.add_argument("--dir", "-d", required=True, help="ジャーナルディレクトリパス")
+    mj_parser.add_argument("--repository", "-r", required=True, help="リポジトリ名")
+
     args = parser.parse_args()
 
     # コマンドディスパッチ（sync / async 統一）
@@ -397,6 +414,7 @@ def main() -> None:
         "add-document": run_add_document,
         "crawl-documents": run_crawl_documents,
         "site-ingest": run_site_ingest,
+        "add-journal": run_add_journal,
     }
     _SYNC_COMMANDS: dict[str, object] = {
         "get-document": run_get_document,
@@ -404,6 +422,7 @@ def main() -> None:
         "stats": run_stats,
         "search": run_search,
         "delete": run_delete,
+        "migrate-journal": run_migrate_journal,
     }
 
     if args.command in _ASYNC_COMMANDS:
@@ -1276,9 +1295,30 @@ def run_search(args: argparse.Namespace) -> None:
     n_results = args.n_results if args.n_results is not None else settings.rag_retrieval_count
     source_type: str | None = args.source_type
 
+    # filters パラメータのパース
+    parsed_filters: dict[str, str | int | float | bool] | None = None
+    if args.filters is not None:
+        try:
+            parsed_filters = json.loads(args.filters)
+            if not isinstance(parsed_filters, dict):
+                print("エラー: --filters は JSON オブジェクト形式で指定してください")
+                return
+            allowed_types = (str, int, float, bool)
+            for key, value in parsed_filters.items():
+                if not isinstance(value, allowed_types):
+                    print(
+                        f"エラー: --filters の値は str/int/float/bool のみ使用できます"
+                        f"（キー {key!r} に不正な型 {type(value).__name__}）"
+                    )
+                    return
+        except json.JSONDecodeError:
+            print("エラー: --filters の JSON パースに失敗しました")
+            return
+
     raw = _asyncio.run(
         service.retrieve_raw_results(
             args.query, n_results=n_results, source_type=source_type,
+            filters=parsed_filters,
         )
     )
 
@@ -1354,6 +1394,83 @@ def run_delete(args: argparse.Namespace) -> None:
         for err in summary.errors:
             print(f"  - {err}", file=sys.stderr)
     print(f"削除しました: {source_id}")
+
+
+async def run_add_journal(args: argparse.Namespace) -> None:
+    """単一ジャーナルエントリを登録する.
+
+    Args:
+        args: コマンドライン引数（--title, --body, --repository, --entry-id）
+    """
+    from .pipeline.ingesters.journal import JournalIngester
+
+    controller, _settings = _build_cli_pipeline_controller()
+
+    ingester = JournalIngester(controller.source_store)
+
+    # --body が @ファイルパス の場合、ファイルから読み込む
+    body = args.body
+    if body.startswith("@"):
+        file_path = Path(body[1:])
+        if not file_path.is_file():
+            print(f"エラー: ファイルが見つかりません: {file_path}", file=sys.stderr)
+            raise SystemExit(1)
+        body = file_path.read_text(encoding="utf-8")
+
+    ingest_result = ingester.add_entry(
+        title=args.title,
+        body=body,
+        repository=args.repository,
+        entry_id=args.entry_id,
+    )
+
+    if ingest_result.errors > 0:
+        print(f"エラー: {ingest_result.error_details[0]}", file=sys.stderr)
+        raise SystemExit(1)
+
+    pipeline_summary = controller.ingest_and_index(
+        f"ingest(journal): add {args.title}"
+    )
+    _print_ingest_result(
+        ingest_result, pipeline_summary, context=f"journal/{args.repository}"
+    )
+
+
+def run_migrate_journal(args: argparse.Namespace) -> None:
+    """既存ジャーナルファイルを source_store に一括配置する.
+
+    Args:
+        args: コマンドライン引数（--dir, --repository）
+    """
+    from .pipeline.ingesters.journal import JournalIngester
+    from .store.source_store import SourceStore
+
+    from .config import get_settings
+    settings = get_settings()
+
+    if not settings.source_store_dir:
+        print("エラー: source_store_dir が設定されていません", file=sys.stderr)
+        raise SystemExit(1)
+
+    store = SourceStore(Path(settings.source_store_dir))
+    store.initialize()
+
+    try:
+        ingester = JournalIngester(store)
+        result = ingester.import_directory(
+            dir_path=args.dir,
+            repository=args.repository,
+        )
+
+        print(result.summary(context=f"repository={args.repository}"))
+
+        if result.placed > 0:
+            print(
+                "\n事後処理: 以下のコマンドでインデックスを構築してください:\n"
+                "  uv run python -m rag.cli rebuild --mode incremental"
+            )
+    finally:
+        store.close()
 
 
 def _format_cli_size(size_bytes: int) -> str:

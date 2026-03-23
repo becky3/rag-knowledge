@@ -253,6 +253,7 @@ class Indexer:
 
         doc_chunks: list[DocumentChunk] = []
         bm25_docs: list[tuple[str, str, str, str]] = []
+        bm25_metadata_list: list[dict[str, str | int | float | bool]] = []
 
         for i, text in enumerate(chunk_texts):
             chunk_id = generate_chunk_id(source_id, i)
@@ -266,12 +267,13 @@ class Indexer:
             bm25_docs.append((
                 chunk_id, text, source_id, metadata.source_type,
             ))
+            bm25_metadata_list.append(meta)
 
         # ChromaDB に upsert（async → sync ブリッジ）
         _run_async(self._vector_store.add_documents(doc_chunks))
 
         # BM25 に追加
-        self._bm25.add_documents(bm25_docs)
+        self._bm25.add_documents(bm25_docs, metadata_list=bm25_metadata_list)
 
     def _clear_all(self) -> None:
         """全インデックスをクリアする."""

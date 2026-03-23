@@ -12,7 +12,7 @@ import mimetypes
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
 from pathlib import Path, PurePosixPath
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 from urllib.parse import urldefrag
 
 from .chunker import chunk_text
@@ -641,6 +641,7 @@ class RAGKnowledgeService:
         query: str,
         n_results: int = 5,
         source_type: str | None = None,
+        filters: dict[str, str | int | float | bool] | None = None,
     ) -> RawSearchResults:
         """ベクトル検索・BM25検索の生結果を個別に返す（準Agentic Search用）.
 
@@ -652,14 +653,13 @@ class RAGKnowledgeService:
             query: 検索クエリ
             n_results: 各エンジンから返却する結果の最大数
             source_type: ソース種別フィルタ（指定時はそのソース種別のみ検索対象）
+            filters: カスタムメタデータフィルタ（完全一致。キーは .meta の extra フィールドに対応）
 
         Returns:
             RawSearchResults: ベクトル検索とBM25検索の生結果
         """
         # ベクトル検索（閾値フィルタなし: LLMが判断する）
-        where: dict[str, str | int | float | bool] | None = (
-            {"source_type": source_type} if source_type is not None else None
-        )
+        where = self._build_where_clause(source_type, filters)
         vector_results_raw = await self._vector_store.search(
             query,
             n_results=n_results,
@@ -693,9 +693,11 @@ class RAGKnowledgeService:
 
         # BM25検索
         bm25_items: list[BM25SearchItem] = []
+        bm25_filters = self._build_bm25_filters(filters) if filters else None
         if self._bm25_index is not None:
             bm25_results_raw = self._bm25_index.search(
                 query, n_results=n_results, source_type=source_type,
+                filters=bm25_filters,
             )
 
             # BM25結果のメタデータをChromaDBから一括取得
@@ -749,6 +751,44 @@ class RAGKnowledgeService:
             vector_results=vector_items,
             bm25_results=bm25_items,
         )
+
+    @staticmethod
+    def _build_where_clause(
+        source_type: str | None,
+        filters: dict[str, str | int | float | bool] | None,
+    ) -> dict[str, Any] | None:
+        """ChromaDB の where 句を構築する.
+
+        source_type と filters を統合する。filters のキーには custom: プレフィックスを
+        自動付与する。複数条件の場合は ChromaDB の $and 演算子で結合する。
+
+        Returns:
+            単一条件: {"key": value}
+            複数条件: {"$and": [{"key1": value1}, {"key2": value2}]}
+            条件なし: None
+        """
+        conditions: dict[str, str | int | float | bool] = {}
+        if source_type is not None:
+            conditions["source_type"] = source_type
+        if filters:
+            for key, value in filters.items():
+                conditions[f"custom:{key}"] = value
+
+        if not conditions:
+            return None
+        if len(conditions) == 1:
+            return conditions
+        return {"$and": [{k: v} for k, v in conditions.items()]}
+
+    @staticmethod
+    def _build_bm25_filters(
+        filters: dict[str, str | int | float | bool],
+    ) -> dict[str, str | int | float | bool]:
+        """BM25 用のフィルタ辞書を構築する.
+
+        キーに custom: プレフィックスを付与する（ChromaDB メタデータのキーと一致させる）。
+        """
+        return {f"custom:{key}": value for key, value in filters.items()}
 
     async def source_exists(self, source_url: str) -> bool:
         """ソースURLに対応するチャンクが存在するか確認する（軽量版）.

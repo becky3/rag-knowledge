@@ -90,6 +90,7 @@ class BM25Index:
         self._documents: dict[str, str] = {}  # id -> text
         self._doc_source_map: dict[str, str] = {}  # id -> source_url
         self._doc_source_type_map: dict[str, str] = {}  # id -> source_type
+        self._doc_metadata_map: dict[str, dict[str, str | int | float | bool]] = {}  # id -> chunk metadata
 
         # BM25インデックス（遅延初期化）
         self._bm25: "bm25s.BM25 | None" = None
@@ -105,30 +106,38 @@ class BM25Index:
     def add_documents(
         self,
         documents: list[tuple[str, str, str, str]],
+        metadata_list: list[dict[str, str | int | float | bool]] | None = None,
     ) -> int:
         """ドキュメントをインデックスに追加する.
 
         Args:
             documents: (id, text, source_url, source_type) のリスト
+            metadata_list: 各ドキュメントに対応するメタデータ辞書のリスト（任意）
 
         Returns:
             追加されたドキュメント数
         """
+        if metadata_list is not None and len(metadata_list) != len(documents):
+            raise ValueError(
+                f"add_documents: length mismatch: "
+                f"documents={len(documents)}, metadata_list={len(metadata_list)}"
+            )
+
         added = 0
         updated = 0
-        for doc_id, text, source_url, source_type in documents:
+        for i, (doc_id, text, source_url, source_type) in enumerate(documents):
             if doc_id in self._documents:
-                # 既存のドキュメントを更新
                 self._documents[doc_id] = text
                 self._doc_source_map[doc_id] = source_url
                 self._doc_source_type_map[doc_id] = source_type
                 updated += 1
             else:
-                # 新規ドキュメントを追加
                 self._documents[doc_id] = text
                 self._doc_source_map[doc_id] = source_url
                 self._doc_source_type_map[doc_id] = source_type
                 added += 1
+            if metadata_list is not None:
+                self._doc_metadata_map[doc_id] = metadata_list[i]
 
         # 新規追加または更新があった場合はインデックス再構築が必要
         if added > 0 or updated > 0:
@@ -145,6 +154,7 @@ class BM25Index:
         query: str,
         n_results: int = 10,
         source_type: str | None = None,
+        filters: dict[str, str | int | float | bool] | None = None,
     ) -> list[BM25Result]:
         """クエリでキーワード検索を実行する.
 
@@ -152,6 +162,7 @@ class BM25Index:
             query: 検索クエリ
             n_results: 返却する結果の最大数
             source_type: ソース種別フィルタ（指定時はそのソース種別のみ返す）
+            filters: カスタムメタデータフィルタ（完全一致。キーは custom:{key} 形式）
 
         Returns:
             BM25Resultのリスト（スコア降順）
@@ -172,9 +183,10 @@ class BM25Index:
             return []
 
         # BM25検索（k は corpus サイズ以下に制限）
-        # source_type フィルタで除外される可能性を考慮し、3倍（最低20件）を取得
+        # source_type / filters フィルタで除外される可能性を考慮し、3倍（最低20件）を取得
         fetch_count = n_results
-        if source_type is not None:
+        has_filter = source_type is not None or filters
+        if has_filter:
             fetch_count = max(n_results * 3, 20)
         k = min(fetch_count, len(self._doc_ids))
         if k == 0:
@@ -184,7 +196,7 @@ class BM25Index:
             [query_tokens], k=k, show_progress=False
         )
 
-        # スコア > 0 の結果のみ抽出（source_type フィルタ適用）
+        # スコア > 0 の結果のみ抽出（source_type + filters フィルタ適用）
         results: list[BM25Result] = []
         for idx, score in zip(doc_indices[0], scores[0]):
             if score <= 0:
@@ -192,6 +204,10 @@ class BM25Index:
             doc_id = self._doc_ids[int(idx)]
             if source_type is not None:
                 if self._doc_source_type_map.get(doc_id) != source_type:
+                    continue
+            if filters:
+                doc_meta = self._doc_metadata_map.get(doc_id, {})
+                if not self._matches_filters(doc_meta, filters):
                     continue
             results.append(
                 BM25Result(
@@ -204,6 +220,17 @@ class BM25Index:
                 break
 
         return results
+
+    @staticmethod
+    def _matches_filters(
+        metadata: dict[str, str | int | float | bool],
+        filters: dict[str, str | int | float | bool],
+    ) -> bool:
+        """メタデータがフィルタ条件に完全一致するか判定する."""
+        for key, value in filters.items():
+            if metadata.get(key) != value:
+                return False
+        return True
 
     def delete_by_source(self, source_url: str) -> int:
         """ソースURL指定でドキュメントを削除する.
@@ -224,6 +251,7 @@ class BM25Index:
             del self._documents[doc_id]
             del self._doc_source_map[doc_id]
             self._doc_source_type_map.pop(doc_id, None)  # 旧データに source_type がない場合の互換性
+            self._doc_metadata_map.pop(doc_id, None)
 
         if to_delete:
             self._needs_rebuild = True
@@ -281,6 +309,7 @@ class BM25Index:
             self._documents.pop(doc_id, None)
             self._doc_source_map.pop(doc_id, None)
             self._doc_source_type_map.pop(doc_id, None)
+            self._doc_metadata_map.pop(doc_id, None)
 
         if stale_ids:
             self._needs_rebuild = True
@@ -293,6 +322,7 @@ class BM25Index:
         self._documents.clear()
         self._doc_source_map.clear()
         self._doc_source_type_map.clear()
+        self._doc_metadata_map.clear()
         self._doc_ids.clear()
         self._bm25 = None
         self._needs_rebuild = True
@@ -364,6 +394,7 @@ class BM25Index:
                     "documents": self._documents,
                     "doc_source_map": self._doc_source_map,
                     "doc_source_type_map": self._doc_source_type_map,
+                    "doc_metadata_map": self._doc_metadata_map,
                 }
                 metadata_path = tmp_dir / METADATA_FILENAME
                 metadata_path.write_text(
@@ -454,6 +485,7 @@ class BM25Index:
             self._documents = metadata["documents"]
             self._doc_source_map = metadata["doc_source_map"]
             self._doc_source_type_map = metadata.get("doc_source_type_map", {})
+            self._doc_metadata_map = metadata["doc_metadata_map"]
 
             # bm25s モデル復元
             bm25s_dir = self._persist_dir / BM25S_SUBDIR
@@ -466,6 +498,7 @@ class BM25Index:
                 self._documents = {}
                 self._doc_source_map = {}
                 self._doc_source_type_map = {}
+                self._doc_metadata_map = {}
                 return
 
             import bm25s as bm25s_lib
@@ -487,6 +520,7 @@ class BM25Index:
             self._documents = {}
             self._doc_source_map = {}
             self._doc_source_type_map = {}
+            self._doc_metadata_map = {}
             self._doc_ids = []
             self._bm25 = None
             self._needs_rebuild = True

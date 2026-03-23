@@ -1046,8 +1046,8 @@ class TestRagStats:
 
 
 @pytest.mark.asyncio
-async def test_rag_server_exposes_thirteen_tools() -> None:
-    """RAG MCPサーバーが13個のツールを公開すること."""
+async def test_rag_server_exposes_sixteen_tools() -> None:
+    """RAG MCPサーバーが16個のツールを公開すること."""
     mod = import_module("rag.server")
     server = mod.mcp
 
@@ -1057,7 +1057,8 @@ async def test_rag_server_exposes_thirteen_tools() -> None:
     expected = {
         "rag_search", "rag_get_document", "rag_add", "rag_crawl",
         "rag_crawl_preview", "rag_crawl_zenn", "rag_crawl_bluesky",
-        "rag_add_document", "rag_crawl_documents", "rag_site_ingest",
-        "rag_delete", "rag_rebuild", "rag_stats",
+        "rag_add_youtube", "rag_crawl_youtube",
+        "rag_add_document", "rag_add_journal", "rag_crawl_documents",
+        "rag_site_ingest", "rag_delete", "rag_rebuild", "rag_stats",
     }
     assert tool_names == expected, f"Expected {expected}, got {tool_names}"

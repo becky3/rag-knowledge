@@ -3,7 +3,7 @@
 仕様: docs/specs/rag-knowledge.md, docs/specs/search-response.md
 独立リポジトリとして動作する。
 
-FastMCP を使用して 13 個の RAG ツールを公開する:
+FastMCP を使用して 16 個の RAG ツールを公開する:
 - rag_search: ナレッジベース検索（チャンク単位返却）
 - rag_get_document: ソース全文取得
 - rag_add: 単一ページをナレッジベースに取り込み
@@ -11,7 +11,10 @@ FastMCP を使用して 13 個の RAG ツールを公開する:
 - rag_crawl_preview: クロール対象ページのプレビュー（タイトル・URL一覧）
 - rag_crawl_zenn: Zenn 記事の一括取り込み
 - rag_crawl_bluesky: BlueSky 投稿の一括取り込み
+- rag_add_youtube: YouTube 動画の字幕・文字起こしをナレッジベースに取り込み
+- rag_crawl_youtube: YouTube プレイリスト・チャンネルの一括取り込み
 - rag_add_document: ドキュメントファイルをナレッジベースに取り込み
+- rag_add_journal: ジャーナルエントリをナレッジベースに登録
 - rag_crawl_documents: ディレクトリ内ドキュメントを一括取り込み
 - rag_site_ingest: Scrapy によるサイト一括取り込み（大規模サイト向け）
 - rag_delete: ソースURL指定でナレッジから論理削除
@@ -59,6 +62,7 @@ with contextlib.redirect_stdout(io.StringIO()):
     from .pipeline.controller import PipelineController
     from .pipeline.ingesters._common import IngestResult
     from .pipeline.ingesters.bluesky import BlueskyIngester as PipelineBlueskyIngester
+    from .pipeline.ingesters.journal import JournalIngester as PipelineJournalIngester
     from .pipeline.ingesters.local import LocalIngester as PipelineLocalIngester
     from .pipeline.ingesters.web import WebIngester as PipelineWebIngester
     from .pipeline.ingesters.youtube import YoutubeIngester as PipelineYoutubeIngester
@@ -281,7 +285,7 @@ def _get_supported_extensions() -> list[str]:
 
 # --- MCP ツール定義 ---
 
-_VALID_SOURCE_TYPES: frozenset[str] = frozenset({"web", "zenn", "bluesky", "youtube", "local"})
+_VALID_SOURCE_TYPES: frozenset[str] = frozenset({"web", "zenn", "bluesky", "youtube", "local", "journal"})
 
 
 def _format_chunk_position(chunk_index: int, total_chunks: int) -> str:
@@ -305,6 +309,7 @@ async def rag_search(
     query: str,
     n_results: int | None = None,
     source_type: str | None = None,
+    filters: str | None = None,
 ) -> str:
     """[rag-knowledge] RAG search - ナレッジベース検索。挨拶・雑談以外の質問では必ずこのツールを最初に呼び出すこと。
 
@@ -316,8 +321,11 @@ async def rag_search(
     Args:
         query: 検索クエリ（ユーザーの質問からキーワードを抽出して構成する）
         n_results: 各エンジンから取得する結果数（未指定時は設定値を使用）
-        source_type: ソース種別フィルタ（"web", "zenn", "bluesky", "youtube", "local"）。
+        source_type: ソース種別フィルタ（"web", "zenn", "bluesky", "youtube", "local", "journal"）。
             指定時はそのソース種別のチャンクのみを検索対象とする。未指定時は全種別を検索。
+        filters: メタデータフィルタ（JSON 形式）。.meta のカスタムフィールドで検索結果を絞り込む。
+            完全一致フィルタ。例: '{"repository": "rag-knowledge"}'
+            未指定時はフィルタなし。
 
     Returns:
         検索結果テキスト。ベクトル検索結果とBM25検索結果をセクション分けして返す。
@@ -329,12 +337,30 @@ async def rag_search(
         valid = ", ".join(sorted(_VALID_SOURCE_TYPES))
         return f"無効な source_type: {source_type!r}（有効値: {valid}）"
 
+    # filters パラメータのパース
+    parsed_filters: dict[str, str | int | float | bool] | None = None
+    if filters is not None:
+        try:
+            parsed_filters = json.loads(filters)
+            if not isinstance(parsed_filters, dict):
+                return "エラー: filters は JSON オブジェクト形式で指定してください（例: '{\"repository\": \"rag-knowledge\"}'）"
+            allowed_types = (str, int, float, bool)
+            for key, value in parsed_filters.items():
+                if not isinstance(value, allowed_types):
+                    return (
+                        f"エラー: filters の値は str/int/float/bool のみサポートされています。"
+                        f" キー {key!r} に不正な型 {type(value).__name__} が指定されています"
+                    )
+        except json.JSONDecodeError:
+            return "エラー: filters の JSON パースに失敗しました"
+
     service = await _get_rag_service()
     if n_results is None:
         n_results = get_settings().rag_retrieval_count
 
     raw = await service.retrieve_raw_results(
         query, n_results=n_results, source_type=source_type,
+        filters=parsed_filters,
     )
 
     if not raw.vector_results and not raw.bm25_results:
@@ -980,6 +1006,69 @@ async def rag_add_document(
     except Exception:
         logger.exception("Failed to add document file: %s", file_path)
         return f"エラー: ファイルの取り込みに失敗しました。パス: {file_path}"
+
+
+@mcp.tool()
+async def rag_add_journal(
+    title: str,
+    body: str,
+    repository: str,
+    entry_id: str | None = None,
+    ctx: MCPContext | None = None,
+) -> str:
+    """[rag-knowledge] RAG add journal - ジャーナルエントリをナレッジベースに登録する.
+
+    journal, session log, work record, development diary.
+    セッションごとの作業記録（ジャーナル）をナレッジベースに追加する。
+    stdio モード専用。HTTP モードでは無効。
+
+    Args:
+        title: エントリタイトル
+        body: 本文（Markdown）
+        repository: リポジトリ名（例: rag-knowledge）
+        entry_id: エントリ識別子（更新時に使用。未指定時は自動生成。命名規則: YYYYMMDD-HHMMSS-topic）
+
+    Returns:
+        取り込み結果のメッセージ
+    """
+    if get_settings().rag_transport == "http":
+        return "エラー: rag_add_journal は HTTP モードでは無効です（セキュリティ上の制約）"
+
+    controller = await _get_pipeline_controller()
+    journal_ingester = PipelineJournalIngester(controller.source_store)
+
+    try:
+        ingest_result = await asyncio.to_thread(
+            journal_ingester.add_entry,
+            title,
+            body,
+            repository,
+            entry_id=entry_id,
+        )
+
+        if ingest_result.placed == 0 and ingest_result.errors == 0:
+            return "エラー: ジャーナルエントリの登録に失敗しました"
+
+        if ingest_result.errors > 0:
+            return f"エラー: {ingest_result.error_details[0]}"
+
+        pipeline_summary = await _run_ingest_and_index_subprocess(
+            f"ingest(journal): {repository}/{entry_id or title}",
+            ctx=ctx,
+        )
+        _reset_pipeline_controller()
+        _reset_rag_service()
+
+        resolved_entry_id = journal_ingester.last_entry_id or entry_id or title
+        return _format_ingest_response(
+            ingest_result, pipeline_summary,
+            context=f"journal: {repository}/{resolved_entry_id}",
+        )
+    except ValueError as e:
+        return f"エラー: {e}"
+    except Exception:
+        logger.exception("Failed to add journal entry: %s/%s", repository, title)
+        return f"エラー: ジャーナルエントリの登録に失敗しました: {title}"
 
 
 @mcp.tool()

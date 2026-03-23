@@ -13,6 +13,7 @@
 | Zenn | [zenn.md](zenn.md) |
 | YouTube | [youtube.md](youtube.md) |
 | Local | [local.md](local.md) |
+| Journal | [journal.md](journal.md) |
 
 スコープ:
 
@@ -92,6 +93,7 @@
 | YouTube プレイリスト一括取り込み | youtube | `rag_crawl_youtube` | プレイリスト内の動画を一括取得して配置 |
 | 単一ドキュメント取り込み | local | `rag_add_document` | 指定ファイルを local/ にコピー |
 | ディレクトリ一括取り込み | local | `rag_crawl_documents` | glob パターンで検索してコピー |
+| ジャーナルエントリ登録 | journal | `rag_add_journal` | ジャーナルエントリを journal/ に配置 |
 
 各操作の入力パラメータ・振る舞い・エッジケースは媒体別仕様書を参照。
 
@@ -192,6 +194,7 @@ flowchart TB
 | zenn | Zenn URL | username + slug で一意に決定 | 上書き |
 | youtube | YouTube 動画 URL | channel_id + video_id で一意に決定 | 上書き |
 | local | 相対パス | ユーザー指定パスで一意に決定 | 上書き |
+| journal | 相対パス | リポジトリ名 + entry_id で一意に決定 | 上書き |
 
 重複検出の手順:
 
