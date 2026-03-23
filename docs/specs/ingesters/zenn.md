@@ -127,9 +127,9 @@ Zenn（zenn.dev）の記事およびスクラップを API 経由で取得し、
 
 | 設定項目 | 型 | 保管先 | デフォルト | 許容範囲 | 内容 |
 |---------|-----|--------|-----------|---------|------|
-| `rag_zenn_max_articles` | 整数 | `config.toml` | 50 | 1〜100 | 取得する最大コンテンツ数（記事・スクラップそれぞれに適用） |
+| `rag_zenn_max_articles` | 整数 | `config.toml` | 100 | 1〜100 | 取得する最大コンテンツ数（記事・スクラップそれぞれに適用） |
 | `rag_zenn_request_timeout` | 整数 | `config.toml` | 30 | 1〜120 | Zenn API リクエストのタイムアウト（秒。記事・スクラップ両方に適用） |
-| `rag_zenn_request_interval` | 小数 | `config.toml` | 1.0 | 0.1〜60 | Zenn API リクエスト間の最低間隔（秒。記事・スクラップ両方に適用） |
+| `rag_zenn_request_interval` | 小数 | `config.toml` | 0.1 | 0.1〜60 | Zenn API リクエスト間の最低間隔（秒。記事・スクラップ両方に適用） |
 
 ## コンポーネント構成
 
