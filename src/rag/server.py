@@ -316,7 +316,7 @@ async def rag_search(
     Args:
         query: 検索クエリ（ユーザーの質問からキーワードを抽出して構成する）
         n_results: 各エンジンから取得する結果数（未指定時は設定値を使用）
-        source_type: ソース種別フィルタ（"web", "zenn", "bluesky", "local"）。
+        source_type: ソース種別フィルタ（"web", "zenn", "bluesky", "youtube", "local"）。
             指定時はそのソース種別のチャンクのみを検索対象とする。未指定時は全種別を検索。
 
     Returns:
@@ -818,8 +818,8 @@ async def rag_add_youtube(
     try:
         ingest_result = await youtube_ingester.ingest_video(video_url)
 
-        if ingest_result.placed == 0 and ingest_result.errors == 0:
-            return f"動画が取り込めませんでした: {video_url}"
+        if ingest_result.placed == 0:
+            return ingest_result.summary(context=f"動画: {video_url}")
 
         pipeline_summary = await _run_ingest_and_index_subprocess(
             f"ingest(youtube): {video_url}",
@@ -891,8 +891,8 @@ async def rag_crawl_youtube(
             max_videos=max_videos,
         )
 
-        if ingest_result.placed == 0 and ingest_result.errors == 0:
-            return f"プレイリストに動画が見つかりませんでした: {playlist_url}"
+        if ingest_result.placed == 0:
+            return ingest_result.summary(context=f"プレイリスト: {playlist_url}")
 
         pipeline_summary = await _run_ingest_and_index_subprocess(
             f"ingest(youtube-playlist): {playlist_url}",

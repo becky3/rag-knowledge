@@ -1591,6 +1591,10 @@ async def run_ingest_youtube(args: argparse.Namespace) -> None:
         logger.error("エラー: %s", e)
         sys.exit(1)
 
+    if ingest_result.placed == 0:
+        _print_ingest_result(ingest_result, None, context=f"動画: {args.video_url}")
+        return
+
     pipeline_summary = controller.ingest_and_index(f"ingest(youtube): {args.video_url}")
     _print_ingest_result(ingest_result, pipeline_summary, context=f"動画: {args.video_url}")
 
@@ -1622,6 +1626,10 @@ async def run_ingest_youtube_playlist(args: argparse.Namespace) -> None:
     except (ValueError, TypeError) as e:
         logger.error("エラー: %s", e)
         sys.exit(1)
+
+    if ingest_result.placed == 0:
+        _print_ingest_result(ingest_result, None, context=f"プレイリスト: {args.playlist_url}")
+        return
 
     pipeline_summary = controller.ingest_and_index(f"ingest(youtube-playlist): {args.playlist_url}")
     _print_ingest_result(ingest_result, pipeline_summary, context=f"プレイリスト: {args.playlist_url}")

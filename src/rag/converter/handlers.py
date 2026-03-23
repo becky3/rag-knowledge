@@ -543,11 +543,14 @@ def _format_timestamp_yt(seconds: float, has_hours: bool) -> str:
     return f"[{m:02d}:{s:02d}]"
 
 
-def _format_upload_date(upload_date: str) -> str:
+def _format_upload_date(upload_date: Any) -> str:
     """YYYYMMDD → YYYY-MM-DD に変換する."""
-    if len(upload_date) == 8 and upload_date.isdigit():
-        return f"{upload_date[:4]}-{upload_date[4:6]}-{upload_date[6:8]}"
-    return upload_date
+    if upload_date is None:
+        return ""
+    s = str(upload_date).strip()
+    if len(s) == 8 and s.isdigit():
+        return f"{s[:4]}-{s[4:6]}-{s[6:8]}"
+    return s
 
 
 def convert_json_youtube(

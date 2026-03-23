@@ -211,29 +211,19 @@ class TestIngestVideo:
         assert "メタデータ取得失敗" in result.error_details[0]
 
     @pytest.mark.asyncio()
-    async def test_unknown_channel_id_fallback(self, source_store: Any) -> None:
-        """channel_id が取得できない場合に unknown がフォールバック値として使われることを検証する."""
+    async def test_missing_channel_id_causes_error(self, source_store: Any) -> None:
+        """channel_id が取得できない場合にエラーになることを検証する."""
         ingester = YoutubeIngester(source_store)
 
         metadata = _make_metadata()
         metadata["channel_id"] = None
-        snippets = _make_snippets()
 
-        with (
-            patch.object(ingester, "_fetch_metadata", new_callable=AsyncMock, return_value=metadata),
-            patch.object(
-                ingester,
-                "_fetch_transcript",
-                new_callable=AsyncMock,
-                return_value=(snippets, "subtitle", "ja"),
-            ),
-        ):
+        with patch.object(ingester, "_fetch_metadata", new_callable=AsyncMock, return_value=metadata):
             result = await ingester.ingest_video("https://www.youtube.com/watch?v=JV3KOJ_Z4Vs")
 
-        assert result.placed == 1
-        call_kwargs = source_store.place_file.call_args
-        assert call_kwargs.kwargs["rel_path"] == "youtube/unknown/JV3KOJ_Z4Vs.json"
-        assert call_kwargs.kwargs["metadata"]["channel_id"] == "unknown"
+        assert result.placed == 0
+        assert result.errors == 1
+        assert "channel_id" in result.error_details[0]
 
     @pytest.mark.asyncio()
     async def test_whisper_model_recorded(self, source_store: Any) -> None:

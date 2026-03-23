@@ -177,6 +177,16 @@ class YoutubeIngester:
             result.skipped += 1
             return result
 
+        # channel_id チェック（チャンネル別階層のため必須）
+        raw_channel_id = metadata.get("channel_id")
+        if not raw_channel_id:
+            logger.error("channel_id が取得できません (video_id=%s)", video_id)
+            result.errors += 1
+            result.error_details.append(f"channel_id 取得失敗: {video_id}")
+            return result
+        # パストラバーサル防止: 安全な文字のみ許可
+        channel_id = re.sub(r"[^A-Za-z0-9_-]", "_", raw_channel_id)
+
         # 字幕取得 → Whisper フォールバック
         try:
             snippets, transcript_source, language = await self._fetch_transcript(
@@ -192,9 +202,6 @@ class YoutubeIngester:
             return result
 
         # JSON データ構築
-        raw_channel_id = metadata.get("channel_id") or "unknown"
-        # パストラバーサル防止: 安全な文字のみ許可
-        channel_id = re.sub(r"[^A-Za-z0-9_-]", "_", raw_channel_id) if raw_channel_id != "unknown" else "unknown"
         json_data: dict[str, Any] = {
             "video_id": video_id,
             "title": metadata.get("title") or "",
@@ -226,7 +233,7 @@ class YoutubeIngester:
             "title": metadata.get("title") or "",
             "collected_at": now_iso(),
             "video_id": video_id,
-            "channel_id": metadata.get("channel_id") or "unknown",
+            "channel_id": channel_id,
             "uploader": metadata.get("uploader") or "",
             "upload_date": metadata.get("upload_date") or "",
             "duration": metadata.get("duration") or 0,
