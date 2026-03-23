@@ -300,8 +300,12 @@ class YoutubeIngester:
         try:
             video_entries = await self._expand_playlist(playlist_url, effective_max)
         except Exception as e:
+            if isinstance(e, (TypeError, AttributeError, ImportError)):
+                raise
             logger.error("プレイリスト展開失敗: %s", e)
-            raise
+            result.errors += 1
+            result.error_details.append(f"プレイリスト展開失敗: {e}")
+            return result
 
         if not video_entries:
             logger.info("プレイリストに動画がありません: %s", playlist_url)
@@ -459,13 +463,16 @@ class YoutubeIngester:
             # 音声ダウンロード
             audio_path = await self._download_audio(video_id, tmpdir)
 
-            # ファイルサイズチェック
+            # ファイルサイズチェック（超過時は警告 + 空 snippets で返す）
             file_size_mb = Path(audio_path).stat().st_size / (1024 * 1024)
             if file_size_mb > MAX_AUDIO_FILE_SIZE_MB:
-                raise ValueError(
-                    f"音声ファイルサイズが上限を超えています: "
-                    f"{file_size_mb:.0f}MB > {MAX_AUDIO_FILE_SIZE_MB}MB"
+                logger.warning(
+                    "音声ファイルサイズが上限を超えています (video_id=%s): %.0fMB > %dMB。スキップします",
+                    video_id,
+                    file_size_mb,
+                    MAX_AUDIO_FILE_SIZE_MB,
                 )
+                return [], self._transcript_languages[0]
 
             # faster-whisper で文字起こし（モデルは遅延初期化 + キャッシュ、Lock で排他）
             def _transcribe() -> tuple[list[dict[str, Any]], str]:

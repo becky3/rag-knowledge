@@ -608,12 +608,19 @@ def convert_json_youtube(
     # スニペット結合
     paragraphs: list[tuple[float, str]] = []
     current_text = ""
-    current_start = snippets[0].get("start", 0.0)
-    prev_end = snippets[0].get("end", 0.0)
+    try:
+        current_start = float(snippets[0].get("start", 0.0))
+        prev_end = float(snippets[0].get("end", 0.0))
+    except (TypeError, ValueError):
+        current_start = 0.0
+        prev_end = 0.0
 
     for i, snippet in enumerate(snippets):
-        s_start = snippet.get("start", 0.0)
-        s_text = snippet.get("text", "")
+        try:
+            s_start = float(snippet.get("start", 0.0))
+        except (TypeError, ValueError):
+            continue
+        s_text = str(snippet.get("text", ""))
 
         if i == 0:
             current_text = s_text
@@ -630,7 +637,10 @@ def convert_json_youtube(
             current_text += s_text
 
         # end 時刻の逆転（YouTube 自動生成字幕で発生）に備え max で追跡
-        prev_end = max(prev_end, snippet.get("end", 0.0))
+        try:
+            prev_end = max(prev_end, float(snippet.get("end", 0.0)))
+        except (TypeError, ValueError):
+            pass
 
     # 最後の段落
     if current_text:

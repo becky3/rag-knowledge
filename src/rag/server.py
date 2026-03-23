@@ -867,9 +867,10 @@ async def rag_crawl_youtube(
         return f"エラー: max_videos は整数で指定してください（入力値: {max_videos!r}）"
     if max_videos <= 0:
         return f"エラー: max_videos は正の整数で指定してください（入力値: {max_videos}）"
-    if max_videos > 500:
-        logger.warning("max_videos (%d) が上限 500 を超えています。500 にクランプします", max_videos)
-        max_videos = 500
+    from .pipeline.ingesters.youtube import MAX_VIDEOS_HARD_LIMIT as _YT_MAX
+    if max_videos > _YT_MAX:
+        logger.warning("max_videos (%d) が上限 %d を超えています。クランプします", max_videos, _YT_MAX)
+        max_videos = _YT_MAX
 
     if not playlist_url or not playlist_url.strip():
         return "エラー: playlist_url を指定してください"
