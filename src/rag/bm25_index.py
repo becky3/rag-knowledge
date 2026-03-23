@@ -117,22 +117,26 @@ class BM25Index:
         Returns:
             追加されたドキュメント数
         """
+        if metadata_list is not None and len(metadata_list) != len(documents):
+            raise ValueError(
+                f"add_documents: length mismatch: "
+                f"documents={len(documents)}, metadata_list={len(metadata_list)}"
+            )
+
         added = 0
         updated = 0
         for i, (doc_id, text, source_url, source_type) in enumerate(documents):
             if doc_id in self._documents:
-                # 既存のドキュメントを更新
                 self._documents[doc_id] = text
                 self._doc_source_map[doc_id] = source_url
                 self._doc_source_type_map[doc_id] = source_type
                 updated += 1
             else:
-                # 新規ドキュメントを追加
                 self._documents[doc_id] = text
                 self._doc_source_map[doc_id] = source_url
                 self._doc_source_type_map[doc_id] = source_type
                 added += 1
-            if metadata_list is not None and i < len(metadata_list):
+            if metadata_list is not None:
                 self._doc_metadata_map[doc_id] = metadata_list[i]
 
         # 新規追加または更新があった場合はインデックス再構築が必要

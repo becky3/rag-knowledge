@@ -344,6 +344,13 @@ async def rag_search(
             parsed_filters = json.loads(filters)
             if not isinstance(parsed_filters, dict):
                 return "エラー: filters は JSON オブジェクト形式で指定してください（例: '{\"repository\": \"rag-knowledge\"}'）"
+            allowed_types = (str, int, float, bool)
+            for key, value in parsed_filters.items():
+                if not isinstance(value, allowed_types):
+                    return (
+                        f"エラー: filters の値は str/int/float/bool のみサポートされています。"
+                        f" キー {key!r} に不正な型 {type(value).__name__} が指定されています"
+                    )
         except json.JSONDecodeError:
             return "エラー: filters の JSON パースに失敗しました"
 
@@ -1052,9 +1059,10 @@ async def rag_add_journal(
         _reset_pipeline_controller()
         _reset_rag_service()
 
+        resolved_entry_id = journal_ingester.last_entry_id or entry_id or title
         return _format_ingest_response(
             ingest_result, pipeline_summary,
-            context=f"journal: {repository}/{title}",
+            context=f"journal: {repository}/{resolved_entry_id}",
         )
     except ValueError as e:
         return f"エラー: {e}"

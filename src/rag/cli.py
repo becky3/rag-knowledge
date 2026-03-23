@@ -1303,6 +1303,14 @@ def run_search(args: argparse.Namespace) -> None:
             if not isinstance(parsed_filters, dict):
                 print("エラー: --filters は JSON オブジェクト形式で指定してください")
                 return
+            allowed_types = (str, int, float, bool)
+            for key, value in parsed_filters.items():
+                if not isinstance(value, allowed_types):
+                    print(
+                        f"エラー: --filters の値は str/int/float/bool のみ使用できます"
+                        f"（キー {key!r} に不正な型 {type(value).__name__}）"
+                    )
+                    return
         except json.JSONDecodeError:
             print("エラー: --filters の JSON パースに失敗しました")
             return

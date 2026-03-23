@@ -32,6 +32,7 @@ class JournalIngester:
 
     def __init__(self, source_store: SourceStore) -> None:
         self._store = source_store
+        self.last_entry_id: str | None = None
 
     def add_entry(
         self,
@@ -78,6 +79,7 @@ class JournalIngester:
                 metadata=metadata,
             )
             result.placed = 1
+            self.last_entry_id = entry_id
         except ValueError as e:
             result.errors = 1
             result.error_details.append(str(e))
