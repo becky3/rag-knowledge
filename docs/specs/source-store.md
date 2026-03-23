@@ -50,7 +50,7 @@ metadata.db、converted_store、検索インデックスは全て source_store �
 
 ### .meta サイドカーファイル
 
-- 自動取り込み媒体（web、bluesky、zenn、youtube、aozora）のファイルには `.meta` サイドカーファイルを同階層に配置する
+- 自動取り込み媒体（web、bluesky、zenn、youtube、aozora、journal）のファイルには `.meta` サイドカーファイルを同階層に配置する
 - local 媒体は `.meta` 不要。sources テーブルの各フィールドは以下から導出する:
   - `title`: ファイル名（拡張子除去）
   - `created_at`: git の初回コミット日時
@@ -117,6 +117,7 @@ flowchart TD
     SS --> ZENN["zenn/"]
     SS --> YT["youtube/"]
     SS --> AZ["aozora/"]
+    SS --> JNL["journal/"]
     SS --> DOT_GIT[".git/"]
 
     LOCAL --> L_USER["my-notes/ 等"]
@@ -140,6 +141,9 @@ flowchart TD
     AZ --> AZ_PERSON["{person_id}/"]
     AZ_PERSON --> AZ_BOOK["{book_id}.html"]
     AZ_PERSON --> AZ_BOOK_META["{book_id}.html.meta"]
+    JNL --> JNL_REPO["repository/"]
+    JNL_REPO --> JNL_ENTRY["entry_id.md"]
+    JNL_REPO --> JNL_META["entry_id.md.meta"]
 ```
 
 - **source_store/**: ルートディレクトリ。パスは `.env` の設定値で指定
@@ -151,6 +155,7 @@ flowchart TD
 - **zenn/**: Zenn インジェスターがユーザー名 + コンテンツ種別（articles/scraps）で階層化して自動配置
 - **youtube/**: YouTube インジェスターがチャンネル ID で階層化して自動配置
 - **aozora/**: 青空文庫インジェスターがカタログ + 著者 ID で階層化して自動配置
+- **journal/**: Journal インジェスターがリポジトリ名で階層化して自動配置
 
 ### converted_store のディレクトリ構成
 
@@ -168,6 +173,7 @@ converted_store は source_store のディレクトリ構成をミラーする�
 | zenn | Zenn 記事 URL | URL が安定識別子 | `https://zenn.dev/user/articles/slug` |
 | youtube | YouTube 動画 URL | video_id が一意識別子 | `https://www.youtube.com/watch?v=xxxxxxxxxxx` |
 | aozora | 青空文庫 URL / 固定文字列 | 作品 URL が安定識別子、カタログは固定文字列 | `https://www.aozora.gr.jp/cards/000035/files/1567_14913.html`、`aozora:catalog` |
+| journal | source_store 内の相対パス | リポジトリ名 + entry_id で一意 | `journal/rag-knowledge/20260323-143000-session-summary.md` |
 
 ### URL パス変換規則
 
@@ -231,7 +237,7 @@ URL: `http://localhost:8080/api/docs`
 | フィールド | 型 | 内容 |
 |-----------|-----|------|
 | `source_id` | str | ソース識別子 |
-| `source_type` | str | 媒体種別（`web`, `bluesky`, `zenn`, `youtube`, `aozora`）。`local` は .meta を持たないため含まない |
+| `source_type` | str | 媒体種別（`web`, `bluesky`, `zenn`, `youtube`, `aozora`, `journal`）。`local` は .meta を持たないため含まない |
 | `title` | str | コンテンツのタイトル |
 | `collected_at` | str | 取り込みタイムスタンプ（ISO 8601） |
 
@@ -281,6 +287,12 @@ URL: `http://localhost:8080/api/docs`
 | `author` | str | 著者名 |
 | `author_kana` | str | 著者名カナ |
 | `copyright_expired` | bool | 著作権切れフラグ |
+
+**journal:**
+
+| フィールド | 型 | 内容 |
+|-----------|-----|------|
+| `repository` | str | リポジトリ名 |
 
 #### .meta ファイルの形式例
 
@@ -365,6 +377,16 @@ author_kana: "Sample Kana"
 copyright_expired: true
 ```
 
+**journal:**
+
+```yaml
+source_id: "journal/rag-knowledge/20260323-143000-session-summary.md"
+source_type: journal
+title: "Session Summary: Pipeline Migration"
+collected_at: "2026-03-23T14:30:00+00:00"
+repository: rag-knowledge
+```
+
 ### metadata.db スキーマ
 
 #### sources テーブル
@@ -374,7 +396,7 @@ source_store 内の全ファイルのメタデータ索引。
 | カラム | 型 | 制約 | 内容 |
 |--------|-----|------|------|
 | `source_id` | TEXT | PRIMARY KEY | ソース識別子 |
-| `source_type` | TEXT | NOT NULL | 媒体種別（`web`, `bluesky`, `zenn`, `youtube`, `aozora`, `local`） |
+| `source_type` | TEXT | NOT NULL | 媒体種別（`web`, `bluesky`, `zenn`, `youtube`, `aozora`, `local`, `journal`） |
 | `file_path` | TEXT | NOT NULL, UNIQUE | source_store 内の相対パス |
 | `title` | TEXT | NOT NULL | コンテンツのタイトル |
 | `status` | TEXT | NOT NULL, DEFAULT 'active' | `active` または `deleted` |

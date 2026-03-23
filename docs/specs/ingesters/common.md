@@ -14,6 +14,7 @@
 | YouTube | [youtube.md](youtube.md) |
 | 青空文庫 | [aozora.md](aozora.md) |
 | Local | [local.md](local.md) |
+| Journal | [journal.md](journal.md) |
 
 スコープ:
 
@@ -97,6 +98,7 @@
 | 著者一括取り込み | aozora | `rag_crawl_aozora` | 著者の全作品（著作権フリー）を一括取得して配置 |
 | 単一ドキュメント取り込み | local | `rag_add_document` | 指定ファイルを local/ にコピー |
 | ディレクトリ一括取り込み | local | `rag_crawl_documents` | glob パターンで検索してコピー |
+| ジャーナルエントリ登録 | journal | `rag_add_journal` | ジャーナルエントリを journal/ に配置 |
 
 各操作の入力パラメータ・振る舞い・エッジケースは媒体別仕様書を参照。
 
@@ -201,6 +203,7 @@ flowchart TB
 | youtube | YouTube 動画 URL | channel_id + video_id で一意に決定 | 上書き |
 | aozora | 青空文庫 URL | person_id + book_id で一意に決定 | スキップ |
 | local | 相対パス | ユーザー指定パスで一意に決定 | 上書き |
+| journal | 相対パス | リポジトリ名 + entry_id で一意に決定 | 上書き |
 
 重複検出の手順:
 

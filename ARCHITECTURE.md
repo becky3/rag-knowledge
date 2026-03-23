@@ -62,6 +62,7 @@
 | `ingesters/zenn.md` | `src/rag/pipeline/ingesters/zenn.py` |
 | `ingesters/local.md` | `src/rag/pipeline/ingesters/local.py` |
 | `ingesters/aozora.md` | `src/rag/pipeline/ingesters/aozora.py` |
+| `ingesters/journal.md` | `src/rag/pipeline/ingesters/journal.py` |
 
 ### Claude Code 拡張
 

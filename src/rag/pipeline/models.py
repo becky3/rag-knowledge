@@ -64,4 +64,6 @@ def detect_source_type(rel_path: str) -> SourceType:
         return "youtube"
     if rel_path.startswith("aozora/"):
         return "aozora"
+    if rel_path.startswith("journal/"):
+        return "journal"
     return "local"

@@ -19,6 +19,7 @@
 | **BlueSky インジェスター** | BlueSky 投稿を AT Protocol API 経由で取得・ナレッジベースに取り込み |
 | **YouTube インジェスター** | YouTube 動画の字幕・音声文字起こしを取得・ナレッジベースに取り込み |
 | **ドキュメントインジェスター** | テキストドキュメント（Markdown、テキスト、PDF、AsciiDoc）をナレッジベースに取り込み |
+| **Journal インジェスター** | 開発ジャーナル（セッション作業記録）をナレッジベースに登録・検索 |
 | **サイト一括取り込み（Scrapy）** | Scrapy subprocess による大規模サイトの一括取り込み |
 | **青空文庫インジェスター** | 青空文庫の著作権切れ作品をカタログ検索・取り込み |
 | **制約付き HTTP クライアント** | バジェット・サーキットブレーカー・レート制限を統合した安全な HTTP アクセス（py-common-lib 提供） |
@@ -100,6 +101,37 @@ YouTube インジェスターは非公式 API（youtube-transcript-api）を使�
 - プレイリスト一括取り込み時は `--max-videos` で段階的に取り込む（1 回あたり 10〜20 動画推奨）
 - `rag_youtube_request_interval`（デフォルト: 5.0 秒）を短くしすぎない
 - IP ブロックが発生した場合は時間を置いて再実行する
+
+## Journal CLI
+
+### 単一エントリ登録
+
+```bash
+# インライン本文
+uv run python -m rag.cli add-journal --title "セッション記録" --body "本文..." --repository rag-knowledge
+
+# ファイルから本文読み込み（長文推奨）
+uv run python -m rag.cli add-journal --title "セッション記録" --body @path/to/journal.md --repository rag-knowledge
+```
+
+| パラメータ | 短縮 | 必須 | 説明 |
+|-----------|------|------|------|
+| `--title` | `-t` | Yes | エントリタイトル |
+| `--body` | `-b` | Yes | 本文（Markdown）。`@ファイルパス` でファイルから読み込み |
+| `--repository` | `-r` | Yes | リポジトリ名 |
+| `--entry-id` | `-e` | No | エントリ識別子（省略時は自動生成） |
+
+### 既存ジャーナル一括取り込み（マイグレーション）
+
+```bash
+uv run python -m rag.cli migrate-journal --dir <path> --repository <name>
+# 事後: uv run python -m rag.cli rebuild --mode incremental
+```
+
+| パラメータ | 短縮 | 必須 | 説明 |
+|-----------|------|------|------|
+| `--dir` | `-d` | Yes | ジャーナルファイルが格納されたディレクトリパス |
+| `--repository` | `-r` | Yes | リポジトリ名（メタデータに記録） |
 
 ## RAG 評価 CLI
 
