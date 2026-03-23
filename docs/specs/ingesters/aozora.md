@@ -12,7 +12,7 @@
 - カタログの新着・更新検出
 - カタログを用いた著者名・作品名での検索
 - 個別作品 XHTML の取得と source_store への配置
-- 著者名を指定した一括取り込み
+- 人物 ID（person_id）を指定した一括取り込み
 - .meta サイドカーファイルの生成
 - MCP ツール・CLI コマンドとしてのインターフェース提供
 - パイプライン制御への取り込み完了通知
@@ -285,7 +285,7 @@ copyright_expired: true
 flowchart TD
     START["rag_update_aozora_catalog()"]
     DL["CSV ZIP ダウンロード（ConstrainedClient 経由）"]
-    UNZIP["ZIP 展開 + Shift_JIS デコード"]
+    UNZIP["ZIP 展開 + UTF-8(BOM 付き) デコード"]
     CHECK{"前回 catalog.csv が存在?"}
     DIFF["前回 CSV と比較（作品 ID ベース）"]
     PLACE_NEW["source_store に catalog.csv 配置 + .meta 生成"]

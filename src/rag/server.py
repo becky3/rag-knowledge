@@ -1444,7 +1444,7 @@ _VALID_REBUILD_MODES: frozenset[str] = frozenset({
     "full", "convert", "index", "incremental",
 })
 _VALID_PIPELINE_SOURCE_TYPES: frozenset[str] = frozenset({
-    "web", "bluesky", "zenn", "youtube", "local",
+    "web", "bluesky", "zenn", "youtube", "aozora", "local",
 })
 _rebuild_lock = threading.Lock()
 

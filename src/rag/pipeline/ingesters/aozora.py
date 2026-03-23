@@ -98,6 +98,10 @@ class AozoraIngester:
 
         # CSV ZIP ダウンロード
         resp = await client.get(CATALOG_ZIP_URL)
+        if resp.status_code < 200 or resp.status_code >= 300:
+            raise ValueError(
+                f"カタログ ZIP のダウンロードに失敗しました（status={resp.status_code}）"
+            )
         zip_bytes = resp.content
 
         # ZIP 展開 + CSV 読み取り
@@ -386,6 +390,16 @@ class AozoraIngester:
 
         # ダウンロード（生データをそのまま保存、エンコーディング変換はコンバーターの責務）
         resp = await client.get(github_url)
+        if resp.status_code < 200 or resp.status_code >= 300:
+            logger.error(
+                "XHTML ダウンロード失敗: book_id=%s status=%s url=%s",
+                book_id, resp.status_code, github_url,
+            )
+            result.errors += 1
+            result.error_details.append(
+                f"XHTML ダウンロード失敗: book_id={book_id}, status={resp.status_code}"
+            )
+            return False
         raw_bytes: bytes = resp.content
 
         # source_id
