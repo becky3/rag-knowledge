@@ -69,6 +69,11 @@ asyncio_mode = "auto"
 addopts = "-n auto"
 required_plugins = ["pytest-xdist"]
 
+[tool.uv]
+# uv sync 時に mineru (CPU版) を自動インストール。
+# CUDA 版を使う場合: uv sync --no-group with-mineru --extra mineru-cuda
+default-groups = ["dev", "with-mineru"]
+
 # PyTorch CUDA index（mineru-cuda extra 専用。CUDA 12.4 環境向け）
 [[tool.uv.index]]
 name = "pytorch-cu124"
@@ -91,3 +96,4 @@ dev = [
     "ruff>=0.14.14",
     "types-PyYAML>=6.0",
 ]
+with-mineru = ["rag-knowledge[mineru]"]
