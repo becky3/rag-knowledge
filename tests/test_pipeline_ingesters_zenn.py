@@ -415,3 +415,125 @@ class TestCrawlAll:
 
         assert result.placed == 0
         assert result.errors == 0
+
+
+@pytest.mark.asyncio()
+class TestSkipMode:
+    """スキップモード（デフォルト）のテスト."""
+
+    async def test_skip_existing_article(self, source_store: SourceStore) -> None:
+        """既存ファイルがある記事はスキップされること."""
+        # 事前に記事ファイルを配置
+        rel_path = source_store.root_dir / "zenn" / "testuser" / "articles" / "existing.json"
+        rel_path.parent.mkdir(parents=True, exist_ok=True)
+        rel_path.write_text('{"slug": "existing"}', encoding="utf-8")
+
+        # 一覧 API は "existing" を返すが、詳細 API は呼ばれないはず
+        client = _make_mock_client([
+            _make_article_list_response(["existing"]),
+        ])
+
+        ingester = ZennIngester(source_store, max_articles=3)
+        result = await ingester.crawl_zenn(
+            "testuser",
+            content_type="articles",
+            client=client,
+        )
+
+        assert result.placed == 0
+        assert result.skipped == 1
+        # 詳細 API は呼ばれない（一覧 API の 1 回のみ）
+        assert client.get.call_count == 1
+
+    async def test_skip_existing_scrap(self, source_store: SourceStore) -> None:
+        """既存ファイルがあるスクラップはスキップされること."""
+        rel_path = source_store.root_dir / "zenn" / "testuser" / "scraps" / "existing.json"
+        rel_path.parent.mkdir(parents=True, exist_ok=True)
+        rel_path.write_text('{"slug": "existing"}', encoding="utf-8")
+
+        client = _make_mock_client([
+            _make_scrap_list_response(["existing"]),
+        ])
+
+        ingester = ZennIngester(source_store, max_articles=3)
+        result = await ingester.crawl_zenn(
+            "testuser",
+            content_type="scraps",
+            client=client,
+        )
+
+        assert result.placed == 0
+        assert result.skipped == 1
+        assert client.get.call_count == 1
+
+    async def test_force_overwrites_existing(self, source_store: SourceStore) -> None:
+        """force=True で既存ファイルが上書きされること."""
+        rel_path = source_store.root_dir / "zenn" / "testuser" / "articles" / "existing.json"
+        rel_path.parent.mkdir(parents=True, exist_ok=True)
+        rel_path.write_text('{"slug": "old"}', encoding="utf-8")
+
+        client = _make_mock_client([
+            _make_article_list_response(["existing"]),
+            _make_article_detail_response("existing"),
+        ])
+
+        ingester = ZennIngester(source_store, max_articles=3)
+        result = await ingester.crawl_zenn(
+            "testuser",
+            content_type="articles",
+            force=True,
+            client=client,
+        )
+
+        assert result.placed == 1
+        assert result.skipped == 0
+        # 上書きされた内容を確認
+        data = json.loads(rel_path.read_text(encoding="utf-8"))
+        assert data["slug"] == "existing"
+        assert "body_html" in data
+
+    async def test_force_overwrites_existing_scrap(self, source_store: SourceStore) -> None:
+        """force=True で既存スクラップが上書きされること."""
+        rel_path = source_store.root_dir / "zenn" / "testuser" / "scraps" / "existing.json"
+        rel_path.parent.mkdir(parents=True, exist_ok=True)
+        rel_path.write_text('{"slug": "old"}', encoding="utf-8")
+
+        client = _make_mock_client([
+            _make_scrap_list_response(["existing"]),
+            _make_scrap_detail_response("existing"),
+        ])
+
+        ingester = ZennIngester(source_store, max_articles=3)
+        result = await ingester.crawl_zenn(
+            "testuser",
+            content_type="scraps",
+            force=True,
+            client=client,
+        )
+
+        assert result.placed == 1
+        assert result.skipped == 0
+        data = json.loads(rel_path.read_text(encoding="utf-8"))
+        assert data["comments_count"] == 2
+
+    async def test_mixed_new_and_existing(self, source_store: SourceStore) -> None:
+        """新規と既存が混在する場合、既存のみスキップされること."""
+        existing_path = source_store.root_dir / "zenn" / "testuser" / "articles" / "old.json"
+        existing_path.parent.mkdir(parents=True, exist_ok=True)
+        existing_path.write_text('{"slug": "old"}', encoding="utf-8")
+
+        client = _make_mock_client([
+            _make_article_list_response(["old", "new-article"]),
+            # "old" はスキップされるので詳細 API は "new-article" のみ
+            _make_article_detail_response("new-article"),
+        ])
+
+        ingester = ZennIngester(source_store, max_articles=3)
+        result = await ingester.crawl_zenn(
+            "testuser",
+            content_type="articles",
+            client=client,
+        )
+
+        assert result.placed == 1
+        assert result.skipped == 1
