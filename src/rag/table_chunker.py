@@ -268,6 +268,9 @@ def _reduce_table_chunk(
 
     # 段階2: カラム属性を複数チャンクに分割
     entity_prefix = f"名前: {entity_name}" if entity_name else ""
+    # entity_prefix 自体が max_chunk_size を超える場合は切り詰め
+    if entity_prefix and len(entity_prefix) >= max_chunk_size:
+        entity_prefix = entity_prefix[: max_chunk_size - 1]
     prefix_overhead = len(entity_prefix) + 1 if entity_prefix else 0
     available = max(1, max_chunk_size - prefix_overhead)
 
@@ -320,6 +323,18 @@ def _reduce_table_chunk(
                 rows=[", ".join(main_row)],
                 entity_name=entity_name,
                 formatted_text=ft,
+            )
+        )
+
+    # attributes が空（1カラムのみ）の場合、entity_prefix だけのチャンクを返す
+    if not chunks:
+        ft = entity_prefix if entity_prefix else ", ".join(main_row)
+        chunks.append(
+            TableChunk(
+                header=", ".join(headers),
+                rows=[", ".join(main_row)],
+                entity_name=entity_name,
+                formatted_text=ft[:max_chunk_size],
             )
         )
 

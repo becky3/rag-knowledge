@@ -78,6 +78,8 @@ class Indexer:
         self._effective_size_heading = max(1, min(chunk_size, safe_base - heading_overhead))
         # テーブルは行単位分割のため chunk_size を適用しない（仕様参照）
         self._effective_size_table = max(1, safe_base)
+        # overlap が実効サイズ以上だと chunk_text が ValueError になるためクランプ
+        self._effective_overlap = min(chunk_overlap, self._effective_size_prose - 1)
 
     def add(
         self,
@@ -266,7 +268,7 @@ class Indexer:
         return chunk_text(
             text,
             chunk_size=self._effective_size_prose,
-            chunk_overlap=self._chunk_overlap,
+            chunk_overlap=self._effective_overlap,
         )
 
     def _add_to_indices(
