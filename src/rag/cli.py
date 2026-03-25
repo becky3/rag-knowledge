@@ -37,8 +37,11 @@ if TYPE_CHECKING:
     from .config import RAGSettings as Settings
     from .pipeline.controller import PipelineController
     from .pipeline.ingesters._common import IngestResult
+    from .pipeline.ingesters.web import WebIngester
+    from .pipeline.ingesters.youtube import YoutubeIngester
     from .pipeline.models import PipelineSummary
     from .rag_knowledge import RAGKnowledgeService
+    from .store.source_store import SourceStore
 
 
 class EvaluationParams(TypedDict):
@@ -1769,6 +1772,44 @@ async def run_ingest_youtube_playlist(args: argparse.Namespace) -> None:
     _print_ingest_result(ingest_result, pipeline_summary, context=f"プレイリスト: {args.playlist_url}")
 
 
+def _create_web_ingester_cli(
+    source_store: SourceStore, settings: Settings,
+) -> WebIngester:
+    """CLI 用 WebIngester を生成する."""
+    from .pipeline.ingesters.web import WebIngester
+
+    return WebIngester(
+        source_store,
+        max_crawl_pages=settings.rag_max_crawl_pages,
+        crawl_request_timeout=settings.rag_crawl_request_timeout,
+        crawl_max_errors=settings.rag_crawl_max_errors,
+        respect_robots_txt=settings.rag_respect_robots_txt,
+        robots_txt_cache_ttl=settings.rag_robots_txt_cache_ttl,
+        url_safety_check=settings.rag_url_safety_check,
+        url_safety_cache_ttl=settings.rag_url_safety_cache_ttl,
+        url_safety_fail_open=settings.rag_url_safety_fail_open,
+        url_safety_timeout=settings.rag_url_safety_timeout,
+    )
+
+
+def _create_youtube_ingester_cli(
+    source_store: SourceStore, settings: Settings,
+) -> YoutubeIngester:
+    """CLI 用 YoutubeIngester を生成する."""
+    from .pipeline.ingesters.youtube import YoutubeIngester
+
+    return YoutubeIngester(
+        source_store,
+        max_videos=settings.rag_youtube_max_videos,
+        request_interval=settings.rag_youtube_request_interval,
+        request_timeout=settings.rag_youtube_request_timeout,
+        whisper_model=settings.rag_youtube_whisper_model,
+        whisper_device=settings.rag_youtube_whisper_device,
+        transcript_languages=settings.rag_youtube_transcript_languages,
+        max_duration=settings.rag_youtube_max_duration,
+    )
+
+
 async def run_crawl_bluesky(args: argparse.Namespace) -> None:
     """BlueSky 投稿取り込み."""
     from .pipeline.ingesters.bluesky import BlueskyIngester
@@ -1792,18 +1833,41 @@ async def run_crawl_bluesky(args: argparse.Namespace) -> None:
             request_timeout=settings.rag_bluesky_request_timeout,
             request_interval=settings.rag_bluesky_request_interval,
         ) as client:
-            ingest_result = await bluesky_ingester.crawl_bluesky(
+            ingest_result, placed_items = await bluesky_ingester.crawl_bluesky(
                 args.handle,
                 max_posts=max_posts,
                 include_reposts=include_reposts,
                 client=client,
             )
+
+            # 投稿内 URL の自動取り込み
+            url_stats: dict[str, int] = {}
+            if placed_items:
+                web_ingester = _create_web_ingester_cli(controller.source_store, settings)
+                youtube_ingester = _create_youtube_ingester_cli(controller.source_store, settings)
+                url_stats = await bluesky_ingester.follow_urls(
+                    placed_items,
+                    client=client,
+                    web_ingester=web_ingester,
+                    youtube_ingester=youtube_ingester,
+                    safe_browsing_api_key=_get_safe_browsing_api_key_for_cli(settings),
+                )
     except (ValueError, TypeError) as e:
         logger.error("エラー: %s", e)
         sys.exit(1)
 
     pipeline_summary = controller.ingest_and_index(f"ingest(bluesky): {args.handle}")
     _print_ingest_result(ingest_result, pipeline_summary, context=f"ハンドル: {args.handle}")
+    if url_stats and any(url_stats.get(k, 0) > 0 for k in ("web_placed", "youtube_placed", "errors")):
+        parts = ["URL 自動取り込み:"]
+        web_n = url_stats.get("web_placed", 0)
+        yt_n = url_stats.get("youtube_placed", 0)
+        err_n = url_stats.get("errors", 0)
+        if web_n > 0 or yt_n > 0:
+            parts.append(f"Web {web_n}件, YouTube {yt_n}件")
+        if err_n > 0:
+            parts.append(f"エラー {err_n}件")
+        print(" ".join(parts))
 
 
 async def run_crawl_zenn(args: argparse.Namespace) -> None:

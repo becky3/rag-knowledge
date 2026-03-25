@@ -10,13 +10,16 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 from datetime import datetime
 
 from rag.pipeline.ingesters._common import IngestResult, now_iso
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any, Literal
 
 if TYPE_CHECKING:
     from py_common_lib.httpx import ConstrainedClient
+    from rag.pipeline.ingesters.web import WebIngester
+    from rag.pipeline.ingesters.youtube import YoutubeIngester
     from rag.store.source_store import SourceStore
 
 logger = logging.getLogger(__name__)
@@ -75,6 +78,100 @@ def _validate_max_posts(max_posts: object) -> int:
     return max_posts
 
 
+# YouTube URL 判定パターン
+_YOUTUBE_URL_RE = re.compile(
+    r"^https?://(?:www\.)?(?:youtube\.com/(?:watch\?.*v=|shorts/)|youtu\.be/)",
+)
+
+# BlueSky URL 判定パターン（スキップ対象）
+_BSKY_URL_RE = re.compile(
+    r"^https?://bsky\.app/profile/",
+)
+
+
+def extract_urls_from_item(item: dict[str, Any]) -> list[str]:
+    """フィードアイテムから URL を抽出する.
+
+    仕様: docs/specs/ingesters/bluesky.md「投稿内 URL の自動取り込み」
+
+    抽出元:
+    1. facets（リッチテキスト内リンク）
+    2. embed.external（外部リンクカード）
+    3. embed.media.external（recordWithMedia の外部リンクカード）
+
+    引用元投稿の URL は対象外。
+
+    Args:
+        item: getAuthorFeed レスポンスのフィードアイテム
+
+    Returns:
+        重複排除済みの URL リスト（出現順を保持）
+    """
+    urls: list[str] = []
+    seen: set[str] = set()
+
+    post = item.get("post")
+    if not isinstance(post, dict):
+        return urls
+
+    record = post.get("record")
+    if not isinstance(record, dict):
+        return urls
+
+    def _add(url: str) -> None:
+        if url and url not in seen and url.startswith(("http://", "https://")):
+            seen.add(url)
+            urls.append(url)
+
+    # 1. facets
+    facets = record.get("facets")
+    if isinstance(facets, list):
+        for facet in facets:
+            if not isinstance(facet, dict):
+                continue
+            features = facet.get("features")
+            if not isinstance(features, list):
+                continue
+            for feature in features:
+                if (
+                    isinstance(feature, dict)
+                    and feature.get("$type") == "app.bsky.richtext.facet#link"
+                ):
+                    _add(feature.get("uri", ""))
+
+    # 2. embed.external / embed.media.external
+    embed = record.get("embed")
+    if isinstance(embed, dict):
+        embed_type = embed.get("$type", "")
+        if embed_type == "app.bsky.embed.external":
+            external = embed.get("external")
+            if isinstance(external, dict):
+                _add(external.get("uri", ""))
+        elif embed_type == "app.bsky.embed.recordWithMedia":
+            media = embed.get("media")
+            if isinstance(media, dict):
+                media_type = media.get("$type", "")
+                if media_type == "app.bsky.embed.external":
+                    external = media.get("external")
+                    if isinstance(external, dict):
+                        _add(external.get("uri", ""))
+
+    return urls
+
+
+def classify_url(url: str) -> Literal["youtube", "web", "skip"]:
+    """URL を種別判定する.
+
+    Returns:
+        "youtube", "web", or "skip"
+    """
+    if _BSKY_URL_RE.match(url):
+        return "skip"
+    if _YOUTUBE_URL_RE.match(url):
+        return "youtube"
+    return "web"
+
+
 class BlueskyIngester:
     """BlueSky インジェスター.
 
@@ -102,7 +199,7 @@ class BlueskyIngester:
         max_posts: int | None = None,
         include_reposts: bool | None = None,
         client: ConstrainedClient | None = None,
-    ) -> IngestResult:
+    ) -> tuple[IngestResult, list[dict[str, Any]]]:
         """BlueSky 投稿を取得し source_store に配置する.
 
         Args:
@@ -112,7 +209,7 @@ class BlueskyIngester:
             client: ConstrainedClient インスタンス
 
         Returns:
-            配置結果
+            (配置結果, 配置済みフィードアイテムのリスト)
         """
         result = IngestResult()
 
@@ -140,6 +237,7 @@ class BlueskyIngester:
         cursor: str | None = None
         total_processed = 0
         seen_paths: set[str] = set()
+        placed_items: list[dict[str, Any]] = []
 
         while total_processed < effective_max:
             # API リクエスト
@@ -273,6 +371,7 @@ class BlueskyIngester:
                         metadata=metadata,
                     )
                     result.placed += 1
+                    placed_items.append(item)
                 except Exception:
                     logger.exception("投稿の配置に失敗しました: %s", rel_path)
                     result.errors += 1
@@ -283,4 +382,112 @@ class BlueskyIngester:
             if not cursor:
                 break
 
-        return result
+        return result, placed_items
+
+    async def follow_urls(
+        self,
+        placed_items: list[dict[str, Any]],
+        *,
+        client: ConstrainedClient | None = None,
+        web_ingester: WebIngester | None = None,
+        youtube_ingester: YoutubeIngester | None = None,
+        safe_browsing_api_key: str = "",
+    ) -> dict[str, int]:
+        """配置済み投稿から URL を抽出し、Web/YouTube インジェスターに委譲する.
+
+        仕様: docs/specs/ingesters/bluesky.md「投稿内 URL の自動取り込み」
+
+        Args:
+            placed_items: 配置済みフィードアイテムのリスト
+            client: ConstrainedClient（Web インジェスターに共有）
+            web_ingester: WebIngester インスタンス
+            youtube_ingester: YoutubeIngester インスタンス
+            safe_browsing_api_key: Google Safe Browsing API キー
+
+        Returns:
+            {"web_placed": N, "youtube_placed": N, "skipped": N, "errors": N}
+        """
+        stats: dict[str, int] = {
+            "web_placed": 0,
+            "youtube_placed": 0,
+            "skipped": 0,
+            "errors": 0,
+        }
+
+        # 全投稿から URL を一括抽出・重複排除
+        all_urls: list[str] = []
+        seen: set[str] = set()
+        for item in placed_items:
+            for url in extract_urls_from_item(item):
+                if url not in seen:
+                    seen.add(url)
+                    all_urls.append(url)
+
+        if not all_urls:
+            return stats
+
+        logger.info("投稿内から %d 件の URL を抽出しました", len(all_urls))
+
+        from py_common_lib.core.budget_tracker import BudgetExhaustedError
+
+        for url in all_urls:
+            # バジェット枯渇チェック（Web URL は ConstrainedClient 経由）
+            if client is not None and client.budget.remaining <= 0:
+                remaining_count = len(all_urls) - (
+                    stats["web_placed"] + stats["youtube_placed"]
+                    + stats["skipped"] + stats["errors"]
+                )
+                if remaining_count > 0:
+                    logger.warning(
+                        "バジェット枯渇のため残り %d 件の URL をスキップします",
+                        remaining_count,
+                    )
+                    stats["skipped"] += remaining_count
+                break
+
+            url_type = classify_url(url)
+
+            if url_type == "skip":
+                stats["skipped"] += 1
+                continue
+
+            if url_type == "youtube" and youtube_ingester is not None:
+                try:
+                    yt_result = await youtube_ingester.ingest_video(video_url=url)
+                    stats["youtube_placed"] += yt_result.placed
+                    if yt_result.errors > 0:
+                        stats["errors"] += yt_result.errors
+                except Exception:
+                    logger.exception("YouTube URL の取り込みに失敗: %s", url)
+                    stats["errors"] += 1
+            elif url_type == "web" and web_ingester is not None:
+                try:
+                    web_result = await web_ingester.add(
+                        url=url, client=client,
+                        safe_browsing_api_key=safe_browsing_api_key,
+                    )
+                    stats["web_placed"] += web_result.placed
+                    if web_result.errors > 0:
+                        stats["errors"] += web_result.errors
+                except BudgetExhaustedError:
+                    logger.warning("バジェット枯渇: %s をスキップ", url)
+                    stats["skipped"] += 1
+                    break
+                except Exception:
+                    logger.exception("Web URL の取り込みに失敗: %s", url)
+                    stats["errors"] += 1
+            else:
+                logger.warning(
+                    "URL タイプ '%s' の委譲先インジェスターが未指定: %s",
+                    url_type, url,
+                )
+                stats["skipped"] += 1
+
+        logger.info(
+            "URL 取り込み完了: web=%d, youtube=%d, skipped=%d, errors=%d",
+            stats["web_placed"],
+            stats["youtube_placed"],
+            stats["skipped"],
+            stats["errors"],
+        )
+        return stats
