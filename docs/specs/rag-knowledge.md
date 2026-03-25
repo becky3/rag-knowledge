@@ -50,7 +50,7 @@ MCP サーバーとして独立動作し、16 個のツールを提供する。
 | カテゴリ | 設定項目 |
 |---------|---------|
 | Embedding モデル | `embedding_model_local`, `embedding_model_online`, `embedding_prefix_enabled` |
-| チャンキング | `rag_chunk_size`, `rag_chunk_overlap`, `rag_embedding_context_length`, `rag_worst_token_char_ratio`, `rag_heading_overhead` |
+| チャンキング | `rag_chunk_size`, `rag_chunk_overlap`, `rag_embedding_context_length`, `rag_worst_token_char_ratio` |
 | 検索 | `rag_retrieval_count`, `rag_similarity_threshold` |
 | ハイブリッド検索 | `rag_hybrid_search_enabled`, `rag_vector_weight`, `rag_bm25_k1`, `rag_bm25_b`, `rag_min_combined_score` |
 | クロール | `rag_max_crawl_pages`, `rag_crawl_delay_sec` |
@@ -270,7 +270,8 @@ flowchart LR
 | `title` | str | コンテンツのタイトル |
 | `chunk_index` | int | チャンクの連番（0 始まり） |
 | `collected_at` | str | 取り込みタイムスタンプ（ISO 8601） |
-| `source_type` | str | データソース種別（`"web"`, `"zenn"`, `"bluesky"`, `"youtube"`, `"local"`, `"journal"`） |
+| `source_type` | str | データソース種別（`"web"`, `"zenn"`, `"bluesky"`, `"youtube"`, `"local"`, `"journal"`, `"aozora"`） |
+| `section_path` | str | 見出し階層（`>` 区切り、現セクションを含む）。見出しチャンカー・テーブルチャンカーが生成する。テキストチャンカーでは空文字列 |
 
 #### カスタムフィールド
 
@@ -383,7 +384,7 @@ flowchart LR
 | コンテンツタイプ検出 | テキストの種類（通常・テーブル・見出し付きテキスト）を判定する |
 | テキストチャンカー | 段落・文・文字数の優先順で分割する。チャンク間にオーバーラップを適用する |
 | テーブルチャンカー | テーブルデータを行単位で分割し、各チャンクにヘッダー行を付加する。現状は Markdown テーブルに対応。AsciiDoc テーブル（<code>&#124;===</code> デリミタ）対応は未実装 |
-| 見出しチャンカー | 見出し単位で分割し、親見出しの階層情報を保持する。現状は Markdown 見出し（`#`）と HTML 見出しに対応。AsciiDoc 見出し（`==`）対応は未実装 |
+| 見出しチャンカー | 見出し単位で分割し、親見出しの階層情報をメタデータ（`section_path`）に保持する。チャンク本文は純粋な本文テキストのみ。現状は Markdown 見出し（`#`）と HTML 見出しに対応。AsciiDoc 見出し（`==`）対応は未実装 |
 | ベクトルストア | Embedding 生成とベクトル DB への格納・検索を担う |
 | BM25 インデックス | 日本語形態素解析によるキーワード検索。ディスク永続化に対応する |
 | ハイブリッド検索エンジン | ベクトル検索と BM25 のスコアを正規化・統合する。設定で有効化できる |
