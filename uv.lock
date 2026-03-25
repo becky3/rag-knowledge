@@ -3925,11 +3925,6 @@ mineru = [
     { name = "torch" },
     { name = "torchvision" },
 ]
-mineru-cuda = [
-    { name = "mineru", extra = ["pipeline"] },
-    { name = "torch" },
-    { name = "torchvision" },
-]
 
 [package.dev-dependencies]
 dev = [
@@ -3940,6 +3935,11 @@ dev = [
     { name = "pytest-xdist" },
     { name = "ruff" },
     { name = "types-pyyaml" },
+]
+with-mineru = [
+    { name = "mineru", extra = ["pipeline"] },
+    { name = "torch" },
+    { name = "torchvision" },
 ]
 
 [package.metadata]
@@ -3954,7 +3954,6 @@ requires-dist = [
     { name = "markdownify", specifier = ">=0.14,<1" },
     { name = "mcp", specifier = ">=1.0,<2" },
     { name = "mineru", extras = ["pipeline"], marker = "extra == 'mineru'" },
-    { name = "mineru", extras = ["pipeline"], marker = "extra == 'mineru-cuda'" },
     { name = "openai", specifier = ">=1.12,<2" },
     { name = "py-common-lib", git = "https://github.com/becky3/py-common-lib" },
     { name = "pydantic", specifier = ">=2.6,<3" },
@@ -3962,16 +3961,14 @@ requires-dist = [
     { name = "pymupdf4llm", specifier = ">=0.0.17" },
     { name = "pyyaml", specifier = ">=6.0,<7" },
     { name = "scrapy", specifier = ">=2.11,<3" },
-    { name = "torch", marker = "extra == 'mineru'", specifier = ">=2.6" },
-    { name = "torch", marker = "extra == 'mineru-cuda'", specifier = ">=2.6", index = "https://download.pytorch.org/whl/cu124", conflict = { package = "rag-knowledge", extra = "mineru-cuda" } },
-    { name = "torchvision", marker = "extra == 'mineru'", specifier = ">=0.21" },
-    { name = "torchvision", marker = "extra == 'mineru-cuda'", specifier = ">=0.21", index = "https://download.pytorch.org/whl/cu124", conflict = { package = "rag-knowledge", extra = "mineru-cuda" } },
+    { name = "torch", marker = "extra == 'mineru'", specifier = ">=2.6", index = "https://download.pytorch.org/whl/cu124" },
+    { name = "torchvision", marker = "extra == 'mineru'", specifier = ">=0.21", index = "https://download.pytorch.org/whl/cu124" },
     { name = "tzdata", specifier = ">=2024.1" },
     { name = "unidic-lite", specifier = ">=1.0,<2" },
     { name = "youtube-transcript-api", specifier = ">=1.0,<2" },
     { name = "yt-dlp", specifier = ">=2024.0" },
 ]
-provides-extras = ["mineru", "mineru-cuda"]
+provides-extras = ["mineru"]
 
 [package.metadata.requires-dev]
 dev = [
@@ -3982,6 +3979,11 @@ dev = [
     { name = "pytest-xdist", specifier = ">=3.5" },
     { name = "ruff", specifier = ">=0.14.14" },
     { name = "types-pyyaml", specifier = ">=6.0" },
+]
+with-mineru = [
+    { name = "mineru", extras = ["pipeline"] },
+    { name = "torch", specifier = ">=2.6", index = "https://download.pytorch.org/whl/cu124" },
+    { name = "torchvision", specifier = ">=0.21", index = "https://download.pytorch.org/whl/cu124" },
 ]
 
 [[package]]

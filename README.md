@@ -44,7 +44,7 @@
 | Embedding | OpenAI SDK / LM Studio (OpenAI 互換 API) |
 | HTML 解析 | BeautifulSoup4 |
 | HTML→Markdown 変換 | markdownify |
-| PDF テキスト抽出 | pymupdf4llm / MinerU (optional, PyTorch CUDA 推奨) |
+| PDF テキスト抽出 | pymupdf4llm / MinerU |
 | YouTube 字幕取得 | youtube-transcript-api |
 | YouTube メタデータ・音声DL | yt-dlp |
 | 音声文字起こし | faster-whisper |
@@ -53,10 +53,25 @@
 
 ## セットアップ
 
+### CUDA 環境（開発用、デフォルト）
+
+NVIDIA GPU + CUDA 12.4 環境向け。MinerU + PyTorch (CUDA 12.4) を含む全依存が自動インストールされる。
+
 ```bash
 uv sync
 cp .env.example .env  # 環境依存値を編集
 ```
+
+### CPU 環境（GPU なし / AMD GPU）
+
+MinerU + PyTorch を除外してセットアップする。PDF 抽出は pymupdf4llm にフォールバックする。
+
+```bash
+uv sync --no-group with-mineru
+cp .env.example .env  # 環境依存値を編集
+```
+
+### API キー
 
 API キーは py-common-lib の `get_secret` で OS セキュアストレージから取得する（サービス名: `rag-knowledge`）。
 登録方法は [py-common-lib の仕様書](https://github.com/becky3/py-common-lib/blob/main/docs/specs/infrastructure/secret-store.md) を参照。

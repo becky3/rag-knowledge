@@ -28,10 +28,7 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-# CPU 版（PyPI デフォルト）
 mineru = ["mineru[pipeline]", "torch>=2.6", "torchvision>=0.21"]
-# CUDA 版（GPU 推論用。CUDA 12.4 環境向け）
-mineru-cuda = ["mineru[pipeline]", "torch>=2.6", "torchvision>=0.21"]
 
 [build-system]
 requires = ["hatchling"]
@@ -70,11 +67,11 @@ addopts = "-n auto"
 required_plugins = ["pytest-xdist"]
 
 [tool.uv]
-# uv sync 時に mineru (CPU版) を自動インストール。
-# CUDA 版を使う場合: uv sync --no-group with-mineru --extra mineru-cuda
+# uv sync で MinerU + PyTorch (CUDA 12.4) を自動インストール。
+# CPU 環境では uv sync --no-group with-mineru で MinerU + PyTorch を除外する。
 default-groups = ["dev", "with-mineru"]
 
-# PyTorch CUDA index（mineru-cuda extra 専用。CUDA 12.4 環境向け）
+# PyTorch CUDA 12.4 index
 [[tool.uv.index]]
 name = "pytorch-cu124"
 url = "https://download.pytorch.org/whl/cu124"
@@ -82,9 +79,8 @@ explicit = true
 
 [tool.uv.sources]
 py-common-lib = { git = "https://github.com/becky3/py-common-lib" }
-# mineru-cuda extra のみ CUDA index から取得。mineru extra は PyPI デフォルト（CPU 版）
-torch = { index = "pytorch-cu124", extra = "mineru-cuda" }
-torchvision = { index = "pytorch-cu124", extra = "mineru-cuda" }
+torch = { index = "pytorch-cu124" }
+torchvision = { index = "pytorch-cu124" }
 
 [dependency-groups]
 dev = [
@@ -96,4 +92,7 @@ dev = [
     "ruff>=0.14.14",
     "types-PyYAML>=6.0",
 ]
-with-mineru = ["rag-knowledge[mineru]"]
+# MinerU + PyTorch (CUDA) の依存を直接列挙
+# uv default-extras 未実装のため dependency-group で代替。
+# [project.optional-dependencies].mineru と同期を保つこと。
+with-mineru = ["mineru[pipeline]", "torch>=2.6", "torchvision>=0.21"]
