@@ -397,19 +397,6 @@ class WebIngester:
                         logger.info("robots.txt により除外: %s", link)
                 pending_links = filtered
 
-            # Safe Browsing 一括チェック
-            if self._safe_browsing_client is not None and pending_links:
-                sb_results = await self._safe_browsing_client.check_urls(pending_links)
-                safe_links: list[str] = []
-                for link in pending_links:
-                    sb_result = sb_results.get(link)
-                    if sb_result is None or sb_result.is_safe:
-                        safe_links.append(link)
-                    else:
-                        logger.warning("Safe Browsing で除外: %s", link)
-                        result.skipped += 1
-                pending_links = safe_links
-
             # 残ページ数上限チェック
             if len(pending_links) > remaining_pages:
                 logger.warning(
