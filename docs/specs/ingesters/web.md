@@ -100,6 +100,10 @@ Web ページを HTTP 経由で取得し、source_store にファイルを配置
 - 検出する脅威タイプ: MALWARE、SOCIAL_ENGINEERING、UNWANTED_SOFTWARE、POTENTIALLY_HARMFUL_APPLICATION
 - チェック結果は TTL ベースでキャッシュする（デフォルト: 300 秒、最大 1000 エントリ）
 - 常にフェイルクローズ: API 障害時（429/500/タイムアウト等）は URL をブロックしエラーとする
+- チェック対象の範囲:
+  - `rag_add`（単一ページ追加）: 指定 URL をチェックする
+  - `rag_crawl`（一括クロール）: 起点 URL のみチェックする。各 depth で発見されたリンクにはチェックを行わない（ユーザーが安全性を認識しているサイトのクロールが前提であり、リンク抽出時の同一ドメインフィルタにより外部ドメインは除外されるため）
+  - `rag_crawl_preview`（プレビュー）: チェックしない（source_store への配置を行わないため）
 
 ### 保存形式
 
@@ -140,7 +144,8 @@ Safe Browsing API はオプション機能。`rag_url_safety_check=false` で無
 
 | 項目 | 内容 |
 |------|------|
-| 最悪ケースリクエスト数 | 1（起点 URL の Safe Browsing チェック）+ 1（インデックスページ）+ 1（robots.txt）+ 1（Safe Browsing 一括チェック。Lookup API v4 は 1 リクエストあたり最大 500 URL。500 URL 超の場合はバッチ分割する）+ 496（個別ページ。バジェット 500 から先行リクエスト分を差し引き）= 500。バジェットトラッカー上限 500 で打ち切り |
+| 最悪ケースリクエスト数（クロール用） | 1（インデックスページ）+ 1（robots.txt）+ 498（個別ページ）= 500。バジェットトラッカー上限 500 で打ち切り |
+| Safe Browsing リクエスト数（別枠） | 1（起点 URL チェック）。SafeBrowsingClient が内部で専用の ConstrainedClient を使用するため、クロール用バジェットとは別管理 |
 | 最悪ケース所要時間 | 500 × 0.1 秒（ハードリミット最小間隔での理論最短）= 50 秒。デフォルト設定（1.0 秒間隔）では 500 秒。per-request タイムアウト・処理時間は含まない。操作全体タイムアウト 600 秒で打ち切り |
 | 想定エラー率 | 外部 Web サイト依存。リトライ機構なし（失敗ページはスキップし処理を続行）。累計エラー数が閾値に達した場合、またはサーキットブレーカー（5 回連続 HTTP 失敗）が発動した場合に操作中断 |
 
@@ -331,7 +336,6 @@ flowchart TD
     EXTRACT["各ページの HTML からリンク抽出（同一ドメインのみ）"]
     FILTER["パターンフィルタ + 訪問済み URL 除外"]
     ROBOTS["robots.txt フィルタ（有効時）"]
-    SAFETY["Safe Browsing 一括チェック（有効時）"]
     LIMIT["ページ数上限チェック（残バジェット）"]
     LOOP["各ページを順次処理"]
     FETCH_PAGE["ページ取得"]
@@ -352,8 +356,7 @@ flowchart TD
     FETCH_INDEX --> EXTRACT
     EXTRACT --> FILTER
     FILTER --> ROBOTS
-    ROBOTS --> SAFETY
-    SAFETY --> LIMIT
+    ROBOTS --> LIMIT
     LIMIT --> LOOP
     LOOP --> FETCH_PAGE
     FETCH_PAGE --> ERR_CHECK
@@ -377,7 +380,10 @@ flowchart TD
 - `rag_max_crawl_pages` と ConstrainedClient のバジェット（500）は全 depth で共有する。いずれかの上限に達した時点で残りの depth をスキップする
 - 累計エラー数が `rag_crawl_max_errors` に達した場合、操作を中断する。これは HTTP レベルのサーキットブレーカー（ConstrainedClient、接続エラー・タイムアウト検出）とは別のアプリケーションレベルの保護で、4xx/5xx レスポンス等のページレベルエラーを検出する
 
-一括クロールでは、インデックスページの SSRF チェック通過により同一ドメインの安全性が確認される。個別ページの取得時にも WebCrawler が各 URL に対して SSRF 検証（DNS 解決 + IP 検証）を実行する。robots.txt フィルタを Safe Browsing チェックの前に実行するのは、robots.txt で除外される URL に対する不要な API 呼び出しを回避するためである。
+一括クロールでは、SSRF 対策として起点 URL および個別ページの取得時に SSRF 検証（DNS 解決 + IP 検証）を実行し、内部ネットワークへの到達を防止する。
+
+Safe Browsing によるコンテンツ安全性チェック（マルウェア・フィッシング等）は起点 URL のみに適用し、各 depth で発見されたリンクには適用しない。
+ユーザーが安全性を認識しているサイトのクロールが前提であり、リンク抽出時の同一ドメインフィルタにより外部ドメインは除外されるためである。
 
 ### クロールプレビューフロー（rag_crawl_preview）
 
@@ -568,7 +574,7 @@ source_id の決定方式は [source-store.md](../source-store.md) の「source_
 | DNS 解決に失敗した場合 | エラーログを出力し、該当ページをスキップする |
 | robots.txt の Disallow に該当する URL | クロールをスキップする |
 | robots.txt の取得に失敗した場合 | フェイルオープンでクロールを許可する |
-| Safe Browsing API で危険と判定された URL | 該当ページをスキップし、警告ログを出力する |
+| Safe Browsing API で危険と判定された URL | `rag_add`: エラーとして処理を中止する。`rag_crawl`: 起点 URL のみチェックし、危険判定で操作を中断する（各 depth で発見されたリンクにはチェックを行わない） |
 | Safe Browsing API の障害時（429/500/タイムアウト等） | 常にフェイルクローズ: URL をブロックしエラーとする |
 | `GOOGLE_SAFE_BROWSING_API_KEY` が未登録・空・不正 | 設定エラー（`SafeBrowsingConfigError`）として即時中断する |
 | URL にフラグメント（`#section`）が含まれる場合 | フラグメント部分を除去してから処理する。フラグメント違いの URL は同一ファイルとして扱う |
