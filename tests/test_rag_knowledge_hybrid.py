@@ -337,8 +337,10 @@ class TestSmartChunking:
 
         # Assert: テーブルとして処理され、各行がチャンクになる
         assert len(chunks) > 0
-        # テーブルチャンクはフォーマット済みで「名前:」を含む
-        assert any("名前:" in chunk or "魔王" in chunk for chunk in chunks)
+        # 戻り値は (content, section_path) のタプル
+        assert all(isinstance(c, tuple) and len(c) == 2 for c in chunks)
+        # テーブルチャンクは content に「名前:」を含む
+        assert any("名前:" in c[0] or "魔王" in c[0] for c in chunks)
 
     def test_smart_chunk_detects_headings(
         self,
@@ -361,8 +363,9 @@ class TestSmartChunking:
         # Act
         chunks = rag_service_hybrid._smart_chunk(heading_text)
 
-        # Assert: 見出しごとにチャンクが分割される
+        # Assert: 見出しごとにチャンクが分割される（タプルリスト）
         assert len(chunks) > 0
+        assert all(isinstance(c, tuple) and len(c) == 2 for c in chunks)
 
     def test_smart_chunk_prose_fallback(
         self,
@@ -377,8 +380,9 @@ class TestSmartChunking:
         # Act
         chunks = rag_service_hybrid._smart_chunk(prose_text)
 
-        # Assert: 何らかのチャンクが生成される
+        # Assert: 何らかのチャンクが生成される（タプルリスト）
         assert len(chunks) >= 1
+        assert all(isinstance(c, tuple) and len(c) == 2 for c in chunks)
 
 
 class TestHybridSearchEngineInitialization:

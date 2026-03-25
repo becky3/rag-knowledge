@@ -47,7 +47,6 @@ class Indexer:
         embedding_prefix_enabled: bool = True,
         embedding_context_length: int = 512,
         worst_token_char_ratio: float = 0.7,
-        heading_overhead: int = 100,
     ) -> None:
         """Indexer を初期化する.
 
@@ -60,7 +59,6 @@ class Indexer:
             embedding_prefix_enabled: Embedding プレフィックスの付与有無
             embedding_context_length: Embedding モデルのコンテキスト長（トークン数）
             worst_token_char_ratio: 最悪ケーストークン/文字比率
-            heading_overhead: 見出しチャンカーの breadcrumb + heading オーバーヘッド目安
         """
         self._vector_store = vector_store
         self._bm25 = bm25_index
@@ -70,12 +68,11 @@ class Indexer:
         self._embedding_checked = False
 
         # 実効サイズの算出: min(chunk_size, 安全上限 - overhead)
-        # 仕様: docs/specs/indexer.md「チャンカー別オーバーヘッドと実効サイズ」
+        # 仕様: docs/specs/indexer.md「オーバーヘッドと実効サイズ」
         token_safe_limit = int(embedding_context_length / worst_token_char_ratio)
         prefix_overhead = self._EMBEDDING_PREFIX_LEN if embedding_prefix_enabled else 0
         safe_base = token_safe_limit - prefix_overhead
         self._effective_size_prose = max(1, min(chunk_size, safe_base))
-        self._effective_size_heading = max(1, min(chunk_size, safe_base - heading_overhead))
         # テーブルは行単位分割のため chunk_size を適用しない（仕様参照）
         self._effective_size_table = max(1, safe_base)
         # overlap が実効サイズ以上だと chunk_text が ValueError になるためクランプ
@@ -242,11 +239,14 @@ class Indexer:
         """ファイルの内容を読み取る."""
         return path.read_text(encoding="utf-8")
 
-    def _chunk_text(self, text: str) -> list[str]:
+    def _chunk_text(self, text: str) -> list[tuple[str, str]]:
         """コンテンツタイプに応じたチャンキング戦略でテキストを分割する.
 
         各チャンカーにはトークン安全上限から算出した実効サイズを渡す。
-        仕様: docs/specs/indexer.md「チャンカー別オーバーヘッドと実効サイズ」
+        仕様: docs/specs/indexer.md「オーバーヘッドと実効サイズ」
+
+        Returns:
+            (content, section_path) のタプルリスト
         """
         content_type = detect_content_type(text)
 
@@ -254,47 +254,64 @@ class Indexer:
             table_chunks = chunk_table_data(
                 text, max_chunk_size=self._effective_size_table,
             )
-            return [c.formatted_text for c in table_chunks] if table_chunks else []
+            return [
+                (c.content, c.section_path) for c in table_chunks
+            ] if table_chunks else []
 
         if content_type in (ContentType.HEADING, ContentType.MIXED):
             heading_chunks = chunk_by_headings(
                 text,
-                max_chunk_size=self._effective_size_heading,
-                min_chunk_size=max(1, self._effective_size_heading // 4),
+                max_chunk_size=self._effective_size_prose,
+                min_chunk_size=max(1, self._effective_size_prose // 4),
             )
-            return [c.formatted_text for c in heading_chunks] if heading_chunks else []
+            return [
+                (c.content, c.section_path) for c in heading_chunks
+            ] if heading_chunks else []
 
         # PROSE
-        return chunk_text(
+        prose_chunks = chunk_text(
             text,
             chunk_size=self._effective_size_prose,
             chunk_overlap=self._effective_overlap,
         )
+        return [(c, "") for c in prose_chunks]
 
     def _add_to_indices(
         self,
         source_id: str,
-        chunk_texts: list[str],
+        chunk_texts: list[tuple[str, str]],
         metadata: SourceMetadata,
     ) -> None:
-        """チャンクを ChromaDB と BM25 に追加する."""
+        """チャンクを ChromaDB と BM25 に追加する.
+
+        Args:
+            source_id: ソース識別子
+            chunk_texts: (content, section_path) のタプルリスト
+            metadata: ソースメタデータ
+        """
         total_chunks = len(chunk_texts)
 
         doc_chunks: list[DocumentChunk] = []
         bm25_docs: list[tuple[str, str, str, str]] = []
         bm25_metadata_list: list[dict[str, str | int | float | bool]] = []
 
-        for i, text in enumerate(chunk_texts):
+        for i, (content, section_path) in enumerate(chunk_texts):
             chunk_id = generate_chunk_id(source_id, i)
-            meta = build_chunk_metadata(metadata, i, total_chunks)
+            meta = build_chunk_metadata(metadata, i, total_chunks, section_path)
 
+            # ChromaDB: Embedding は本文のみ（section_path を含めない）
             doc_chunks.append(DocumentChunk(
                 id=chunk_id,
-                text=text,
+                text=content,
                 metadata=meta,
             ))
+
+            # BM25: section_path + 本文を結合（見出しキーワードでもヒットさせる）
+            bm25_text = (
+                f"{section_path}\n{content}" if section_path else content
+            )
             bm25_docs.append((
-                chunk_id, text, source_id, metadata.source_type,
+                chunk_id, bm25_text, source_id, metadata.source_type,
             ))
             bm25_metadata_list.append(meta)
 

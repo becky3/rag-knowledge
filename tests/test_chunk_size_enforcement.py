@@ -40,16 +40,16 @@ class TestHeadingChunkerSizeEnforcement:
         text = f"# Code Section\n\n{code}"
         chunks = chunk_by_headings(text, max_chunk_size=200, min_chunk_size=50)
         assert len(chunks) > 1
-        assert all(len(c.formatted_text) <= 200 for c in chunks)
+        assert all(len(c.content) <= 200 for c in chunks)
 
-    def test_deep_nesting_formatted_text_limit(self) -> None:
-        """深い見出しネストでも formatted_text が max_chunk_size 以内であること."""
+    def test_deep_nesting_content_limit(self) -> None:
+        """深い見出しネストでも content が max_chunk_size 以内であること."""
         text = (
             "# L1\n## L2\n### L3\n#### L4\n##### L5\n###### L6\n"
             + "x" * 500
         )
         chunks = chunk_by_headings(text, max_chunk_size=200, min_chunk_size=50)
-        assert all(len(c.formatted_text) <= 200 for c in chunks)
+        assert all(len(c.content) <= 200 for c in chunks)
 
     def test_single_long_paragraph_split(self) -> None:
         """段落分割できない長いテキストが行/文字ベースで分割されること."""
@@ -58,14 +58,14 @@ class TestHeadingChunkerSizeEnforcement:
         text = f"# Section\n\n{long_para}"
         chunks = chunk_by_headings(text, max_chunk_size=100, min_chunk_size=20)
         assert len(chunks) > 1
-        assert all(len(c.formatted_text) <= 100 for c in chunks)
+        assert all(len(c.content) <= 100 for c in chunks)
 
     def test_prose_fallback_split(self) -> None:
         """見出しなしテキストで段落超過時に分割されること."""
         long_para = "x" * 500
         chunks = chunk_by_headings(long_para, max_chunk_size=200, min_chunk_size=50)
         assert len(chunks) > 1
-        assert all(len(c.formatted_text) <= 200 for c in chunks)
+        assert all(len(c.content) <= 200 for c in chunks)
 
     def test_normal_case_unchanged(self) -> None:
         """通常ケースの動作が変わらないこと."""
@@ -94,7 +94,7 @@ class TestTableChunkerSizeEnforcement:
         table = f"{headers}\n{sep}\n{row}"
         chunks = chunk_table_data(table, max_chunk_size=200)
         assert len(chunks) > 1
-        assert all(len(c.formatted_text) <= 200 for c in chunks)
+        assert all(len(c.content) <= 200 for c in chunks)
         # 全チャンクにエンティティ名が保持されている
         assert all(c.entity_name == "long_value_0" for c in chunks)
 
@@ -110,7 +110,7 @@ class TestTableChunkerSizeEnforcement:
         )
         # 周辺行付きだと超過するサイズに設定
         chunks_with_context = chunk_table_data(table, row_context_size=1)
-        max_with = max(len(c.formatted_text) for c in chunks_with_context)
+        max_with = max(len(c.content) for c in chunks_with_context)
 
         # max_chunk_size を周辺行なしなら収まるが周辺行ありだと超過する値に
         limit = max_with - 5
@@ -130,7 +130,7 @@ class TestTableChunkerLongJapaneseValues:
             "| ベクトル検索 | " + "あ" * 200 + " | " + "い" * 200 + " |"
         )
         chunks = chunk_table_data(table, max_chunk_size=300)
-        assert all(len(c.formatted_text) <= 300 for c in chunks)
+        assert all(len(c.content) <= 300 for c in chunks)
 
     def test_single_attribute_exceeds_limit(self) -> None:
         """単一セル値が max_chunk_size を超える場合でも制限内に収まること."""
@@ -141,4 +141,4 @@ class TestTableChunkerLongJapaneseValues:
         )
         chunks = chunk_table_data(table, max_chunk_size=200)
         assert len(chunks) >= 1
-        assert all(len(c.formatted_text) <= 200 for c in chunks)
+        assert all(len(c.content) <= 200 for c in chunks)

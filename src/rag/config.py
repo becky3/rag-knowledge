@@ -125,8 +125,6 @@ class RAGSettings(BaseModel):
     rag_chunk_overlap: int = Field(ge=0)
     rag_embedding_context_length: int = Field(default=512, ge=1)
     rag_worst_token_char_ratio: float = Field(default=0.7, gt=0.0, le=1.0)
-    rag_heading_overhead: int = Field(default=100, ge=0)
-
     # 検索
     rag_retrieval_count: int = Field(ge=1)
     rag_similarity_threshold: float | None = Field(

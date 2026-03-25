@@ -216,7 +216,7 @@ flowchart TD
     DETECT -->|見出し付き/混在| HEADING
     DETECT -->|散文| PROSE
 
-    TABLE --> METADATA["チャンクメタデータ付与<br>(section_path 生成)"]
+    TABLE --> METADATA["チャンクメタデータ付与<br>(section_path 付与)"]
     HEADING --> METADATA
     PROSE --> METADATA
 
@@ -260,7 +260,7 @@ flowchart LR
 | `chunk_index` | int | チャンクの連番（0 始まり） |
 | `total_chunks` | int | 当該ソースのチャンク総数（新規フィールド。既存の rag-knowledge.md には未定義） |
 | `collected_at` | str | 取り込みタイムスタンプ（ISO 8601）。metadata.db の `created_at` から取得（.meta の `collected_at` 由来） |
-| `section_path` | str | 見出し階層（`>` 区切り、現セクションを含む）。見出しチャンカー・テーブルチャンカーが生成する。テキストチャンカーでは空文字列。例: `第1章 データ処理 > 1.1 前処理 > 1.1.1 正規化` |
+| `section_path` | str | 見出し階層（`>` 区切り、現セクションを含む）。見出しチャンカーが生成する。テーブルチャンカー・テキストチャンカーでは空文字列。例: `第1章 データ処理 > 1.1 前処理 > 1.1.1 正規化` |
 
 #### カスタムフィールド
 

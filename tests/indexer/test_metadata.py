@@ -35,6 +35,15 @@ class TestBuildChunkMetadata:
         assert result["chunk_index"] == 0
         assert result["total_chunks"] == 5
         assert result["collected_at"] == "2025-01-01T00:00:00Z"
+        assert result["section_path"] == ""
+
+    def test_section_path_included(self) -> None:
+        meta = _make_metadata()
+        result = build_chunk_metadata(
+            meta, chunk_index=0, total_chunks=1,
+            section_path="Chapter 1 > Section 1.1",
+        )
+        assert result["section_path"] == "Chapter 1 > Section 1.1"
 
     def test_chunk_index_varies(self) -> None:
         meta = _make_metadata()

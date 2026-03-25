@@ -27,13 +27,13 @@ class TestChunkTableData:
         assert len(chunks) == 3
         assert chunks[0].entity_name == "魔王"
         assert "HP" in chunks[0].header
-        assert "200" in chunks[0].formatted_text
+        assert "200" in chunks[0].content
 
         assert chunks[1].entity_name == "闇の王"
-        assert "500" in chunks[1].formatted_text
+        assert "500" in chunks[1].content
 
         assert chunks[2].entity_name == "ゴブリン"
-        assert "8" in chunks[2].formatted_text
+        assert "8" in chunks[2].content
 
     def test_tab_separated_table_chunks_by_row(self) -> None:
         """タブ区切りテーブルを行単位でチャンキングする."""
@@ -57,15 +57,15 @@ class TestChunkTableData:
         assert "HP" in chunks[0].header
         assert "MP" in chunks[0].header
 
-    def test_formatted_text_contains_entity_and_attributes(self) -> None:
-        """フォーマット済みテキストにエンティティと属性が含まれる."""
+    def test_content_contains_entity_and_attributes(self) -> None:
+        """content にエンティティと属性が含まれる."""
         text = """| 名前 | HP | MP |
 |------|-----|-----|
 | 魔王 | 200 | 100 |"""
 
         chunks = chunk_table_data(text)
 
-        formatted = chunks[0].formatted_text
+        formatted = chunks[0].content
         assert "魔王" in formatted
         assert "HP" in formatted
         assert "200" in formatted

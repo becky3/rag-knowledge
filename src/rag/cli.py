@@ -553,8 +553,12 @@ def _build_bm25_index_from_fixture(
         chunks = smart_chunk(content, chunk_size, chunk_overlap)
         normalized_url, _ = urldefrag(source_url)
         url_hash = hashlib.sha256(normalized_url.encode()).hexdigest()[:16]
-        for i, chunk in enumerate(chunks):
-            documents.append((f"{url_hash}_{i}", chunk, normalized_url, "web"))
+        for i, (chunk_text, section_path) in enumerate(chunks):
+            # BM25 には section_path + 本文を結合したテキストを登録
+            bm25_text = (
+                f"{section_path}\n{chunk_text}" if section_path else chunk_text
+            )
+            documents.append((f"{url_hash}_{i}", bm25_text, normalized_url, "web"))
 
     added = bm25_index.add_documents(documents)
     logger.info("BM25 index built with %d chunks from fixture", added)
@@ -1577,7 +1581,6 @@ def _build_cli_pipeline_controller() -> tuple[
         embedding_prefix_enabled=settings.embedding_prefix_enabled,
         embedding_context_length=settings.rag_embedding_context_length,
         worst_token_char_ratio=settings.rag_worst_token_char_ratio,
-        heading_overhead=settings.rag_heading_overhead,
     )
 
     controller = PipelineController(

@@ -14,6 +14,7 @@ def build_chunk_metadata(
     source_metadata: SourceMetadata,
     chunk_index: int,
     total_chunks: int,
+    section_path: str = "",
 ) -> dict[str, str | int | float | bool]:
     """チャンクに付与するメタデータを構築する.
 
@@ -21,6 +22,7 @@ def build_chunk_metadata(
         source_metadata: ソースメタデータ
         chunk_index: チャンクの連番（0 始まり）
         total_chunks: 当該ソースのチャンク総数
+        section_path: 見出し階層（> 区切り）。見出しチャンカーが生成する
 
     Returns:
         ChromaDB 格納用のメタデータ辞書
@@ -32,6 +34,7 @@ def build_chunk_metadata(
         "chunk_index": chunk_index,
         "total_chunks": total_chunks,
         "collected_at": source_metadata.collected_at,
+        "section_path": section_path,
     }
 
     # カスタムフィールド: extra の各キーに custom: プレフィックスを付与

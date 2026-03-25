@@ -51,12 +51,12 @@ def count_tokens(tok: Tokenizer, text: str) -> int:
 
 
 def chunk_like_indexer(text: str) -> tuple[str, list[str]]:
-    """indexer._chunk_text と同等のロジック. (content_type_name, chunks) を返す."""
+    """indexer._chunk_text の content 部分のみを取得する. (content_type_name, chunks) を返す."""
     content_type = detect_content_type(text)
 
     if content_type == ContentType.TABLE:
         table_chunks = chunk_table_data(text)
-        chunks = [c.formatted_text for c in table_chunks] if table_chunks else []
+        chunks = [c.content for c in table_chunks] if table_chunks else []
         return content_type.name, chunks
 
     if content_type in (ContentType.HEADING, ContentType.MIXED):
@@ -65,7 +65,7 @@ def chunk_like_indexer(text: str) -> tuple[str, list[str]]:
             max_chunk_size=CHUNK_SIZE,
             min_chunk_size=max(1, CHUNK_SIZE // 4),
         )
-        chunks = [c.formatted_text for c in heading_chunks] if heading_chunks else []
+        chunks = [c.content for c in heading_chunks] if heading_chunks else []
         return content_type.name, chunks
 
     chunks = chunk_text(text, chunk_size=CHUNK_SIZE, chunk_overlap=CHUNK_OVERLAP)

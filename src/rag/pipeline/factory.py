@@ -79,7 +79,6 @@ def build_pipeline_controller(
         embedding_prefix_enabled=settings.embedding_prefix_enabled,
         embedding_context_length=settings.rag_embedding_context_length,
         worst_token_char_ratio=settings.rag_worst_token_char_ratio,
-        heading_overhead=settings.rag_heading_overhead,
     )
 
     return PipelineController(

@@ -376,6 +376,8 @@ async def rag_search(
             parts.append(f"Title: {item.title}")
             parts.append(f"Chunk: {chunk_pos}")
             parts.append(f"Type: {item.source_type}")
+            if item.section_path:
+                parts.append(f"Section: {item.section_path}")
             if item.collected_at:
                 parts.append(f"Collected: {item.collected_at}")
             parts.append("")
@@ -392,6 +394,8 @@ async def rag_search(
             parts.append(f"Title: {bm25_item.title}")
             parts.append(f"Chunk: {chunk_pos}")
             parts.append(f"Type: {bm25_item.source_type}")
+            if bm25_item.section_path:
+                parts.append(f"Section: {bm25_item.section_path}")
             if bm25_item.collected_at:
                 parts.append(f"Collected: {bm25_item.collected_at}")
             parts.append("")

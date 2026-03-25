@@ -15,37 +15,21 @@ class HeadingChunk:
 
     見出しとその配下のテキストをセットでチャンク化。
     親見出しの階層情報も保持する。
+    見出し階層は section_path プロパティで取得する。
     """
 
     heading: str  # 見出しテキスト
     content: str  # 本文
     heading_level: int  # 見出しレベル（1〜6）
     parent_headings: list[str] = field(default_factory=list)  # 親見出しの階層
-    formatted_text: str = ""  # 検索用にフォーマットされたテキスト
 
-    def __post_init__(self) -> None:
-        """フォーマット済みテキストを生成する."""
-        if not self.formatted_text:
-            self.formatted_text = self._format()
-
-    def _format(self) -> str:
-        """検索用のフォーマット済みテキストを生成する."""
-        parts: list[str] = []
-
-        # 親見出しをパンくずリスト形式で追加
-        if self.parent_headings:
-            breadcrumb = " > ".join(self.parent_headings)
-            parts.append(f"[{breadcrumb}]")
-
-        # 現在の見出し
+    @property
+    def section_path(self) -> str:
+        """見出し階層を > 区切りで返す."""
+        parts = list(self.parent_headings)
         if self.heading:
-            parts.append(f"# {self.heading}")
-
-        # 本文
-        if self.content:
-            parts.append(self.content)
-
-        return "\n".join(parts)
+            parts.append(self.heading)
+        return " > ".join(parts)
 
 
 def chunk_by_headings(
@@ -90,7 +74,6 @@ def chunk_by_headings(
                     content=text,
                     heading_level=0,
                     parent_headings=[],
-                    formatted_text=text,
                 )
             ]
         # 大きすぎる場合は段落で分割
@@ -153,51 +136,7 @@ def chunk_by_headings(
                     )
                 )
 
-    return _enforce_formatted_text_limit(chunks, max_chunk_size)
-
-
-def _enforce_formatted_text_limit(
-    chunks: list[HeadingChunk],
-    max_chunk_size: int,
-) -> list[HeadingChunk]:
-    """formatted_text が max_chunk_size を超えるチャンクの content を縮小する.
-
-    breadcrumb + heading のオーバーヘッドにより formatted_text が
-    max_chunk_size を超える場合、content を切り詰めて制限内に収める。
-    """
-    result: list[HeadingChunk] = []
-    for chunk in chunks:
-        if len(chunk.formatted_text) <= max_chunk_size:
-            result.append(chunk)
-            continue
-
-        # formatted_text のオーバーヘッド（breadcrumb + heading + 改行）を算出
-        overhead = len(chunk.formatted_text) - len(chunk.content)
-        available = max_chunk_size - overhead
-        if available <= 0:
-            # オーバーヘッドだけで超過する場合は heading/breadcrumb を省略
-            result.append(
-                HeadingChunk(
-                    heading="",
-                    content=chunk.content[:max_chunk_size],
-                    heading_level=chunk.heading_level,
-                    parent_headings=[],
-                    formatted_text=chunk.content[:max_chunk_size],
-                )
-            )
-            continue
-
-        # content を縮小して再生成
-        trimmed_content = chunk.content[:available]
-        result.append(
-            HeadingChunk(
-                heading=chunk.heading,
-                content=trimmed_content,
-                heading_level=chunk.heading_level,
-                parent_headings=chunk.parent_headings.copy(),
-            )
-        )
-    return result
+    return chunks
 
 
 def _convert_html_headings_to_markdown(text: str) -> str:
@@ -261,6 +200,24 @@ def _split_content_preserving_heading(
     """見出し情報を保持しながらコンテンツを分割する."""
     chunks: list[HeadingChunk] = []
 
+    # 2つ目以降のチャンク用: heading を parent_headings に含めて section_path を維持
+    parents_with_heading = (
+        parent_headings + [heading] if heading else parent_headings
+    )
+
+    def _append(text: str) -> None:
+        """チャンクを追加する。最初のチャンクには heading を設定する."""
+        if not chunks:
+            chunks.append(HeadingChunk(
+                heading=heading, content=text,
+                heading_level=level, parent_headings=parent_headings.copy(),
+            ))
+        else:
+            chunks.append(HeadingChunk(
+                heading="", content=text,
+                heading_level=level, parent_headings=parents_with_heading.copy(),
+            ))
+
     # 段落で分割
     paragraphs = re.split(r"\n\s*\n", content)
     current_content_parts: list[str] = []
@@ -275,60 +232,25 @@ def _split_content_preserving_heading(
 
         # 単一段落が max_chunk_size を超える場合はフォールバック分割
         if para_size > max_chunk_size:
-            # 現在の蓄積分を確定
             if current_content_parts:
-                chunk_content = "\n\n".join(current_content_parts)
-                chunks.append(
-                    HeadingChunk(
-                        heading=heading if not chunks else f"{heading} (続き)",
-                        content=chunk_content,
-                        heading_level=level,
-                        parent_headings=parent_headings.copy(),
-                    )
-                )
+                _append("\n\n".join(current_content_parts))
                 current_content_parts = []
                 current_size = 0
 
-            # 行ベース → 文字ベースのフォールバックで分割
             for sub in _split_large_block(para, max_chunk_size):
-                chunks.append(
-                    HeadingChunk(
-                        heading=heading if not chunks else f"{heading} (続き)",
-                        content=sub,
-                        heading_level=level,
-                        parent_headings=parent_headings.copy(),
-                    )
-                )
+                _append(sub)
             continue
 
         if current_size + para_size + 2 > max_chunk_size and current_content_parts:
-            # 現在のチャンクを確定
-            chunk_content = "\n\n".join(current_content_parts)
-            chunks.append(
-                HeadingChunk(
-                    heading=heading if not chunks else f"{heading} (続き)",
-                    content=chunk_content,
-                    heading_level=level,
-                    parent_headings=parent_headings.copy(),
-                )
-            )
+            _append("\n\n".join(current_content_parts))
             current_content_parts = [para]
             current_size = para_size
         else:
             current_content_parts.append(para)
             current_size += para_size + 2
 
-    # 残りのチャンク
     if current_content_parts:
-        chunk_content = "\n\n".join(current_content_parts)
-        chunks.append(
-            HeadingChunk(
-                heading=heading if not chunks else f"{heading} (続き)",
-                content=chunk_content,
-                heading_level=level,
-                parent_headings=parent_headings.copy(),
-            )
-        )
+        _append("\n\n".join(current_content_parts))
 
     return chunks
 
@@ -361,7 +283,6 @@ def _split_prose_into_chunks(
                         content=chunk_content,
                         heading_level=0,
                         parent_headings=[],
-                        formatted_text=chunk_content,
                     )
                 )
                 current_parts = []
@@ -374,7 +295,6 @@ def _split_prose_into_chunks(
                         content=sub,
                         heading_level=0,
                         parent_headings=[],
-                        formatted_text=sub,
                     )
                 )
             continue
@@ -387,7 +307,6 @@ def _split_prose_into_chunks(
                     content=chunk_content,
                     heading_level=0,
                     parent_headings=[],
-                    formatted_text=chunk_content,
                 )
             )
             current_parts = [para]
@@ -404,7 +323,6 @@ def _split_prose_into_chunks(
                 content=chunk_content,
                 heading_level=0,
                 parent_headings=[],
-                formatted_text=chunk_content,
             )
         )
 
