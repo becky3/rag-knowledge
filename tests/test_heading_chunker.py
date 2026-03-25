@@ -116,12 +116,13 @@ class TestChunkByHeadings:
 
         # 複数のチャンクに分割される
         assert len(chunks) > 1
-        # すべてのチャンクが見出し情報を持つ
-        for chunk in chunks:
-            assert "見出し" in chunk.heading
+        # 最初のチャンクは見出しを持ち、2つ目以降は空
+        assert chunks[0].heading == "見出し"
+        for chunk in chunks[1:]:
+            assert chunk.heading == ""
 
-    def test_formatted_text_includes_breadcrumb(self) -> None:
-        """AC4: フォーマット済みテキストにパンくずリストが含まれる."""
+    def test_section_path_includes_breadcrumb(self) -> None:
+        """AC4: section_path に親見出しと現見出しが含まれる."""
         text = """# 親見出し
 ## 子見出し
 内容"""
@@ -130,8 +131,8 @@ class TestChunkByHeadings:
 
         # 子見出しのチャンク
         child_chunk = [c for c in chunks if c.heading == "子見出し"][0]
-        assert "[親見出し]" in child_chunk.formatted_text
-        assert "# 子見出し" in child_chunk.formatted_text
+        assert child_chunk.section_path == "親見出し > 子見出し"
+        assert child_chunk.parent_headings == ["親見出し"]
 
     def test_small_chunks_merged(self) -> None:
         """AC5: 小さすぎるチャンクは前のチャンクと結合される."""
@@ -147,3 +148,43 @@ class TestChunkByHeadings:
         # 「短い。」は前のチャンクと結合されるか、独立チャンクになる
         # 結合の条件を満たさない場合は独立チャンクとして存在
         assert len(chunks) >= 1
+
+    def test_section_path_with_deep_nesting(self) -> None:
+        """section_path が親見出し + 現見出しの > 区切りで生成されること."""
+        text = """# 第1章
+## 1.1 前処理
+### 1.1.1 正規化
+正規化の内容"""
+
+        chunks = chunk_by_headings(text)
+
+        target = [c for c in chunks if c.heading == "1.1.1 正規化"][0]
+        assert target.section_path == "第1章 > 1.1 前処理 > 1.1.1 正規化"
+
+    def test_section_path_empty_for_no_heading(self) -> None:
+        """見出しなしチャンクの section_path は空文字列."""
+        text = "見出しのないテキスト"
+        chunks = chunk_by_headings(text)
+
+        assert len(chunks) == 1
+        assert chunks[0].section_path == ""
+
+    def test_split_chunks_have_empty_heading(self) -> None:
+        """分割チャンクの2つ目以降で heading が空であること."""
+        long_content = "あ" * 500
+        text = f"# 見出し\n\n{long_content}"
+        chunks = chunk_by_headings(text, max_chunk_size=200, min_chunk_size=50)
+
+        assert len(chunks) > 1
+        assert chunks[0].heading == "見出し"
+        for c in chunks[1:]:
+            assert c.heading == ""
+
+    def test_no_tsuzuki_suffix(self) -> None:
+        """分割チャンクに (続き) サフィックスが付与されないこと."""
+        long_content = "あ" * 500
+        text = f"# 見出し\n\n{long_content}"
+        chunks = chunk_by_headings(text, max_chunk_size=200, min_chunk_size=50)
+
+        for c in chunks:
+            assert "(続き)" not in c.heading

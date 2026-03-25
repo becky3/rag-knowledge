@@ -203,6 +203,62 @@ class TestAdd:
         )
         assert len(result["ids"]) >= 2
 
+    def test_section_path_in_metadata(
+        self, indexer: Indexer, vector_store: VectorStore, tmp_path: Path,
+    ) -> None:
+        """section_path がメタデータに含まれること."""
+        text = "# Parent\n\n## Child\n\nContent under child."
+        path = _write_text_file(tmp_path, "heading.txt", text)
+        meta = _make_metadata(source_id="src-sp")
+
+        indexer.add("src-sp", path, meta)
+
+        result = vector_store._collection.get(
+            where={"source_id": "src-sp"}, include=["metadatas"],
+        )
+        # いずれかのチャンクに section_path が設定されている
+        section_paths = [m.get("section_path", "") for m in result["metadatas"]]
+        assert any("Parent" in sp for sp in section_paths)
+
+    def test_embedding_receives_content_only(
+        self, indexer: Indexer, vector_store: VectorStore, tmp_path: Path,
+    ) -> None:
+        """Embedding（ChromaDB の documents）には本文のみが格納されること."""
+        text = "# UniqueHeading\n\nBody text only."
+        path = _write_text_file(tmp_path, "heading.txt", text)
+        meta = _make_metadata(source_id="src-emb")
+
+        indexer.add("src-emb", path, meta)
+
+        result = vector_store._collection.get(
+            where={"source_id": "src-emb"},
+            include=["documents", "metadatas"],
+        )
+        # section_path はメタデータに格納されている
+        assert any(
+            m.get("section_path") == "UniqueHeading"
+            for m in result["metadatas"]
+        )
+        # documents（Embedding 入力）には見出しテキストが含まれない
+        for doc in result["documents"]:
+            assert "UniqueHeading" not in doc
+            assert "[" not in doc  # 旧形式の breadcrumb
+            assert "# " not in doc  # 旧形式の見出しプレフィックス
+
+    def test_bm25_receives_section_path_plus_content(
+        self, indexer: Indexer, bm25_index: BM25Index, tmp_path: Path,
+    ) -> None:
+        """BM25 には section_path + 本文が渡されること."""
+        text = "# MyHeading\n\nBody text for BM25."
+        path = _write_text_file(tmp_path, "heading.txt", text)
+        meta = _make_metadata(source_id="src-bm25-sp")
+
+        indexer.add("src-bm25-sp", path, meta)
+
+        # BM25 で見出しキーワードで検索できる
+        results = bm25_index.search("MyHeading", n_results=5)
+        assert len(results) > 0
+
     def test_table_text_uses_table_chunker(
         self, indexer: Indexer, vector_store: VectorStore, tmp_path: Path,
     ) -> None:

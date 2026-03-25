@@ -9,7 +9,7 @@ import asyncio
 import hashlib
 import logging
 import mimetypes
-from collections.abc import Awaitable, Callable
+from collections.abc import Awaitable, Callable, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path, PurePosixPath
 from typing import TYPE_CHECKING, Any
@@ -32,7 +32,9 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
-def smart_chunk(text: str, chunk_size: int, chunk_overlap: int) -> list[str]:
+def smart_chunk(
+    text: str, chunk_size: int, chunk_overlap: int,
+) -> list[tuple[str, str]]:
     """コンテンツタイプに応じた適切なチャンキング手法を選択する.
 
     仕様: docs/specs/rag-knowledge.md
@@ -47,7 +49,7 @@ def smart_chunk(text: str, chunk_size: int, chunk_overlap: int) -> list[str]:
         chunk_overlap: チャンク間のオーバーラップ文字数
 
     Returns:
-        チャンクのリスト
+        (content, section_path) のタプルリスト
     """
     if not text or not text.strip():
         return []
@@ -58,16 +60,20 @@ def smart_chunk(text: str, chunk_size: int, chunk_overlap: int) -> list[str]:
     if content_type == ContentType.TABLE:
         table_chunks = chunk_table_data(text, max_chunk_size=chunk_size)
         if table_chunks:
-            return [chunk.formatted_text for chunk in table_chunks]
+            return [(c.content, c.section_path) for c in table_chunks]
         logger.debug("Table chunking returned no results, falling back to prose")
 
     if content_type in (ContentType.HEADING, ContentType.MIXED):
         heading_chunks = chunk_by_headings(text, max_chunk_size=chunk_size)
         if heading_chunks:
-            return [chunk.formatted_text for chunk in heading_chunks]
+            return [(c.content, c.section_path) for c in heading_chunks]
         logger.debug("Heading chunking returned no results, falling back to prose")
 
-    return chunk_text(text, chunk_size=chunk_size, chunk_overlap=chunk_overlap)
+    return [
+        (c, "") for c in chunk_text(
+            text, chunk_size=chunk_size, chunk_overlap=chunk_overlap,
+        )
+    ]
 
 
 @dataclass
@@ -99,6 +105,7 @@ class VectorSearchItem:
         title: コンテンツのタイトル
         source_type: ソース種別
         total_chunks: 当該ソースのチャンク総数（0はレガシーデータ）
+        section_path: 見出し階層（> 区切り）
     """
 
     text: str
@@ -109,6 +116,7 @@ class VectorSearchItem:
     source_type: str = ""
     total_chunks: int = 0
     collected_at: str = ""
+    section_path: str = ""
 
 
 @dataclass
@@ -126,6 +134,7 @@ class BM25SearchItem:
         title: コンテンツのタイトル
         source_type: ソース種別
         total_chunks: 当該ソースのチャンク総数（0はレガシーデータ）
+        section_path: 見出し階層（> 区切り）
     """
 
     text: str
@@ -137,6 +146,7 @@ class BM25SearchItem:
     source_type: str = ""
     total_chunks: int = 0
     collected_at: str = ""
+    section_path: str = ""
 
 
 @dataclass
@@ -155,6 +165,58 @@ class RawSearchResults:
 
     vector_results: list[VectorSearchItem]
     bm25_results: list[BM25SearchItem]
+
+
+def format_raw_search_results(raw: RawSearchResults) -> str:
+    """RawSearchResults をテキスト形式にフォーマットする.
+
+    server.py（MCP）と cli.py（CLI）で共通使用する。
+    仕様: docs/specs/search-response.md
+
+    Returns:
+        フォーマット済みテキスト。結果なしの場合は結果なしメッセージ。
+    """
+    if not raw.vector_results and not raw.bm25_results:
+        return "該当する情報が見つかりませんでした"
+
+    sections: list[tuple[str, Sequence[VectorSearchItem | BM25SearchItem]]] = []
+    if raw.vector_results:
+        sections.append(("## ベクトル検索結果 (意味的類似度)\n", raw.vector_results))
+    if raw.bm25_results:
+        sections.append(("## BM25 検索結果 (キーワード一致)\n", raw.bm25_results))
+
+    parts: list[str] = []
+    for header, items in sections:
+        parts.append(header)
+        for i, item in enumerate(items, start=1):
+            # スコア行: ベクトルは distance、BM25 は score
+            if isinstance(item, VectorSearchItem):
+                parts.append(f"### Result {i} [distance={item.distance:.3f}]")
+            else:
+                parts.append(f"### Result {i} [score={item.score:.3f}]")
+
+            chunk_pos = _format_chunk_position(item.chunk_index, item.total_chunks)
+            parts.append(f"Source: {item.source_url}")
+            parts.append(f"Title: {item.title}")
+            parts.append(f"Chunk: {chunk_pos}")
+            parts.append(f"Type: {item.source_type}")
+            if item.section_path:
+                parts.append(f"Section: {item.section_path}")
+            if item.collected_at:
+                parts.append(f"Collected: {item.collected_at}")
+            parts.append("")
+            parts.append(item.text)
+            parts.append("")
+
+    return "\n".join(parts).rstrip()
+
+
+def _format_chunk_position(chunk_index: int, total_chunks: int) -> str:
+    """チャンク位置を表示用文字列にフォーマットする."""
+    pos = chunk_index + 1
+    if total_chunks > 0:
+        return f"{pos}/{total_chunks}"
+    return f"{pos}/?"
 
 
 class RAGKnowledgeService:
@@ -425,10 +487,13 @@ class RAGKnowledgeService:
 
         return await self._ingest_crawled_page(page)
 
-    def _smart_chunk(self, text: str) -> list[str]:
+    def _smart_chunk(self, text: str) -> list[tuple[str, str]]:
         """コンテンツタイプに応じた適切なチャンキング手法を選択する.
 
         仕様: docs/specs/rag-knowledge.md
+
+        Returns:
+            (content, section_path) のタプルリスト
         """
         return smart_chunk(text, self._chunk_size, self._chunk_overlap)
 
@@ -458,16 +523,17 @@ class RAGKnowledgeService:
         document_chunks = [
             DocumentChunk(
                 id=f"{url_hash}_{i}",
-                text=chunk,
+                text=content,
                 metadata={
                     "source_id": normalized_url,
                     "title": page.title,
                     "chunk_index": i,
                     "crawled_at": page.crawled_at,
                     "source_type": "web",
+                    "section_path": section_path,
                 },
             )
-            for i, chunk in enumerate(chunks)
+            for i, (content, section_path) in enumerate(chunks)
         ]
         new_ids = {chunk.id for chunk in document_chunks}
 
@@ -480,10 +546,11 @@ class RAGKnowledgeService:
         # BM25インデックスにも追加（ハイブリッド検索用）
         # 注: BM25は補助的機能のため、失敗してもVectorStoreの結果は維持する
         if self._bm25_index is not None:
-            bm25_docs = [
-                (chunk.id, chunk.text, normalized_url, "web")
-                for chunk in document_chunks
-            ]
+            bm25_docs = []
+            for chunk in document_chunks:
+                sp = str(chunk.metadata.get("section_path", ""))
+                bm25_text = f"{sp}\n{chunk.text}" if sp else chunk.text
+                bm25_docs.append((chunk.id, bm25_text, normalized_url, "web"))
             try:
                 self._bm25_index.add_documents(bm25_docs)
                 logger.debug("Added %d documents to BM25 index", len(bm25_docs))
@@ -678,6 +745,7 @@ class RAGKnowledgeService:
                 result.metadata.get("collected_at")
                 or result.metadata.get("crawled_at", "")
             )
+            section_path = str(result.metadata.get("section_path", ""))
             vector_items.append(
                 VectorSearchItem(
                     text=result.text,
@@ -688,6 +756,7 @@ class RAGKnowledgeService:
                     source_type=source_type_val,
                     total_chunks=total_chunks,
                     collected_at=collected_at,
+                    section_path=section_path,
                 )
             )
 
@@ -719,6 +788,7 @@ class RAGKnowledgeService:
                 collected_at = str(
                     meta.get("collected_at") or meta.get("crawled_at", "")
                 )
+                section_path = str(meta.get("section_path", ""))
                 bm25_items.append(
                     BM25SearchItem(
                         text=bm25_result.text,
@@ -730,6 +800,7 @@ class RAGKnowledgeService:
                         source_type=bm25_source_type,
                         total_chunks=total_chunks,
                         collected_at=collected_at,
+                        section_path=section_path,
                     )
                 )
 

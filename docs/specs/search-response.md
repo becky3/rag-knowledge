@@ -97,6 +97,7 @@ MCP クライアントからの rag_search ツール呼び出し。
 | Title | コンテンツのタイトル | 常時 | `Title: ガイドページ` |
 | Chunk | チャンク位置（現在位置/全体数、1 始まり表示） | 常時 | `Chunk: 3/15` |
 | Type | ソース種別 | 常時 | `Type: web` |
+| Section | 見出し階層（`section_path`） | 値がある場合のみ | `Section: 第1章 > 1.1 前処理` |
 | Collected | 取り込み日時 | 値がある場合のみ | `Collected: 2025-01-15T10:30:00Z` |
 
 メタデータの後に空行を挟み、チャンクテキストを出力する。
@@ -114,6 +115,7 @@ Source: https://example.com/docs/guide
 Title: ガイドページ
 Chunk: 3/15
 Type: web
+Section: 第1章 導入 > 1.1 セットアップ
 Collected: 2025-01-15T10:30:00Z
 
 チャンクテキストがここに入る...

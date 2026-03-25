@@ -20,7 +20,12 @@ class TableChunk:
     header: str  # ヘッダー行（カラム名）
     rows: list[str]  # データ行
     entity_name: str  # 行の識別子（最初のカラムの値）
-    formatted_text: str  # 検索用にフォーマットされたテキスト
+    content: str  # 検索用にフォーマットされたテキスト
+
+    @property
+    def section_path(self) -> str:
+        """テーブルチャンクの section_path（常に空文字列）."""
+        return ""
 
 
 def chunk_table_data(
@@ -42,7 +47,7 @@ def chunk_table_data(
         text: テーブルデータを含むテキスト
         header_row: 明示的なヘッダー行（Noneの場合は自動検出）
         row_context_size: 前後に含めるコンテキスト行数
-        max_chunk_size: formatted_text の最大文字数（0 の場合は制限なし）
+        max_chunk_size: content の最大文字数（0 の場合は制限なし）
 
     Returns:
         TableChunkのリスト
@@ -79,11 +84,11 @@ def chunk_table_data(
 
         # フォーマットされたテキストを生成
         main_row_index_in_context = i - start_idx
-        formatted_text = _format_table_chunk(
+        content = _format_table_chunk(
             headers, row, context_rows, entity_name, main_row_index_in_context
         )
 
-        if max_chunk_size > 0 and len(formatted_text) > max_chunk_size:
+        if max_chunk_size > 0 and len(content) > max_chunk_size:
             # 段階的削減: (1) 周辺行除去 → (2) カラム分割
             reduced = _reduce_table_chunk(
                 headers, row, entity_name, max_chunk_size,
@@ -95,7 +100,7 @@ def chunk_table_data(
                     header=", ".join(headers),
                     rows=[", ".join(r) for r in context_rows],
                     entity_name=entity_name,
-                    formatted_text=formatted_text,
+                    content=content,
                 )
             )
 
@@ -262,7 +267,7 @@ def _reduce_table_chunk(
                 header=", ".join(headers),
                 rows=[", ".join(main_row)],
                 entity_name=entity_name,
-                formatted_text=formatted_no_context,
+                content=formatted_no_context,
             )
         ]
 
@@ -322,7 +327,7 @@ def _reduce_table_chunk(
                 header=", ".join(headers),
                 rows=[", ".join(main_row)],
                 entity_name=entity_name,
-                formatted_text=ft,
+                content=ft,
             )
         )
 
@@ -334,7 +339,7 @@ def _reduce_table_chunk(
                 header=", ".join(headers),
                 rows=[", ".join(main_row)],
                 entity_name=entity_name,
-                formatted_text=ft[:max_chunk_size],
+                content=ft[:max_chunk_size],
             )
         )
 
@@ -357,7 +362,7 @@ def _flush_table_attrs(
             header=", ".join(headers),
             rows=[", ".join(main_row)],
             entity_name=entity_name,
-            formatted_text=ft,
+            content=ft,
         )
     )
 

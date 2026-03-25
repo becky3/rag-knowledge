@@ -553,8 +553,12 @@ def _build_bm25_index_from_fixture(
         chunks = smart_chunk(content, chunk_size, chunk_overlap)
         normalized_url, _ = urldefrag(source_url)
         url_hash = hashlib.sha256(normalized_url.encode()).hexdigest()[:16]
-        for i, chunk in enumerate(chunks):
-            documents.append((f"{url_hash}_{i}", chunk, normalized_url, "web"))
+        for i, (chunk_text, section_path) in enumerate(chunks):
+            # BM25 には section_path + 本文を結合したテキストを登録
+            bm25_text = (
+                f"{section_path}\n{chunk_text}" if section_path else chunk_text
+            )
+            documents.append((f"{url_hash}_{i}", bm25_text, normalized_url, "web"))
 
     added = bm25_index.add_documents(documents)
     logger.info("BM25 index built with %d chunks from fixture", added)
@@ -1337,43 +1341,9 @@ def run_search(args: argparse.Namespace) -> None:
         )
     )
 
-    if not raw.vector_results and not raw.bm25_results:
-        print("該当する情報が見つかりませんでした")
-        return
+    from .rag_knowledge import format_raw_search_results
 
-    parts: list[str] = []
-
-    if raw.vector_results:
-        parts.append("## ベクトル検索結果 (意味的類似度)\n")
-        for i, item in enumerate(raw.vector_results, start=1):
-            chunk_pos = _format_cli_chunk_position(item.chunk_index, item.total_chunks)
-            parts.append(f"### Result {i} [distance={item.distance:.3f}]")
-            parts.append(f"Source: {item.source_url}")
-            parts.append(f"Title: {item.title}")
-            parts.append(f"Chunk: {chunk_pos}")
-            parts.append(f"Type: {item.source_type}")
-            if item.collected_at:
-                parts.append(f"Collected: {item.collected_at}")
-            parts.append("")
-            parts.append(item.text)
-            parts.append("")
-
-    if raw.bm25_results:
-        parts.append("## BM25 検索結果 (キーワード一致)\n")
-        for i, bm25_item in enumerate(raw.bm25_results, start=1):
-            chunk_pos = _format_cli_chunk_position(bm25_item.chunk_index, bm25_item.total_chunks)
-            parts.append(f"### Result {i} [score={bm25_item.score:.3f}]")
-            parts.append(f"Source: {bm25_item.source_url}")
-            parts.append(f"Title: {bm25_item.title}")
-            parts.append(f"Chunk: {chunk_pos}")
-            parts.append(f"Type: {bm25_item.source_type}")
-            if bm25_item.collected_at:
-                parts.append(f"Collected: {bm25_item.collected_at}")
-            parts.append("")
-            parts.append(bm25_item.text)
-            parts.append("")
-
-    print("\n".join(parts).rstrip())
+    print(format_raw_search_results(raw))
 
 
 def run_delete(args: argparse.Namespace) -> None:
@@ -1499,13 +1469,6 @@ def _format_cli_size(size_bytes: int) -> str:
     return f"{size_bytes / (1024 * 1024 * 1024):.1f} GB"
 
 
-def _format_cli_chunk_position(chunk_index: int, total_chunks: int) -> str:
-    """チャンク位置を表示用にフォーマットする."""
-    if total_chunks > 0:
-        return f"{chunk_index + 1}/{total_chunks}"
-    return str(chunk_index + 1)
-
-
 # --- インジェスト系 CLI コマンド ---
 
 
@@ -1577,7 +1540,6 @@ def _build_cli_pipeline_controller() -> tuple[
         embedding_prefix_enabled=settings.embedding_prefix_enabled,
         embedding_context_length=settings.rag_embedding_context_length,
         worst_token_char_ratio=settings.rag_worst_token_char_ratio,
-        heading_overhead=settings.rag_heading_overhead,
     )
 
     controller = PipelineController(
