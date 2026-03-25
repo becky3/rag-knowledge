@@ -50,6 +50,7 @@ os.environ.setdefault("ANONYMIZED_TELEMETRY", "False")
 # 問題への対策として、import 時に stdout を抑制する。
 from .config import ensure_utf8_streams
 from .filter_parser import parse_filters
+from .rag_knowledge import format_raw_search_results
 
 with contextlib.redirect_stdout(io.StringIO()):
     from .bm25_index import BM25Index
@@ -294,22 +295,6 @@ def _get_supported_extensions() -> list[str]:
 _VALID_SOURCE_TYPES: frozenset[str] = frozenset({"web", "zenn", "bluesky", "youtube", "local", "aozora", "journal"})
 
 
-def _format_chunk_position(chunk_index: int, total_chunks: int) -> str:
-    """チャンク位置を表示用文字列にフォーマットする.
-
-    Args:
-        chunk_index: 0始まりチャンクインデックス
-        total_chunks: チャンク総数（0はレガシーデータ＝不明）
-
-    Returns:
-        "3/15" 形式、total_chunks 不明時は "3/?"
-    """
-    pos = chunk_index + 1
-    if total_chunks > 0:
-        return f"{pos}/{total_chunks}"
-    return f"{pos}/?"
-
-
 @mcp.tool()
 async def rag_search(
     query: str,
@@ -361,48 +346,7 @@ async def rag_search(
         filters=parsed_filters,
     )
 
-    if not raw.vector_results and not raw.bm25_results:
-        return "該当する情報が見つかりませんでした"
-
-    parts: list[str] = []
-
-    # ベクトル検索結果
-    if raw.vector_results:
-        parts.append("## ベクトル検索結果 (意味的類似度)\n")
-        for i, item in enumerate(raw.vector_results, start=1):
-            chunk_pos = _format_chunk_position(item.chunk_index, item.total_chunks)
-            parts.append(f"### Result {i} [distance={item.distance:.3f}]")
-            parts.append(f"Source: {item.source_url}")
-            parts.append(f"Title: {item.title}")
-            parts.append(f"Chunk: {chunk_pos}")
-            parts.append(f"Type: {item.source_type}")
-            if item.section_path:
-                parts.append(f"Section: {item.section_path}")
-            if item.collected_at:
-                parts.append(f"Collected: {item.collected_at}")
-            parts.append("")
-            parts.append(item.text)
-            parts.append("")
-
-    # BM25検索結果
-    if raw.bm25_results:
-        parts.append("## BM25 検索結果 (キーワード一致)\n")
-        for i, bm25_item in enumerate(raw.bm25_results, start=1):
-            chunk_pos = _format_chunk_position(bm25_item.chunk_index, bm25_item.total_chunks)
-            parts.append(f"### Result {i} [score={bm25_item.score:.3f}]")
-            parts.append(f"Source: {bm25_item.source_url}")
-            parts.append(f"Title: {bm25_item.title}")
-            parts.append(f"Chunk: {chunk_pos}")
-            parts.append(f"Type: {bm25_item.source_type}")
-            if bm25_item.section_path:
-                parts.append(f"Section: {bm25_item.section_path}")
-            if bm25_item.collected_at:
-                parts.append(f"Collected: {bm25_item.collected_at}")
-            parts.append("")
-            parts.append(bm25_item.text)
-            parts.append("")
-
-    return "\n".join(parts).rstrip()
+    return format_raw_search_results(raw)
 
 
 _VALID_DOCUMENT_FORMATS: frozenset[str] = frozenset({"text", "original"})

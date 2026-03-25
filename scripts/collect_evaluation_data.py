@@ -136,7 +136,10 @@ async def collect_documents(
 
     documents: list[dict[str, str]] = []
 
-    async with httpx.AsyncClient() as client:
+    headers = {
+        "User-Agent": "Mozilla/5.0 (compatible; EvalDataCollector/1.0)",
+    }
+    async with httpx.AsyncClient(headers=headers) as client:
         for i, (cluster, title, lang) in enumerate(requests, 1):
             logger.info("[%d/%d] Fetching: %s (%s) [%s]", i, total, title, lang, cluster)
 

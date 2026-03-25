@@ -31,6 +31,59 @@ MCP サーバー enabled 中は、**同じ DB に対する CLI 操作・テス�
 
 MCP を disable → CLI `rebuild --mode full` で復旧する。
 
+### worktree 環境セットアップ
+
+worktree で CLI 操作・動作確認を行う場合、以下のセットアップを実施すること。
+
+1. メインリポジトリから `.env` をコピーする:
+
+   ```bash
+   cp .env <worktree-path>/.env
+   ```
+
+2. worktree の `.env` でストレージパスを worktree 内の絶対パスに変更する（相対パスだとメインリポジトリのストレージを参照してしまう）:
+
+   ```
+   CHROMADB_PERSIST_DIR=D:/GitHub/becky3/rag-knowledge-wt-XXX/.tmp/test_chroma_db
+   BM25_PERSIST_DIR=D:/GitHub/becky3/rag-knowledge-wt-XXX/.tmp/test_bm25_index
+   SOURCE_STORE_DIR=D:/GitHub/becky3/rag-knowledge-wt-XXX/.tmp/test_source_store
+   CONVERTED_STORE_DIR=D:/GitHub/becky3/rag-knowledge-wt-XXX/.tmp/test_converted_store
+   ```
+
+3. LM Studio の接続先を確認し、必要に応じて `localhost` に変更する:
+
+   ```
+   LMSTUDIO_BASE_URL=http://localhost:1234/v1
+   ```
+
+4. `.tmp` ディレクトリを作成する:
+
+   ```bash
+   mkdir -p <worktree-path>/.tmp
+   ```
+
+### CLI 動作確認の確認観点
+
+データ取り込み後、以下の確認を行うこと。
+
+#### 登録データの直接確認
+
+ChromaDB に格納されたデータを直接確認する。
+
+- チャンク数が妥当か
+- メタデータ（`section_path`, `source_type`, `title` 等）が正しく設定されているか
+- ドキュメント（Embedding 入力）の内容が期待通りか
+
+#### 検索結果の確認
+
+```bash
+uv run python -m rag.cli search --query "<クエリ>"
+```
+
+- ベクトル検索・BM25 の両方で結果が返ること
+- メタデータ行（Source, Title, Chunk, Type, Section, Collected）が正しく表示されること
+- 検索結果の内容がクエリに関連していること
+
 ### worktree コードでの MCP 動作確認
 
 worktree で開発中のコードを MCP サーバーとして動作確認する手順:
