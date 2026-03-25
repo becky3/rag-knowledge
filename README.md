@@ -152,13 +152,16 @@ uv run python -m rag.cli migrate-journal --dir <path> --repository <name>
 
 ## RAG 評価 CLI
 
+評価用フィクスチャ（テスト文書・評価データセット）はリポジトリに含まれない。ローカルに用意したフィクスチャを `--fixture` / `--dataset` で指定して使用する。
+
 ```bash
 # テスト用 DB 初期化
 uv run python -m rag.cli init-test-db \
   --chunk-size 200 --chunk-overlap 30 \
   --persist-dir .tmp/test_chroma_db \
   --bm25-persist-dir .tmp/test_bm25_index \
-  --fixture tests/fixtures/rag_test_documents.json
+  --bm25-k1 1.5 --bm25-b 0.75 \
+  --fixture <path/to/rag_test_documents.json>
 
 # 検索精度評価
 uv run python -m rag.cli evaluate \
@@ -166,7 +169,9 @@ uv run python -m rag.cli evaluate \
   --output-dir .tmp/rag-evaluation \
   --chunk-size 200 --chunk-overlap 30 \
   --vector-weight 0.6 \
-  --bm25-k1 1.5 --bm25-b 0.75
+  --bm25-k1 1.5 --bm25-b 0.75 \
+  --fixture <path/to/rag_test_documents.json> \
+  --dataset <path/to/rag_evaluation_dataset.json>
 ```
 
 ## テスト
