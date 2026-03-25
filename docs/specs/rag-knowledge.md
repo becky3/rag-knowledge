@@ -270,8 +270,8 @@ flowchart LR
 | `title` | str | コンテンツのタイトル |
 | `chunk_index` | int | チャンクの連番（0 始まり） |
 | `collected_at` | str | 取り込みタイムスタンプ（ISO 8601） |
-| `source_type` | str | データソース種別（`"web"`, `"zenn"`, `"bluesky"`, `"youtube"`, `"local"`, `"journal"`） |
-| `section_path` | str | 見出し階層（`>` 区切り、現セクションを含む）。見出しチャンカー・テーブルチャンカーが生成する。散文チャンカーでは空文字列 |
+| `source_type` | str | データソース種別（`"web"`, `"zenn"`, `"bluesky"`, `"youtube"`, `"local"`, `"journal"`, `"aozora"`） |
+| `section_path` | str | 見出し階層（`>` 区切り、現セクションを含む）。見出しチャンカー・テーブルチャンカーが生成する。テキストチャンカーでは空文字列 |
 
 #### カスタムフィールド
 
