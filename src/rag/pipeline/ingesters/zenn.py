@@ -52,6 +52,7 @@ class ZennIngester:
         *,
         max_articles: int | None = None,
         content_type: str = "all",
+        force: bool = False,
         client: Any | None = None,
     ) -> IngestResult:
         """Zenn コンテンツを取得し source_store に配置する.
@@ -60,6 +61,7 @@ class ZennIngester:
             username: Zenn ユーザー名
             max_articles: 取得する最大コンテンツ数（None の場合はインスタンス設定を使用）
             content_type: 取得対象（``articles``, ``scraps``, ``all``）
+            force: 既存ファイルを上書きするか（デフォルト: False＝スキップモード）
             client: ConstrainedClient インスタンス
 
         Returns:
@@ -86,11 +88,11 @@ class ZennIngester:
         # content_type に応じて処理
         if content_type in ("articles", "all"):
             await self._crawl_articles(
-                username, effective_max, client, result
+                username, effective_max, client, result, force=force
             )
         if content_type in ("scraps", "all"):
             await self._crawl_scraps(
-                username, effective_max, client, result
+                username, effective_max, client, result, force=force
             )
 
         return result
@@ -101,6 +103,8 @@ class ZennIngester:
         max_articles: int,
         client: Any,
         result: IngestResult,
+        *,
+        force: bool = False,
     ) -> None:
         """記事を取得して配置する."""
         # 一覧走査
@@ -110,6 +114,15 @@ class ZennIngester:
 
         for slug in slugs:
             try:
+                # スキップ判定: 既存ファイルがあり force でなければスキップ
+                rel_path = f"zenn/{username}/articles/{slug}.json"
+                if not force:
+                    dest = self._store.root_dir / rel_path
+                    if dest.exists():
+                        logger.debug("既存ファイルのためスキップ: %s", rel_path)
+                        result.skipped += 1
+                        continue
+
                 # 記事詳細取得
                 url = f"{ZENN_API_BASE}/articles/{slug}"
                 resp = await client.get(url)
@@ -122,7 +135,6 @@ class ZennIngester:
                     continue
 
                 # JSON として保存
-                rel_path = f"zenn/{username}/articles/{slug}.json"
                 json_data = json.dumps(article, ensure_ascii=False, indent=2)
                 json_bytes = json_data.encode("utf-8")
 
@@ -166,6 +178,8 @@ class ZennIngester:
         max_articles: int,
         client: Any,
         result: IngestResult,
+        *,
+        force: bool = False,
     ) -> None:
         """スクラップを取得して配置する."""
         # 一覧走査
@@ -175,14 +189,20 @@ class ZennIngester:
 
         for slug in slugs:
             try:
+                # スキップ判定: 既存ファイルがあり force でなければスキップ
+                rel_path = f"zenn/{username}/scraps/{slug}.json"
+                if not force:
+                    dest = self._store.root_dir / rel_path
+                    if dest.exists():
+                        logger.debug("既存ファイルのためスキップ: %s", rel_path)
+                        result.skipped += 1
+                        continue
+
                 # スクラップ詳細取得
                 url = f"{ZENN_API_BASE}/scraps/{slug}"
                 resp = await client.get(url)
                 data = resp.json()
                 scrap = data.get("scrap", data)
-
-                # JSON として保存
-                rel_path = f"zenn/{username}/scraps/{slug}.json"
                 json_data = json.dumps(scrap, ensure_ascii=False, indent=2)
                 json_bytes = json_data.encode("utf-8")
 

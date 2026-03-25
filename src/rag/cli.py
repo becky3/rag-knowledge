@@ -366,6 +366,7 @@ def main() -> None:
     zenn_parser.add_argument("username", help="Zenn ユーザー名")
     zenn_parser.add_argument("--max-articles", type=int, default=None, help="取得する最大コンテンツ数")
     zenn_parser.add_argument("--content-type", choices=["articles", "scraps", "all"], default="all", help="取得対象")
+    zenn_parser.add_argument("--force", action="store_true", default=False, help="既存ファイルを上書きする（デフォルト: スキップ）")
 
     # add-document: 単一ドキュメント取り込み
     adddoc_parser = subparsers.add_parser("add-document", help="ドキュメントファイルをナレッジベースに取り込む")
@@ -1858,11 +1859,19 @@ async def run_crawl_zenn(args: argparse.Namespace) -> None:
                 args.username,
                 max_articles=max_articles,
                 content_type=args.content_type,
+                force=args.force,
                 client=client,
             )
     except (ValueError, TypeError) as e:
         logger.error("エラー: %s", e)
         sys.exit(1)
+
+    if ingest_result.placed == 0 and ingest_result.errors == 0:
+        if ingest_result.skipped > 0:
+            print(f"全 {ingest_result.skipped} 件のコンテンツがスキップされました（ユーザー: {args.username}）。上書きするには --force を指定してください")
+        else:
+            print(f"コンテンツが見つかりませんでした（ユーザー: {args.username}）")
+        return
 
     pipeline_summary = controller.ingest_and_index(f"ingest(zenn): {args.username}")
     _print_ingest_result(ingest_result, pipeline_summary, context=f"ユーザー: {args.username}")

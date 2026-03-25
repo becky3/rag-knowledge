@@ -208,7 +208,7 @@ flowchart TB
 |------|-----------|----------------|-------------|
 | web | URL | URL パス変換規則で一意に決定 | 上書き |
 | bluesky | AT URI | DID + 年月 + rkey で一意に決定 | スキップ |
-| zenn | Zenn URL | username + slug で一意に決定 | 上書き |
+| zenn | Zenn URL | username + slug で一意に決定 | スキップ（force 指定時は上書き） |
 | youtube | YouTube 動画 URL | channel_id + video_id で一意に決定 | 上書き |
 | aozora | 青空文庫 URL | person_id + book_id で一意に決定 | スキップ |
 | local | 相対パス | ユーザー指定パスで一意に決定 | 上書き |

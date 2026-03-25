@@ -63,7 +63,9 @@ Zenn（zenn.dev）の記事およびスクラップを API 経由で取得し、
 
 ### 重複検出
 
-[インジェスター共通仕様](common.md) のファイルシステムベース方式に従う。source_id（Zenn 記事 URL）からファイルパスを導出し、ファイルの存在有無で判定する。既存ファイルが存在する場合は上書きする。
+[インジェスター共通仕様](common.md) のファイルシステムベース方式に従う。source_id（Zenn 記事 URL）からファイルパスを導出し、ファイルの存在有無で判定する。
+
+デフォルト動作はスキップモード（既存ファイルがあれば上書きしない）。明示的に `force` を指定した場合のみ上書きする。定期的な取り込み運用では記事の更新頻度は低く、毎回上書き → 変換 → インデックス再構築の無駄を避ける。
 
 ## 想定プロファイル
 
@@ -103,7 +105,7 @@ Zenn（zenn.dev）の記事およびスクラップを API 経由で取得し、
 
 | ツール | 入力 | 振る舞い |
 |--------|------|---------|
-| `rag_crawl_zenn` | username、max_articles（任意）、content_type（任意） | 指定ユーザーの Zenn コンテンツを API 経由で取得し、source_store にファイルを配置する。取り込み完了後、パイプライン制御に通知する |
+| `rag_crawl_zenn` | username、max_articles（任意）、content_type（任意）、force（任意） | 指定ユーザーの Zenn コンテンツを API 経由で取得し、source_store にファイルを配置する。取り込み完了後、パイプライン制御に通知する |
 
 ツール入力パラメータ:
 
@@ -112,6 +114,7 @@ Zenn（zenn.dev）の記事およびスクラップを API 経由で取得し、
 | `username` | 文字列 | はい | Zenn ユーザー名 |
 | `max_articles` | 整数 | いいえ | 取得する最大コンテンツ数。デフォルト: 50、許容範囲: 1〜100 |
 | `content_type` | 文字列 | いいえ | 取得対象のフィルタ: `articles`（記事のみ）、`scraps`（スクラップのみ）、`all`（両方）。デフォルト: `all`。ツール入力では複数形（`articles`/`scraps`）、.meta の `content_type` フィールドでは単数形（`article`/`scrap`）を使用する |
+| `force` | 真偽値 | いいえ | 既存ファイルを上書きするか。デフォルト: `false`（スキップモード） |
 
 ツール出力: source_store への配置結果（配置ファイル数、スキップ数、エラー数）のサマリーテキスト。記事とスクラップの内訳も含む。
 
@@ -121,7 +124,7 @@ Zenn（zenn.dev）の記事およびスクラップを API 経由で取得し、
 
 | コマンド | 引数 | 振る舞い |
 |---------|------|---------|
-| `crawl-zenn` | `username`、`--max-articles`（任意）、`--content-type`（任意） | `rag_crawl_zenn` と同等の処理を CLI から実行する |
+| `crawl-zenn` | `username`、`--max-articles`（任意）、`--content-type`（任意）、`--force`（任意） | `rag_crawl_zenn` と同等の処理を CLI から実行する |
 
 ### 設定項目
 
@@ -231,14 +234,18 @@ username: "alice"
 
 ```mermaid
 flowchart TD
-    START["rag_crawl_zenn(username, max_articles, content_type)"]
+    START["rag_crawl_zenn(username, max_articles, content_type, force)"]
     VALIDATE["入力バリデーション"]
     DISCOVER["コンテンツ一覧 API を走査（content_type に応じて記事/スクラップ/両方）"]
     PAGE["ページ取得"]
     CHECK_NEXT{"next_page が null?"}
     CHECK_LIMIT{"走査上限 or 記事数上限?"}
-    FETCH["各記事の詳細を取得"]
+    LOOP["各 slug をループ"]
+    CHECK_EXIST{"既存ファイルあり and not force?"}
+    SKIP["スキップ（次の slug へ）"]
+    FETCH["記事の詳細を取得"]
     PLACE["source_store にファイル配置 + .meta 生成"]
+    LOOP_END{"次の slug あり?"}
     NOTIFY["パイプライン制御に取り込み完了通知"]
     RESULT["配置結果サマリーを返却"]
 
@@ -246,12 +253,18 @@ flowchart TD
     VALIDATE --> DISCOVER
     DISCOVER --> PAGE
     PAGE --> CHECK_NEXT
-    CHECK_NEXT -->|"はい"| FETCH
+    CHECK_NEXT -->|"はい"| LOOP
     CHECK_NEXT -->|"いいえ"| CHECK_LIMIT
-    CHECK_LIMIT -->|"はい（上限到達）"| FETCH
+    CHECK_LIMIT -->|"はい（上限到達）"| LOOP
     CHECK_LIMIT -->|"いいえ"| PAGE
+    LOOP --> CHECK_EXIST
+    CHECK_EXIST -->|"はい"| SKIP
+    CHECK_EXIST -->|"いいえ"| FETCH
     FETCH --> PLACE
-    PLACE --> NOTIFY
+    SKIP --> LOOP_END
+    PLACE --> LOOP_END
+    LOOP_END -->|"はい"| CHECK_EXIST
+    LOOP_END -->|"いいえ"| NOTIFY
     NOTIFY --> RESULT
 ```
 
@@ -275,20 +288,20 @@ flowchart TD
 
 ### 個別記事取得とファイル配置の処理手順
 
-1. 記事詳細 API（`/api/articles/{slug}`）にリクエストを送信する
-2. レスポンスから `article` オブジェクトを取得する
-3. `article` オブジェクトをそのまま JSON として source_store に配置する（配置先: `zenn/{username}/articles/{slug}.json`）
-4. .meta サイドカーファイルを同階層に生成する（配置先: `zenn/{username}/articles/{slug}.json.meta`）
-5. 重複検出: 配置先パスにファイルが既に存在する場合は上書きする
+1. 重複検出: 配置先パス（`zenn/{username}/articles/{slug}.json`）にファイルが既に存在し、`force` が指定されていなければスキップする
+2. 記事詳細 API（`/api/articles/{slug}`）にリクエストを送信する
+3. レスポンスから `article` オブジェクトを取得する
+4. `article` オブジェクトをそのまま JSON として source_store に配置する（配置先: `zenn/{username}/articles/{slug}.json`）
+5. .meta サイドカーファイルを同階層に生成する（配置先: `zenn/{username}/articles/{slug}.json.meta`）
 
 ### スクラップ取得とファイル配置の処理手順
 
 1. スクラップ一覧 API（`/api/scraps?username={username}&order=latest&page={page}`）を走査する。走査手順は記事一覧走査と同様（ページネーション上限・コンテンツ数上限で終了）
 2. 各スクラップの `slug` を収集する
-3. スクラップ詳細 API（`/api/scraps/{slug}`）にリクエストを送信する
-4. レスポンスの `scrap` オブジェクト（`comments` 配列を含む）をそのまま JSON として source_store に配置する（配置先: `zenn/{username}/scraps/{slug}.json`）
-5. .meta サイドカーファイルを同階層に生成する（配置先: `zenn/{username}/scraps/{slug}.json.meta`）
-6. 重複検出: 配置先パスにファイルが既に存在する場合は上書きする
+3. 重複検出: 配置先パス（`zenn/{username}/scraps/{slug}.json`）にファイルが既に存在し、`force` が指定されていなければスキップする
+4. スクラップ詳細 API（`/api/scraps/{slug}`）にリクエストを送信する
+5. レスポンスの `scrap` オブジェクト（`comments` 配列を含む）をそのまま JSON として source_store に配置する（配置先: `zenn/{username}/scraps/{slug}.json`）
+6. .meta サイドカーファイルを同階層に生成する（配置先: `zenn/{username}/scraps/{slug}.json.meta`）
 
 ### パイプライン制御との連携
 
@@ -418,7 +431,8 @@ Zenn は公式の API ドキュメントを公開していない。以下は観�
 | `article` オブジェクトが空 | 該当記事をスキップする。空の JSON ファイルは source_store に配置しない |
 | 下書き・非公開記事 | API が公開記事のみを返すため、考慮不要 |
 | 大量記事ユーザー（480 件超 = 10 ページ超） | ページネーション走査上限（10 ページ）で打ち切る。取得済み記事を処理し、上限到達の旨を警告ログに出力する |
-| 同一記事の再取り込み | source_id（記事の公開 URL）からファイルパスを導出し、既存ファイルを上書きする |
+| 同一記事の再取り込み（デフォルト） | source_id（記事の公開 URL）からファイルパスを導出し、既存ファイルがあればスキップする |
+| 同一記事の再取り込み（`force` 指定時） | source_id（記事の公開 URL）からファイルパスを導出し、既存ファイルを上書きする |
 | バジェット上限到達 | 取得済みデータを配置し、上限到達の旨をログ出力する |
 | サーキットブレーカー発動 | 操作を中断し、取得済みデータを配置する。エラーの詳細をログ出力する |
 | 操作全体タイムアウト | 操作を中断し、取得済みデータを配置する |
@@ -428,7 +442,8 @@ Zenn は公式の API ドキュメントを公開していない。以下は観�
 | `content_type` に無効な値を指定 | バリデーションエラーとして拒否する。有効値: `articles`, `scraps`, `all` |
 | スクラップのコメントが 0 件 | raw JSON をそのまま source_store に保存する（インジェスターは無加工保存）。コンバーターが空テキストとして変換をスキップする |
 | スクラップのコメント `body_html` が全て空 | raw JSON をそのまま source_store に保存する。コンバーターが空テキストとして変換をスキップする |
-| 同一スクラップの再取り込み | source_id（スクラップの公開 URL）からファイルパスを導出し、既存ファイルを上書きする |
+| 同一スクラップの再取り込み（デフォルト） | source_id（スクラップの公開 URL）からファイルパスを導出し、既存ファイルがあればスキップする |
+| 同一スクラップの再取り込み（`force` 指定時） | source_id（スクラップの公開 URL）からファイルパスを導出し、既存ファイルを上書きする |
 | Zenn API のレート制限（429） | ConstrainedClient のサーキットブレーカーで検出される。連続失敗として計上し、閾値超過で操作を中断する |
 | .meta ファイルの書き込みに失敗した場合 | ファイル物理削除禁止制約により、配置済みデータファイルのロールバックは行わない。エラーログを出力して処理を続行する |
 

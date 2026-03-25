@@ -606,18 +606,20 @@ async def rag_crawl_zenn(
     username: str,
     max_articles: int | None = None,
     content_type: str = "all",
+    force: bool = False,
     ctx: MCPContext | None = None,
 ) -> str:
     """[rag-knowledge] RAG crawl Zenn - Zenn コンテンツを API 経由で取得し一括取り込み.
 
     knowledge base, Zenn, ingest, articles, scraps, API.
     指定ユーザーの Zenn 記事・スクラップを API 経由で取得し、ナレッジベースに取り込む。
-    同一コンテンツの再取り込み時は既存の知識を最新に置き換える。
+    デフォルトでは既存コンテンツはスキップする。force=True で上書き取り込み。
 
     Args:
         username: Zenn ユーザー名
         max_articles: 取得する最大コンテンツ数（未指定時は設定値を使用、許容範囲: 1〜100）
         content_type: 取得対象（"articles": 記事のみ、"scraps": スクラップのみ、"all": 両方。デフォルト: "all"）
+        force: 既存ファイルを上書きするか（デフォルト: false＝スキップモード）
 
     Returns:
         取り込み結果のサマリーテキスト
@@ -654,10 +656,13 @@ async def rag_crawl_zenn(
                 username.strip(),
                 max_articles=max_articles,
                 content_type=content_type,
+                force=force,
                 client=client,
             )
 
         if ingest_result.placed == 0 and ingest_result.errors == 0:
+            if ingest_result.skipped > 0:
+                return f"全 {ingest_result.skipped} 件のコンテンツがスキップされました（ユーザー: {username}）。上書きするには force=true を指定してください"
             return f"コンテンツが見つかりませんでした（ユーザー: {username}）"
 
         pipeline_summary = await _run_ingest_and_index_subprocess(
