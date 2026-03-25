@@ -428,7 +428,23 @@ class BlueskyIngester:
 
         logger.info("投稿内から %d 件の URL を抽出しました", len(all_urls))
 
+        from py_common_lib.core.budget_tracker import BudgetExhaustedError
+
         for url in all_urls:
+            # バジェット枯渇チェック（Web URL は ConstrainedClient 経由）
+            if client is not None and client.budget.remaining <= 0:
+                remaining_count = len(all_urls) - (
+                    stats["web_placed"] + stats["youtube_placed"]
+                    + stats["skipped"] + stats["errors"]
+                )
+                if remaining_count > 0:
+                    logger.warning(
+                        "バジェット枯渇のため残り %d 件の URL をスキップします",
+                        remaining_count,
+                    )
+                    stats["skipped"] += remaining_count
+                break
+
             url_type = classify_url(url)
 
             if url_type == "skip":
@@ -453,6 +469,10 @@ class BlueskyIngester:
                     stats["web_placed"] += web_result.placed
                     if web_result.errors > 0:
                         stats["errors"] += web_result.errors
+                except BudgetExhaustedError:
+                    logger.warning("バジェット枯渇: %s をスキップ", url)
+                    stats["skipped"] += 1
+                    break
                 except Exception:
                     logger.exception("Web URL の取り込みに失敗: %s", url)
                     stats["errors"] += 1

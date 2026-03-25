@@ -94,6 +94,15 @@ def _make_mock_client(pages: list[dict]) -> AsyncMock:
     return client
 
 
+def _make_budget_client(remaining: int = 500) -> AsyncMock:
+    """バジェット付きモック ConstrainedClient を生成する."""
+    client = AsyncMock()
+    budget = MagicMock()
+    budget.remaining = remaining
+    client.budget = budget
+    return client
+
+
 class TestValidateMaxPosts:
     """_validate_max_posts のテスト."""
 
@@ -463,7 +472,7 @@ class TestFollowUrls:
 
         mock_web = AsyncMock()
         mock_web.add = AsyncMock(return_value=MagicMock(placed=1, errors=0))
-        mock_client = AsyncMock()
+        mock_client = _make_budget_client()
 
         ingester = BlueskyIngester(source_store)
         stats = await ingester.follow_urls(
@@ -554,7 +563,7 @@ class TestFollowUrls:
         ingester = BlueskyIngester(source_store)
         stats = await ingester.follow_urls(
             [item],
-            client=AsyncMock(),
+            client=_make_budget_client(),
             web_ingester=mock_web,
             youtube_ingester=None,
         )
@@ -581,7 +590,7 @@ class TestFollowUrls:
         ingester = BlueskyIngester(source_store)
         stats = await ingester.follow_urls(
             [item1, item2],
-            client=AsyncMock(),
+            client=_make_budget_client(),
             web_ingester=mock_web,
             youtube_ingester=None,
         )
