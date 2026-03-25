@@ -183,7 +183,6 @@ rag_respect_robots_txt = true
 rag_robots_txt_cache_ttl = 3600
 rag_url_safety_check = false
 rag_url_safety_cache_ttl = 300
-rag_url_safety_fail_open = true
 rag_url_safety_timeout = 5.0
 rag_stats_max_sources = 100
 rag_zenn_max_articles = 50

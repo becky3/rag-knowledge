@@ -323,8 +323,7 @@ class RAGKnowledgeService:
             {"pages_crawled": N, "chunks_stored": M, "errors": E, "unsafe_urls": U}
 
         Raises:
-            SafetyCheckError: Safe Browsing APIでfail_open=False設定時、
-                API障害が発生した場合に送出される
+            SafetyCheckError: Safe Browsing API障害時に送出される
         """
         return await self._ingest_from_index_impl(
             index_url, url_pattern, progress_callback

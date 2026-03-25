@@ -24,10 +24,17 @@ _SERVICE_NAME = "rag-knowledge"
 logger = logging.getLogger(__name__)
 
 
+class SafeBrowsingConfigError(Exception):
+    """Safe Browsing の設定エラー.
+
+    API キー未登録・空・不正（400 応答）、keyring アクセス失敗時に送出される。
+    """
+
+
 class SafetyCheckError(Exception):
     """URL安全性チェック失敗時の例外.
 
-    危険なURLが検出された場合、またはfail_close設定時にAPI障害が発生した場合に送出される。
+    危険なURLが検出された場合、またはAPI障害が発生した場合に送出される。
     """
 
     def __init__(self, url: str, message: str, threats: list[str] | None = None) -> None:
@@ -81,7 +88,6 @@ class SafeBrowsingResult:
     url: str
     is_safe: bool
     threats: list[ThreatMatch] = field(default_factory=list)
-    error: str | None = None
     cached: bool = False
 
 
@@ -109,13 +115,13 @@ class SafeBrowsingClient:
     API_URL = "https://safebrowsing.googleapis.com/v4/threatMatches:find"
     DEFAULT_CACHE_TTL = 300  # 5分（デフォルトTTL）
     MAX_CACHE_SIZE = 1000  # キャッシュの最大エントリ数
+    MAX_URLS_PER_REQUEST = 500  # Lookup API v4 の 1 リクエストあたり URL 上限
 
     def __init__(
         self,
         api_key: str,
         timeout: float = 10.0,
         cache_ttl: float | None = None,
-        fail_open: bool = True,
         client_id: str = "rag-knowledge",
         client_version: str = "1.0.0",
         max_cache_size: int | None = None,
@@ -127,7 +133,6 @@ class SafeBrowsingClient:
             api_key: Google Safe Browsing API キー
             timeout: APIリクエストのタイムアウト秒数
             cache_ttl: キャッシュのTTL秒数（None の場合はデフォルトTTLを使用）
-            fail_open: API障害時の動作（True: URLを許可, False: URLを拒否）
             client_id: クライアント識別子
             client_version: クライアントバージョン
             max_cache_size: キャッシュの最大エントリ数（None の場合はデフォルト値を使用）
@@ -137,7 +142,6 @@ class SafeBrowsingClient:
         self._api_key = api_key
         self._timeout = httpx.Timeout(timeout)
         self._cache_ttl = cache_ttl
-        self._fail_open = fail_open
         self._client_id = client_id
         self._client_version = client_version
         self._max_cache_size = max_cache_size if max_cache_size is not None else self.MAX_CACHE_SIZE
@@ -165,7 +169,6 @@ class SafeBrowsingClient:
                 url=result.url,
                 is_safe=result.is_safe,
                 threats=list(result.threats),
-                error=result.error,
                 cached=True,
             )
 
@@ -286,64 +289,86 @@ class SafeBrowsingClient:
         if not urls_to_check:
             return results
 
-        # API呼び出し
+        # API呼び出し（常にフェイルクローズ: エラー時は例外送出）
         try:
             api_results = await self._call_api(urls_to_check)
             for url, result in api_results.items():
                 results[url] = result
                 # キャッシュに保存
                 await self._set_cache(url, result)
+        except SafeBrowsingConfigError:
+            raise
         except Exception as e:
             logger.exception("Safe Browsing API error")
-            if self._fail_open:
-                # fail-open: API障害時はURLを許可
-                for url in urls_to_check:
-                    results[url] = SafeBrowsingResult(
-                        url=url,
-                        is_safe=True,
-                        error=str(e),
-                    )
-            else:
-                # fail-close: API障害時はURLを拒否（例外を送出）
-                raise SafetyCheckError(
-                    url=urls_to_check[0] if len(urls_to_check) == 1 else "",
-                    message=f"Safe Browsing API障害のためURL安全性を確認できません: {e}",
-                ) from e
+            raise SafetyCheckError(
+                url=urls_to_check[0] if len(urls_to_check) == 1 else "",
+                message=f"Safe Browsing API障害のためURL安全性を確認できません: {e}",
+            ) from e
 
         return results
 
     async def _call_api(self, urls: list[str]) -> dict[str, SafeBrowsingResult]:
-        """Safe Browsing API を呼び出す."""
+        """Safe Browsing API を呼び出す.
+
+        URL 数が MAX_URLS_PER_REQUEST を超える場合はバッチ分割して呼び出す。
+        """
+        # バッチ分割
+        if len(urls) > self.MAX_URLS_PER_REQUEST:
+            all_results: dict[str, SafeBrowsingResult] = {}
+            for i in range(0, len(urls), self.MAX_URLS_PER_REQUEST):
+                batch = urls[i : i + self.MAX_URLS_PER_REQUEST]
+                batch_results = await self._call_api_single(batch)
+                all_results.update(batch_results)
+            return all_results
+
+        return await self._call_api_single(urls)
+
+    async def _call_api_single(self, urls: list[str]) -> dict[str, SafeBrowsingResult]:
+        """Safe Browsing API を 1 回呼び出す."""
         from py_common_lib.httpx import ConstrainedClient
 
         request_body = self._build_request_body(urls)
+        headers = {"x-goog-api-key": self._api_key}
 
         if self._cc_kwargs is not None:
             # 都度生成: 再入・並行利用による状態干渉を防ぐ
-            cc = ConstrainedClient(**self._cc_kwargs)
+            cc_kwargs = {**self._cc_kwargs, "headers": headers}
+            cc = ConstrainedClient(**cc_kwargs)
             async with cc as client:
                 resp = await client.post(
                     self.API_URL,
-                    params={"key": self._api_key},
                     json=request_body,
                 )
-                if resp.status_code != 200:
-                    raise RuntimeError(
-                        f"Safe Browsing API error: {resp.status_code} - {resp.text}"
-                    )
+                self._check_response_status(resp.status_code, resp.text)
                 response_data = resp.json()
         else:
-            async with httpx.AsyncClient(timeout=self._timeout) as session:  # safety:allowed
+            async with httpx.AsyncClient(timeout=self._timeout, headers=headers) as session:  # safety:allowed
                 resp = await session.post(
-                    self.API_URL, params={"key": self._api_key}, json=request_body
+                    self.API_URL, json=request_body,
                 )
-                if resp.status_code != 200:
-                    raise RuntimeError(
-                        f"Safe Browsing API error: {resp.status_code} - {resp.text}"
-                    )
+                self._check_response_status(resp.status_code, resp.text)
                 response_data = resp.json()
 
         return self._parse_response(response_data, urls)
+
+    def _check_response_status(self, status_code: int, text: str) -> None:
+        """APIレスポンスのステータスコードを検証する."""
+        if status_code == 200:
+            return
+        if status_code == 400:
+            # バッチ分割により URL 数超過は通常発生しない。
+            # 400 は API キー不正またはリクエスト不正として設定エラーとする。
+            raise SafeBrowsingConfigError(
+                f"Safe Browsing API 設定エラー（400 Bad Request）: {text}"
+            )
+        if status_code == 429:
+            raise RuntimeError(
+                "Safe Browsing API レートリミット超過（429）。"
+                "1日あたりのリクエスト上限に達しました。時間を置いてから再試行してください"
+            )
+        raise RuntimeError(
+            f"Safe Browsing API エラー（{status_code}）: {text}"
+        )
 
     async def is_url_safe(self, url: str) -> bool:
         """URLが安全かどうかを判定する（シンプルなインターフェース）.
@@ -352,7 +377,7 @@ class SafeBrowsingClient:
             url: チェックするURL
 
         Returns:
-            True: 安全（または判定不能）, False: 危険
+            True: 安全, False: 危険
         """
         result = await self.check_url(url)
         return result.is_safe
@@ -394,6 +419,9 @@ def create_safe_browsing_client(settings: RAGSettings) -> SafeBrowsingClient | N
 
     Returns:
         SafeBrowsingClient または None（無効時）
+
+    Raises:
+        SafeBrowsingConfigError: API キー未登録・空・keyring アクセス失敗時
     """
     if not settings.rag_url_safety_check:
         logger.debug("URL safety check is disabled")
@@ -401,26 +429,22 @@ def create_safe_browsing_client(settings: RAGSettings) -> SafeBrowsingClient | N
 
     try:
         api_key = get_secret("GOOGLE_SAFE_BROWSING_API_KEY", service=_SERVICE_NAME)
-    except SecretNotFoundError:
-        logger.warning(
+    except SecretNotFoundError as e:
+        raise SafeBrowsingConfigError(
             "URL safety check is enabled but GOOGLE_SAFE_BROWSING_API_KEY is not "
-            "registered in the secret store. Skipping Safe Browsing integration."
-        )
-        return None
-    except SecretStoreError:
-        logger.warning(
-            "URL safety check is enabled but failed to access the secret store. "
-            "Skipping Safe Browsing integration.",
-            exc_info=True,
-        )
-        return None
+            "registered in the secret store. Register the key or set "
+            "rag_url_safety_check=false in config.toml."
+        ) from e
+    except SecretStoreError as e:
+        raise SafeBrowsingConfigError(
+            "URL safety check is enabled but failed to access the secret store."
+        ) from e
 
     if not api_key:
-        logger.warning(
+        raise SafeBrowsingConfigError(
             "URL safety check is enabled but GOOGLE_SAFE_BROWSING_API_KEY is empty. "
-            "Skipping Safe Browsing integration."
+            "Register a valid key or set rag_url_safety_check=false in config.toml."
         )
-        return None
 
     cache_ttl: float | None = None
     if settings.rag_url_safety_cache_ttl > 0:
@@ -430,7 +454,6 @@ def create_safe_browsing_client(settings: RAGSettings) -> SafeBrowsingClient | N
         api_key=api_key,
         timeout=settings.rag_url_safety_timeout,
         cache_ttl=cache_ttl,
-        fail_open=settings.rag_url_safety_fail_open,
         constrained_client_kwargs={
             "request_timeout": settings.rag_url_safety_timeout,
             "max_requests": 10,

@@ -391,7 +391,6 @@ class BlueskyIngester:
         client: ConstrainedClient | None = None,
         web_ingester: WebIngester | None = None,
         youtube_ingester: YoutubeIngester | None = None,
-        safe_browsing_api_key: str = "",
     ) -> dict[str, int]:
         """配置済み投稿から URL を抽出し、Web/YouTube インジェスターに委譲する.
 
@@ -402,7 +401,6 @@ class BlueskyIngester:
             client: ConstrainedClient（Web インジェスターに共有）
             web_ingester: WebIngester インスタンス
             youtube_ingester: YoutubeIngester インスタンス
-            safe_browsing_api_key: Google Safe Browsing API キー
 
         Returns:
             {"web_placed": N, "youtube_placed": N, "skipped": N, "errors": N}
@@ -464,7 +462,6 @@ class BlueskyIngester:
                 try:
                     web_result = await web_ingester.add(
                         url=url, client=client,
-                        safe_browsing_api_key=safe_browsing_api_key,
                     )
                     stats["web_placed"] += web_result.placed
                     if web_result.errors > 0:

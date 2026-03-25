@@ -241,7 +241,6 @@ class TestAdd:
 
         ingester = WebIngester(
             source_store,
-            url_safety_check=False,
             respect_robots_txt=False,
         )
         result = await ingester.add(
@@ -272,7 +271,6 @@ class TestAdd:
 
         ingester = WebIngester(
             source_store,
-            url_safety_check=False,
             respect_robots_txt=False,
         )
         with pytest.raises(ValueError, match="リダイレクト"):
@@ -294,7 +292,6 @@ class TestAddExtension:
 
         ingester = WebIngester(
             source_store,
-            url_safety_check=False,
             respect_robots_txt=False,
         )
         result = await ingester.add(
@@ -322,7 +319,6 @@ class TestAddExtension:
 
         ingester = WebIngester(
             source_store,
-            url_safety_check=False,
             respect_robots_txt=False,
         )
         result = await ingester.add(
@@ -351,7 +347,6 @@ class TestAddExtension:
 
         ingester = WebIngester(
             source_store,
-            url_safety_check=False,
             respect_robots_txt=False,
         )
         result = await ingester.add(
@@ -394,7 +389,6 @@ class TestCrawlExtension:
 
         ingester = WebIngester(
             source_store,
-            url_safety_check=False,
             respect_robots_txt=False,
         )
         result = await ingester.crawl(
@@ -432,7 +426,6 @@ class TestCrawl:
 
         ingester = WebIngester(
             source_store,
-            url_safety_check=False,
             respect_robots_txt=False,
         )
         result = await ingester.crawl(
@@ -459,7 +452,6 @@ class TestCrawl:
 
         ingester = WebIngester(
             source_store,
-            url_safety_check=False,
             respect_robots_txt=False,
         )
         result = await ingester.crawl(
@@ -491,7 +483,6 @@ class TestCrawlPreview:
 
         ingester = WebIngester(
             source_store,
-            url_safety_check=False,
             respect_robots_txt=False,
         )
         previews = await ingester.crawl_preview(
@@ -526,7 +517,6 @@ class TestCrawlPreview:
 
         ingester = WebIngester(
             source_store,
-            url_safety_check=False,
             respect_robots_txt=False,
         )
         result = await ingester.crawl_preview(
@@ -574,7 +564,6 @@ class TestCrawlDepth:
 
         ingester = WebIngester(
             source_store,
-            url_safety_check=False,
             respect_robots_txt=False,
         )
         result = await ingester.crawl(
@@ -611,7 +600,6 @@ class TestCrawlDepth:
 
         ingester = WebIngester(
             source_store,
-            url_safety_check=False,
             respect_robots_txt=False,
         )
         result = await ingester.crawl(
@@ -648,7 +636,6 @@ class TestCrawlDepth:
 
         ingester = WebIngester(
             source_store,
-            url_safety_check=False,
             respect_robots_txt=False,
         )
         result = await ingester.crawl(
@@ -681,7 +668,6 @@ class TestCrawlDepth:
 
         ingester = WebIngester(
             source_store,
-            url_safety_check=False,
             respect_robots_txt=False,
         )
         result = await ingester.crawl(
@@ -720,7 +706,6 @@ class TestCrawlDepth:
         ingester = WebIngester(
             source_store,
             max_crawl_pages=2,
-            url_safety_check=False,
             respect_robots_txt=False,
         )
         result = await ingester.crawl(
@@ -764,7 +749,6 @@ class TestCrawlMaxErrors:
         ingester = WebIngester(
             source_store,
             crawl_max_errors=5,
-            url_safety_check=False,
             respect_robots_txt=False,
         )
         result = await ingester.crawl(
@@ -783,7 +767,6 @@ class TestCrawlMaxErrors:
         ingester = WebIngester(
             source_store,
             crawl_max_errors=1,  # 1 は下限 5 にクランプ
-            url_safety_check=False,
             respect_robots_txt=False,
         )
         assert ingester._crawl_max_errors == 5
@@ -819,7 +802,6 @@ class TestCrawlPreviewDepth:
 
         ingester = WebIngester(
             source_store,
-            url_safety_check=False,
             respect_robots_txt=False,
         )
         previews = await ingester.crawl_preview(
@@ -966,7 +948,6 @@ class TestCrawlContentTypeFilter:
 
         ingester = WebIngester(
             source_store,
-            url_safety_check=False,
             respect_robots_txt=False,
         )
         result = await ingester.crawl(

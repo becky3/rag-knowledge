@@ -80,7 +80,12 @@ with contextlib.redirect_stdout(io.StringIO()):
     from .store.source_store import SourceStore
 
 from py_common_lib.httpx import ConstrainedClient  # safety:allowed
-from py_common_lib.secrets import SecretNotFoundError, SecretStoreError, get_secret
+
+from .safe_browsing import (
+    SafeBrowsingClient,
+    SafeBrowsingConfigError,
+    create_safe_browsing_client,
+)
 
 from mcp.server.fastmcp import Context, FastMCP
 
@@ -94,9 +99,6 @@ ensure_utf8_streams()
 logger = logging.getLogger(__name__)
 
 mcp = FastMCP("rag")
-
-# シークレットサービス名
-_SECRET_SERVICE_NAME = "rag-knowledge"
 
 # --- 遅延初期化: RAGKnowledgeService（検索用） ---
 
@@ -214,32 +216,29 @@ def _build_pipeline_controller() -> PipelineController:
     return build_pipeline_controller()
 
 
-_safe_browsing_api_key_cache: str | None = None
+_safe_browsing_client_cache: SafeBrowsingClient | None = None
+_safe_browsing_client_initialized = False
 
 
-def _get_safe_browsing_api_key() -> str:
-    """Safe Browsing API キーを取得する（プロセス内キャッシュ）.
+def _get_safe_browsing_client() -> SafeBrowsingClient | None:
+    """SafeBrowsingClient を取得する（プロセス内キャッシュ）.
 
     Returns:
-        API キー。取得できない場合は空文字列。
+        SafeBrowsingClient または None（無効時）
+
+    Raises:
+        SafeBrowsingConfigError: API キー未登録・空・keyring アクセス失敗時
     """
-    global _safe_browsing_api_key_cache
-    if _safe_browsing_api_key_cache is not None:
-        return _safe_browsing_api_key_cache
+    global _safe_browsing_client_cache, _safe_browsing_client_initialized
+    if _safe_browsing_client_initialized:
+        return _safe_browsing_client_cache
+    # SafeBrowsingConfigError 時は initialized を True にしない
+    # （設定修正まで毎回エラー送出）
 
     settings = get_settings()
-    if not settings.rag_url_safety_check:
-        _safe_browsing_api_key_cache = ""
-        return ""
-    try:
-        key = get_secret(
-            "GOOGLE_SAFE_BROWSING_API_KEY", service=_SECRET_SERVICE_NAME,
-        )
-        _safe_browsing_api_key_cache = key or ""
-    except (SecretNotFoundError, SecretStoreError):
-        logger.warning("Safe Browsing API key not available")
-        _safe_browsing_api_key_cache = ""
-    return _safe_browsing_api_key_cache
+    _safe_browsing_client_cache = create_safe_browsing_client(settings)
+    _safe_browsing_client_initialized = True
+    return _safe_browsing_client_cache
 
 
 # --- レスポンスフォーマッタ ---
@@ -263,7 +262,10 @@ def _format_ingest_response(
 # --- ファクトリヘルパー ---
 
 
-def _create_web_ingester(source_store: SourceStore) -> PipelineWebIngester:
+def _create_web_ingester(
+    source_store: SourceStore,
+    safe_browsing_client: SafeBrowsingClient | None = None,
+) -> PipelineWebIngester:
     """設定に基づいて PipelineWebIngester を生成する."""
     settings = get_settings()
     return PipelineWebIngester(
@@ -273,10 +275,7 @@ def _create_web_ingester(source_store: SourceStore) -> PipelineWebIngester:
         crawl_max_errors=settings.rag_crawl_max_errors,
         respect_robots_txt=settings.rag_respect_robots_txt,
         robots_txt_cache_ttl=settings.rag_robots_txt_cache_ttl,
-        url_safety_check=settings.rag_url_safety_check,
-        url_safety_cache_ttl=settings.rag_url_safety_cache_ttl,
-        url_safety_fail_open=settings.rag_url_safety_fail_open,
-        url_safety_timeout=settings.rag_url_safety_timeout,
+        safe_browsing_client=safe_browsing_client,
     )
 
 
@@ -414,17 +413,20 @@ async def rag_add(url: str, ctx: MCPContext | None = None) -> str:
         取り込み結果のメッセージ
     """
     controller = await _get_pipeline_controller()
-    web_ingester = _create_web_ingester(controller.source_store)
+    try:
+        sb_client = _get_safe_browsing_client()
+    except SafeBrowsingConfigError as e:
+        return f"Safe Browsing 設定エラー: {e}"
+    web_ingester = _create_web_ingester(controller.source_store, sb_client)
     settings = get_settings()
 
     try:
-        api_key = _get_safe_browsing_api_key()
         async with ConstrainedClient(
             request_timeout=settings.rag_crawl_request_timeout,
             request_interval=settings.rag_crawl_delay_sec,
         ) as client:
             ingest_result = await web_ingester.add(
-                url, client=client, safe_browsing_api_key=api_key,
+                url, client=client,
             )
 
         if ingest_result.placed == 0 and ingest_result.errors == 0:
@@ -486,17 +488,19 @@ async def rag_crawl(
         )
 
     controller = await _get_pipeline_controller()
-    web_ingester = _create_web_ingester(controller.source_store)
+    try:
+        sb_client = _get_safe_browsing_client()
+    except SafeBrowsingConfigError as e:
+        return f"Safe Browsing 設定エラー: {e}"
+    web_ingester = _create_web_ingester(controller.source_store, sb_client)
 
     try:
-        api_key = _get_safe_browsing_api_key()
         async with ConstrainedClient(
             request_timeout=settings.rag_crawl_request_timeout,
             request_interval=settings.rag_crawl_delay_sec,
         ) as client:
             ingest_result = await web_ingester.crawl(
                 url, pattern=pattern, depth=depth, client=client,
-                safe_browsing_api_key=api_key,
             )
 
         if ingest_result.placed == 0 and ingest_result.errors == 0:
@@ -734,7 +738,11 @@ async def rag_crawl_bluesky(
             # 投稿内 URL の自動取り込み
             url_stats: dict[str, int] = {}
             if placed_items:
-                web_ingester = _create_web_ingester(controller.source_store)
+                try:
+                    sb_client = _get_safe_browsing_client()
+                except SafeBrowsingConfigError as e:
+                    return f"Safe Browsing 設定エラー: {e}"
+                web_ingester = _create_web_ingester(controller.source_store, sb_client)
                 youtube_ingester = PipelineYoutubeIngester(
                     controller.source_store,
                     max_videos=settings.rag_youtube_max_videos,
@@ -745,13 +753,11 @@ async def rag_crawl_bluesky(
                     transcript_languages=settings.rag_youtube_transcript_languages,
                     max_duration=settings.rag_youtube_max_duration,
                 )
-                api_key = _get_safe_browsing_api_key()
                 url_stats = await bluesky_ingester.follow_urls(
                     placed_items,
                     client=client,
                     web_ingester=web_ingester,
                     youtube_ingester=youtube_ingester,
-                    safe_browsing_api_key=api_key,
                 )
 
         if ingest_result.placed == 0 and ingest_result.errors == 0:
