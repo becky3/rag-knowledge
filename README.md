@@ -44,7 +44,7 @@
 | Embedding | OpenAI SDK / LM Studio (OpenAI 互換 API) |
 | HTML 解析 | BeautifulSoup4 |
 | HTML→Markdown 変換 | markdownify |
-| PDF テキスト抽出 | pymupdf4llm / MinerU |
+| PDF テキスト抽出 | pymupdf4llm / MinerU（CUDA 環境、未インストール時は pymupdf4llm にフォールバック） |
 | YouTube 字幕取得 | youtube-transcript-api |
 | YouTube メタデータ・音声DL | yt-dlp |
 | 音声文字起こし | faster-whisper |

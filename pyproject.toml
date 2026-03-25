@@ -92,7 +92,5 @@ dev = [
     "ruff>=0.14.14",
     "types-PyYAML>=6.0",
 ]
-# MinerU + PyTorch (CUDA) の依存を直接列挙
-# uv default-extras 未実装のため dependency-group で代替。
-# [project.optional-dependencies].mineru と同期を保つこと。
-with-mineru = ["mineru[pipeline]", "torch>=2.6", "torchvision>=0.21"]
+# uv default-extras 未実装のため dependency-group で代替
+with-mineru = ["rag-knowledge[mineru]"]

@@ -3937,9 +3937,7 @@ dev = [
     { name = "types-pyyaml" },
 ]
 with-mineru = [
-    { name = "mineru", extra = ["pipeline"] },
-    { name = "torch" },
-    { name = "torchvision" },
+    { name = "rag-knowledge", extra = ["mineru"] },
 ]
 
 [package.metadata]
@@ -3980,11 +3978,7 @@ dev = [
     { name = "ruff", specifier = ">=0.14.14" },
     { name = "types-pyyaml", specifier = ">=6.0" },
 ]
-with-mineru = [
-    { name = "mineru", extras = ["pipeline"] },
-    { name = "torch", specifier = ">=2.6", index = "https://download.pytorch.org/whl/cu124" },
-    { name = "torchvision", specifier = ">=0.21", index = "https://download.pytorch.org/whl/cu124" },
-]
+with-mineru = [{ name = "rag-knowledge", extras = ["mineru"] }]
 
 [[package]]
 name = "referencing"
