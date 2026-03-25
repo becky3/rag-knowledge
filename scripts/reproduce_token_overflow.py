@@ -25,9 +25,22 @@ CONTEXT_LENGTH = 512
 
 
 def load_tokenizer() -> Tokenizer:
-    """nomic-embed-text-v2-moe のトークナイザーをロードする."""
-    print("Loading tokenizer: nomic-ai/nomic-embed-text-v2-moe ...")
-    tok = Tokenizer.from_pretrained("nomic-ai/nomic-embed-text-v2-moe")
+    """nomic-embed-text-v2-moe のトークナイザーをロードする.
+
+    Hugging Face Hub からダウンロードする。ネットワーク未接続・キャッシュ未作成の
+    場合はエラーメッセージを表示して終了する。
+    """
+    model_id = "nomic-ai/nomic-embed-text-v2-moe"
+    print(f"Loading tokenizer: {model_id} ...")
+    try:
+        tok = Tokenizer.from_pretrained(model_id)
+    except Exception as e:
+        print(f"\n[ERROR] Failed to load tokenizer: {model_id}")
+        print("  Possible causes:")
+        print("    - Network unavailable")
+        print("    - Hugging Face Hub cache not created")
+        print(f"  {type(e).__name__}: {e}")
+        sys.exit(1)
     print("  OK\n")
     return tok
 
@@ -77,7 +90,7 @@ def analyze(label: str, source_text: str, tok: Tokenizer) -> None:
         if n_tokens > CONTEXT_LENGTH:
             over_limit += 1
 
-        # 先頭プレビュー（文字化け防止のため ASCII safe に）
+        # 先頭プレビュー（改行をスペースに置換）
         preview = chunk[:60]
         for ch in "\n\r":
             preview = preview.replace(ch, " ")

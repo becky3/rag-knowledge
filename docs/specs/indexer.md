@@ -62,7 +62,7 @@ Embedding に渡る最終テキストは「Embedding プレフィックス + チ
 | overlap バッファ | `rag_chunk_overlap` + 区切り文字（最大 +1） | 散文チャンカー |
 | breadcrumb + 見出し + 改行 | 100（見出し階層5段・各15文字程度を想定。超過時は content を縮小して安全上限内に収める） | 見出しチャンカー |
 
-各チャンカーに渡す実効 `max_chunk_size` の算出式（`rag_chunk_overlap = 30` の場合）:
+各チャンカーに渡す実効 `max_chunk_size` の算出式（`rag_chunk_overlap = 30`、`embedding_prefix_enabled = true` の場合。プレフィックス無効時は Embedding プレフィックス分の 17 文字を差し引かない）:
 
 | チャンカー | 算出式 | 実効サイズ |
 |-----------|--------|----------|
