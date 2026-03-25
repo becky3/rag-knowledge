@@ -193,10 +193,21 @@ class Indexer:
             return
 
         total_chunks = len(chunk_ids)
+
+        # 既存チャンクの section_path を保持する（メタデータのみ更新時に消さない）
+        existing_meta_map = _run_async(
+            self._vector_store.get_metadata_by_ids(chunk_ids),
+        )
+
         metadatas = []
         for chunk_id in chunk_ids:
             chunk_index = parse_chunk_index(chunk_id)
-            meta = build_chunk_metadata(metadata, chunk_index, total_chunks)
+            existing_sp = str(
+                existing_meta_map.get(chunk_id, {}).get("section_path", ""),
+            )
+            meta = build_chunk_metadata(
+                metadata, chunk_index, total_chunks, section_path=existing_sp,
+            )
             metadatas.append(meta)
 
         _run_async(self._vector_store.update_metadata(chunk_ids, metadatas))

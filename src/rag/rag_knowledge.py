@@ -9,7 +9,7 @@ import asyncio
 import hashlib
 import logging
 import mimetypes
-from collections.abc import Awaitable, Callable
+from collections.abc import Awaitable, Callable, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path, PurePosixPath
 from typing import TYPE_CHECKING, Any
@@ -179,7 +179,7 @@ def format_raw_search_results(raw: RawSearchResults) -> str:
     if not raw.vector_results and not raw.bm25_results:
         return "該当する情報が見つかりませんでした"
 
-    sections: list[tuple[str, list[VectorSearchItem | BM25SearchItem]]] = []
+    sections: list[tuple[str, Sequence[VectorSearchItem | BM25SearchItem]]] = []
     if raw.vector_results:
         sections.append(("## ベクトル検索結果 (意味的類似度)\n", raw.vector_results))
     if raw.bm25_results:
