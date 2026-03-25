@@ -141,7 +141,12 @@ MCP サーバーが公開する 16 個のツール。
 
 ### 取り込みツールの出力形式
 
-取り込みツール（rag_add、rag_crawl、rag_crawl_zenn、rag_crawl_bluesky、rag_add_youtube、rag_crawl_youtube、rag_add_document、rag_crawl_documents、rag_add_journal、rag_site_ingest）は、source_store への配置結果とパイプライン処理結果を統合したサマリーを返す。配置結果には配置ファイル数・スキップ数・エラー数を含み、パイプライン処理結果にはコンバート・インデックス構築の処理件数を含む。rag_crawl_preview は source_store への配置を行わないため本出力形式の対象外。
+取り込みツール（rag_add、rag_crawl、rag_crawl_zenn、rag_crawl_bluesky、rag_add_youtube、rag_crawl_youtube、
+rag_add_document、rag_crawl_documents、rag_add_journal、rag_site_ingest）は、
+source_store への配置結果とパイプライン処理結果を統合したサマリーを返す。
+配置結果には配置ファイル数・スキップ数・エラー数を含み、
+パイプライン処理結果にはコンバート・インデックス構築の処理件数を含む。
+rag_crawl_preview は source_store への配置を行わないため本出力形式の対象外。
 
 ### 検索結果の設計
 
