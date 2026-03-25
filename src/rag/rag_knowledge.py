@@ -56,7 +56,7 @@ def smart_chunk(text: str, chunk_size: int, chunk_overlap: int) -> list[str]:
     logger.debug("Detected content type: %s", content_type.value)
 
     if content_type == ContentType.TABLE:
-        table_chunks = chunk_table_data(text)
+        table_chunks = chunk_table_data(text, max_chunk_size=chunk_size)
         if table_chunks:
             return [chunk.formatted_text for chunk in table_chunks]
         logger.debug("Table chunking returned no results, falling back to prose")

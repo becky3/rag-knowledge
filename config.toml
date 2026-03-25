@@ -9,6 +9,12 @@ embedding_prefix_enabled = true
 # チャンキング
 rag_chunk_size = 200
 rag_chunk_overlap = 30
+# Embedding コンテキスト長（トークン数）。LM Studio の設定値に合わせる
+rag_embedding_context_length = 512
+# 最悪ケーストークン/文字比率。導出手順: docs/specs/indexer.md「トークン/文字比率の導出手順」
+rag_worst_token_char_ratio = 0.7
+# 見出しチャンカーの breadcrumb + heading オーバーヘッド目安（文字数）
+rag_heading_overhead = 100
 
 # 検索
 rag_retrieval_count = 3

@@ -1574,6 +1574,10 @@ def _build_cli_pipeline_controller() -> tuple[
         metadata_db=source_store.db,
         chunk_size=settings.rag_chunk_size,
         chunk_overlap=settings.rag_chunk_overlap,
+        embedding_prefix_enabled=settings.embedding_prefix_enabled,
+        embedding_context_length=settings.rag_embedding_context_length,
+        worst_token_char_ratio=settings.rag_worst_token_char_ratio,
+        heading_overhead=settings.rag_heading_overhead,
     )
 
     controller = PipelineController(
