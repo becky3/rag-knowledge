@@ -34,6 +34,9 @@ class Indexer:
     IndexerProtocol を満たし、パイプライン制御から呼び出される。
     """
 
+    # Embedding プレフィックス "search_document: " の文字数
+    _EMBEDDING_PREFIX_LEN = 17
+
     def __init__(
         self,
         vector_store: VectorStore,
@@ -41,6 +44,10 @@ class Indexer:
         metadata_db: MetadataDB,
         chunk_size: int = 200,
         chunk_overlap: int = 30,
+        embedding_prefix_enabled: bool = True,
+        embedding_context_length: int = 512,
+        worst_token_char_ratio: float = 0.7,
+        heading_overhead: int = 100,
     ) -> None:
         """Indexer を初期化する.
 
@@ -50,6 +57,10 @@ class Indexer:
             metadata_db: metadata.db 操作クラス
             chunk_size: チャンクの最大文字数
             chunk_overlap: チャンク間のオーバーラップ文字数
+            embedding_prefix_enabled: Embedding プレフィックスの付与有無
+            embedding_context_length: Embedding モデルのコンテキスト長（トークン数）
+            worst_token_char_ratio: 最悪ケーストークン/文字比率
+            heading_overhead: 見出しチャンカーの breadcrumb + heading オーバーヘッド目安
         """
         self._vector_store = vector_store
         self._bm25 = bm25_index
@@ -57,6 +68,16 @@ class Indexer:
         self._chunk_size = chunk_size
         self._chunk_overlap = chunk_overlap
         self._embedding_checked = False
+
+        # 実効サイズの算出: min(chunk_size, 安全上限 - overhead)
+        # 仕様: docs/specs/indexer.md「チャンカー別オーバーヘッドと実効サイズ」
+        token_safe_limit = int(embedding_context_length / worst_token_char_ratio)
+        prefix_overhead = self._EMBEDDING_PREFIX_LEN if embedding_prefix_enabled else 0
+        safe_base = token_safe_limit - prefix_overhead
+        self._effective_size_prose = max(1, min(chunk_size, safe_base))
+        self._effective_size_heading = max(1, min(chunk_size, safe_base - heading_overhead))
+        # テーブルは行単位分割のため chunk_size を適用しない（仕様参照）
+        self._effective_size_table = max(1, safe_base)
 
     def add(
         self,
@@ -220,25 +241,31 @@ class Indexer:
         return path.read_text(encoding="utf-8")
 
     def _chunk_text(self, text: str) -> list[str]:
-        """コンテンツタイプに応じたチャンキング戦略でテキストを分割する."""
+        """コンテンツタイプに応じたチャンキング戦略でテキストを分割する.
+
+        各チャンカーにはトークン安全上限から算出した実効サイズを渡す。
+        仕様: docs/specs/indexer.md「チャンカー別オーバーヘッドと実効サイズ」
+        """
         content_type = detect_content_type(text)
 
         if content_type == ContentType.TABLE:
-            table_chunks = chunk_table_data(text)
+            table_chunks = chunk_table_data(
+                text, max_chunk_size=self._effective_size_table,
+            )
             return [c.formatted_text for c in table_chunks] if table_chunks else []
 
         if content_type in (ContentType.HEADING, ContentType.MIXED):
             heading_chunks = chunk_by_headings(
                 text,
-                max_chunk_size=self._chunk_size,
-                min_chunk_size=max(1, self._chunk_size // 4),
+                max_chunk_size=self._effective_size_heading,
+                min_chunk_size=max(1, self._effective_size_heading // 4),
             )
             return [c.formatted_text for c in heading_chunks] if heading_chunks else []
 
         # PROSE
         return chunk_text(
             text,
-            chunk_size=self._chunk_size,
+            chunk_size=self._effective_size_prose,
             chunk_overlap=self._chunk_overlap,
         )
 

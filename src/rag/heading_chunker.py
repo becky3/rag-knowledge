@@ -153,7 +153,51 @@ def chunk_by_headings(
                     )
                 )
 
-    return chunks
+    return _enforce_formatted_text_limit(chunks, max_chunk_size)
+
+
+def _enforce_formatted_text_limit(
+    chunks: list[HeadingChunk],
+    max_chunk_size: int,
+) -> list[HeadingChunk]:
+    """formatted_text が max_chunk_size を超えるチャンクの content を縮小する.
+
+    breadcrumb + heading のオーバーヘッドにより formatted_text が
+    max_chunk_size を超える場合、content を切り詰めて制限内に収める。
+    """
+    result: list[HeadingChunk] = []
+    for chunk in chunks:
+        if len(chunk.formatted_text) <= max_chunk_size:
+            result.append(chunk)
+            continue
+
+        # formatted_text のオーバーヘッド（breadcrumb + heading + 改行）を算出
+        overhead = len(chunk.formatted_text) - len(chunk.content)
+        available = max_chunk_size - overhead
+        if available <= 0:
+            # オーバーヘッドだけで超過する場合は heading/breadcrumb を省略
+            result.append(
+                HeadingChunk(
+                    heading="",
+                    content=chunk.content[:max_chunk_size],
+                    heading_level=chunk.heading_level,
+                    parent_headings=[],
+                    formatted_text=chunk.content[:max_chunk_size],
+                )
+            )
+            continue
+
+        # content を縮小して再生成
+        trimmed_content = chunk.content[:available]
+        result.append(
+            HeadingChunk(
+                heading=chunk.heading,
+                content=trimmed_content,
+                heading_level=chunk.heading_level,
+                parent_headings=chunk.parent_headings.copy(),
+            )
+        )
+    return result
 
 
 def _convert_html_headings_to_markdown(text: str) -> str:
@@ -229,6 +273,34 @@ def _split_content_preserving_heading(
 
         para_size = len(para)
 
+        # 単一段落が max_chunk_size を超える場合はフォールバック分割
+        if para_size > max_chunk_size:
+            # 現在の蓄積分を確定
+            if current_content_parts:
+                chunk_content = "\n\n".join(current_content_parts)
+                chunks.append(
+                    HeadingChunk(
+                        heading=heading if not chunks else f"{heading} (続き)",
+                        content=chunk_content,
+                        heading_level=level,
+                        parent_headings=parent_headings.copy(),
+                    )
+                )
+                current_content_parts = []
+                current_size = 0
+
+            # 行ベース → 文字ベースのフォールバックで分割
+            for sub in _split_large_block(para, max_chunk_size):
+                chunks.append(
+                    HeadingChunk(
+                        heading=heading if not chunks else f"{heading} (続き)",
+                        content=sub,
+                        heading_level=level,
+                        parent_headings=parent_headings.copy(),
+                    )
+                )
+            continue
+
         if current_size + para_size + 2 > max_chunk_size and current_content_parts:
             # 現在のチャンクを確定
             chunk_content = "\n\n".join(current_content_parts)
@@ -279,6 +351,34 @@ def _split_prose_into_chunks(
 
         para_size = len(para)
 
+        # 単一段落が max_chunk_size を超える場合はフォールバック分割
+        if para_size > max_chunk_size:
+            if current_parts:
+                chunk_content = "\n\n".join(current_parts)
+                chunks.append(
+                    HeadingChunk(
+                        heading="",
+                        content=chunk_content,
+                        heading_level=0,
+                        parent_headings=[],
+                        formatted_text=chunk_content,
+                    )
+                )
+                current_parts = []
+                current_size = 0
+
+            for sub in _split_large_block(para, max_chunk_size):
+                chunks.append(
+                    HeadingChunk(
+                        heading="",
+                        content=sub,
+                        heading_level=0,
+                        parent_headings=[],
+                        formatted_text=sub,
+                    )
+                )
+            continue
+
         if current_size + para_size + 2 > max_chunk_size and current_parts:
             chunk_content = "\n\n".join(current_parts)
             chunks.append(
@@ -307,5 +407,46 @@ def _split_prose_into_chunks(
                 formatted_text=chunk_content,
             )
         )
+
+    return chunks
+
+
+def _split_large_block(text: str, max_size: int) -> list[str]:
+    """大きなテキストブロックを行ベース → 文字ベースで分割する.
+
+    空行のない長いコンテンツ（コードブロック等）を max_size 以内に分割する。
+    まず行単位でまとめ、それでも超える場合は文字数で強制分割する。
+    """
+    max_size = max(1, max_size)
+    lines = text.split("\n")
+    chunks: list[str] = []
+    current_lines: list[str] = []
+    current_size = 0
+
+    for line in lines:
+        line_size = len(line)
+
+        # 単一行が max_size を超える場合は文字ベースで強制分割
+        if line_size > max_size:
+            if current_lines:
+                chunks.append("\n".join(current_lines))
+                current_lines = []
+                current_size = 0
+            for i in range(0, line_size, max_size):
+                chunks.append(line[i : i + max_size])
+            continue
+
+        # 行を追加すると超える場合は現在の蓄積分を確定
+        new_size = current_size + line_size + (1 if current_lines else 0)
+        if new_size > max_size and current_lines:
+            chunks.append("\n".join(current_lines))
+            current_lines = [line]
+            current_size = line_size
+        else:
+            current_lines.append(line)
+            current_size = new_size
+
+    if current_lines:
+        chunks.append("\n".join(current_lines))
 
     return chunks

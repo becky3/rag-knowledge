@@ -50,7 +50,7 @@ MCP サーバーとして独立動作し、16 個のツールを提供する。
 | カテゴリ | 設定項目 |
 |---------|---------|
 | Embedding モデル | `embedding_model_local`, `embedding_model_online`, `embedding_prefix_enabled` |
-| チャンキング | `rag_chunk_size`, `rag_chunk_overlap` |
+| チャンキング | `rag_chunk_size`, `rag_chunk_overlap`, `rag_embedding_context_length`, `rag_worst_token_char_ratio`, `rag_heading_overhead` |
 | 検索 | `rag_retrieval_count`, `rag_similarity_threshold` |
 | ハイブリッド検索 | `rag_hybrid_search_enabled`, `rag_vector_weight`, `rag_bm25_k1`, `rag_bm25_b`, `rag_min_combined_score` |
 | クロール | `rag_max_crawl_pages`, `rag_crawl_delay_sec` |
