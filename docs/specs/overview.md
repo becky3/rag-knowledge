@@ -46,7 +46,7 @@ RAG Knowledge は、外部 Web ページから収集した知識をベクトル 
 | Embedding | OpenAI SDK / LM Studio (OpenAI 互換 API) |
 | HTML 解析 | BeautifulSoup4 |
 | HTML→Markdown 変換 | markdownify |
-| PDF テキスト抽出 | pymupdf4llm / MinerU (optional, PyTorch CUDA 推奨) |
+| PDF テキスト抽出 | pymupdf4llm / MinerU（CUDA 環境、未インストール時は pymupdf4llm にフォールバック） |
 | 設定管理 | pydantic-settings (.env + config.toml) |
 
 ## 4. 開発方針
