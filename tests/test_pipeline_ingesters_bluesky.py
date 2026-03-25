@@ -23,6 +23,8 @@ from rag.pipeline.ingesters.bluesky import (
     _escape_did,
     _make_title,
     _validate_max_posts,
+    classify_url,
+    extract_urls_from_item,
 )
 from rag.store.source_store import SourceStore
 
@@ -186,7 +188,7 @@ class TestCrawlBluesky:
         client = _make_mock_client([{"feed": [item]}])
 
         ingester = BlueskyIngester(source_store, max_posts=3)
-        result = await ingester.crawl_bluesky(
+        result, _ = await ingester.crawl_bluesky(
             "alice.bsky.social", client=client
         )
 
@@ -219,7 +221,7 @@ class TestCrawlBluesky:
 
         # 2 回目（同じアイテム）
         client2 = _make_mock_client([{"feed": [item]}])
-        result = await ingester.crawl_bluesky(
+        result, _ = await ingester.crawl_bluesky(
             "alice.bsky.social", client=client2
         )
 
@@ -235,7 +237,7 @@ class TestCrawlBluesky:
         ])
 
         ingester = BlueskyIngester(source_store, max_posts=10)
-        result = await ingester.crawl_bluesky(
+        result, _ = await ingester.crawl_bluesky(
             "alice.bsky.social",
             include_reposts=False,
             client=client,
@@ -252,7 +254,7 @@ class TestCrawlBluesky:
         ])
 
         ingester = BlueskyIngester(source_store, max_posts=10)
-        result = await ingester.crawl_bluesky(
+        result, _ = await ingester.crawl_bluesky(
             "alice.bsky.social",
             include_reposts=True,
             client=client,
@@ -300,7 +302,7 @@ class TestCrawlBluesky:
         client = _make_mock_client([{"feed": []}])
 
         ingester = BlueskyIngester(source_store, max_posts=3)
-        result = await ingester.crawl_bluesky(
+        result, _ = await ingester.crawl_bluesky(
             "alice.bsky.social", client=client
         )
 
@@ -316,10 +318,285 @@ class TestCrawlBluesky:
         client = _make_mock_client([{"feed": items}])
 
         ingester = BlueskyIngester(source_store)
-        result = await ingester.crawl_bluesky(
+        result, _ = await ingester.crawl_bluesky(
             "alice.bsky.social",
             max_posts=2,
             client=client,
         )
 
         assert result.placed == 2
+
+
+class TestExtractUrlsFromItem:
+    """extract_urls_from_item のテスト."""
+
+    def test_facets_link(self) -> None:
+        """facets 内のリンクが抽出されること."""
+        item = _make_feed_item()
+        item["post"]["record"]["facets"] = [
+            {
+                "features": [
+                    {
+                        "$type": "app.bsky.richtext.facet#link",
+                        "uri": "https://example.com/page1",
+                    }
+                ]
+            }
+        ]
+        urls = extract_urls_from_item(item)
+        assert urls == ["https://example.com/page1"]
+
+    def test_embed_external(self) -> None:
+        """embed.external のリンクカードが抽出されること."""
+        item = _make_feed_item(
+            embed={
+                "$type": "app.bsky.embed.external",
+                "external": {"uri": "https://example.com/card"},
+            }
+        )
+        urls = extract_urls_from_item(item)
+        assert urls == ["https://example.com/card"]
+
+    def test_record_with_media_external(self) -> None:
+        """recordWithMedia の外部リンクカードが抽出されること."""
+        item = _make_feed_item(
+            embed={
+                "$type": "app.bsky.embed.recordWithMedia",
+                "media": {
+                    "$type": "app.bsky.embed.external",
+                    "external": {"uri": "https://example.com/media-card"},
+                },
+            }
+        )
+        urls = extract_urls_from_item(item)
+        assert urls == ["https://example.com/media-card"]
+
+    def test_multiple_sources_dedup(self) -> None:
+        """facets と embed.external に同一 URL がある場合、重複排除されること."""
+        item = _make_feed_item(
+            embed={
+                "$type": "app.bsky.embed.external",
+                "external": {"uri": "https://example.com/shared"},
+            }
+        )
+        item["post"]["record"]["facets"] = [
+            {
+                "features": [
+                    {
+                        "$type": "app.bsky.richtext.facet#link",
+                        "uri": "https://example.com/shared",
+                    }
+                ]
+            }
+        ]
+        urls = extract_urls_from_item(item)
+        assert urls == ["https://example.com/shared"]
+
+    def test_no_urls(self) -> None:
+        """URL が含まれない投稿で空リストが返ること."""
+        item = _make_feed_item(text="URL のないテキスト")
+        urls = extract_urls_from_item(item)
+        assert urls == []
+
+    def test_non_http_uri_excluded(self) -> None:
+        """HTTP/HTTPS 以外の URI が除外されること."""
+        item = _make_feed_item()
+        item["post"]["record"]["facets"] = [
+            {
+                "features": [
+                    {
+                        "$type": "app.bsky.richtext.facet#link",
+                        "uri": "ftp://example.com/file",
+                    }
+                ]
+            }
+        ]
+        urls = extract_urls_from_item(item)
+        assert urls == []
+
+
+class TestClassifyUrl:
+    """classify_url のテスト."""
+
+    def test_youtube_watch(self) -> None:
+        """YouTube watch URL が youtube に分類されること."""
+        assert classify_url("https://www.youtube.com/watch?v=abc123") == "youtube"
+
+    def test_youtube_short(self) -> None:
+        """youtu.be 短縮 URL が youtube に分類されること."""
+        assert classify_url("https://youtu.be/abc123") == "youtube"
+
+    def test_youtube_shorts(self) -> None:
+        """YouTube Shorts URL が youtube に分類されること."""
+        assert classify_url("https://youtube.com/shorts/abc123") == "youtube"
+
+    def test_bsky_url_skip(self) -> None:
+        """BlueSky URL が skip に分類されること."""
+        assert classify_url("https://bsky.app/profile/alice.bsky.social/post/xyz") == "skip"
+
+    def test_general_web(self) -> None:
+        """一般的な URL が web に分類されること."""
+        assert classify_url("https://example.com/article") == "web"
+
+    def test_http_web(self) -> None:
+        """HTTP URL が web に分類されること."""
+        assert classify_url("http://example.com/page") == "web"
+
+
+@pytest.mark.asyncio()
+class TestFollowUrls:
+    """follow_urls のテスト."""
+
+    async def test_web_url_delegated(self, source_store: SourceStore) -> None:
+        """Web URL が WebIngester に委譲されること."""
+        item = _make_feed_item()
+        item["post"]["record"]["facets"] = [
+            {
+                "features": [
+                    {
+                        "$type": "app.bsky.richtext.facet#link",
+                        "uri": "https://example.com/article",
+                    }
+                ]
+            }
+        ]
+
+        mock_web = AsyncMock()
+        mock_web.add = AsyncMock(return_value=MagicMock(placed=1, errors=0))
+        mock_client = AsyncMock()
+
+        ingester = BlueskyIngester(source_store)
+        stats = await ingester.follow_urls(
+            [item],
+            client=mock_client,
+            web_ingester=mock_web,
+            youtube_ingester=None,
+        )
+
+        mock_web.add.assert_called_once_with(
+            url="https://example.com/article", client=mock_client,
+            safe_browsing_api_key="",
+        )
+        assert stats["web_placed"] == 1
+
+    async def test_youtube_url_delegated(self, source_store: SourceStore) -> None:
+        """YouTube URL が YoutubeIngester に委譲されること."""
+        item = _make_feed_item()
+        item["post"]["record"]["facets"] = [
+            {
+                "features": [
+                    {
+                        "$type": "app.bsky.richtext.facet#link",
+                        "uri": "https://www.youtube.com/watch?v=test123",
+                    }
+                ]
+            }
+        ]
+
+        mock_yt = AsyncMock()
+        mock_yt.ingest_video = AsyncMock(
+            return_value=MagicMock(placed=1, errors=0)
+        )
+
+        ingester = BlueskyIngester(source_store)
+        stats = await ingester.follow_urls(
+            [item],
+            client=None,
+            web_ingester=None,
+            youtube_ingester=mock_yt,
+        )
+
+        mock_yt.ingest_video.assert_called_once_with(
+            video_url="https://www.youtube.com/watch?v=test123"
+        )
+        assert stats["youtube_placed"] == 1
+
+    async def test_bsky_url_skipped(self, source_store: SourceStore) -> None:
+        """BlueSky URL がスキップされること."""
+        item = _make_feed_item()
+        item["post"]["record"]["facets"] = [
+            {
+                "features": [
+                    {
+                        "$type": "app.bsky.richtext.facet#link",
+                        "uri": "https://bsky.app/profile/alice.bsky.social/post/abc",
+                    }
+                ]
+            }
+        ]
+
+        ingester = BlueskyIngester(source_store)
+        stats = await ingester.follow_urls(
+            [item], client=None, web_ingester=None, youtube_ingester=None,
+        )
+
+        assert stats["skipped"] == 1
+        assert stats["web_placed"] == 0
+        assert stats["youtube_placed"] == 0
+
+    async def test_error_isolated(self, source_store: SourceStore) -> None:
+        """URL 先の取り込みエラーが隔離されること."""
+        item = _make_feed_item()
+        item["post"]["record"]["facets"] = [
+            {
+                "features": [
+                    {
+                        "$type": "app.bsky.richtext.facet#link",
+                        "uri": "https://example.com/fail",
+                    }
+                ]
+            }
+        ]
+
+        mock_web = AsyncMock()
+        mock_web.add = AsyncMock(side_effect=Exception("connection error"))
+
+        ingester = BlueskyIngester(source_store)
+        stats = await ingester.follow_urls(
+            [item],
+            client=AsyncMock(),
+            web_ingester=mock_web,
+            youtube_ingester=None,
+        )
+
+        assert stats["errors"] == 1
+        assert stats["web_placed"] == 0
+
+    async def test_cross_item_dedup(self, source_store: SourceStore) -> None:
+        """複数投稿に同一 URL がある場合、1 回のみ取り込まれること."""
+        url = "https://example.com/shared-article"
+        facet = {
+            "features": [
+                {"$type": "app.bsky.richtext.facet#link", "uri": url}
+            ]
+        }
+        item1 = _make_feed_item(rkey="post1")
+        item1["post"]["record"]["facets"] = [facet]
+        item2 = _make_feed_item(rkey="post2")
+        item2["post"]["record"]["facets"] = [facet]
+
+        mock_web = AsyncMock()
+        mock_web.add = AsyncMock(return_value=MagicMock(placed=1, errors=0))
+
+        ingester = BlueskyIngester(source_store)
+        stats = await ingester.follow_urls(
+            [item1, item2],
+            client=AsyncMock(),
+            web_ingester=mock_web,
+            youtube_ingester=None,
+        )
+
+        mock_web.add.assert_called_once()
+        assert stats["web_placed"] == 1
+
+    async def test_empty_items(self, source_store: SourceStore) -> None:
+        """配置済みアイテムが空の場合、何も実行されないこと."""
+        ingester = BlueskyIngester(source_store)
+        stats = await ingester.follow_urls(
+            [], client=None, web_ingester=None, youtube_ingester=None,
+        )
+
+        assert stats["web_placed"] == 0
+        assert stats["youtube_placed"] == 0
+        assert stats["skipped"] == 0
+        assert stats["errors"] == 0

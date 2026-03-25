@@ -16,7 +16,7 @@
 | **URL 安全性チェック** | Google Safe Browsing API による URL 検証 |
 | **クロールプレビュー** | クロール対象ページのタイトル・URL 一覧を事前確認 |
 | **Zenn インジェスター** | Zenn 記事を API 経由で取得・ナレッジベースに取り込み |
-| **BlueSky インジェスター** | BlueSky 投稿を AT Protocol API 経由で取得・ナレッジベースに取り込み |
+| **BlueSky インジェスター** | BlueSky 投稿を AT Protocol API 経由で取得・投稿内 URL の自動取り込み |
 | **YouTube インジェスター** | YouTube 動画の字幕・音声文字起こしを取得・ナレッジベースに取り込み |
 | **ドキュメントインジェスター** | テキストドキュメント（Markdown、テキスト、PDF、AsciiDoc）をナレッジベースに取り込み |
 | **Journal インジェスター** | 開発ジャーナル（セッション作業記録）をナレッジベースに登録・検索 |

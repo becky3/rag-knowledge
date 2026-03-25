@@ -776,12 +776,35 @@ async def rag_crawl_bluesky(
             request_timeout=settings.rag_bluesky_request_timeout,
             request_interval=settings.rag_bluesky_request_interval,
         ) as client:
-            ingest_result = await bluesky_ingester.crawl_bluesky(
+            ingest_result, placed_items = await bluesky_ingester.crawl_bluesky(
                 handle,
                 max_posts=max_posts,
                 include_reposts=include_reposts,
                 client=client,
             )
+
+            # 投稿内 URL の自動取り込み
+            url_stats: dict[str, int] = {}
+            if placed_items:
+                web_ingester = _create_web_ingester(controller.source_store)
+                youtube_ingester = PipelineYoutubeIngester(
+                    controller.source_store,
+                    max_videos=settings.rag_youtube_max_videos,
+                    request_interval=settings.rag_youtube_request_interval,
+                    request_timeout=settings.rag_youtube_request_timeout,
+                    whisper_model=settings.rag_youtube_whisper_model,
+                    whisper_device=settings.rag_youtube_whisper_device,
+                    transcript_languages=settings.rag_youtube_transcript_languages,
+                    max_duration=settings.rag_youtube_max_duration,
+                )
+                api_key = _get_safe_browsing_api_key()
+                url_stats = await bluesky_ingester.follow_urls(
+                    placed_items,
+                    client=client,
+                    web_ingester=web_ingester,
+                    youtube_ingester=youtube_ingester,
+                    safe_browsing_api_key=api_key,
+                )
 
         if ingest_result.placed == 0 and ingest_result.errors == 0:
             return f"投稿が見つかりませんでした（ハンドル: {handle}）"
@@ -793,9 +816,20 @@ async def rag_crawl_bluesky(
         _reset_pipeline_controller()
         _reset_rag_service()
 
-        return _format_ingest_response(
+        summary = _format_ingest_response(
             ingest_result, pipeline_summary, context=f"ハンドル: {handle}",
         )
+        if url_stats and any(url_stats.get(k, 0) > 0 for k in ("web_placed", "youtube_placed", "errors")):
+            parts = ["\n\nURL 自動取り込み:"]
+            web_n = url_stats.get("web_placed", 0)
+            yt_n = url_stats.get("youtube_placed", 0)
+            err_n = url_stats.get("errors", 0)
+            if web_n > 0 or yt_n > 0:
+                parts.append(f"Web {web_n}件, YouTube {yt_n}件")
+            if err_n > 0:
+                parts.append(f"エラー {err_n}件")
+            summary += " ".join(parts)
+        return summary
     except (ValueError, TypeError) as e:
         return f"エラー: {e}"
     except Exception:
