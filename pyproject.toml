@@ -71,7 +71,7 @@ required_plugins = ["pytest-xdist"]
 
 [tool.uv]
 # uv sync 時に mineru (CPU版) を自動インストール。
-# CUDA 版を使う場合は uv sync --extra mineru-cuda に切り替える。
+# CUDA 版を使う場合: uv sync --no-group with-mineru --extra mineru-cuda
 default-groups = ["dev", "with-mineru"]
 
 # PyTorch CUDA index（mineru-cuda extra 専用。CUDA 12.4 環境向け）
