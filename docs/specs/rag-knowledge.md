@@ -64,6 +64,7 @@ MCP サーバーとして独立動作し、16 個のツールを提供する。
 | サイト一括取り込み | `site_ingest_delay_sec`, `site_ingest_max_pages`, `site_ingest_download_timeout`, `site_ingest_timeout_sec`, `site_ingest_error_count` |
 
 - Embedding モデルを変更した場合、既存データとの類似度計算が不正確になるため、コレクション再構築が必要
+- ローカル Embedding モデルにはコンテキスト長の制限（512 トークン）がある。チャンキング時にこの制限を超えないよう文字数ベースで制御する。詳細は [indexer.md](indexer.md) の「トークン安全上限」を参照
 - 呼び出し元が MCP クライアントとして本サーバーに接続することで RAG 機能を利用できる
 - トランスポートは stdio（デフォルト）と http（Streamable HTTP）を切替可能。`.env` でトランスポート種別・ホスト・ポート・DNS リバインディング保護を設定する。HTTP モードはローカル／信頼済みネットワーク向けを想定しており、デフォルトではループバックアドレスにバインドする。外部ネットワークへ公開する場合は、ファイアウォールやリバースプロキシでの認証付与などによりアクセス制御を行うこと
 - `src/` 配下の外部 HTTP リクエストは ConstrainedClient（py-common-lib パッケージで提供）経由で実行する。`httpx.AsyncClient`/`httpx.Client`・`aiohttp.ClientSession`・`requests`・`urllib.request` の直接利用は禁止
