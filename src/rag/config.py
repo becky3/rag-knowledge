@@ -153,7 +153,6 @@ class RAGSettings(BaseModel):
     # URL安全性チェック (Google Safe Browsing API)
     rag_url_safety_check: bool
     rag_url_safety_cache_ttl: int = Field(ge=0)
-    rag_url_safety_fail_open: bool
     rag_url_safety_timeout: float = Field(gt=0)
 
     # レスポンスサイズ制限

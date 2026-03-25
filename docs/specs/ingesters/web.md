@@ -81,7 +81,7 @@ Web ページを HTTP 経由で取得し、source_store にファイルを配置
 3. 全ての IP アドレスがブロック対象に該当しないことを検証する
 4. いずれかが該当する場合は `ValueError` を送出する
 
-リダイレクト追従は SSRF 防止のため無効化する。リダイレクトレスポンス（3xx）はエラーとして扱う。
+リダイレクト追従は SSRF 防止のため無効化する。リダイレクトレスポンス（3xx）はブロックし、スキップ扱い（エラーカウント対象外）とする。
 
 ### robots.txt
 
@@ -95,12 +95,11 @@ Web ページを HTTP 経由で取得し、source_store にファイルを配置
 
 - `rag_url_safety_check` が `true`（デフォルト）の場合、Google Safe Browsing API で URL の安全性を検証する
 - API キーは OS セキュアストレージ（keyring）から取得する（サービス名: `rag-knowledge`、キー名: `GOOGLE_SAFE_BROWSING_API_KEY`）
-- API キーが未登録の場合、チェックを無効化し警告ログを出力する
+- API キーが未登録・空・不正（400 応答）の場合は設定エラー（`SafeBrowsingConfigError`）として即時中断する
+- API キーは `x-goog-api-key` ヘッダーで送信する（URL パラメータではログに漏洩するため）
 - 検出する脅威タイプ: MALWARE、SOCIAL_ENGINEERING、UNWANTED_SOFTWARE、POTENTIALLY_HARMFUL_APPLICATION
 - チェック結果は TTL ベースでキャッシュする（デフォルト: 300 秒、最大 1000 エントリ）
-- フェイルオープン/フェイルクローズ:
-  - `rag_url_safety_fail_open=true`（デフォルト）: API 障害時は URL を許可する
-  - `rag_url_safety_fail_open=false`: API 障害時は URL をブロックする
+- 常にフェイルクローズ: API 障害時（429/500/タイムアウト等）は URL をブロックしエラーとする
 
 ### 保存形式
 
@@ -125,7 +124,7 @@ Web ページを HTTP 経由で取得し、source_store にファイルを配置
 |--------|------|---------|
 | Google Safe Browsing API v4 | URL 安全性チェック | REST API（ConstrainedClient 経由、オプション） |
 
-Safe Browsing API はオプション機能。API キーが未登録の場合は機能が無効化される。
+Safe Browsing API はオプション機能。`rag_url_safety_check=false` で無効化できる。有効時に API キーが未登録・空・不正の場合は `SafeBrowsingConfigError` で即時中断する。
 
 ## 想定プロファイル
 
@@ -141,7 +140,7 @@ Safe Browsing API はオプション機能。API キーが未登録の場合は�
 
 | 項目 | 内容 |
 |------|------|
-| 最悪ケースリクエスト数 | 1（インデックスページ）+ 1（robots.txt）+ 1（Safe Browsing 一括チェック。Lookup API v4 は最大 500 URL を 1 リクエストで検査可能）+ 497（個別ページ。バジェット 500 から先行リクエスト分を差し引き）= 500。バジェットトラッカー上限 500 で打ち切り |
+| 最悪ケースリクエスト数 | 1（起点 URL の Safe Browsing チェック）+ 1（インデックスページ）+ 1（robots.txt）+ 1（Safe Browsing 一括チェック。Lookup API v4 は 1 リクエストあたり最大 500 URL。500 URL 超の場合はバッチ分割する）+ 496（個別ページ。バジェット 500 から先行リクエスト分を差し引き）= 500。バジェットトラッカー上限 500 で打ち切り |
 | 最悪ケース所要時間 | 500 × 0.1 秒（ハードリミット最小間隔での理論最短）= 50 秒。デフォルト設定（1.0 秒間隔）では 500 秒。per-request タイムアウト・処理時間は含まない。操作全体タイムアウト 600 秒で打ち切り |
 | 想定エラー率 | 外部 Web サイト依存。リトライ機構なし（失敗ページはスキップし処理を続行）。累計エラー数が閾値に達した場合、またはサーキットブレーカー（5 回連続 HTTP 失敗）が発動した場合に操作中断 |
 
@@ -172,7 +171,7 @@ Safe Browsing API はオプション機能。API キーが未登録の場合は�
 | クロール対象ページ数上限 | ハードリミット | 500 ページ | 引き上げ不可（引き下げ可） |
 | クロール深度上限 | ハードリミット | 10 | 引き上げ不可（引き下げ可） |
 | SSRF 対策 | ハードリミット | プライベート IP・ローカルホストへのリクエスト拒否 | 無効化不可 |
-| リダイレクト追従無効化 | ハードリミット | HTTP リダイレクト（3xx）をエラーとして扱う | 無効化不可 |
+| リダイレクト追従無効化 | ハードリミット | HTTP リダイレクト（3xx）をブロックしスキップ扱いとする | 無効化不可 |
 | HTTP エラーレスポンス拒否 | ハードリミット | HTTP 4xx/5xx レスポンスをエラーとして扱い、コンテンツを保存しない | 無効化不可 |
 | クロール対象ページ数 | 設定値 | 許容範囲 1〜500、デフォルト 50 | 範囲内で変更可 |
 | クロール遅延（リクエスト間隔） | 設定値 | 許容範囲 0.1〜60 秒、デフォルト 1.0 秒 | 範囲内で変更可 |
@@ -234,7 +233,6 @@ Safe Browsing API はオプション機能。API キーが未登録の場合は�
 | `rag_robots_txt_cache_ttl` | int | `config.toml` | 3600 | 0 以上 | robots.txt キャッシュの有効期間（秒） |
 | `rag_url_safety_check` | bool | `config.toml` | true | — | Google Safe Browsing API による URL 安全性チェックを有効にするか |
 | `rag_url_safety_cache_ttl` | int | `config.toml` | 300 | 0 以上 | Safe Browsing チェック結果のキャッシュ有効期間（秒） |
-| `rag_url_safety_fail_open` | bool | `config.toml` | true | — | Safe Browsing API 障害時に URL を許可するか |
 | `rag_url_safety_timeout` | float | `config.toml` | 5.0 | 0 より大きい | Safe Browsing API のリクエストタイムアウト（秒） |
 | `rag_crawl_request_timeout` | int | `config.toml` | 30 | 1〜120 | ページ取得時の per-request タイムアウト（秒） |
 | `rag_crawl_default_depth` | int | `config.toml` | 1 | 1〜10 | クロールのデフォルト深度。1 = 従来動作（インデックスページの直接リンクのみ） |
@@ -327,6 +325,7 @@ flowchart TD
 flowchart TD
     START["rag_crawl(url, pattern, depth)"]
     VALIDATE["URL バリデーション + depth > 1 なら pattern 必須チェック"]
+    SAFETY_ORIGIN["起点 URL の Safe Browsing チェック（有効時）"]
     DEPTH_LOOP["depth ループ開始（現在の depth = 1）"]
     FETCH_INDEX["対象ページ群を取得"]
     EXTRACT["各ページの HTML からリンク抽出（同一ドメインのみ）"]
@@ -347,7 +346,8 @@ flowchart TD
     ABORT["エラー閾値到達: 操作中断"]
 
     START --> VALIDATE
-    VALIDATE --> DEPTH_LOOP
+    VALIDATE --> SAFETY_ORIGIN
+    SAFETY_ORIGIN --> DEPTH_LOOP
     DEPTH_LOOP --> FETCH_INDEX
     FETCH_INDEX --> EXTRACT
     EXTRACT --> FILTER
@@ -561,7 +561,7 @@ source_id の決定方式は [source-store.md](../source-store.md) の「source_
 | URL のスキームが http/https 以外 | バリデーションエラーとして拒否する |
 | URL のホスト名がない | バリデーションエラーとして拒否する |
 | プライベート IP・localhost へのアクセス | SSRF 対策としてリクエストを拒否する |
-| HTTP リダイレクト（3xx） | SSRF 防止のためリダイレクト追従を無効化し、エラーとして扱う |
+| HTTP リダイレクト（3xx） | SSRF 防止のためリダイレクト追従を無効化し、スキップ扱い（エラーカウント対象外）とする |
 | HTTP 404（Not Found） | リンク切れとして扱い、スキップする（エラーカウント対象外）。一括クロール（`rag_crawl` / `rag_crawl_preview`）では該当ページをスキップし、処理を続行する |
 | HTTP クライアントエラー（403/429 等、404 以外の 4xx） | エラーカウント対象として扱い、レスポンスボディを保存しない。単一ページ取得（`rag_add`）では ValueError を発生させる。一括クロールでは該当ページをスキップし、累計エラー数に加算する |
 | HTTP サーバーエラー（5xx） | 403/429 と同様にエラーカウント対象として扱う |
@@ -569,8 +569,8 @@ source_id の決定方式は [source-store.md](../source-store.md) の「source_
 | robots.txt の Disallow に該当する URL | クロールをスキップする |
 | robots.txt の取得に失敗した場合 | フェイルオープンでクロールを許可する |
 | Safe Browsing API で危険と判定された URL | 該当ページをスキップし、警告ログを出力する |
-| Safe Browsing API の障害時 | `rag_url_safety_fail_open` の設定に従い、URL を許可またはブロックする |
-| `GOOGLE_SAFE_BROWSING_API_KEY` が未登録 | URL 安全性チェックを無効化し、警告ログを出力して処理を続行する |
+| Safe Browsing API の障害時（429/500/タイムアウト等） | 常にフェイルクローズ: URL をブロックしエラーとする |
+| `GOOGLE_SAFE_BROWSING_API_KEY` が未登録・空・不正 | 設定エラー（`SafeBrowsingConfigError`）として即時中断する |
 | URL にフラグメント（`#section`）が含まれる場合 | フラグメント部分を除去してから処理する。フラグメント違いの URL は同一ファイルとして扱う |
 | URL にクエリパラメータが含まれる場合 | クエリパラメータも含めてパスに変換する（`?` → `？` の全角変換）。同一パスで異なるクエリの URL は異なるファイルとして扱う |
 | クロール時の個別ページエラー | ページ単位でエラーを隔離し、成功したページの処理を続行する。404 はリンク切れとしてスキップ（エラーカウント対象外）。403/429/5xx は累計エラー数に加算し、`rag_crawl_max_errors` に達した場合は操作を中断する |

@@ -38,6 +38,7 @@ if TYPE_CHECKING:
     from .pipeline.controller import PipelineController
     from .pipeline.ingesters._common import IngestResult
     from .pipeline.ingesters.web import WebIngester
+    from .safe_browsing import SafeBrowsingClient
     from .pipeline.ingesters.youtube import YoutubeIngester
     from .pipeline.models import PipelineSummary
     from .rag_knowledge import RAGKnowledgeService
@@ -1551,17 +1552,20 @@ def _build_cli_pipeline_controller() -> tuple[
     return controller, settings
 
 
-def _get_safe_browsing_api_key_for_cli(settings: "Settings") -> str:
-    """CLI 用: Safe Browsing API キーを取得する."""
-    from py_common_lib.secrets import SecretNotFoundError, SecretStoreError, get_secret
+def _create_safe_browsing_client_cli(
+    settings: "Settings",
+) -> "SafeBrowsingClient | None":
+    """CLI 用: SafeBrowsingClient を生成する.
 
-    if not settings.rag_url_safety_check:
-        return ""
+    SafeBrowsingConfigError 時はエラーメッセージを表示して終了する。
+    """
+    from .safe_browsing import SafeBrowsingConfigError, create_safe_browsing_client
+
     try:
-        return get_secret("GOOGLE_SAFE_BROWSING_API_KEY", service="rag-knowledge") or ""
-    except (SecretNotFoundError, SecretStoreError):
-        logger.warning("Safe Browsing API key not available")
-        return ""
+        return create_safe_browsing_client(settings)
+    except SafeBrowsingConfigError as e:
+        logger.error("Safe Browsing 設定エラー: %s", e)
+        sys.exit(1)
 
 
 def _print_ingest_result(
@@ -1585,18 +1589,15 @@ async def run_add(args: argparse.Namespace) -> None:
     from py_common_lib.httpx import ConstrainedClient  # safety:allowed
 
     controller, settings = _build_cli_pipeline_controller()
+    sb_client = _create_safe_browsing_client_cli(settings)
     web_ingester = WebIngester(
         controller.source_store,
         max_crawl_pages=settings.rag_max_crawl_pages,
         crawl_request_timeout=settings.rag_crawl_request_timeout,
         respect_robots_txt=settings.rag_respect_robots_txt,
         robots_txt_cache_ttl=settings.rag_robots_txt_cache_ttl,
-        url_safety_check=settings.rag_url_safety_check,
-        url_safety_cache_ttl=settings.rag_url_safety_cache_ttl,
-        url_safety_fail_open=settings.rag_url_safety_fail_open,
-        url_safety_timeout=settings.rag_url_safety_timeout,
+        safe_browsing_client=sb_client,
     )
-    api_key = _get_safe_browsing_api_key_for_cli(settings)
 
     try:
         async with ConstrainedClient(
@@ -1604,7 +1605,7 @@ async def run_add(args: argparse.Namespace) -> None:
             request_interval=settings.rag_crawl_delay_sec,
         ) as client:
             ingest_result = await web_ingester.add(
-                args.url, client=client, safe_browsing_api_key=api_key,
+                args.url, client=client,
             )
     except ValueError as e:
         logger.error("エラー: %s", e)
@@ -1640,6 +1641,7 @@ async def run_crawl(args: argparse.Namespace) -> None:
         )
         sys.exit(1)
 
+    sb_client = _create_safe_browsing_client_cli(settings)
     web_ingester = WebIngester(
         controller.source_store,
         max_crawl_pages=settings.rag_max_crawl_pages,
@@ -1647,12 +1649,8 @@ async def run_crawl(args: argparse.Namespace) -> None:
         crawl_max_errors=settings.rag_crawl_max_errors,
         respect_robots_txt=settings.rag_respect_robots_txt,
         robots_txt_cache_ttl=settings.rag_robots_txt_cache_ttl,
-        url_safety_check=settings.rag_url_safety_check,
-        url_safety_cache_ttl=settings.rag_url_safety_cache_ttl,
-        url_safety_fail_open=settings.rag_url_safety_fail_open,
-        url_safety_timeout=settings.rag_url_safety_timeout,
+        safe_browsing_client=sb_client,
     )
-    api_key = _get_safe_browsing_api_key_for_cli(settings)
 
     try:
         async with ConstrainedClient(
@@ -1661,7 +1659,6 @@ async def run_crawl(args: argparse.Namespace) -> None:
         ) as client:
             ingest_result = await web_ingester.crawl(
                 args.url, pattern=args.pattern, depth=depth, client=client,
-                safe_browsing_api_key=api_key,
             )
     except ValueError as e:
         logger.error("エラー: %s", e)
@@ -1739,7 +1736,9 @@ async def run_ingest_youtube_playlist(args: argparse.Namespace) -> None:
 
 
 def _create_web_ingester_cli(
-    source_store: SourceStore, settings: Settings,
+    source_store: SourceStore,
+    settings: Settings,
+    safe_browsing_client: SafeBrowsingClient | None = None,
 ) -> WebIngester:
     """CLI 用 WebIngester を生成する."""
     from .pipeline.ingesters.web import WebIngester
@@ -1751,10 +1750,7 @@ def _create_web_ingester_cli(
         crawl_max_errors=settings.rag_crawl_max_errors,
         respect_robots_txt=settings.rag_respect_robots_txt,
         robots_txt_cache_ttl=settings.rag_robots_txt_cache_ttl,
-        url_safety_check=settings.rag_url_safety_check,
-        url_safety_cache_ttl=settings.rag_url_safety_cache_ttl,
-        url_safety_fail_open=settings.rag_url_safety_fail_open,
-        url_safety_timeout=settings.rag_url_safety_timeout,
+        safe_browsing_client=safe_browsing_client,
     )
 
 
@@ -1809,14 +1805,16 @@ async def run_crawl_bluesky(args: argparse.Namespace) -> None:
             # 投稿内 URL の自動取り込み
             url_stats: dict[str, int] = {}
             if placed_items:
-                web_ingester = _create_web_ingester_cli(controller.source_store, settings)
+                sb_client = _create_safe_browsing_client_cli(settings)
+                web_ingester = _create_web_ingester_cli(
+                    controller.source_store, settings, sb_client,
+                )
                 youtube_ingester = _create_youtube_ingester_cli(controller.source_store, settings)
                 url_stats = await bluesky_ingester.follow_urls(
                     placed_items,
                     client=client,
                     web_ingester=web_ingester,
                     youtube_ingester=youtube_ingester,
-                    safe_browsing_api_key=_get_safe_browsing_api_key_for_cli(settings),
                 )
     except (ValueError, TypeError) as e:
         logger.error("エラー: %s", e)

@@ -484,7 +484,6 @@ class TestFollowUrls:
 
         mock_web.add.assert_called_once_with(
             url="https://example.com/article", client=mock_client,
-            safe_browsing_api_key="",
         )
         assert stats["web_placed"] == 1
 

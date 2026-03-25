@@ -21,6 +21,7 @@ from bs4 import BeautifulSoup
 from pathlib import PurePosixPath
 
 from rag.pipeline.ingesters._common import IngestResult, now_iso
+from rag.safe_browsing import SafeBrowsingClient
 from rag.utils.url import check_ssrf, validate_url
 
 # converter が認識する拡張子（変換対象 + パススルー対象）
@@ -55,10 +56,6 @@ _CRAWL_ALLOWED_EXTENSIONS: frozenset[str] = frozenset(
 _CRAWL_ALLOWED_CONTENT_TYPES: frozenset[str] = frozenset(
     {"text/html", "application/pdf"},
 )
-
-# Safe Browsing キャッシュ最大エントリ数
-SAFE_BROWSING_CACHE_MAX_ENTRIES = 1000
-
 
 def _decode_html_bytes(data: bytes) -> str:
     """HTML バイト列をテキストにデコードする.
@@ -188,10 +185,7 @@ class WebIngester:
         crawl_max_errors: int = 5,
         respect_robots_txt: bool = True,
         robots_txt_cache_ttl: int = 3600,
-        url_safety_check: bool = True,
-        url_safety_cache_ttl: int = 300,
-        url_safety_fail_open: bool = True,
-        url_safety_timeout: float = 5.0,
+        safe_browsing_client: SafeBrowsingClient | None = None,
     ) -> None:
         self._store = source_store
         self._max_crawl_pages = min(max_crawl_pages, MAX_CRAWL_PAGES_HARD_LIMIT)
@@ -202,30 +196,22 @@ class WebIngester:
         )
         self._respect_robots_txt = respect_robots_txt
         self._robots_txt_cache_ttl = robots_txt_cache_ttl
-        self._url_safety_check = url_safety_check
-        self._url_safety_cache_ttl = url_safety_cache_ttl
-        self._url_safety_fail_open = url_safety_fail_open
-        self._url_safety_timeout = url_safety_timeout
+        self._safe_browsing_client = safe_browsing_client
 
         # robots.txt キャッシュ: key = scheme://hostname:port
         self._robots_cache: dict[str, tuple[RobotFileParser | None, float]] = {}
-
-        # Safe Browsing キャッシュ: key = url, value = (is_safe, timestamp)
-        self._safety_cache: dict[str, tuple[bool, float]] = {}
 
     async def add(
         self,
         url: str,
         *,
         client: Any | None = None,
-        safe_browsing_api_key: str = "",
     ) -> IngestResult:
         """単一ページを取得して source_store に配置する.
 
         Args:
             url: 取り込み対象ページの URL
             client: ConstrainedClient インスタンス
-            safe_browsing_api_key: Safe Browsing API キー
 
         Returns:
             配置結果
@@ -239,13 +225,10 @@ class WebIngester:
             raise ValueError("client (ConstrainedClient) が必要です")
 
         # Safe Browsing チェック
-        if self._url_safety_check and not safe_browsing_api_key:
-            logger.warning("Safe Browsing が有効ですが API キーが未指定です。チェックをスキップします")
-        if self._url_safety_check and safe_browsing_api_key:
-            is_safe = await self._check_safe_browsing(
-                [url], safe_browsing_api_key, client
-            )
-            if not is_safe.get(url, True):
+        if self._safe_browsing_client is not None:
+            sb_results = await self._safe_browsing_client.check_urls([url])
+            sb_result = sb_results.get(url)
+            if sb_result is not None and not sb_result.is_safe:
                 logger.warning("Safe Browsing で危険と判定された URL: %s", url)
                 result.errors += 1
                 result.error_details.append(f"Unsafe URL: {url}")
@@ -305,7 +288,6 @@ class WebIngester:
         pattern: str = "",
         depth: int = 1,
         client: Any | None = None,
-        safe_browsing_api_key: str = "",
     ) -> IngestResult:
         """リンク集ページから一括クロールして source_store に配置する.
 
@@ -317,7 +299,6 @@ class WebIngester:
             pattern: リンクをフィルタする正規表現パターン
             depth: クロール深度（1〜10。デフォルト: 1 = 従来動作）
             client: ConstrainedClient インスタンス
-            safe_browsing_api_key: Safe Browsing API キー
 
         Returns:
             配置結果
@@ -349,11 +330,15 @@ class WebIngester:
                 result.error_details.append(f"無効な正規表現パターン: {e}")
                 return result
 
-        # Safe Browsing 警告（1回のみ）
-        if self._url_safety_check and not safe_browsing_api_key:
-            logger.warning(
-                "Safe Browsing が有効ですが API キーが未指定です。チェックをスキップします"
-            )
+        # Safe Browsing チェック（起点 URL）
+        if self._safe_browsing_client is not None:
+            sb_results = await self._safe_browsing_client.check_urls([url])
+            sb_result = sb_results.get(url)
+            if sb_result is not None and not sb_result.is_safe:
+                logger.warning("Safe Browsing で危険と判定された URL: %s", url)
+                result.errors += 1
+                result.error_details.append(f"Unsafe URL: {url}")
+                return result
 
         # インデックスページ取得
         resp = await client.get(url, follow_redirects=False)
@@ -413,17 +398,12 @@ class WebIngester:
                 pending_links = filtered
 
             # Safe Browsing 一括チェック
-            if (
-                self._url_safety_check
-                and safe_browsing_api_key
-                and pending_links
-            ):
-                safety_results = await self._check_safe_browsing(
-                    pending_links, safe_browsing_api_key, client
-                )
+            if self._safe_browsing_client is not None and pending_links:
+                sb_results = await self._safe_browsing_client.check_urls(pending_links)
                 safe_links: list[str] = []
                 for link in pending_links:
-                    if safety_results.get(link, True):
+                    sb_result = sb_results.get(link)
+                    if sb_result is None or sb_result.is_safe:
                         safe_links.append(link)
                     else:
                         logger.warning("Safe Browsing で除外: %s", link)
@@ -461,9 +441,10 @@ class WebIngester:
 
                     page_resp = await client.get(link, follow_redirects=False)
                     if 300 <= page_resp.status_code < 400:
-                        logger.warning("リダイレクト（SSRF 防止）: %s", link)
-                        result.errors += 1
-                        result.error_details.append(f"Redirect blocked: {link}")
+                        # リダイレクトは SSRF 防止でブロックするが、
+                        # 正常な応答（301/302）なのでスキップ扱い（エラーカウント対象外）
+                        logger.info("リダイレクト（SSRF 防止でスキップ）: %s", link)
+                        result.skipped += 1
                         continue
                     if page_resp.status_code == 404:
                         # 404 はリンク切れ（スキップ扱い、エラーカウント対象外）
@@ -656,8 +637,7 @@ class WebIngester:
                         link, follow_redirects=False
                     )
                     if 300 <= page_resp.status_code < 400:
-                        # リダイレクト: エラーカウント（crawl と統一）
-                        error_count += 1
+                        # リダイレクト: スキップ扱い（crawl と統一）
                         continue
                     if page_resp.status_code == 404:
                         # リンク切れ: スキップ（エラーカウント対象外）
@@ -737,86 +717,3 @@ class WebIngester:
             self._robots_cache[key] = (None, now)
             return True
 
-    # --- Safe Browsing ---
-
-    async def _check_safe_browsing(
-        self,
-        urls: list[str],
-        api_key: str,
-        client: Any,
-    ) -> dict[str, bool]:
-        """Safe Browsing API で URL の安全性をチェックする.
-
-        Returns:
-            URL -> is_safe の辞書
-        """
-        results: dict[str, bool] = {}
-        unchecked: list[str] = []
-        now = time.time()
-
-        # キャッシュから取得
-        for url in urls:
-            if url in self._safety_cache:
-                is_safe, cached_at = self._safety_cache[url]
-                if now - cached_at < self._url_safety_cache_ttl:
-                    results[url] = is_safe
-                    continue
-            unchecked.append(url)
-
-        if not unchecked:
-            return results
-
-        # API 呼び出し
-        try:
-            sb_url = "https://safebrowsing.googleapis.com/v4/threatMatches:find"
-            body = {
-                "client": {"clientId": "rag-knowledge", "clientVersion": "1.0"},
-                "threatInfo": {
-                    "threatTypes": [
-                        "MALWARE",
-                        "SOCIAL_ENGINEERING",
-                        "UNWANTED_SOFTWARE",
-                        "POTENTIALLY_HARMFUL_APPLICATION",
-                    ],
-                    "platformTypes": ["ANY_PLATFORM"],
-                    "threatEntryTypes": ["URL"],
-                    "threatEntries": [{"url": u} for u in unchecked],
-                },
-            }
-
-            resp = await client.post(
-                sb_url,
-                params={"key": api_key},
-                json=body,
-                timeout=self._url_safety_timeout,
-            )
-            data = resp.json()
-
-            # 脅威検出された URL を特定
-            threat_urls: set[str] = set()
-            for match in data.get("matches", []):
-                threat_url = match.get("threat", {}).get("url", "")
-                if threat_url:
-                    threat_urls.add(threat_url)
-
-            for u in unchecked:
-                is_safe = u not in threat_urls
-                results[u] = is_safe
-                # キャッシュ更新（TTL 切れエントリを先に削除してから追加）
-                if len(self._safety_cache) >= SAFE_BROWSING_CACHE_MAX_ENTRIES:
-                    expired = [
-                        k for k, (_, ts) in self._safety_cache.items()
-                        if now - ts >= self._url_safety_cache_ttl
-                    ]
-                    for k in expired:
-                        del self._safety_cache[k]
-                if len(self._safety_cache) < SAFE_BROWSING_CACHE_MAX_ENTRIES:
-                    self._safety_cache[u] = (is_safe, now)
-
-        except Exception:
-            logger.warning("Safe Browsing API の呼び出しに失敗しました")
-            # フェイルオープン/フェイルクローズ
-            for u in unchecked:
-                results[u] = self._url_safety_fail_open
-
-        return results

@@ -55,7 +55,7 @@ MCP サーバーとして独立動作し、16 個のツールを提供する。
 | ハイブリッド検索 | `rag_hybrid_search_enabled`, `rag_vector_weight`, `rag_bm25_k1`, `rag_bm25_b`, `rag_min_combined_score` |
 | クロール | `rag_max_crawl_pages`, `rag_crawl_delay_sec` |
 | robots.txt | `rag_respect_robots_txt`, `rag_robots_txt_cache_ttl` |
-| URL 安全性 | `rag_url_safety_check`, `rag_url_safety_cache_ttl`, `rag_url_safety_fail_open`, `rag_url_safety_timeout` |
+| URL 安全性 | `rag_url_safety_check`, `rag_url_safety_cache_ttl`, `rag_url_safety_timeout` |
 | レスポンス制御 | `rag_max_response_chars`（rag_get_document のトランケーション）, `rag_stats_max_sources` |
 | Zenn インジェスター | `rag_zenn_max_articles`, `rag_zenn_request_timeout`, `rag_zenn_request_interval` |
 | BlueSky インジェスター | `rag_bluesky_appview_url`, `rag_bluesky_max_posts`, `rag_bluesky_request_timeout`, `rag_bluesky_request_interval`, `rag_bluesky_include_reposts` |
@@ -418,7 +418,7 @@ flowchart LR
 | BM25 インデックスの破損 | 空インデックスで起動する（フェイルセーフ） |
 | Embedding プロバイダー接続不可 | 疎通確認で検出し、エラーを返す |
 | `OPENAI_API_KEY` が未登録 | オンライン Embedding プロバイダーの初期化に失敗し、エラーを返す |
-| `GOOGLE_SAFE_BROWSING_API_KEY` が未登録 | URL 安全性チェックを無効化し、警告ログを出力して処理を続行する |
+| `GOOGLE_SAFE_BROWSING_API_KEY` が未登録・空・不正 | 設定エラー（`SafeBrowsingConfigError`）として即時中断する |
 | クロールプレビュー時のタイトル取得失敗 | タイトルを空文字列とし、URL のみ返す。他のページの処理は続行する |
 | rag_get_document レスポンスサイズ超過 | MCP 経由で `RAG_MAX_RESPONSE_CHARS` 超過時はトランケーションし、末尾に CLI `--output` オプションでの全文取得を案内する。CLI の `--output` 指定時はトランケーションなし |
 | バジェット上限到達 | 取得済みデータを返し、上限到達の旨をログ出力する |

@@ -37,10 +37,9 @@ rag_robots_txt_cache_ttl = 3600
 
 # URL 安全性チェック (Google Safe Browsing API)
 # true にするには keyring に GOOGLE_SAFE_BROWSING_API_KEY の登録が必要
-# 未登録の場合はチェックが無効化され警告ログが出力される
+# 未登録・空・不正の場合は SafeBrowsingConfigError で即時中断する
 rag_url_safety_check = true
 rag_url_safety_cache_ttl = 300
-rag_url_safety_fail_open = true
 rag_url_safety_timeout = 5.0
 
 # レスポンス制御
