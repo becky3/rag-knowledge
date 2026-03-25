@@ -84,6 +84,7 @@ from py_common_lib.httpx import ConstrainedClient  # safety:allowed
 from .safe_browsing import (
     SafeBrowsingClient,
     SafeBrowsingConfigError,
+    SafetyCheckError,
     create_safe_browsing_client,
 )
 
@@ -440,6 +441,8 @@ async def rag_add(url: str, ctx: MCPContext | None = None) -> str:
         _reset_rag_service()
 
         return _format_ingest_response(ingest_result, pipeline_summary, context=url)
+    except (SafetyCheckError, SafeBrowsingConfigError) as e:
+        return f"Safe Browsing エラー: {e}"
     except ValueError as e:
         return f"エラー: {e}"
     except Exception:
@@ -514,6 +517,8 @@ async def rag_crawl(
         _reset_rag_service()
 
         return _format_ingest_response(ingest_result, pipeline_summary, context=url)
+    except (SafetyCheckError, SafeBrowsingConfigError) as e:
+        return f"Safe Browsing エラー: {e}"
     except ValueError as e:
         return f"エラー: {e}"
     except Exception:
@@ -784,6 +789,8 @@ async def rag_crawl_bluesky(
                 parts.append(f"エラー {err_n}件")
             summary += " ".join(parts)
         return summary
+    except (SafetyCheckError, SafeBrowsingConfigError) as e:
+        return f"Safe Browsing エラー: {e}"
     except (ValueError, TypeError) as e:
         return f"エラー: {e}"
     except Exception:
