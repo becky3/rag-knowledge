@@ -662,7 +662,7 @@ async def rag_crawl_zenn(
 
         if ingest_result.placed == 0 and ingest_result.errors == 0:
             if ingest_result.skipped > 0:
-                return f"全 {ingest_result.skipped} 件のコンテンツが既に取り込み済みです（ユーザー: {username}）。上書きするには force=true を指定してください"
+                return f"全 {ingest_result.skipped} 件のコンテンツがスキップされました（ユーザー: {username}）。上書きするには force=true を指定してください"
             return f"コンテンツが見つかりませんでした（ユーザー: {username}）"
 
         pipeline_summary = await _run_ingest_and_index_subprocess(

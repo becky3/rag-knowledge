@@ -1868,7 +1868,7 @@ async def run_crawl_zenn(args: argparse.Namespace) -> None:
 
     if ingest_result.placed == 0 and ingest_result.errors == 0:
         if ingest_result.skipped > 0:
-            print(f"全 {ingest_result.skipped} 件のコンテンツが既に取り込み済みです（ユーザー: {args.username}）。上書きするには --force を指定してください")
+            print(f"全 {ingest_result.skipped} 件のコンテンツがスキップされました（ユーザー: {args.username}）。上書きするには --force を指定してください")
         else:
             print(f"コンテンツが見つかりませんでした（ユーザー: {args.username}）")
         return

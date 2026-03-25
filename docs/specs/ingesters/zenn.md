@@ -240,10 +240,12 @@ flowchart TD
     PAGE["ページ取得"]
     CHECK_NEXT{"next_page が null?"}
     CHECK_LIMIT{"走査上限 or 記事数上限?"}
+    LOOP["各 slug をループ"]
     CHECK_EXIST{"既存ファイルあり and not force?"}
-    SKIP["スキップ"]
-    FETCH["各記事の詳細を取得"]
+    SKIP["スキップ（次の slug へ）"]
+    FETCH["記事の詳細を取得"]
     PLACE["source_store にファイル配置 + .meta 生成"]
+    LOOP_END{"次の slug あり?"}
     NOTIFY["パイプライン制御に取り込み完了通知"]
     RESULT["配置結果サマリーを返却"]
 
@@ -251,15 +253,18 @@ flowchart TD
     VALIDATE --> DISCOVER
     DISCOVER --> PAGE
     PAGE --> CHECK_NEXT
-    CHECK_NEXT -->|"はい"| CHECK_EXIST
+    CHECK_NEXT -->|"はい"| LOOP
     CHECK_NEXT -->|"いいえ"| CHECK_LIMIT
-    CHECK_LIMIT -->|"はい（上限到達）"| CHECK_EXIST
+    CHECK_LIMIT -->|"はい（上限到達）"| LOOP
     CHECK_LIMIT -->|"いいえ"| PAGE
+    LOOP --> CHECK_EXIST
     CHECK_EXIST -->|"はい"| SKIP
     CHECK_EXIST -->|"いいえ"| FETCH
     FETCH --> PLACE
-    SKIP --> NOTIFY
-    PLACE --> NOTIFY
+    SKIP --> LOOP_END
+    PLACE --> LOOP_END
+    LOOP_END -->|"はい"| CHECK_EXIST
+    LOOP_END -->|"いいえ"| NOTIFY
     NOTIFY --> RESULT
 ```
 
