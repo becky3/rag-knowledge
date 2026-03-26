@@ -210,6 +210,9 @@ __marimo__/
 chroma_db/
 bm25_index/
 
+# QA test resources
+.qa/
+
 # Temporary files
 .tmp/
 
