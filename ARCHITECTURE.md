@@ -22,6 +22,7 @@
 |---|---|
 | `src/rag/embedding/` | Embedding プロバイダー抽象化（ローカル / OpenAI）とファクトリ |
 | `src/rag/ingesters/` | インジェスタープラグイン（BaseIngester 抽象基底・IngestedContent 共通モデル・WebIngester・ZennIngester・DocumentIngester・BlueskyIngester） |
+| `src/rag/infrastructure/` | インフラ基盤（ChromaDB サーバーのライフサイクル管理） |
 | `src/rag/pipeline/` | パイプライン制御（git 操作・差分検知・ステージ間連携・4モード実行） |
 | `src/rag/pipeline/worker.py` | MCP 用サブプロセスエントリポイント（`python -m rag.pipeline.worker` で起動、クラッシュ耐性確保） |
 | `src/rag/pipeline/factory.py` | PipelineController のファクトリ関数（server/cli/worker 共通） |
