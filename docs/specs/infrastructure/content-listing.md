@@ -120,7 +120,7 @@ flowchart TD
     MCP["MCP rag_list_recent"]
     CLI["CLI list-recent"]
     VALIDATE["パラメータ検証"]
-    SERVICE["RAGKnowledgeService"]
+    SERVICE["共通関数 (rag_knowledge.py)"]
     METADB["MetadataDB"]
     FORMAT["テキストフォーマット"]
     RESPONSE["レスポンス返却"]
@@ -139,7 +139,7 @@ flowchart TD
 
 1. MCP ツールまたは CLI からパラメータを受け取る
 2. `source_type` と `limit` のバリデーションを実行する（1〜100 の範囲チェック含む）
-3. `RAGKnowledgeService` の共通関数を呼び出す
+3. `rag_knowledge.py` の共通関数 `list_recent_sources` を呼び出す
 4. `MetadataDB` から以下の 2 クエリを発行する:
    - 一覧取得: `source_type` + `status = 'active'` でフィルタし、`collected_at` 降順で `limit` 件取得
    - 総件数取得: 同条件の `COUNT(*)` で該当 source_type の全件数を取得
@@ -149,7 +149,7 @@ flowchart TD
 
 | ファイル | 役割 |
 |---------|------|
-| `src/rag/server.py` | MCP ツール定義。パラメータ検証と `RAGKnowledgeService` 呼び出し |
+| `src/rag/server.py` | MCP ツール定義。パラメータ検証と共通関数呼び出し |
 | `src/rag/cli.py` | CLI サブコマンド定義。パラメータ検証と共通関数呼び出し |
 | `src/rag/rag_knowledge.py` | 共通ロジック。MetadataDB へのクエリとフォーマット処理 |
 | `src/rag/store/metadata_db.py` | MetadataDB。`source_type` フィルタ + `collected_at` 降順ソートのクエリ |

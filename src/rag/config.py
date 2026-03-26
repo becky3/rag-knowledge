@@ -161,6 +161,9 @@ class RAGSettings(BaseModel):
     # rag_stats ソース一覧の最大表示件数
     rag_stats_max_sources: int = Field(ge=1)
 
+    # rag_list_recent デフォルト取得件数
+    rag_list_recent_limit: int = Field(ge=1, le=100)
+
     # Zenn インジェスター
     rag_zenn_max_articles: int = Field(ge=1, le=100)
     rag_zenn_request_timeout: int = Field(ge=1, le=120)

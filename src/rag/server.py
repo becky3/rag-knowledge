@@ -3,7 +3,7 @@
 仕様: docs/specs/rag-knowledge.md, docs/specs/search-response.md
 独立リポジトリとして動作する。
 
-FastMCP を使用して 20 個の RAG ツールを公開する:
+FastMCP を使用して 21 個の RAG ツールを公開する:
 - rag_search: ナレッジベース検索（チャンク単位返却）
 - rag_get_document: ソース全文取得
 - rag_add: 単一ページをナレッジベースに取り込み
@@ -21,6 +21,7 @@ FastMCP を使用して 20 個の RAG ツールを公開する:
 - rag_search_aozora: 青空文庫カタログ検索
 - rag_add_aozora: 青空文庫作品の単一取り込み
 - rag_crawl_aozora: 青空文庫著者作品の一括取り込み
+- rag_list_recent: 指定 source_type のソースを新しい順で一覧取得
 - rag_delete: ソースURL指定でナレッジから論理削除
 - rag_rebuild: ナレッジベースの再構築
 - rag_stats: ナレッジベースの統計情報を表示
@@ -50,7 +51,7 @@ os.environ.setdefault("ANONYMIZED_TELEMETRY", "False")
 # 問題への対策として、import 時に stdout を抑制する。
 from .config import ensure_utf8_streams
 from .filter_parser import parse_filters
-from .rag_knowledge import format_raw_search_results
+from .rag_knowledge import format_file_size, format_raw_search_results
 
 with contextlib.redirect_stdout(io.StringIO()):
     from .bm25_index import BM25Index
@@ -1600,15 +1601,7 @@ _VALID_PIPELINE_SOURCE_TYPES: frozenset[str] = frozenset({
 _rebuild_lock = threading.Lock()
 
 
-def _format_size(size_bytes: int) -> str:
-    """バイト数を人間が読みやすい単位に変換する."""
-    if size_bytes < 1024:
-        return f"{size_bytes} B"
-    if size_bytes < 1024 * 1024:
-        return f"{size_bytes / 1024:.1f} KB"
-    if size_bytes < 1024 * 1024 * 1024:
-        return f"{size_bytes / (1024 * 1024):.1f} MB"
-    return f"{size_bytes / (1024 * 1024 * 1024):.1f} GB"
+_format_size = format_file_size
 
 
 def _format_rebuild_summary(summary: PipelineSummary, elapsed: float) -> str:
@@ -2057,6 +2050,44 @@ async def _run_rebuild_subprocess(
     elapsed = result.get("elapsed", 0)
 
     return _format_rebuild_summary(summary, elapsed)
+
+
+@mcp.tool()
+async def rag_list_recent(
+    source_type: str,
+    limit: int | None = None,
+) -> str:
+    """[rag-knowledge] List recent sources - 指定した source_type のソースを新しい順で一覧取得する.
+
+    content listing, recent sources, source list, browse.
+    ナレッジベースに取り込んだコンテンツを source_type 別に一覧で確認できる。
+    最近取り込んだコンテンツの確認や、ナレッジベースの内容把握に使用する。
+
+    Args:
+        source_type: ソース種別: "web", "bluesky", "zenn", "youtube", "aozora", "local", "journal"
+        limit: 取得件数（1〜100、未指定時は設定値を使用）
+
+    Returns:
+        ソース一覧テキスト（タイトル、source_id、collected_at、ファイルサイズ）
+    """
+    if source_type not in _VALID_SOURCE_TYPES:
+        valid = ", ".join(sorted(_VALID_SOURCE_TYPES))
+        return f"無効な source_type: {source_type!r}（有効値: {valid}）"
+
+    settings = get_settings()
+    if limit is None:
+        limit = settings.rag_list_recent_limit
+    if limit < 1 or limit > 100:
+        return "エラー: limit は 1〜100 の範囲で指定してください"
+
+    from .rag_knowledge import list_recent_sources
+
+    return await asyncio.to_thread(
+        list_recent_sources,
+        settings.source_store_dir,
+        source_type,
+        limit,
+    )
 
 
 @mcp.tool()

@@ -1151,3 +1151,59 @@ def format_document_response(result: DocumentResult) -> str:
     lines.append("")
     lines.append(result.content)
     return "\n".join(lines)
+
+
+def list_recent_sources(
+    source_store_dir: str,
+    source_type: str,
+    limit: int,
+) -> str:
+    """指定 source_type のソースを新しい順で一覧取得する（MCP/CLI 共通ロジック）.
+
+    仕様: docs/specs/infrastructure/content-listing.md
+
+    Args:
+        source_store_dir: source_store のルートディレクトリパス
+        source_type: ソース種別
+        limit: 取得件数
+
+    Returns:
+        フォーマット済みテキスト
+    """
+    from .store.metadata_db import MetadataDB
+
+    db_path = Path(source_store_dir) / "metadata.db"
+    if not db_path.exists():
+        return f"source_type: {source_type}（0件 / 全0件）"
+
+    db = MetadataDB(db_path)
+    try:
+        db.initialize()
+        sources = db.list_sources(source_type=source_type, limit=limit)  # type: ignore[arg-type]
+        total = db.count_sources_by_type(source_type=source_type)  # type: ignore[arg-type]
+    finally:
+        db.close()
+
+    lines: list[str] = [
+        f"source_type: {source_type}（{len(sources)}件 / 全{total}件）",
+    ]
+
+    for i, src in enumerate(sources, 1):
+        lines.append("")
+        lines.append(f"{i}. {src.title}")
+        lines.append(f"   Source: {src.source_id}")
+        lines.append(f"   Collected: {src.collected_at}")
+        lines.append(f"   Size: {format_file_size(src.file_size)}")
+
+    return "\n".join(lines)
+
+
+def format_file_size(size_bytes: int) -> str:
+    """バイト数を人間が読みやすい単位に変換する."""
+    if size_bytes < 1024:
+        return f"{size_bytes} B"
+    if size_bytes < 1024 * 1024:
+        return f"{size_bytes / 1024:.1f} KB"
+    if size_bytes < 1024 * 1024 * 1024:
+        return f"{size_bytes / (1024 * 1024):.1f} MB"
+    return f"{size_bytes / (1024 * 1024 * 1024):.1f} GB"

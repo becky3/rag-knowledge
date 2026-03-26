@@ -311,6 +311,31 @@ class MetadataDB:
             ).fetchone()
         return int(row["cnt"]) if row else 0
 
+    def list_sources(
+        self,
+        *,
+        source_type: SourceType,
+        limit: int,
+    ) -> list[SourceRecord]:
+        """指定 source_type の active ソースを collected_at 降順で取得する."""
+        rows = self._connection.execute(
+            "SELECT * FROM sources"
+            " WHERE source_type = ? AND status = 'active'"
+            " ORDER BY collected_at DESC"
+            " LIMIT ?",
+            (source_type, limit),
+        ).fetchall()
+        return [_row_to_source_record(r) for r in rows]
+
+    def count_sources_by_type(self, *, source_type: SourceType) -> int:
+        """指定 source_type の active ソース件数を返す."""
+        row = self._connection.execute(
+            "SELECT COUNT(*) as cnt FROM sources"
+            " WHERE source_type = ? AND status = 'active'",
+            (source_type,),
+        ).fetchone()
+        return int(row["cnt"]) if row else 0
+
 
 def _row_to_source_record(row: sqlite3.Row) -> SourceRecord:
     """sqlite3.Row を SourceRecord に変換する."""
