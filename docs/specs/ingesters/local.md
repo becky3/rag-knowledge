@@ -35,7 +35,7 @@ Local インジェスターは、ローカルファイルシステム上のテ�
 - ローカルファイルシステムのみ対象とする（外部 HTTP リクエストは発生しない）
 - パストラバーサル対策: ファイルパスを `Path.resolve()` で正規化し、`..` を含むパスの解決後に実際のファイルシステムパスとして扱う
 - アクセス許可ディレクトリの制限は設けない（OS レベルのファイル権限に委ねる）
-  - **前提**: 本機能は stdio モードでの信頼済みローカル環境での利用を想定する。HTTP モードでは `rag_document_http_mode_enabled` が `true` かつ `rag_document_allowed_dirs` にパスが指定されている場合のみツールが有効化される。許可ディレクトリ外のパスはバリデーションエラーとして拒否する
+  - **前提**: `rag_add_document` はコンテンツアップロード型のため HTTP・stdio 両モードで使用可能。`rag_crawl_documents` は HTTP モードでは opt-in 制御が必要（`rag_document_http_mode_enabled=true` かつ `rag_document_allowed_dirs` 指定）
 - **ファイル物理削除禁止**: source_store 内のファイルの物理削除は一切行わない
 - **metadata.db アクセス禁止**: metadata.db に直接アクセスしない。DB 登録はパイプライン制御が実行する
 - **git 操作禁止**: git 操作はパイプライン制御のみが実行する
@@ -55,7 +55,7 @@ Local インジェスターは、ローカルファイルシステム上のテ�
 |--------|------|-----|---------|
 | ディレクトリ一括取り込みファイル数上限 | ハードリミット | 100 件 | 引き上げ不可（引き下げ可） |
 | パストラバーサル対策 | ハードリミット | `Path.resolve()` による正規化 | 無効化不可 |
-| HTTP モードでのローカルファイルアクセス制限 | ハードリミット | HTTP モード時、`rag_add_document` / `rag_crawl_documents` ツールはデフォルト無効。有効化する場合は `config.toml` の `rag_document_http_mode_enabled`（デフォルト: `false`）を `true` に設定し、かつ許可ディレクトリ `rag_document_allowed_dirs`（デフォルト: 空＝全拒否）を指定する。許可ディレクトリ外のパスはバリデーションエラーとして拒否する | デフォルト: 無効。opt-in + 許可ディレクトリ指定で有効化 |
+| HTTP モードでのローカルパスアクセス制限 | ハードリミット | `rag_crawl_documents`: HTTP モード時はデフォルト無効。`rag_document_http_mode_enabled=true` かつ `rag_document_allowed_dirs` 指定で有効化。許可ディレクトリ外のパスはエラー。`rag_add_document`: コンテンツアップロード型のため制限なし | `rag_crawl_documents`: opt-in で有効化可。`rag_add_document`: 制限なし |
 | metadata.db 直接アクセス禁止 | ハードリミット | インジェスターから metadata.db への読み書きを禁止 | 不可 |
 | git 操作禁止 | ハードリミット | インジェスターから git コマンドの直接呼び出しを禁止 | 不可 |
 | ファイル物理削除禁止 | ハードリミット | source_store 内のファイル削除を禁止 | 不可 |
@@ -68,14 +68,17 @@ Local インジェスターは、ローカルファイルシステム上のテ�
 
 | ツール | 入力 | 振る舞い |
 |--------|------|---------|
-| `rag_add_document` | `file_path` | 単一ドキュメントファイルを source_store の `local/` にコピーする。同一ファイル名の再取り込み時は上書きする |
+| `rag_add_document` | `content`、`filename`、`encoding`（任意）、`upload_mode`（任意） | ファイルコンテンツを受け取り、source_store の `local/` に配置する。`upload_mode=fail`（デフォルト）では当日の配置先に同名ファイルが存在する場合エラーを返す。`upload_mode=replace` では上書きする |
 | `rag_crawl_documents` | `dir_path`、`pattern`（任意） | 指定ディレクトリ内のドキュメントファイルを glob パターンで検索し、一括で source_store の `local/` にコピーする。同一パスの再取り込み時は上書きする |
 
 #### rag_add_document パラメータ
 
 | パラメータ | 型 | 必須 | 説明 |
 |-----------|-----|------|------|
-| `file_path` | 文字列 | はい | 取り込み対象ファイルのパス（絶対パスまたは相対パス） |
+| `content` | 文字列 | はい | ファイルのコンテンツ。`encoding=text` の場合は UTF-8 文字列、`encoding=base64` の場合は base64 エンコードされた文字列 |
+| `filename` | 文字列 | はい | 元ファイルのファイル名（例: `resume.pdf`、`notes.md`）。拡張子バリデーションおよびファイル配置先の命名に使用する |
+| `encoding` | 文字列 | いいえ | コンテンツのエンコーディング。`"text"`（デフォルト）または `"base64"`。テキストファイル（`.md`, `.txt`, `.adoc`）は `text`、バイナリファイル（`.pdf`）は `base64` を使用する |
+| `upload_mode` | 文字列 | いいえ | 同名ファイル存在時の動作。`"fail"`（デフォルト、エラーを返す）または `"replace"`（上書き） |
 
 ツール出力: 配置結果のサマリーテキスト（ファイル名、配置先パス）
 
@@ -112,11 +115,13 @@ source_store 内の相対パスを source_id として使用する。
 
 #### 単一ファイル（`rag_add_document`）
 
-元ファイルのファイル名のみを使用し、`local/{filename}` に配置する。
+`filename` パラメータのファイル名部分のみを使用し、アップロード日付ディレクトリ配下に配置する。
 
-- 入力: `file_path=/home/user/docs/resume.pdf`
-- 配置先: `source_store/local/resume.pdf`
-- source_id: `local/resume.pdf`
+- 入力: `filename="resume.pdf"`、`encoding="base64"`
+- 配置先: `source_store/local/.upload/YYYY/MM/DD/resume.pdf`
+- source_id: `local/.upload/YYYY/MM/DD/resume.pdf`
+
+`YYYY/MM/DD` はアップロード時の日付（サーバーローカル時刻）。同一ファイルを再アップロードした場合、異なる日付ディレクトリに配置されるため別 source_id となる（`upload_mode=replace` を指定しても上書きは当日分のみ）。
 
 #### ディレクトリ一括（`rag_crawl_documents`）
 
@@ -179,35 +184,40 @@ flowchart TB
     FS["ローカルファイルシステム"]
 
     CLIENT -->|stdio / http| TOOLS
-    TOOLS -->|取り込み指示| LING
-    LING -->|ファイル読み取り| FS
-    LING -->|ファイルコピー| LOCAL
+    TOOLS -->|content + encoding + filename| UL["コンテンツアップロード層"]
+    TOOLS -->|dir_path / pattern| LING
+    UL -->|data: bytes, filename| LING
+    LING -->|ファイル配置| LOCAL
     LING -->|取り込み完了通知| PC
     PC -->|git add + commit + diff| SS
 ```
+
+CLI は `rag_add_document` のデコード処理を経由せず、ファイルをバイト列として直接読み込んでインジェスターに渡す。
 
 ### 単一ファイル取り込みフロー
 
 ```mermaid
 flowchart TD
-    START["rag_add_document(file_path)"]
-    VALIDATE["入力バリデーション"]
-    RESOLVE["パス正規化（resolve）"]
-    CHECK_EXIST{"ファイルが存在する?"}
+    START["rag_add_document(content, filename, encoding, upload_mode)"]
+    SAN["sanitize_filename(filename)"]
+    DECODE["decode_upload_content(content, encoding)"]
     CHECK_EXT{"拡張子は対応済み?"}
-    COPY["source_store/local/ にコピー"]
+    CHECK_DUP{"upload_mode=fail かつ<br>同名ファイルが存在?"}
+    PLACE["source_store/local/.upload/YYYY/MM/DD/ に配置"]
     NOTIFY["パイプライン制御に完了通知"]
     RESULT["結果サマリーを返却"]
     ERROR["エラーを返却"]
 
-    START --> VALIDATE
-    VALIDATE --> RESOLVE
-    RESOLVE --> CHECK_EXIST
-    CHECK_EXIST -->|はい| CHECK_EXT
-    CHECK_EXIST -->|いいえ| ERROR
-    CHECK_EXT -->|はい| COPY
+    START --> SAN
+    SAN -->|バリデーション失敗| ERROR
+    SAN --> DECODE
+    DECODE -->|バリデーション失敗| ERROR
+    DECODE --> CHECK_EXT
+    CHECK_EXT -->|はい| CHECK_DUP
     CHECK_EXT -->|いいえ| ERROR
-    COPY --> NOTIFY
+    CHECK_DUP -->|はい| ERROR
+    CHECK_DUP -->|いいえ| PLACE
+    PLACE --> NOTIFY
     NOTIFY --> RESULT
 ```
 
@@ -244,13 +254,27 @@ flowchart TD
 
 ### 単一ファイル取り込みの処理手順
 
+#### MCP ツール経由（rag_add_document）
+
+1. `sanitize_filename(filename)` でファイル名をサニタイズする（コンテンツアップロード層）
+2. `decode_upload_content(content, encoding)` でバイト列を取得する（コンテンツアップロード層）
+3. サニタイズ済みファイル名の拡張子が対応リストに含まれるか確認する
+4. `upload_mode=fail` かつ当日の配置先パスにファイルが存在する場合はエラーを返す
+5. `source_store/local/.upload/YYYY/MM/DD/{filename}` にファイルを配置する
+6. パイプライン制御に取り込み完了を通知する
+7. 配置結果のサマリーを返す
+
+#### CLI 経由（add-document コマンド）
+
 1. `file_path` をバリデーションする（空文字列チェック）
 2. `Path.resolve()` でパスを正規化する（シンボリックリンク解決、`..` 除去）
 3. ファイルの存在を確認する（ディレクトリの場合は拒否）
 4. 拡張子が対応リストに含まれるか確認する
-5. ファイルを `source_store/local/{filename}` にコピーする
-6. パイプライン制御に取り込み完了を通知する
-7. 配置結果のサマリーを返す
+5. ファイルをバイト列として読み込む
+6. `LocalIngester.add_document(data, filename, upload_mode)` を呼び出す（手順 4 以降は MCP と共通）
+7. `source_store/local/.upload/YYYY/MM/DD/{filename}` にファイルを配置する
+8. パイプライン制御に取り込み完了を通知する
+9. 配置結果のサマリーを返す
 
 ### ディレクトリ一括取り込みの処理手順
 
@@ -272,21 +296,21 @@ flowchart TD
 
 | ケース | 振る舞い |
 |--------|---------|
-| ファイルが存在しない | バリデーションエラーとして拒否する |
-| ディレクトリが存在しない | バリデーションエラーとして拒否する |
-| 対応していない拡張子のファイル | バリデーションエラーとして拒否する（単一取り込み時）。一括取り込み時はフィルタで除外する |
-| `file_path` が空文字列 | バリデーションエラーとして拒否する |
-| `dir_path` が空文字列 | バリデーションエラーとして拒否する |
-| パスに `..` が含まれる | `Path.resolve()` で正規化し、解決後の実パスで処理する |
-| シンボリックリンク | `Path.resolve()` でリンク先を解決し、実ファイルを処理する |
-| ファイルの読み取り権限がない | 単一取り込み時: エラーを返す。一括取り込み時: 該当ファイルをスキップし、エラーをログ出力する（エラー数としてサマリーに計上） |
-| ファイルサイズが 0 バイト | 単一取り込み時: エラーを返す。一括取り込み時: 該当ファイルをスキップする（スキップ数としてサマリーに計上）。空ファイルの配置は行わない |
-| テキストファイルのエンコーディングが UTF-8 以外 | インジェスターはファイルをバイナリコピーするため影響なし。テキスト変換時のエンコーディング処理はコンバーターの責務（[converter.md](../converter.md) 参照） |
+| `content` が空文字列 | コンテンツアップロード層でバリデーションエラーとして拒否する（`rag_add_document`） |
+| `encoding` が `"text"` でも `"base64"` でもない | コンテンツアップロード層でバリデーションエラーとして拒否する（`rag_add_document`） |
+| `encoding=base64` で不正な base64 文字列 | コンテンツアップロード層でバリデーションエラーとして拒否する（`rag_add_document`） |
+| `filename` が空文字列 | コンテンツアップロード層でバリデーションエラーとして拒否する（`rag_add_document`） |
+| `filename` にディレクトリセパレータや `..` が含まれる | コンテンツアップロード層がファイル名部分のみ採用してサニタイズする（`rag_add_document`） |
+| 対応していない拡張子 | バリデーションエラーとして拒否する（`rag_add_document` 単一取り込み時）。`rag_crawl_documents` 一括取り込み時はフィルタで除外する |
+| `upload_mode=fail` かつ同日に同名ファイルが存在する | エラーを返す（`rag_add_document`） |
+| `upload_mode=replace` かつ同日に同名ファイルが存在する | 上書きする（`rag_add_document`） |
+| ファイルが存在しない（CLI） | バリデーションエラーとして拒否する（CLI `add-document` コマンド） |
+| ディレクトリが存在しない（`rag_crawl_documents`） | バリデーションエラーとして拒否する |
+| ファイルサイズが 0 バイト（`rag_crawl_documents`） | 該当ファイルをスキップする（スキップ数としてサマリーに計上）。空ファイルの配置は行わない |
+| テキストファイルのエンコーディングが UTF-8 以外 | インジェスターはバイト列をそのまま保存するため影響なし。テキスト変換時のエンコーディング処理はコンバーターの責務（[converter.md](../converter.md) 参照） |
 | glob パターンがファイル数上限を超過 | パスの辞書順でソートした上で先頭 100 件にクランプし、警告ログを出力する。超過分は処理しない |
 | glob パターンに一致するファイルが 0 件 | 0 件処理として正常終了する |
-| 同一ファイル名の再取り込み | 配置先パスにファイルが存在する場合は上書きする |
-| ファイルが指定されたがディレクトリだった | バリデーションエラーとして拒否する（`rag_add_document` の場合） |
-| ディレクトリが指定されたがファイルだった | バリデーションエラーとして拒否する（`rag_crawl_documents` の場合） |
+| ディレクトリが指定されたがファイルだった（`rag_crawl_documents`） | バリデーションエラーとして拒否する |
 | `pattern` に `..` が含まれる、または `Path(pattern).is_absolute()` が真 | バリデーションエラーとして拒否する |
 | glob マッチ結果が `dir_path` 配下でない | 該当ファイルを除外する |
 | コピー先ディレクトリが存在しない | 必要な中間ディレクトリを自動作成する |
@@ -296,6 +320,7 @@ flowchart TD
 ## 関連ドキュメント
 
 - [common.md](common.md) — インジェスター共通仕様
+- [../infrastructure/content-upload.md](../infrastructure/content-upload.md) — コンテンツアップロード層（デコード・バリデーション）
 - [../source-store.md](../source-store.md) — source_store 仕様（ディレクトリ構成、local 媒体のメタデータ導出）
 - [../pipeline-controller.md](../pipeline-controller.md) — パイプライン制御仕様（git 操作、ステージ間連携）
 - [../converter.md](../converter.md) — コンバーター仕様（テキスト変換、PDF バックエンド選択）
