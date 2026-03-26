@@ -1051,6 +1051,8 @@ async def rag_add_document(
         return _format_ingest_response(
             ingest_result, pipeline_summary, context=sanitized_filename,
         )
+    except FileExistsError as e:
+        return f"エラー: {e}"
     except Exception:
         logger.exception("Failed to add document: %s", sanitized_filename)
         return f"エラー: ファイルの取り込みに失敗しました: {sanitized_filename}"
@@ -2255,7 +2257,7 @@ async def _read_upload_file(
     filename = getattr(file_field, "filename", "") or ""
 
     # ストリーミング読み取りでサイズチェック
-    chunks: list[bytes] = []
+    data = bytearray()
     total = 0
     while True:
         chunk = await file_field.read(65536)
@@ -2268,13 +2270,12 @@ async def _read_upload_file(
                 413,
                 f"ファイルサイズが上限を超えています（上限: {max_mb} MB）",
             )
-        chunks.append(chunk)
+        data.extend(chunk)
 
-    data = b"".join(chunks)
-    if len(data) == 0:
+    if total == 0:
         return _upload_error(400, "アップロードファイルが空です（0 バイト）")
 
-    return data, filename
+    return bytes(data), filename
 
 
 @mcp.custom_route("/upload/document", methods=["POST"])  # type: ignore[untyped-decorator]
@@ -2285,41 +2286,41 @@ async def upload_document(request: Request) -> Response:
     if auth_error is not None:
         return _upload_error(401, auth_error)
 
-    settings = get_settings()
-    max_size_bytes = settings.rag_upload_max_file_size_mb * 1024 * 1024
-
-    # ファイル読み取り
-    result = await _read_upload_file(request, max_size_bytes)
-    if isinstance(result, JSONResponse):
-        return result
-    data, raw_filename = result
-
-    # フォームフィールド取得
-    form = await request.form()
-    upload_mode = str(form.get("upload_mode", "fail"))
-    if upload_mode not in _VALID_UPLOAD_MODES:
-        valid = ", ".join(sorted(_VALID_UPLOAD_MODES))
-        return _upload_error(400, f"無効な upload_mode: {upload_mode!r}（有効値: {valid}）")
-
-    # ファイル名サニタイズ・拡張子チェック
-    try:
-        sanitized = sanitize_upload_filename(raw_filename)
-    except ValueError as e:
-        return _upload_error(400, str(e))
-
-    supported = _get_supported_extensions()
-    ext = Path(sanitized).suffix.lower()
-    if not ext or ext not in supported:
-        return _upload_error(
-            400,
-            f"対応していないファイル形式です: {sanitized!r}（対応: {', '.join(supported)}）",
-        )
-
-    # インジェストロック取得
+    # インジェストロック取得（ボディ読み取り前に実施し、競合時の無駄な I/O を回避）
     if not await _acquire_ingest_lock():
         return _upload_error(409, "別のインジェストが実行中です")
 
     try:
+        settings = get_settings()
+        max_size_bytes = settings.rag_upload_max_file_size_mb * 1024 * 1024
+
+        # ファイル読み取り
+        result = await _read_upload_file(request, max_size_bytes)
+        if isinstance(result, JSONResponse):
+            return result
+        data, raw_filename = result
+
+        # フォームフィールド取得
+        form = await request.form()
+        upload_mode = str(form.get("upload_mode", "fail"))
+        if upload_mode not in _VALID_UPLOAD_MODES:
+            valid = ", ".join(sorted(_VALID_UPLOAD_MODES))
+            return _upload_error(400, f"無効な upload_mode: {upload_mode!r}（有効値: {valid}）")
+
+        # ファイル名サニタイズ・拡張子チェック
+        try:
+            sanitized = sanitize_upload_filename(raw_filename)
+        except ValueError as e:
+            return _upload_error(400, str(e))
+
+        supported = _get_supported_extensions()
+        ext = Path(sanitized).suffix.lower()
+        if not ext or ext not in supported:
+            return _upload_error(
+                400,
+                f"対応していないファイル形式です: {sanitized!r}（対応: {', '.join(supported)}）",
+            )
+
         controller = await _get_pipeline_controller()
         local_ingester = PipelineLocalIngester(
             controller.source_store,
@@ -2332,10 +2333,7 @@ async def upload_document(request: Request) -> Response:
         )
 
         if ingest_result.errors > 0:
-            error_msg = ingest_result.error_details[0]
-            if "同名ファイルが既に存在します" in error_msg:
-                return _upload_error(409, error_msg)
-            return _upload_error(400, error_msg)
+            return _upload_error(400, ingest_result.error_details[0])
 
         if ingest_result.placed == 0:
             return _upload_error(500, "ファイルの取り込みに失敗しました")
@@ -2353,6 +2351,8 @@ async def upload_document(request: Request) -> Response:
             f"ドキュメントを取り込みました: {sanitized}",
             source_id=source_id,
         )
+    except FileExistsError as e:
+        return _upload_error(409, str(e))
     except Exception:
         logger.exception("Upload document failed: %s", sanitized)
         return _upload_error(500, "インジェスト処理中にエラーが発生しました")
@@ -2368,50 +2368,50 @@ async def upload_journal(request: Request) -> Response:
     if auth_error is not None:
         return _upload_error(401, auth_error)
 
-    settings = get_settings()
-    max_size_bytes = settings.rag_upload_max_file_size_mb * 1024 * 1024
-
-    # ファイル読み取り
-    result = await _read_upload_file(request, max_size_bytes)
-    if isinstance(result, JSONResponse):
-        return result
-    data, raw_filename = result
-
-    # ファイル名サニタイズ・拡張子チェック
-    try:
-        sanitized = sanitize_upload_filename(raw_filename)
-    except ValueError as e:
-        return _upload_error(400, str(e))
-
-    if not sanitized.lower().endswith(".md"):
-        return _upload_error(
-            400,
-            f"ジャーナルは .md ファイルのみ対応しています: {sanitized!r}",
-        )
-
-    # フォームフィールド取得
-    form = await request.form()
-    title = str(form.get("title", "")).strip()
-    repository = str(form.get("repository", "")).strip()
-    entry_id = form.get("entry_id")
-    entry_id_str = str(entry_id).strip() if entry_id else None
-
-    if not title:
-        return _upload_error(400, "title が未指定です")
-    if not repository:
-        return _upload_error(400, "repository が未指定です")
-
-    # UTF-8 テキストとしてデコード
-    try:
-        body = data.decode("utf-8")
-    except UnicodeDecodeError:
-        return _upload_error(400, "ファイルが UTF-8 テキストではありません")
-
-    # インジェストロック取得
+    # インジェストロック取得（ボディ読み取り前に実施し、競合時の無駄な I/O を回避）
     if not await _acquire_ingest_lock():
         return _upload_error(409, "別のインジェストが実行中です")
 
     try:
+        settings = get_settings()
+        max_size_bytes = settings.rag_upload_max_file_size_mb * 1024 * 1024
+
+        # ファイル読み取り
+        result = await _read_upload_file(request, max_size_bytes)
+        if isinstance(result, JSONResponse):
+            return result
+        data, raw_filename = result
+
+        # ファイル名サニタイズ・拡張子チェック
+        try:
+            sanitized = sanitize_upload_filename(raw_filename)
+        except ValueError as e:
+            return _upload_error(400, str(e))
+
+        if not sanitized.lower().endswith(".md"):
+            return _upload_error(
+                400,
+                f"ジャーナルは .md ファイルのみ対応しています: {sanitized!r}",
+            )
+
+        # フォームフィールド取得
+        form = await request.form()
+        title = str(form.get("title", "")).strip()
+        repository = str(form.get("repository", "")).strip()
+        entry_id = form.get("entry_id")
+        entry_id_str = str(entry_id).strip() if entry_id else None
+
+        if not title:
+            return _upload_error(400, "title が未指定です")
+        if not repository:
+            return _upload_error(400, "repository が未指定です")
+
+        # UTF-8 テキストとしてデコード
+        try:
+            body = data.decode("utf-8")
+        except UnicodeDecodeError:
+            return _upload_error(400, "ファイルが UTF-8 テキストではありません")
+
         controller = await _get_pipeline_controller()
         journal_ingester = PipelineJournalIngester(controller.source_store)
 

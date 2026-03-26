@@ -234,7 +234,7 @@ class TestUploadDocumentIntegration:
         """upload_mode=fail で同名ファイルが存在する場合 409 を返す."""
         mock_controller = _mock_pipeline_controller()
         mock_ingester = MagicMock()
-        mock_ingester.add_document.return_value = _error_ingest_result(
+        mock_ingester.add_document.side_effect = FileExistsError(
             "同名ファイルが既に存在します: local/.upload/2026/01/01/test.md"
         )
 

@@ -61,12 +61,14 @@ class LocalIngester:
             rel_path = self._upload_rel_path(filename)
 
             if upload_mode == "fail" and self._file_exists(rel_path):
-                raise ValueError(
+                raise FileExistsError(
                     f"同名ファイルが既に存在します: {rel_path}"
                 )
 
             self._store.place_file(source_type="local", data=data, rel_path=rel_path)
             result.placed = 1
+        except FileExistsError:
+            raise
         except ValueError as e:
             result.errors = 1
             result.error_details.append(str(e))
