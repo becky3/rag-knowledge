@@ -233,3 +233,4 @@ git-flow ベースのブランチ戦略を採用。詳細は `~/.claude/docs/spe
 **プロジェクト固有スキル:**
 
 - `/test-run` — テスト実行・コード品質チェック（`.claude/skills/test-run/SKILL.md`）
+- `/qa` — MCP・CLI・HTTP API の動作確認（`.claude/skills/qa/SKILL.md`）
