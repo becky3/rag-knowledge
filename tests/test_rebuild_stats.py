@@ -248,7 +248,7 @@ class TestCollectPipelineStats:
             title="Test",
             content_hash="abc",
             file_size=100,
-            created_at="2026-01-01",
+            collected_at="2026-01-01",
             updated_at="2026-01-01",
         )
         db.set_status("src1", "deleted")

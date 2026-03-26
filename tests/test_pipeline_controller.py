@@ -481,7 +481,7 @@ class TestDeleteAndReAdd:
             title="a",
             content_hash="dummy",
             file_size=len(content),
-            created_at="2026-01-01T00:00:00+00:00",
+            collected_at="2026-01-01T00:00:00+00:00",
             updated_at="2026-01-01T00:00:00+00:00",
         )
         ctrl.commit("readd a")
@@ -525,7 +525,7 @@ class TestDeleteAndReAdd:
             title="b",
             content_hash="dummy2",
             file_size=11,
-            created_at="2026-01-01T00:00:00+00:00",
+            collected_at="2026-01-01T00:00:00+00:00",
             updated_at="2026-01-01T00:00:00+00:00",
         )
         ctrl.commit("readd b with new content")
@@ -563,7 +563,7 @@ class TestRemoveFile:
             title="Test",
             content_hash="dummy",
             file_size=17,
-            created_at="2026-01-01T00:00:00+00:00",
+            collected_at="2026-01-01T00:00:00+00:00",
             updated_at="2026-01-01T00:00:00+00:00",
         )
 
@@ -606,7 +606,7 @@ class TestRemoveFile:
             title="ghost",
             content_hash="dummy",
             file_size=0,
-            created_at="2026-01-01T00:00:00+00:00",
+            collected_at="2026-01-01T00:00:00+00:00",
             updated_at="2026-01-01T00:00:00+00:00",
         )
 

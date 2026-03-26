@@ -533,7 +533,7 @@ class TestClear:
             title="Web Page",
             content_hash="abc",
             file_size=100,
-            created_at="2025-01-01T00:00:00Z",
+            collected_at="2025-01-01T00:00:00Z",
             updated_at="2025-01-01T00:00:00Z",
         )
         metadata_db.register_source(
@@ -543,7 +543,7 @@ class TestClear:
             title="Zenn Article",
             content_hash="def",
             file_size=200,
-            created_at="2025-01-01T00:00:00Z",
+            collected_at="2025-01-01T00:00:00Z",
             updated_at="2025-01-01T00:00:00Z",
         )
 

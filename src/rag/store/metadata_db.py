@@ -32,7 +32,7 @@ CREATE TABLE IF NOT EXISTS sources (
     status       TEXT NOT NULL DEFAULT 'active',
     content_hash TEXT NOT NULL,
     file_size    INTEGER NOT NULL,
-    created_at   TEXT NOT NULL,
+    collected_at TEXT NOT NULL,
     updated_at   TEXT NOT NULL
 );
 
@@ -90,7 +90,7 @@ class MetadataDB:
         title: str,
         content_hash: str,
         file_size: int,
-        created_at: str,
+        collected_at: str,
         updated_at: str,
     ) -> None:
         """ソースを登録する.
@@ -101,8 +101,8 @@ class MetadataDB:
         旧レコードを削除してから登録する。
 
         Note:
-            created_at は新規 INSERT 時のみ使用される。既存レコードの
-            更新時は元の created_at が保持される（ON CONFLICT で更新対象外）。
+            collected_at は新規 INSERT 時のみ使用される。既存レコードの
+            更新時は元の collected_at が保持される（ON CONFLICT で更新対象外）。
             local 媒体の git 由来時刻への補正は、パイプライン制御層が
             update_source() で後から実施する。
         """
@@ -115,7 +115,7 @@ class MetadataDB:
             """\
             INSERT INTO sources
                 (source_id, source_type, file_path, title, status,
-                 content_hash, file_size, created_at, updated_at)
+                 content_hash, file_size, collected_at, updated_at)
             VALUES (?, ?, ?, ?, 'active', ?, ?, ?, ?)
             ON CONFLICT(source_id) DO UPDATE SET
                 source_type = excluded.source_type,
@@ -133,7 +133,7 @@ class MetadataDB:
                 title,
                 content_hash,
                 file_size,
-                created_at,
+                collected_at,
                 updated_at,
             ),
         )
@@ -161,7 +161,7 @@ class MetadataDB:
             "status",
             "content_hash",
             "file_size",
-            "created_at",
+            "collected_at",
             "updated_at",
         }
         invalid = set(fields.keys()) - allowed
@@ -221,7 +221,7 @@ class MetadataDB:
 
         where = " AND ".join(conditions) if conditions else "1=1"
         rows = self._connection.execute(
-            f"SELECT * FROM sources WHERE {where} ORDER BY created_at",  # noqa: S608
+            f"SELECT * FROM sources WHERE {where} ORDER BY collected_at",  # noqa: S608
             params,
         ).fetchall()
         return [_row_to_source_record(r) for r in rows]
@@ -322,6 +322,6 @@ def _row_to_source_record(row: sqlite3.Row) -> SourceRecord:
         status=row["status"],
         content_hash=row["content_hash"],
         file_size=row["file_size"],
-        created_at=row["created_at"],
+        collected_at=row["collected_at"],
         updated_at=row["updated_at"],
     )

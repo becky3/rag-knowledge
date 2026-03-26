@@ -715,11 +715,11 @@ class PipelineController:
 
         existing = self.db.get_source(source_id)
         if existing:
-            created_at = existing.created_at
+            collected_at = existing.collected_at
         elif meta_dict and "collected_at" in meta_dict:
-            created_at = str(meta_dict["collected_at"])
+            collected_at = str(meta_dict["collected_at"])
         else:
-            created_at = now
+            collected_at = now
 
         self.db.register_source(
             source_id=source_id,
@@ -728,7 +728,7 @@ class PipelineController:
             title=title,
             content_hash=content_hash,
             file_size=len(data),
-            created_at=created_at,
+            collected_at=collected_at,
             updated_at=now,
         )
 
@@ -815,10 +815,10 @@ class PipelineController:
         source_id = record.source_id
         source_type = record.source_type
         title = record.title
-        created_at = record.created_at
+        collected_at_db = record.collected_at
 
         meta_dict = self._read_meta_dict(file_path) or {}
-        collected_at = str(meta_dict.get("collected_at", created_at))
+        collected_at = str(meta_dict.get("collected_at", collected_at_db))
 
         extra = dict(meta_dict)
         for key in ("source_id", "source_type", "title", "collected_at"):

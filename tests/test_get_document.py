@@ -294,6 +294,6 @@ def _setup_source_with_db(
             title=title,
             content_hash=content_hash,
             file_size=len(content),
-            created_at=now,
+            collected_at=now,
             updated_at=now,
         )
