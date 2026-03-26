@@ -12,7 +12,7 @@ import mimetypes
 from collections.abc import Awaitable, Callable, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path, PurePosixPath
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, cast
 from urllib.parse import urldefrag
 
 from .chunker import chunk_text
@@ -1179,8 +1179,11 @@ def list_recent_sources(
     db = MetadataDB(db_path)
     try:
         db.initialize()
-        sources = db.list_sources(source_type=source_type, limit=limit)  # type: ignore[arg-type]
-        total = db.count_sources_by_type(source_type=source_type)  # type: ignore[arg-type]
+        from .store.models import SourceType
+
+        st = cast(SourceType, source_type)
+        sources = db.list_sources(source_type=st, limit=limit)
+        total = db.count_sources_by_type(source_type=st)
     finally:
         db.close()
 
