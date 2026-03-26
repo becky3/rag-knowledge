@@ -174,6 +174,9 @@ class RAGSettings(BaseModel):
     rag_document_http_mode_enabled: bool
     rag_document_allowed_dirs: str
 
+    # Upload HTTP API
+    rag_upload_max_file_size_mb: int = Field(ge=1, le=500)
+
     # PDF バックエンド
     rag_pdf_backend: Literal["auto", "mineru", "pymupdf4llm"]
     rag_pdf_mineru_mfd_conf_thres: float = Field(ge=0.0, le=1.0)

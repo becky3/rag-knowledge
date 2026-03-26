@@ -48,6 +48,7 @@ TEST_SETTINGS_DEFAULTS: dict[str, object] = {
     "rag_document_supported_extensions": ".md,.txt,.pdf,.adoc",
     "rag_document_http_mode_enabled": False,
     "rag_document_allowed_dirs": "",
+    "rag_upload_max_file_size_mb": 50,
     "rag_bluesky_appview_url": "https://public.api.bsky.app",
     "rag_bluesky_max_posts": 200,
     "rag_bluesky_request_timeout": 30,

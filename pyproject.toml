@@ -25,6 +25,7 @@ dependencies = [
     "youtube-transcript-api>=1.0,<2",
     "yt-dlp>=2024.0",
     "faster-whisper>=1.0,<2",
+    "python-multipart>=0.0.9",
 ]
 
 [project.optional-dependencies]
