@@ -90,7 +90,8 @@ def _output_error(message: str) -> None:
 
 def _output_result(data: dict[str, object]) -> None:
     """結果 JSON を出力する."""
-    _output_json({"type": "result", **data})
+    payload: dict[str, object] = {**data, "type": "result"}
+    _output_json(payload)
 
 
 def _is_json_output(args: argparse.Namespace) -> bool:
