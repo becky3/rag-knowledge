@@ -63,6 +63,13 @@ class _EnvLoader(BaseSettings):
     source_store_dir: str
     converted_store_dir: str
 
+    # ChromaDB サーバー接続
+    chromadb_server_host: str = "localhost"
+    chromadb_server_port: int = Field(default=8000, ge=1, le=65535)
+    # auto_start は #407 (ChromaDB Server Manager) で参照実装予定。
+    # 未実装のため現時点ではデフォルト False。#407 完了後に True に変更する。
+    chromadb_auto_start: bool = False
+
     # トランスポート
     rag_transport: Literal["stdio", "http"]
     rag_http_host: str
@@ -104,6 +111,11 @@ class RAGSettings(BaseModel):
     bm25_persist_dir: str
     source_store_dir: str
     converted_store_dir: str
+    chromadb_server_host: str
+    chromadb_server_port: int = Field(ge=1, le=65535)
+    # auto_start は #407 (ChromaDB Server Manager) で参照実装予定
+    # 未実装のため _EnvLoader のデフォルトは False
+    chromadb_auto_start: bool
     rag_transport: Literal["stdio", "http"]
     rag_http_host: str
     rag_http_port: int = Field(ge=1, le=65535)
