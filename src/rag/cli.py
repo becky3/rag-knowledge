@@ -1260,9 +1260,10 @@ def run_stats(args: argparse.Namespace) -> None:
     try:
         embedding_provider = get_embedding_provider(settings, settings.embedding_provider)
         with contextlib.redirect_stdout(io.StringIO()):
-            vector_store = VectorStore(
+            vector_store = VectorStore.create_http(
                 embedding_provider=embedding_provider,
-                persist_directory=settings.chromadb_persist_dir,
+                host=settings.chromadb_server_host,
+                port=settings.chromadb_server_port,
             )
         index_stats = vector_store.get_stats()
         total_chunks = int(str(index_stats.get("total_chunks", 0)))
@@ -1344,9 +1345,10 @@ def run_search(args: argparse.Namespace) -> None:
     embedding_provider = get_embedding_provider(settings, settings.embedding_provider)
 
     with contextlib.redirect_stdout(io.StringIO()):
-        vector_store = VectorStore(
+        vector_store = VectorStore.create_http(
             embedding_provider=embedding_provider,
-            persist_directory=settings.chromadb_persist_dir,
+            host=settings.chromadb_server_host,
+            port=settings.chromadb_server_port,
         )
         bm25_index = BM25Index(
             k1=settings.rag_bm25_k1,
@@ -1558,9 +1560,10 @@ def _build_cli_pipeline_controller() -> tuple[
     embedding_provider = get_embedding_provider(settings, settings.embedding_provider)
 
     with contextlib.redirect_stdout(io.StringIO()):
-        vector_store = VectorStore(
+        vector_store = VectorStore.create_http(
             embedding_provider=embedding_provider,
-            persist_directory=settings.chromadb_persist_dir,
+            host=settings.chromadb_server_host,
+            port=settings.chromadb_server_port,
         )
         bm25_index = BM25Index(
             k1=settings.rag_bm25_k1,

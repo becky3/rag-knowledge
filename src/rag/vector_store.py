@@ -72,6 +72,39 @@ class VectorStore:
         )
 
     @classmethod
+    def create_http(
+        cls,
+        embedding_provider: EmbeddingProvider,
+        host: str = "localhost",
+        port: int = 8000,
+        collection_name: str = "knowledge",
+    ) -> "VectorStore":
+        """ChromaDB サーバーに HttpClient で接続する VectorStore を作成する.
+
+        Args:
+            embedding_provider: Embedding生成プロバイダー
+            host: ChromaDB サーバーのホスト
+            port: ChromaDB サーバーのポート
+            collection_name: コレクション名
+
+        Returns:
+            HttpClient ベースの VectorStore インスタンス
+        """
+        instance = cls.__new__(cls)
+        instance._embedding = embedding_provider
+        instance._persist_directory = ""
+        instance._collection_name = collection_name
+        chroma_settings = ChromaSettings(anonymized_telemetry=False)
+        instance._client = chromadb.HttpClient(
+            host=host, port=port, settings=chroma_settings,
+        )
+        instance._collection = instance._client.get_or_create_collection(
+            name=collection_name,
+            metadata={"hnsw:space": "cosine"},
+        )
+        return instance
+
+    @classmethod
     def create_ephemeral(
         cls,
         embedding_provider: EmbeddingProvider,

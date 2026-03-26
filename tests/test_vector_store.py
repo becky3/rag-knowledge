@@ -699,3 +699,102 @@ class TestClose:
         """EphemeralClient の close() はエラーにならないこと."""
         # ephemeral は persist_directory が空文字なので何もしない
         ephemeral_store.close()  # 例外が出なければOK
+
+
+class TestCreateHttp:
+    """VectorStore.create_http() のテスト (#406)."""
+
+    def test_create_http_sets_attributes(
+        self,
+        mock_embedding: MockEmbeddingProvider,
+    ) -> None:
+        """create_http() で属性が正しく設定されること."""
+        from unittest.mock import patch, MagicMock
+
+        mock_client = MagicMock()
+        mock_collection = MagicMock()
+        mock_client.get_or_create_collection.return_value = mock_collection
+
+        with patch("chromadb.HttpClient", return_value=mock_client):
+            store = VectorStore.create_http(
+                embedding_provider=mock_embedding,
+                host="example.com",
+                port=9000,
+                collection_name="test_col",
+            )
+
+        assert store._persist_directory == ""
+        assert store._collection_name == "test_col"
+        assert store._client is mock_client
+        assert store._collection is mock_collection
+
+    def test_create_http_default_params(
+        self,
+        mock_embedding: MockEmbeddingProvider,
+    ) -> None:
+        """create_http() のデフォルト引数が仕様通りであること."""
+        from unittest.mock import patch, MagicMock, call
+        from chromadb.config import Settings as ChromaSettings
+
+        mock_client = MagicMock()
+        mock_client.get_or_create_collection.return_value = MagicMock()
+
+        with patch("chromadb.HttpClient", return_value=mock_client) as mock_http:
+            VectorStore.create_http(embedding_provider=mock_embedding)
+
+        # デフォルト host=localhost, port=8000
+        assert mock_http.call_count == 1
+        _, kwargs = mock_http.call_args
+        assert kwargs["host"] == "localhost"
+        assert kwargs["port"] == 8000
+
+    def test_create_http_passes_anonymized_telemetry_false(
+        self,
+        mock_embedding: MockEmbeddingProvider,
+    ) -> None:
+        """create_http() がテレメトリ無効の Settings を渡すこと."""
+        from unittest.mock import patch, MagicMock
+
+        mock_client = MagicMock()
+        mock_client.get_or_create_collection.return_value = MagicMock()
+
+        with patch("chromadb.HttpClient", return_value=mock_client) as mock_http:
+            VectorStore.create_http(embedding_provider=mock_embedding)
+
+        _, kwargs = mock_http.call_args
+        settings = kwargs["settings"]
+        assert settings.anonymized_telemetry is False
+
+    def test_create_http_collection_uses_cosine(
+        self,
+        mock_embedding: MockEmbeddingProvider,
+    ) -> None:
+        """create_http() が cosine 距離のコレクションを作成すること."""
+        from unittest.mock import patch, MagicMock
+
+        mock_client = MagicMock()
+        mock_client.get_or_create_collection.return_value = MagicMock()
+
+        with patch("chromadb.HttpClient", return_value=mock_client):
+            VectorStore.create_http(embedding_provider=mock_embedding)
+
+        mock_client.get_or_create_collection.assert_called_once_with(
+            name="knowledge",
+            metadata={"hnsw:space": "cosine"},
+        )
+
+    def test_create_http_close_is_noop(
+        self,
+        mock_embedding: MockEmbeddingProvider,
+    ) -> None:
+        """HttpClient で作成した VectorStore の close() はエラーにならないこと."""
+        from unittest.mock import patch, MagicMock
+
+        mock_client = MagicMock()
+        mock_client.get_or_create_collection.return_value = MagicMock()
+
+        with patch("chromadb.HttpClient", return_value=mock_client):
+            store = VectorStore.create_http(embedding_provider=mock_embedding)
+
+        # persist_directory が空文字なので close() は noop
+        store.close()  # 例外が出なければOK

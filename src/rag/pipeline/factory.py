@@ -60,9 +60,10 @@ def build_pipeline_controller(
     embedding_provider = get_embedding_provider(settings, settings.embedding_provider)
 
     with contextlib.redirect_stdout(io.StringIO()):
-        vector_store = VectorStore(
+        vector_store = VectorStore.create_http(
             embedding_provider=embedding_provider,
-            persist_directory=settings.chromadb_persist_dir,
+            host=settings.chromadb_server_host,
+            port=settings.chromadb_server_port,
         )
         bm25_index = BM25Index(
             k1=settings.rag_bm25_k1,

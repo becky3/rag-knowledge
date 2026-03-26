@@ -63,6 +63,11 @@ class _EnvLoader(BaseSettings):
     source_store_dir: str
     converted_store_dir: str
 
+    # ChromaDB サーバー接続
+    chromadb_server_host: str = "localhost"
+    chromadb_server_port: int = Field(default=8000, ge=1, le=65535)
+    chromadb_auto_start: bool = True
+
     # トランスポート
     rag_transport: Literal["stdio", "http"]
     rag_http_host: str
@@ -104,6 +109,9 @@ class RAGSettings(BaseModel):
     bm25_persist_dir: str
     source_store_dir: str
     converted_store_dir: str
+    chromadb_server_host: str
+    chromadb_server_port: int = Field(ge=1, le=65535)
+    chromadb_auto_start: bool
     rag_transport: Literal["stdio", "http"]
     rag_http_host: str
     rag_http_port: int = Field(ge=1, le=65535)
