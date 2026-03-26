@@ -229,25 +229,6 @@ class TestWaitForReady:
         mock_process = MagicMock()
         mock_process.poll.return_value = 1
         mock_process.returncode = 1
-        mock_stderr = MagicMock()
-        mock_stderr.read.return_value = "Error: port already in use"
-        mock_process.stderr = mock_stderr
-        manager._process = mock_process
-
-        with patch(
-            "rag.infrastructure.chromadb_manager.time.monotonic",
-            side_effect=[0.0, 0.0],
-        ):
-            assert manager._wait_for_ready(timeout=30.0) is False
-
-    def test_process_exits_no_stderr(
-        self, manager: ChromaDBServerManager
-    ) -> None:
-        """プロセスが予期せず終了し stderr が None の場合."""
-        mock_process = MagicMock()
-        mock_process.poll.return_value = 1
-        mock_process.returncode = 1
-        mock_process.stderr = None
         manager._process = mock_process
 
         with patch(
@@ -315,6 +296,26 @@ class TestShutdown:
         mock_process.wait.side_effect = [
             subprocess.TimeoutExpired(cmd="chroma", timeout=5.0),
             None,
+        ]
+        manager._process = mock_process
+        manager._started_by_us = True
+
+        manager.shutdown()
+        mock_process.terminate.assert_called_once()
+        mock_process.kill.assert_called_once()
+        assert manager._process is None
+        assert manager._started_by_us is False
+
+    def test_kill_also_times_out(
+        self, manager: ChromaDBServerManager
+    ) -> None:
+        """kill 後もタイムアウトした場合、例外を握りつぶして終了する."""
+        mock_process = MagicMock()
+        mock_process.poll.return_value = None
+        mock_process.pid = 12345
+        mock_process.wait.side_effect = [
+            subprocess.TimeoutExpired(cmd="chroma", timeout=5.0),
+            subprocess.TimeoutExpired(cmd="chroma", timeout=5.0),
         ]
         manager._process = mock_process
         manager._started_by_us = True

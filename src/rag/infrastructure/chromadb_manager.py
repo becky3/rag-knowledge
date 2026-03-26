@@ -161,8 +161,15 @@ class ChromaDBServerManager:
                 _SHUTDOWN_TIMEOUT,
             )
             self._process.kill()
-            self._process.wait(timeout=_SHUTDOWN_TIMEOUT)
-            logger.info("ChromaDB server killed")
+            try:
+                self._process.wait(timeout=_SHUTDOWN_TIMEOUT)
+                logger.info("ChromaDB server killed")
+            except subprocess.TimeoutExpired:
+                logger.warning(
+                    "ChromaDB server did not exit even after kill() "
+                    "within %.0fs; giving up without further waiting",
+                    _SHUTDOWN_TIMEOUT,
+                )
 
         self._process = None
         self._started_by_us = False
@@ -187,7 +194,7 @@ class ChromaDBServerManager:
 
         popen_kwargs: dict[str, Any] = {
             "stdout": subprocess.DEVNULL,
-            "stderr": subprocess.PIPE,
+            "stderr": subprocess.DEVNULL,
             "stdin": subprocess.DEVNULL,
             "text": True,
         }
@@ -229,14 +236,10 @@ class ChromaDBServerManager:
         while time.monotonic() - start < timeout:
             # プロセスが予期せず終了していないか確認
             if self._process is not None and self._process.poll() is not None:
-                stderr_output = ""
-                if self._process.stderr:
-                    stderr_output = self._process.stderr.read()
                 logger.error(
                     "ChromaDB server process exited unexpectedly "
-                    "(code: %d): %s",
+                    "(code: %d)",
                     self._process.returncode,
-                    stderr_output[:500] if stderr_output else "(no output)",
                 )
                 return False
 
