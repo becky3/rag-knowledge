@@ -733,8 +733,7 @@ class TestCreateHttp:
         mock_embedding: MockEmbeddingProvider,
     ) -> None:
         """create_http() のデフォルト引数が仕様通りであること."""
-        from unittest.mock import patch, MagicMock, call
-        from chromadb.config import Settings as ChromaSettings
+        from unittest.mock import patch, MagicMock
 
         mock_client = MagicMock()
         mock_client.get_or_create_collection.return_value = MagicMock()
