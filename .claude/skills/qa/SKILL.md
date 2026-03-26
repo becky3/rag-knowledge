@@ -98,7 +98,7 @@ YouTube API へのアクセスにより IP ブロックのリスクがありま�
 
 1. **実データ確認**: source_store / converted_store のファイルを `ls` で確認。メタデータの確認方法は媒体により異なる:
    - **local 以外**（web, bluesky, zenn, youtube, aozora, journal）: `.meta` サイドカーファイルの内容を確認（source_type, title, collected_at）
-   - **local**: `.meta` は存在しない。metadata.db の sources テーブルで確認する（source_type, title, collected_at は DB から導出される）
+   - **local**: `.meta` は存在しない。metadata.db の sources テーブルで確認する: `sqlite3 <source_store>/metadata.db "SELECT source_id, source_type, title, collected_at FROM sources WHERE source_type='local'"`
 2. **Git 状態確認**: source_store 内の git リポジトリで `git status` を実行し、新規ファイルの追加を確認（source_store は独立した git リポジトリ）
 3. **検索確認**: `search --query <取り込み内容に関連するクエリ>` で検索し、取り込んだソースがヒットすること、メタデータ行が正しいことを確認
 
@@ -138,7 +138,7 @@ NG を検出した場合、Issue 起票を提案する。
 |---------|---------|-----|
 | A) Local | add-document（Markdown） | リポジトリの `README.md` |
 | A) Local | add-document（PDF） | `.qa/pdf_add_test.pdf` |
-| A) Local | add-document（上書き） | `README.md` を `--upload-mode replace` で再取り込み |
+| A) Local | add-document（上書き） | `README.md` を再取り込み（CLI: `--upload-mode replace` / MCP: `upload_mode="replace"`） |
 | A) Local | crawl-documents | リポジトリの `docs/specs/` ディレクトリ全体 |
 | A) Local | add-journal | `.qa/journal_add_test.md`（`--title "コンテンツ一覧取得機能の実装"` `--repository rag-knowledge`） |
 | A) Local | migrate-journal | `.qa/journals/`（古いジャーナル 10 件、`--repository rag-knowledge`） |
