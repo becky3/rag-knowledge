@@ -44,13 +44,6 @@ def ingester(source_store: SourceStore) -> LocalIngester:
 
 
 @pytest.fixture()
-def sample_file(tmp_path: Path) -> Path:
-    f = tmp_path / "sample.md"
-    f.write_text("# Test\nHello world", encoding="utf-8")
-    return f
-
-
-@pytest.fixture()
 def sample_dir(tmp_path: Path) -> Path:
     d = tmp_path / "docs"
     d.mkdir()
@@ -64,65 +57,46 @@ def sample_dir(tmp_path: Path) -> Path:
 
 
 class TestAddDocument:
-    def test_add_single_file(self, ingester: LocalIngester, sample_file: Path, source_store: SourceStore) -> None:
-        result = ingester.add_document(str(sample_file))
+    def test_add_single_file(self, ingester: LocalIngester, source_store: SourceStore) -> None:
+        data = b"# Test\nHello world"
+        result = ingester.add_document(data, "sample.md")
         assert result.placed == 1
         assert result.errors == 0
         placed = source_store.root_dir / "local" / _UPLOAD_DIR / _today_prefix() / "sample.md"
         assert placed.exists()
+        assert placed.read_bytes() == data
 
-    def test_add_nonexistent_file(self, ingester: LocalIngester) -> None:
-        result = ingester.add_document("/nonexistent/path.md")
+    def test_add_empty_data_raises_error(self, ingester: LocalIngester) -> None:
+        result = ingester.add_document(b"", "empty.md")
         assert result.errors == 1
 
-    def test_add_empty_path(self, ingester: LocalIngester) -> None:
-        result = ingester.add_document("")
-        assert result.errors == 1
+    def test_add_binary_content(self, ingester: LocalIngester, source_store: SourceStore) -> None:
+        data = b"%PDF-1.4 binary content \x00\x01\x02"
+        result = ingester.add_document(data, "doc.pdf")
+        assert result.placed == 1
+        placed = source_store.root_dir / "local" / _UPLOAD_DIR / _today_prefix() / "doc.pdf"
+        assert placed.read_bytes() == data
 
-    def test_add_unsupported_extension(self, ingester: LocalIngester, tmp_path: Path) -> None:
-        f = tmp_path / "test.xyz"
-        f.write_text("test")
-        result = ingester.add_document(str(f))
-        assert result.errors == 1
-
-    def test_add_directory_path(self, ingester: LocalIngester, tmp_path: Path) -> None:
-        d = tmp_path / "adir"
-        d.mkdir()
-        result = ingester.add_document(str(d))
-        assert result.errors == 1
-
-    def test_add_empty_file(self, ingester: LocalIngester, tmp_path: Path) -> None:
-        f = tmp_path / "empty.md"
-        f.write_text("")
-        result = ingester.add_document(str(f))
-        assert result.errors == 1
-
-    def test_add_replace_mode(self, ingester: LocalIngester, tmp_path: Path, source_store: SourceStore) -> None:
+    def test_add_replace_mode(self, ingester: LocalIngester, source_store: SourceStore) -> None:
         """replace モード: 同名ファイルを上書きできること."""
-        f = tmp_path / "overwrite.md"
-        f.write_text("v1", encoding="utf-8")
-        ingester.add_document(str(f), upload_mode="replace")
-        f.write_text("v2", encoding="utf-8")
-        result = ingester.add_document(str(f), upload_mode="replace")
+        ingester.add_document(b"v1", "overwrite.md", upload_mode="replace")
+        result = ingester.add_document(b"v2", "overwrite.md", upload_mode="replace")
         assert result.placed == 1
         placed = source_store.root_dir / "local" / _UPLOAD_DIR / _today_prefix() / "overwrite.md"
-        assert placed.read_text(encoding="utf-8") == "v2"
+        assert placed.read_bytes() == b"v2"
 
-    def test_add_fail_mode_duplicate(self, ingester: LocalIngester, tmp_path: Path) -> None:
+    def test_add_fail_mode_duplicate(self, ingester: LocalIngester) -> None:
         """fail モード（デフォルト）: 同名ファイルが既にある場合にエラーになること."""
-        f = tmp_path / "dup.md"
-        f.write_text("first", encoding="utf-8")
-        result1 = ingester.add_document(str(f))
+        result1 = ingester.add_document(b"first", "dup.md")
         assert result1.placed == 1
 
-        f.write_text("second", encoding="utf-8")
-        result2 = ingester.add_document(str(f))
+        result2 = ingester.add_document(b"second", "dup.md")
         assert result2.placed == 0
         assert result2.errors == 1
         assert "同名ファイル" in result2.error_details[0]
 
-    def test_no_meta_for_local(self, ingester: LocalIngester, sample_file: Path, source_store: SourceStore) -> None:
-        ingester.add_document(str(sample_file))
+    def test_no_meta_for_local(self, ingester: LocalIngester, source_store: SourceStore) -> None:
+        ingester.add_document(b"# Test", "sample.md")
         meta = source_store.root_dir / "local" / _UPLOAD_DIR / _today_prefix() / "sample.md.meta"
         assert not meta.exists()
 
@@ -205,9 +179,9 @@ class TestCrawlDocuments:
 class TestUploadPath:
     """アップロードパスの構造テスト."""
 
-    def test_upload_path_structure(self, ingester: LocalIngester, sample_file: Path, source_store: SourceStore) -> None:
-        """MCP 経由のファイルが .upload/yyyy/MM/dd/ に配置されること."""
-        ingester.add_document(str(sample_file))
+    def test_upload_path_structure(self, ingester: LocalIngester, source_store: SourceStore) -> None:
+        """ファイルが .upload/yyyy/MM/dd/ に配置されること."""
+        ingester.add_document(b"# Test content", "sample.md")
         upload_base = source_store.root_dir / "local" / _UPLOAD_DIR
         assert upload_base.exists()
         # 日付ディレクトリの存在確認（_FIXED_DATE で固定）
@@ -216,34 +190,22 @@ class TestUploadPath:
         assert (date_dir / "sample.md").exists()
 
 
-class TestHttpModeRestriction:
-    def test_http_mode_no_allowed_dirs(self, source_store: SourceStore, tmp_path: Path) -> None:
+class TestCrawlHttpModeRestriction:
+    """crawl_documents の HTTP モード制限テスト."""
+
+    def test_crawl_http_mode_no_allowed_dirs(self, source_store: SourceStore, sample_dir: Path) -> None:
         ingester = LocalIngester(source_store, http_mode_enabled=True, allowed_dirs=[])
-        f = tmp_path / "test.md"
-        f.write_text("test content")
-        result = ingester.add_document(str(f))
+        result = ingester.crawl_documents(str(sample_dir))
         assert result.errors == 1
 
-    def test_http_mode_allowed_dir(self, source_store: SourceStore, tmp_path: Path) -> None:
-        allowed = tmp_path / "allowed"
-        allowed.mkdir()
-        f = allowed / "test.md"
-        f.write_text("test content")
-        ingester = LocalIngester(source_store, http_mode_enabled=True, allowed_dirs=[str(allowed)])
-        result = ingester.add_document(str(f))
-        assert result.placed == 1
+    def test_crawl_http_mode_allowed_dir(self, source_store: SourceStore, sample_dir: Path) -> None:
+        ingester = LocalIngester(source_store, http_mode_enabled=True, allowed_dirs=[str(sample_dir)])
+        result = ingester.crawl_documents(str(sample_dir))
+        assert result.placed > 0
 
-    def test_http_mode_denied_dir(self, source_store: SourceStore, tmp_path: Path) -> None:
-        allowed = tmp_path / "allowed"
+    def test_crawl_http_mode_denied_dir(self, source_store: SourceStore, tmp_path: Path, sample_dir: Path) -> None:
+        allowed = tmp_path / "allowed_other"
         allowed.mkdir()
-        denied = tmp_path / "denied"
-        denied.mkdir()
-        f = denied / "test.md"
-        f.write_text("test content")
         ingester = LocalIngester(source_store, http_mode_enabled=True, allowed_dirs=[str(allowed)])
-        result = ingester.add_document(str(f))
+        result = ingester.crawl_documents(str(sample_dir))
         assert result.errors == 1
-
-    def test_stdio_mode_no_restriction(self, ingester: LocalIngester, sample_file: Path) -> None:
-        result = ingester.add_document(str(sample_file))
-        assert result.placed == 1

@@ -413,7 +413,7 @@ def main() -> None:
     # add-journal: 単一ジャーナルエントリの登録
     aj_parser = subparsers.add_parser("add-journal", help="ジャーナルエントリをナレッジベースに登録")
     aj_parser.add_argument("--title", "-t", required=True, help="エントリタイトル")
-    aj_parser.add_argument("--body", "-b", required=True, help="本文（Markdown）。@ファイルパス で本文をファイルから読み込み")
+    aj_parser.add_argument("--file", "-f", required=True, help="本文 Markdown ファイルのパス。CLI がファイルを読み込んでコンテンツをインジェスターに渡す")
     aj_parser.add_argument("--repository", "-r", required=True, help="リポジトリ名")
     aj_parser.add_argument("--entry-id", "-e", default=None, help="エントリ識別子（省略時は自動生成）")
 
@@ -1387,7 +1387,7 @@ async def run_add_journal(args: argparse.Namespace) -> None:
     """単一ジャーナルエントリを登録する.
 
     Args:
-        args: コマンドライン引数（--title, --body, --repository, --entry-id）
+        args: コマンドライン引数（--title, --file, --repository, --entry-id）
     """
     from .pipeline.ingesters.journal import JournalIngester
 
@@ -1395,14 +1395,12 @@ async def run_add_journal(args: argparse.Namespace) -> None:
 
     ingester = JournalIngester(controller.source_store)
 
-    # --body が @ファイルパス の場合、ファイルから読み込む
-    body = args.body
-    if body.startswith("@"):
-        file_path = Path(body[1:])
-        if not file_path.is_file():
-            print(f"エラー: ファイルが見つかりません: {file_path}", file=sys.stderr)
-            raise SystemExit(1)
-        body = file_path.read_text(encoding="utf-8")
+    # --file で指定したファイルを読み込む
+    file_path = Path(args.file)
+    if not file_path.is_file():
+        print(f"エラー: ファイルが見つかりません: {file_path}", file=sys.stderr)
+        raise SystemExit(1)
+    body = file_path.read_text(encoding="utf-8")
 
     ingest_result = ingester.add_entry(
         title=args.title,
@@ -1884,28 +1882,47 @@ async def run_add_document(args: argparse.Namespace) -> None:
     controller, settings = _build_cli_pipeline_controller()
 
     supported_extensions = [
-        ext.strip() if ext.strip().startswith(".") else f".{ext.strip()}"
+        (ext.strip() if ext.strip().startswith(".") else f".{ext.strip()}").lower()
         for ext in settings.rag_document_supported_extensions.split(",")
         if ext.strip()
     ]
+
+    # CLI でのバリデーション: パス → バイト列取得
+    file_path_str = args.file_path
+    if not file_path_str or not file_path_str.strip():
+        print("エラー: file_path が空です", file=sys.stderr)
+        raise SystemExit(1)
+    resolved = Path(file_path_str.strip()).resolve()
+    if not resolved.exists():
+        print(f"エラー: ファイルが見つかりません: {resolved}", file=sys.stderr)
+        raise SystemExit(1)
+    if resolved.is_dir():
+        print(f"エラー: パスはファイルではなくディレクトリです: {resolved}", file=sys.stderr)
+        raise SystemExit(1)
+    ext = resolved.suffix.lower()
+    if ext not in supported_extensions:
+        print(f"エラー: 対応していないファイル形式です: {ext!r}（対応: {', '.join(supported_extensions)}）", file=sys.stderr)
+        raise SystemExit(1)
+    data = resolved.read_bytes()
+
     local_ingester = LocalIngester(
         controller.source_store,
         supported_extensions=supported_extensions,
     )
 
     ingest_result = local_ingester.add_document(
-        args.file_path, upload_mode=args.upload_mode,
+        data, resolved.name, upload_mode=args.upload_mode,
     )
 
     if ingest_result.placed == 0 and ingest_result.errors == 0:
-        print(f"取り込み対象がありませんでした: {args.file_path}")
+        print(f"取り込み対象がありませんでした: {file_path_str}")
         return
     if ingest_result.errors > 0:
         print(f"エラー: {ingest_result.error_details[0]}", file=sys.stderr)
         raise SystemExit(1)
 
-    pipeline_summary = controller.ingest_and_index(f"ingest(local): add {args.file_path}")
-    _print_ingest_result(ingest_result, pipeline_summary, context=args.file_path)
+    pipeline_summary = controller.ingest_and_index(f"ingest(local): add {resolved.name}")
+    _print_ingest_result(ingest_result, pipeline_summary, context=file_path_str)
 
 
 async def run_crawl_documents(args: argparse.Namespace) -> None:
@@ -1915,7 +1932,7 @@ async def run_crawl_documents(args: argparse.Namespace) -> None:
     controller, settings = _build_cli_pipeline_controller()
 
     supported_extensions = [
-        ext.strip() if ext.strip().startswith(".") else f".{ext.strip()}"
+        (ext.strip() if ext.strip().startswith(".") else f".{ext.strip()}").lower()
         for ext in settings.rag_document_supported_extensions.split(",")
         if ext.strip()
     ]

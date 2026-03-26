@@ -124,17 +124,13 @@ YouTube インジェスターは非公式 API（youtube-transcript-api）を使�
 ### 単一エントリ登録
 
 ```bash
-# インライン本文
-uv run python -m rag.cli add-journal --title "セッション記録" --body "本文..." --repository rag-knowledge
-
-# ファイルから本文読み込み（長文推奨）
-uv run python -m rag.cli add-journal --title "セッション記録" --body @path/to/journal.md --repository rag-knowledge
+uv run python -m rag.cli add-journal --title "セッション記録" --file path/to/journal.md --repository rag-knowledge
 ```
 
 | パラメータ | 短縮 | 必須 | 説明 |
 |-----------|------|------|------|
 | `--title` | `-t` | Yes | エントリタイトル |
-| `--body` | `-b` | Yes | 本文（Markdown）。`@ファイルパス` でファイルから読み込み |
+| `--file` | `-f` | Yes | 本文 Markdown ファイルのパス。CLI がファイルを読み込んでコンテンツをインジェスターに渡す |
 | `--repository` | `-r` | Yes | リポジトリ名 |
 | `--entry-id` | `-e` | No | エントリ識別子（省略時は自動生成） |
 

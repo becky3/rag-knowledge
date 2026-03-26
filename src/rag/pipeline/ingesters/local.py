@@ -40,35 +40,38 @@ class LocalIngester:
 
     def add_document(
         self,
-        file_path: str,
+        data: bytes,
+        filename: str,
         *,
         upload_mode: UploadMode = "fail",
     ) -> IngestResult:
-        """単一ドキュメントファイルを source_store に配置する.
+        """単一ドキュメントのバイト列を source_store に配置する.
 
         Args:
-            file_path: 取り込み対象ファイルのパス
+            data: ファイルのバイト列（MCP 経由はデコード済み、CLI 経由は直接読み込み）
+            filename: 配置先命名に使用するファイル名（サニタイズ済みであること）
             upload_mode: 同名ファイル存在時の動作
                 ``fail`` — エラー（デフォルト）、``replace`` — 上書き
         """
         result = IngestResult()
         try:
-            resolved = self._validate_single_file(file_path)
-            rel_path = self._upload_rel_path(resolved.name)
+            if len(data) == 0:
+                raise ValueError(f"ファイルが空です (0 バイト): {filename}")
+
+            rel_path = self._upload_rel_path(filename)
 
             if upload_mode == "fail" and self._file_exists(rel_path):
                 raise ValueError(
                     f"同名ファイルが既に存在します: {rel_path}"
                 )
 
-            data = resolved.read_bytes()
             self._store.place_file(source_type="local", data=data, rel_path=rel_path)
             result.placed = 1
         except ValueError as e:
             result.errors = 1
             result.error_details.append(str(e))
         except OSError as e:
-            logger.exception("Failed to copy file: %s", file_path)
+            logger.exception("Failed to place file: %s", filename)
             result.errors = 1
             result.error_details.append(str(e))
         return result
