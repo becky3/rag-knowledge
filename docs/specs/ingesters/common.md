@@ -145,6 +145,7 @@ flowchart TB
         BING["BlueskyIngester"]
         AING["AozoraIngester"]
         DING["LocalIngester"]
+        JING["JournalIngester"]
     end
 
     subgraph Safety["制約付き中間ライブラリ (py-common-lib)"]
