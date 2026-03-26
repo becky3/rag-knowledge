@@ -178,8 +178,8 @@ def _build_rag_service() -> RAGKnowledgeService:
 
     with contextlib.redirect_stdout(io.StringIO()):
         # HttpClient で ChromaDB サーバーに接続。
-        # chromadb_persist_dir はサーバー側の永続化パス（chroma run --path）で使用。
-        # auto_start による自動起動は #407 で実装予定。
+        # ChromaDB サーバーの起動確保は _configure_and_run() の
+        # ChromaDBServerManager.ensure_server_running() で実施済み。
         vector_store = VectorStore.create_http(
             embedding_provider=embedding_provider,
             host=settings.chromadb_server_host,
@@ -2486,6 +2486,21 @@ async def upload_journal(request: Request) -> Response:
 def _configure_and_run() -> None:
     """トランスポート設定に基づいて MCP サーバーを起動する."""
     settings = get_settings()
+
+    # ChromaDB サーバーの起動確保（グレースフルデグレード: 失敗しても MCP は稼働継続）
+    import atexit
+
+    from .infrastructure.chromadb_manager import ChromaDBServerManager
+
+    chromadb_manager = ChromaDBServerManager(
+        host=settings.chromadb_server_host,
+        port=settings.chromadb_server_port,
+        persist_dir=settings.chromadb_persist_dir,
+        auto_start=settings.chromadb_auto_start,
+    )
+    chromadb_manager.ensure_server_running()
+    atexit.register(chromadb_manager.shutdown)
+
     transport = settings.rag_transport
 
     if transport == "http":

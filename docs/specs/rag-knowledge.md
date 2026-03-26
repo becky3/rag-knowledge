@@ -247,8 +247,6 @@ flowchart TB
 
 ### ChromaDB client/server 構成
 
-> **TODO:#406** VectorStore HttpClient 化、**TODO:#407** ChromaDB Server Manager 実装
-
 ChromaDB は `chroma run` によるサーバーモードで動作し、MCP サーバー・CLI の両方が `HttpClient` で接続する。これにより、`PersistentClient` の単一プロセス制約を解消し、MCP と CLI の同時アクセスを可能にする。
 
 | 項目 | 仕様 |
@@ -443,6 +441,7 @@ flowchart LR
 | ConstrainedClient (py-common-lib) | 全外部 HTTP リクエストのゲートウェイ。ハードリミット・バジェット・サーキットブレーカーを統合し、httpx.AsyncClient をラップする |
 | BudgetTracker (py-common-lib) | 操作あたりのリクエスト総数を追跡し、上限到達で BudgetExhaustedError を送出する |
 | CircuitBreaker (py-common-lib) | 連続失敗回数を監視し、閾値超過で CircuitBreakerOpenError を送出する |
+| ChromaDB Server Manager | MCP サーバー起動時に ChromaDB サーバーのヘルスチェック・自動起動を行う。グレースフルデグレードにより起動失敗時も MCP は稼働継続する |
 | 評価ツール | Precision、Recall、F1、NDCG、MRR の計算とベースライン比較 |
 
 ## 外部連携
@@ -477,6 +476,7 @@ flowchart LR
 | 設定値がハードリミット超過 | ハードリミット値にクランプし、警告ログを出力する |
 | AsciiDoc デリミタブロックが閉じられていない | ファイル末尾までをブロック内とみなし、ブロック内での見出し分割を行わない |
 | ネストしたデリミタブロック（AsciiDoc モード） | AsciiDoc 仕様に従い、同一種類のデリミタはネスト不可。最初の閉じデリミタで終了する |
+| ChromaDB サーバー自動起動失敗（chroma コマンド未検出・起動タイムアウト・プロセス異常終了） | 警告ログを出力し、MCP サーバーは稼働を継続する（グレースフルデグレード）。ツール呼び出し時に接続エラーを返す |
 | ChromaDB サーバーがダウンしている状態でのツール呼び出し | 接続エラーを検出し、エラーメッセージを返す。MCP サーバー自体は稼働を継続する |
 
 ## 関連ドキュメント
