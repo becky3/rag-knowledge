@@ -25,7 +25,8 @@
 
 ## 制約
 
-- **ソース単位の返却**: チャンク単位ではなくソース単位で返却する。1ソース = 1エントリとして title、source_id、collected_at 等のメタデータを返す
+- **ソース単位の返却**: チャンク単位ではなくソース単位で返却する。1ソース = 1エントリとして title、source_id、collected_at、file_size のメタデータを返す
+- **データソースの限定**: 全データを MetadataDB から取得する。VectorStore や BM25 インデックスへの追加クエリは発行しない
 - **source_type 必須**: `source_type` パラメータは必須とする。全 source_type 横断の一覧取得は提供しない
 - **ソート基準の固定**: `collected_at` 降順でソートする。ソート基準の切り替えは提供しない
 - **論理削除済みソースの除外**: `status` が `deleted` のソースは一覧に含めない
@@ -63,7 +64,7 @@
 バリデーション:
 
 - `source_type` が有効値でない場合、エラーメッセージを返す（有効値の一覧を含める）
-- `limit` が 1 未満の場合、エラーメッセージを返す
+- `limit` が 1 未満または 100 を超える場合、エラーメッセージを返す
 
 出力:
 
@@ -75,18 +76,21 @@ source_type: web（5件 / 全80件）
 1. Sample Documentation Site
    Source: https://example.com/docs
    Collected: 2025-06-15T10:30:00+09:00
-   Chunks: 15
+   Size: 45.2 KB
 
 2. Another Page Title
    Source: https://example.com/guide
    Collected: 2025-06-14T08:00:00+09:00
-   Chunks: 8
+   Size: 12.8 KB
 ```
 
 - ヘッダー行: `source_type: {type}（{表示件数}件 / 全{該当source_typeの総件数}件）`
-- 各エントリ: 番号付きリスト。タイトル、source_id、collected_at、チャンク数を表示
+  - 総件数: MetadataDB の `sources` テーブルに対して同一 `source_type` + `status = 'active'` 条件の `COUNT(*)` で取得する
+- 各エントリ: 番号付きリスト。タイトル、source_id、collected_at、ファイルサイズを表示
+  - ファイルサイズ: MetadataDB の `file_size` カラムから取得する。人間が読みやすい単位（KB / MB）でフォーマットする
 - 該当するソースが0件の場合: `source_type: {type}（0件 / 全0件）`
 - Source の値形式は source_type によって異なる（URL、AT URI、ファイルパス等。詳細は [source-store.md](../source-store.md) の source_id 決定方式を参照）
+- クエリコスト: 一覧取得 1 クエリ + 総件数 COUNT 1 クエリの最大 2 クエリで完結する。全データは MetadataDB から取得し、VectorStore への追加クエリは発行しない
 
 ### CLI サブコマンド
 
@@ -126,7 +130,7 @@ flowchart TD
     VALIDATE -->|不正| ERROR["エラー返却"]
     VALIDATE -->|正常| SERVICE
     SERVICE --> METADB
-    METADB -->|"source_type フィルタ + collected_at DESC（現DB: created_at）"| SERVICE
+    METADB -->|"source_type フィルタ + collected_at DESC + COUNT（現DB: created_at）"| SERVICE
     SERVICE --> FORMAT
     FORMAT --> RESPONSE
 ```
@@ -134,10 +138,12 @@ flowchart TD
 ### データ取得フロー
 
 1. MCP ツールまたは CLI からパラメータを受け取る
-2. `source_type` と `limit` のバリデーションを実行する
+2. `source_type` と `limit` のバリデーションを実行する（1〜100 の範囲チェック含む）
 3. `RAGKnowledgeService` の共通関数を呼び出す
-4. `MetadataDB` から `source_type` でフィルタし、`collected_at` 降順で `limit` 件取得する（現在の DB スキーマでは `created_at` カラムでソート。カラム名の `collected_at` への統一は別途対応予定）
-5. 結果をテキスト形式にフォーマットして返却する
+4. `MetadataDB` から以下の 2 クエリを発行する:
+   - 一覧取得: `source_type` + `status = 'active'` でフィルタし、`collected_at` 降順で `limit` 件取得（現在の DB スキーマでは `created_at` カラムでソート。カラム名の `collected_at` への統一は別途対応予定）
+   - 総件数取得: 同条件の `COUNT(*)` で該当 source_type の全件数を取得
+5. 結果をテキスト形式にフォーマットして返却する（file_size は人間が読みやすい単位に変換）
 
 ### 関連ファイル
 
@@ -157,7 +163,7 @@ flowchart TD
 | 指定 source_type のソースが0件 | `source_type: {type}（0件 / 全0件）` を返す |
 | limit が該当ソース件数より大きい | 全件返却する（エラーにはしない） |
 | 無効な source_type を指定 | エラーメッセージを返す（有効値の一覧を含める） |
-| limit に 0 以下を指定 | エラーメッセージを返す |
+| limit に 0 以下または 101 以上を指定 | エラーメッセージを返す |
 | 論理削除済みソースが存在 | 一覧に含めない（`status = 'active'` のみ対象） |
 | `collected_at` が同一の複数ソース | ソート順序は不定（同一タイムスタンプ内の順序は保証しない） |
 
