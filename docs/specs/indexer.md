@@ -347,7 +347,7 @@ BM25 のトークナイズには日本語形態素解析（fugashi）を使用�
 
 | 連携先 | 用途 | 接続方式 |
 |--------|------|---------|
-| ChromaDB | ベクトルの永続化・類似度検索 | 組み込みモード（PersistentClient） |
+| ChromaDB | ベクトルの永続化・類似度検索 | HttpClient（ChromaDB サーバーに接続）。接続先設定は [rag-knowledge.md](rag-knowledge.md) の「ChromaDB サーバー設定」を参照 |
 | LM Studio | ローカル Embedding 生成 | OpenAI 互換 API（localhost） |
 | OpenAI Embeddings API | オンライン Embedding 生成 | OpenAI SDK 経由の REST API |
 
@@ -359,7 +359,7 @@ Embedding プロバイダーの接続は OpenAI SDK を使用する。OpenAI SDK
 |--------|---------|
 | converted_store のファイルが空の場合 | チャンクが生成されないため、インデックスへの追加をスキップする。既存チャンクがあれば削除する |
 | Embedding プロバイダーが接続不可の場合 | 処理開始前の疎通確認で検出し、エラーを返す。パイプライン制御にエラーを伝播する |
-| ChromaDB の永続化ディレクトリが存在しない場合 | ChromaDB の PersistentClient が自動作成する |
+| ChromaDB サーバーに接続できない場合 | 処理開始前の疎通確認で検出し、エラーを返す。パイプライン制御にエラーを伝播する |
 | BM25 インデックスの永続化ファイルが破損した場合 | 空インデックスで起動する（フェイルセーフ）。次回のインデックス操作で再構築される |
 | チャンク数が大幅に変わった場合（例: 10 → 2） | stale チャンク削除で旧チャンク（ID 2〜9）を削除し、新チャンク（ID 0〜1）を upsert する |
 | metadata.db に対応するレコードがない場合 | 警告ログを出力し、ファイルパスから導出可能な情報（source_type）でメタデータを補完する。タイトルはファイル名から導出する |
