@@ -41,6 +41,7 @@ TEST_SETTINGS_DEFAULTS: dict[str, object] = {
     "rag_url_safety_cache_ttl": 300,
     "rag_url_safety_timeout": 5.0,
     "rag_stats_max_sources": 100,
+    "rag_list_recent_limit": 20,
     "rag_zenn_max_articles": 50,
     "rag_zenn_request_timeout": 30,
     "rag_zenn_request_interval": 1.0,

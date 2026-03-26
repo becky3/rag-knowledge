@@ -67,6 +67,72 @@ class RegressionInfo(TypedDict):
 logger = logging.getLogger(__name__)
 
 
+# --- JSON 出力ヘルパー ---
+# worker.py の JSON Lines プロトコルと互換のフォーマットで出力する。
+# 仕様: docs/specs/rag-knowledge.md (MCP 薄層アダプターパターン)
+
+
+def _output_json(data: dict[str, object]) -> None:
+    """JSON Lines 形式で 1 行出力する."""
+    print(json.dumps(data, ensure_ascii=False), flush=True)
+
+
+def _output_progress(processed: int, total: int, current: str) -> None:
+    """進捗 JSON を出力する."""
+    _output_json({"type": "progress", "processed": processed, "total": total, "current": current})
+
+
+def _output_error(message: str) -> None:
+    """エラー JSON を出力し、exit code 1 で終了する."""
+    _output_json({"type": "error", "error": True, "message": message})
+    sys.exit(1)
+
+
+def _output_result(data: dict[str, object]) -> None:
+    """結果 JSON を出力する."""
+    payload: dict[str, object] = {**data, "type": "result"}
+    _output_json(payload)
+
+
+def _is_json_output(args: argparse.Namespace) -> bool:
+    """--output json が指定されているかを判定する."""
+    return getattr(args, "output_format", "text") == "json"
+
+
+def _ingest_result_to_dict(
+    ingest_result: "IngestResult",
+    pipeline_summary: "PipelineSummary | None",
+) -> dict[str, object]:
+    """IngestResult + PipelineSummary を JSON 出力用 dict に変換する."""
+    data: dict[str, object] = {
+        "placed": ingest_result.placed,
+        "skipped": ingest_result.skipped,
+        "overwritten": ingest_result.overwritten,
+        "errors": ingest_result.errors,
+        "error_details": ingest_result.error_details,
+    }
+    if pipeline_summary is not None:
+        data["pipeline"] = {
+            "mode": pipeline_summary.mode.value,
+            "total_files": pipeline_summary.total_files,
+            "processed": pipeline_summary.processed,
+            "skipped": pipeline_summary.skipped,
+            "errors": pipeline_summary.errors,
+        }
+    return data
+
+
+def _add_output_option(parser: argparse.ArgumentParser) -> None:
+    """サブコマンドパーサーに --output オプションを追加する."""
+    parser.add_argument(
+        "--output",
+        dest="output_format",
+        choices=["text", "json"],
+        default="text",
+        help="出力フォーマット（text/json、デフォルト: text）",
+    )
+
+
 def _validate_bm25_k1(value: str) -> float:
     try:
         f = float(value)
@@ -300,6 +366,7 @@ def main() -> None:
         default=None,
         help="対象媒体フィルタ（incremental では指定不可）",
     )
+    _add_output_option(rebuild_parser)
     # stats サブコマンド
     subparsers.add_parser("stats", help="ナレッジベースの統計情報を表示")
 
@@ -357,33 +424,39 @@ def main() -> None:
     # delete サブコマンド
     delete_parser = subparsers.add_parser("delete", help="ソースをナレッジベースから論理削除")
     delete_parser.add_argument("source_id", help="削除するソース識別子（source_id）")
+    _add_output_option(delete_parser)
 
     # --- インジェスト系サブコマンド ---
 
     # add: 単一ページ取り込み
     add_parser = subparsers.add_parser("add", help="単一ページをナレッジベースに取り込む")
     add_parser.add_argument("url", help="取り込むページのURL")
+    _add_output_option(add_parser)
 
     # crawl: リンク集クロール
     crawl_parser = subparsers.add_parser("crawl", help="リンク集ページからクロール＆一括取り込み")
     crawl_parser.add_argument("url", help="リンク集ページのURL")
     crawl_parser.add_argument("--pattern", default="", help="URLフィルタリング用の正規表現パターン（depth >= 2 の場合は必須）")
     crawl_parser.add_argument("--depth", type=int, default=None, help="クロール深度（1〜10。未指定時は設定値を使用）")
+    _add_output_option(crawl_parser)
 
     # ingest-youtube: YouTube 単一動画取り込み
     yt_parser = subparsers.add_parser("ingest-youtube", help="YouTube 動画を取り込み")
     yt_parser.add_argument("video_url", help="YouTube 動画 URL")
+    _add_output_option(yt_parser)
 
     # ingest-youtube-playlist: YouTube プレイリスト一括取り込み
     ytpl_parser = subparsers.add_parser("ingest-youtube-playlist", help="YouTube プレイリストを一括取り込み")
     ytpl_parser.add_argument("playlist_url", help="YouTube プレイリスト URL")
     ytpl_parser.add_argument("--max-videos", type=int, default=None, help="取得する最大動画数")
+    _add_output_option(ytpl_parser)
 
     # crawl-bluesky: BlueSky 取り込み
     bs_parser = subparsers.add_parser("crawl-bluesky", help="BlueSky 投稿を一括取り込み")
     bs_parser.add_argument("handle", help="BlueSky ハンドル（例: user.bsky.social）")
     bs_parser.add_argument("--max-posts", type=int, default=None, help="取得する最大投稿数")
     bs_parser.add_argument("--include-reposts", action="store_true", default=None, help="リポストを含める")
+    _add_output_option(bs_parser)
 
     # crawl-zenn: Zenn 取り込み
     zenn_parser = subparsers.add_parser("crawl-zenn", help="Zenn コンテンツを一括取り込み")
@@ -391,17 +464,20 @@ def main() -> None:
     zenn_parser.add_argument("--max-articles", type=int, default=None, help="取得する最大コンテンツ数")
     zenn_parser.add_argument("--content-type", choices=["articles", "scraps", "all"], default="all", help="取得対象")
     zenn_parser.add_argument("--force", action="store_true", default=False, help="既存ファイルを上書きする（デフォルト: スキップ）")
+    _add_output_option(zenn_parser)
 
     # add-document: 単一ドキュメント取り込み
     adddoc_parser = subparsers.add_parser("add-document", help="ドキュメントファイルをナレッジベースに取り込む")
     adddoc_parser.add_argument("file_path", help="取り込み対象ファイルのパス")
     adddoc_parser.add_argument("--upload-mode", choices=["fail", "replace"], default="fail", help="同名ファイル存在時の動作")
+    _add_output_option(adddoc_parser)
 
     # crawl-documents: ディレクトリ一括取り込み
     crawldoc_parser = subparsers.add_parser("crawl-documents", help="ディレクトリ内ドキュメントを一括取り込み")
     crawldoc_parser.add_argument("dir_path", help="取り込み対象ディレクトリのパス")
     crawldoc_parser.add_argument("--pattern", default="**/*", help="glob パターン")
     crawldoc_parser.add_argument("--upload-mode", choices=["fail", "replace"], default="fail", help="同名ファイル存在時の動作")
+    _add_output_option(crawldoc_parser)
 
     # site-ingest: Scrapy によるサイト一括取り込み
     siteingest_parser = subparsers.add_parser("site-ingest", help="Scrapy でサイトを一括取り込み（大規模サイト向け）")
@@ -417,7 +493,8 @@ def main() -> None:
     )
 
     # update-aozora-catalog: 青空文庫カタログ更新
-    subparsers.add_parser("update-aozora-catalog", help="青空文庫カタログを更新")
+    update_aozora_parser = subparsers.add_parser("update-aozora-catalog", help="青空文庫カタログを更新")
+    _add_output_option(update_aozora_parser)
 
     # search-aozora: 青空文庫カタログ検索
     search_aozora_parser = subparsers.add_parser("search-aozora", help="青空文庫カタログを検索")
@@ -428,11 +505,13 @@ def main() -> None:
     # ingest-aozora: 青空文庫作品取り込み
     ingest_aozora_parser = subparsers.add_parser("ingest-aozora", help="青空文庫の作品を取り込み")
     ingest_aozora_parser.add_argument("book_id", help="青空文庫の作品 ID")
+    _add_output_option(ingest_aozora_parser)
 
     # ingest-aozora-author: 青空文庫著者一括取り込み
     ingest_aozora_author_parser = subparsers.add_parser("ingest-aozora-author", help="青空文庫の著者作品を一括取り込み")
     ingest_aozora_author_parser.add_argument("person_id", help="著者の人物 ID（search-aozora で確認）")
     ingest_aozora_author_parser.add_argument("--max-works", type=int, default=None, help="取得する最大作品数")
+    _add_output_option(ingest_aozora_author_parser)
 
     # add-journal: 単一ジャーナルエントリの登録
     aj_parser = subparsers.add_parser("add-journal", help="ジャーナルエントリをナレッジベースに登録")
@@ -440,6 +519,7 @@ def main() -> None:
     aj_parser.add_argument("--file", "-f", required=True, help="本文 Markdown ファイルのパス。CLI がファイルを読み込んでコンテンツをインジェスターに渡す")
     aj_parser.add_argument("--repository", "-r", required=True, help="リポジトリ名")
     aj_parser.add_argument("--entry-id", "-e", default=None, help="エントリ識別子（省略時は自動生成）")
+    _add_output_option(aj_parser)
 
     # migrate-journal: 既存ジャーナルファイルの一括取り込み
     mj_parser = subparsers.add_parser("migrate-journal", help="既存ジャーナルファイルを source_store に一括配置")
@@ -1104,11 +1184,15 @@ def run_rebuild(args: argparse.Namespace) -> None:
     from .pipeline.factory import build_pipeline_controller
     from .store.models import SourceType
 
+    json_out = _is_json_output(args)
+
     mode: str = args.mode
     source_type: SourceType | None = args.source_type
 
     # incremental + source_type のバリデーション
     if mode == "incremental" and source_type is not None:
+        if json_out:
+            _output_error("incremental モードでは source_type を指定できません")
         logger.error(
             "incremental モードでは source_type を指定できません"
         )
@@ -1117,14 +1201,21 @@ def run_rebuild(args: argparse.Namespace) -> None:
     settings = get_settings()
 
     if not settings.source_store_dir:
+        if json_out:
+            _output_error("SOURCE_STORE_DIR が設定されていません")
         logger.error("SOURCE_STORE_DIR が設定されていません")
         sys.exit(1)
     if not settings.converted_store_dir:
+        if json_out:
+            _output_error("CONVERTED_STORE_DIR が設定されていません")
         logger.error("CONVERTED_STORE_DIR が設定されていません")
         sys.exit(1)
 
     source_store_dir = Path(settings.source_store_dir)
     if not source_store_dir.exists():
+        msg = f"source_store ディレクトリが存在しません: {source_store_dir}"
+        if json_out:
+            _output_error(msg)
         logger.error(
             "source_store ディレクトリが存在しません: %s", source_store_dir,
         )
@@ -1138,22 +1229,40 @@ def run_rebuild(args: argparse.Namespace) -> None:
 
     start = time.monotonic()
 
+    progress_cb = _output_progress if json_out else None
+
     if mode == "full":
         summary = controller.run_full_rebuild(
             source_type=source_type,
+            progress_callback=progress_cb,
         )
     elif mode == "convert":
         summary = controller.run_convert_only(
             source_type=source_type,
+            progress_callback=progress_cb,
         )
     elif mode == "index":
         summary = controller.run_index_only(
             source_type=source_type,
+            progress_callback=progress_cb,
         )
     else:
-        summary = controller.run_incremental()
+        summary = controller.run_incremental(
+            progress_callback=progress_cb,
+        )
 
     elapsed = time.monotonic() - start
+
+    if json_out:
+        _output_result({
+            "mode": summary.mode.value,
+            "total_files": summary.total_files,
+            "processed": summary.processed,
+            "skipped": summary.skipped,
+            "errors": summary.errors,
+            "elapsed": round(elapsed, 1),
+        })
+        return
 
     logger.info(
         "再構築完了: %d 処理 / %d スキップ / %d エラー / %.1f 秒",
@@ -1398,12 +1507,17 @@ def run_delete(args: argparse.Namespace) -> None:
     Args:
         args: コマンドライン引数
     """
+    json_out = _is_json_output(args)
+
     controller, _settings = _build_cli_pipeline_controller()
     source_id: str = args.source_id
 
     try:
         controller.source_store.remove_file(source_id)
     except KeyError:
+        if json_out:
+            _output_result({"deleted": False, "not_found": True})
+            return
         print(f"該当するソースが見つかりませんでした: {source_id}", file=sys.stderr)
         sys.exit(1)
 
@@ -1411,11 +1525,26 @@ def run_delete(args: argparse.Namespace) -> None:
         summary = controller.ingest_and_index(f"delete: {source_id}")
     except Exception:
         logger.exception("削除パイプライン実行に失敗: %s", source_id)
+        if json_out:
+            _output_error(f"削除に失敗しました: {source_id}")
         print(
             f"エラー: 削除に失敗しました: {source_id}",
             file=sys.stderr,
         )
         sys.exit(1)
+
+    if json_out:
+        _output_result({
+            "deleted": True,
+            "pipeline": {
+                "mode": summary.mode.value,
+                "total_files": summary.total_files,
+                "processed": summary.processed,
+                "skipped": summary.skipped,
+                "errors": summary.errors,
+            },
+        })
+        return
 
     if summary.errors:
         print(f"警告: パイプラインでエラーが発生しました: {source_id}", file=sys.stderr)
@@ -1432,6 +1561,8 @@ async def run_add_journal(args: argparse.Namespace) -> None:
     """
     from .pipeline.ingesters.journal import JournalIngester
 
+    json_out = _is_json_output(args)
+
     controller, _settings = _build_cli_pipeline_controller()
 
     ingester = JournalIngester(controller.source_store)
@@ -1439,6 +1570,8 @@ async def run_add_journal(args: argparse.Namespace) -> None:
     # --file で指定したファイルを読み込む
     file_path = Path(args.file)
     if not file_path.is_file():
+        if json_out:
+            _output_error(f"ファイルが見つかりません: {file_path}")
         print(f"エラー: ファイルが見つかりません: {file_path}", file=sys.stderr)
         raise SystemExit(1)
     body = file_path.read_text(encoding="utf-8")
@@ -1451,6 +1584,8 @@ async def run_add_journal(args: argparse.Namespace) -> None:
     )
 
     if ingest_result.errors > 0:
+        if json_out:
+            _output_error(ingest_result.error_details[0])
         print(f"エラー: {ingest_result.error_details[0]}", file=sys.stderr)
         raise SystemExit(1)
 
@@ -1458,7 +1593,8 @@ async def run_add_journal(args: argparse.Namespace) -> None:
         f"ingest(journal): add {args.title}"
     )
     _print_ingest_result(
-        ingest_result, pipeline_summary, context=f"journal/{args.repository}"
+        ingest_result, pipeline_summary, context=f"journal/{args.repository}",
+        json_output=json_out,
     )
 
 
@@ -1609,8 +1745,12 @@ def _print_ingest_result(
     pipeline_summary: "PipelineSummary | None",
     *,
     context: str = "",
+    json_output: bool = False,
 ) -> None:
     """取り込み結果を標準出力に表示する."""
+    if json_output:
+        _output_result(_ingest_result_to_dict(ingest_result, pipeline_summary))
+        return
     print(ingest_result.summary(context=context))
     if pipeline_summary is not None:
         print(f"パイプライン: {pipeline_summary.processed}件処理")
@@ -1623,6 +1763,8 @@ async def run_add(args: argparse.Namespace) -> None:
     from .pipeline.ingesters.web import WebIngester
 
     from py_common_lib.httpx import ConstrainedClient  # safety:allowed
+
+    json_out = _is_json_output(args)
 
     controller, settings = _build_cli_pipeline_controller()
     sb_client = _create_safe_browsing_client_cli(settings)
@@ -1644,11 +1786,13 @@ async def run_add(args: argparse.Namespace) -> None:
                 args.url, client=client,
             )
     except ValueError as e:
+        if json_out:
+            _output_error(str(e))
         logger.error("エラー: %s", e)
         sys.exit(1)
 
     pipeline_summary = controller.ingest_and_index(f"ingest(web): add {args.url}")
-    _print_ingest_result(ingest_result, pipeline_summary, context=args.url)
+    _print_ingest_result(ingest_result, pipeline_summary, context=args.url, json_output=json_out)
 
 
 async def run_crawl(args: argparse.Namespace) -> None:
@@ -1657,18 +1801,29 @@ async def run_crawl(args: argparse.Namespace) -> None:
 
     from py_common_lib.httpx import ConstrainedClient  # safety:allowed
 
+    json_out = _is_json_output(args)
+
     controller, settings = _build_cli_pipeline_controller()
 
     depth = args.depth if args.depth is not None else settings.rag_crawl_default_depth
 
     # depth >= 2 の場合は pattern 必須
     if depth >= 2 and not args.pattern:
+        if json_out:
+            _output_error("depth が 2 以上の場合は --pattern の指定が必須です")
         logger.error("depth が 2 以上の場合は --pattern の指定が必須です")
         sys.exit(1)
 
     # MSYS パス変換検出
     from .pipeline.ingesters.web import _looks_like_msys_path
     if args.pattern and _looks_like_msys_path(args.pattern):
+        msg = (
+            f"pattern が Windows パスに変換されています: {args.pattern!r}。"
+            "Git Bash 環境では先頭の / が自動変換されます。"
+            "先頭の / を除去するか、MSYS_NO_PATHCONV=1 を設定してください"
+        )
+        if json_out:
+            _output_error(msg)
         logger.error(
             "pattern が Windows パスに変換されています: %r。"
             "Git Bash 環境では先頭の / が自動変換されます。"
@@ -1697,16 +1852,20 @@ async def run_crawl(args: argparse.Namespace) -> None:
                 args.url, pattern=args.pattern, depth=depth, client=client,
             )
     except ValueError as e:
+        if json_out:
+            _output_error(str(e))
         logger.error("エラー: %s", e)
         sys.exit(1)
 
     pipeline_summary = controller.ingest_and_index(f"ingest(web): crawl {args.url}")
-    _print_ingest_result(ingest_result, pipeline_summary, context=args.url)
+    _print_ingest_result(ingest_result, pipeline_summary, context=args.url, json_output=json_out)
 
 
 async def run_ingest_youtube(args: argparse.Namespace) -> None:
     """YouTube 単一動画取り込み."""
     from .pipeline.ingesters.youtube import YoutubeIngester
+
+    json_out = _is_json_output(args)
 
     controller, settings = _build_cli_pipeline_controller()
 
@@ -1724,20 +1883,24 @@ async def run_ingest_youtube(args: argparse.Namespace) -> None:
     try:
         ingest_result = await youtube_ingester.ingest_video(args.video_url)
     except (ValueError, TypeError) as e:
+        if json_out:
+            _output_error(str(e))
         logger.error("エラー: %s", e)
         sys.exit(1)
 
     if ingest_result.placed == 0:
-        _print_ingest_result(ingest_result, None, context=f"動画: {args.video_url}")
+        _print_ingest_result(ingest_result, None, context=f"動画: {args.video_url}", json_output=json_out)
         return
 
     pipeline_summary = controller.ingest_and_index(f"ingest(youtube): {args.video_url}")
-    _print_ingest_result(ingest_result, pipeline_summary, context=f"動画: {args.video_url}")
+    _print_ingest_result(ingest_result, pipeline_summary, context=f"動画: {args.video_url}", json_output=json_out)
 
 
 async def run_ingest_youtube_playlist(args: argparse.Namespace) -> None:
     """YouTube プレイリスト一括取り込み."""
     from .pipeline.ingesters.youtube import YoutubeIngester
+
+    json_out = _is_json_output(args)
 
     controller, settings = _build_cli_pipeline_controller()
 
@@ -1760,15 +1923,17 @@ async def run_ingest_youtube_playlist(args: argparse.Namespace) -> None:
             max_videos=max_videos,
         )
     except (ValueError, TypeError) as e:
+        if json_out:
+            _output_error(str(e))
         logger.error("エラー: %s", e)
         sys.exit(1)
 
     if ingest_result.placed == 0:
-        _print_ingest_result(ingest_result, None, context=f"プレイリスト: {args.playlist_url}")
+        _print_ingest_result(ingest_result, None, context=f"プレイリスト: {args.playlist_url}", json_output=json_out)
         return
 
     pipeline_summary = controller.ingest_and_index(f"ingest(youtube-playlist): {args.playlist_url}")
-    _print_ingest_result(ingest_result, pipeline_summary, context=f"プレイリスト: {args.playlist_url}")
+    _print_ingest_result(ingest_result, pipeline_summary, context=f"プレイリスト: {args.playlist_url}", json_output=json_out)
 
 
 def _create_web_ingester_cli(
@@ -1814,6 +1979,8 @@ async def run_crawl_bluesky(args: argparse.Namespace) -> None:
 
     from py_common_lib.httpx import ConstrainedClient  # safety:allowed
 
+    json_out = _is_json_output(args)
+
     controller, settings = _build_cli_pipeline_controller()
 
     max_posts = args.max_posts if args.max_posts is not None else settings.rag_bluesky_max_posts
@@ -1853,21 +2020,33 @@ async def run_crawl_bluesky(args: argparse.Namespace) -> None:
                     youtube_ingester=youtube_ingester,
                 )
     except (ValueError, TypeError) as e:
+        if json_out:
+            _output_error(str(e))
         logger.error("エラー: %s", e)
         sys.exit(1)
 
     pipeline_summary = controller.ingest_and_index(f"ingest(bluesky): {args.handle}")
-    _print_ingest_result(ingest_result, pipeline_summary, context=f"ハンドル: {args.handle}")
-    if url_stats and any(url_stats.get(k, 0) > 0 for k in ("web_placed", "youtube_placed", "errors")):
-        parts = ["URL 自動取り込み:"]
-        web_n = url_stats.get("web_placed", 0)
-        yt_n = url_stats.get("youtube_placed", 0)
-        err_n = url_stats.get("errors", 0)
-        if web_n > 0 or yt_n > 0:
-            parts.append(f"Web {web_n}件, YouTube {yt_n}件")
-        if err_n > 0:
-            parts.append(f"エラー {err_n}件")
-        print(" ".join(parts))
+    if json_out:
+        data = _ingest_result_to_dict(ingest_result, pipeline_summary)
+        if url_stats:
+            data["url_follow"] = {
+                "web_placed": url_stats.get("web_placed", 0),
+                "youtube_placed": url_stats.get("youtube_placed", 0),
+                "errors": url_stats.get("errors", 0),
+            }
+        _output_result(data)
+    else:
+        _print_ingest_result(ingest_result, pipeline_summary, context=f"ハンドル: {args.handle}")
+        if url_stats and any(url_stats.get(k, 0) > 0 for k in ("web_placed", "youtube_placed", "errors")):
+            parts = ["URL 自動取り込み:"]
+            web_n = url_stats.get("web_placed", 0)
+            yt_n = url_stats.get("youtube_placed", 0)
+            err_n = url_stats.get("errors", 0)
+            if web_n > 0 or yt_n > 0:
+                parts.append(f"Web {web_n}件, YouTube {yt_n}件")
+            if err_n > 0:
+                parts.append(f"エラー {err_n}件")
+            print(" ".join(parts))
 
 
 async def run_crawl_zenn(args: argparse.Namespace) -> None:
@@ -1875,6 +2054,8 @@ async def run_crawl_zenn(args: argparse.Namespace) -> None:
     from .pipeline.ingesters.zenn import ZennIngester
 
     from py_common_lib.httpx import ConstrainedClient  # safety:allowed
+
+    json_out = _is_json_output(args)
 
     controller, settings = _build_cli_pipeline_controller()
 
@@ -1898,10 +2079,15 @@ async def run_crawl_zenn(args: argparse.Namespace) -> None:
                 client=client,
             )
     except (ValueError, TypeError) as e:
+        if json_out:
+            _output_error(str(e))
         logger.error("エラー: %s", e)
         sys.exit(1)
 
     if ingest_result.placed == 0 and ingest_result.errors == 0:
+        if json_out:
+            _output_result(_ingest_result_to_dict(ingest_result, None))
+            return
         if ingest_result.skipped > 0:
             print(f"全 {ingest_result.skipped} 件のコンテンツがスキップされました（ユーザー: {args.username}）。上書きするには --force を指定してください")
         else:
@@ -1909,12 +2095,14 @@ async def run_crawl_zenn(args: argparse.Namespace) -> None:
         return
 
     pipeline_summary = controller.ingest_and_index(f"ingest(zenn): {args.username}")
-    _print_ingest_result(ingest_result, pipeline_summary, context=f"ユーザー: {args.username}")
+    _print_ingest_result(ingest_result, pipeline_summary, context=f"ユーザー: {args.username}", json_output=json_out)
 
 
 async def run_add_document(args: argparse.Namespace) -> None:
     """単一ドキュメント取り込み."""
     from .pipeline.ingesters.local import LocalIngester
+
+    json_out = _is_json_output(args)
 
     controller, settings = _build_cli_pipeline_controller()
 
@@ -1927,18 +2115,27 @@ async def run_add_document(args: argparse.Namespace) -> None:
     # CLI でのバリデーション: パス → バイト列取得
     file_path_str = args.file_path
     if not file_path_str or not file_path_str.strip():
+        if json_out:
+            _output_error("file_path が空です")
         print("エラー: file_path が空です", file=sys.stderr)
         raise SystemExit(1)
     resolved = Path(file_path_str.strip()).resolve()
     if not resolved.exists():
+        if json_out:
+            _output_error(f"ファイルが見つかりません: {resolved}")
         print(f"エラー: ファイルが見つかりません: {resolved}", file=sys.stderr)
         raise SystemExit(1)
     if resolved.is_dir():
+        if json_out:
+            _output_error(f"パスはファイルではなくディレクトリです: {resolved}")
         print(f"エラー: パスはファイルではなくディレクトリです: {resolved}", file=sys.stderr)
         raise SystemExit(1)
     ext = resolved.suffix.lower()
     if ext not in supported_extensions:
-        print(f"エラー: 対応していないファイル形式です: {ext!r}（対応: {', '.join(supported_extensions)}）", file=sys.stderr)
+        msg = f"対応していないファイル形式です: {ext!r}（対応: {', '.join(supported_extensions)}）"
+        if json_out:
+            _output_error(msg)
+        print(f"エラー: {msg}", file=sys.stderr)
         raise SystemExit(1)
     data = resolved.read_bytes()
 
@@ -1952,19 +2149,26 @@ async def run_add_document(args: argparse.Namespace) -> None:
     )
 
     if ingest_result.placed == 0 and ingest_result.errors == 0:
+        if json_out:
+            _output_result(_ingest_result_to_dict(ingest_result, None))
+            return
         print(f"取り込み対象がありませんでした: {file_path_str}")
         return
     if ingest_result.errors > 0:
+        if json_out:
+            _output_error(ingest_result.error_details[0])
         print(f"エラー: {ingest_result.error_details[0]}", file=sys.stderr)
         raise SystemExit(1)
 
     pipeline_summary = controller.ingest_and_index(f"ingest(local): add {resolved.name}")
-    _print_ingest_result(ingest_result, pipeline_summary, context=file_path_str)
+    _print_ingest_result(ingest_result, pipeline_summary, context=file_path_str, json_output=json_out)
 
 
 async def run_crawl_documents(args: argparse.Namespace) -> None:
     """ディレクトリ一括取り込み."""
     from .pipeline.ingesters.local import LocalIngester
+
+    json_out = _is_json_output(args)
 
     controller, settings = _build_cli_pipeline_controller()
 
@@ -1983,14 +2187,19 @@ async def run_crawl_documents(args: argparse.Namespace) -> None:
     )
 
     if ingest_result.placed == 0 and ingest_result.errors == 0:
+        if json_out:
+            _output_result(_ingest_result_to_dict(ingest_result, None))
+            return
         print(f"対象ファイルが見つかりませんでした: {args.dir_path}")
         return
     if ingest_result.errors > 0 and ingest_result.placed == 0:
+        if json_out:
+            _output_error(ingest_result.error_details[0])
         print(f"エラー: {ingest_result.error_details[0]}", file=sys.stderr)
         raise SystemExit(1)
 
     pipeline_summary = controller.ingest_and_index(f"ingest(local): crawl {args.dir_path}")
-    _print_ingest_result(ingest_result, pipeline_summary, context=f"ディレクトリ: {args.dir_path}")
+    _print_ingest_result(ingest_result, pipeline_summary, context=f"ディレクトリ: {args.dir_path}", json_output=json_out)
 
 
 async def run_site_ingest(args: argparse.Namespace) -> None:
@@ -2108,6 +2317,8 @@ async def run_update_aozora_catalog(args: argparse.Namespace) -> None:
 
     from py_common_lib.httpx import ConstrainedClient  # safety:allowed
 
+    json_out = _is_json_output(args)
+
     controller, settings = _build_cli_pipeline_controller()
 
     aozora_ingester = AozoraIngester(controller.source_store)
@@ -2119,13 +2330,18 @@ async def run_update_aozora_catalog(args: argparse.Namespace) -> None:
         ) as client:
             result_text = await aozora_ingester.update_catalog(client=client)
     except (ValueError, TypeError) as e:
+        if json_out:
+            _output_error(str(e))
         logger.error("エラー: %s", e)
         sys.exit(1)
 
     # カタログはパイプライン処理対象外だが、未コミット変更が残ると
     # 後続の rebuild で失敗するためコミットしておく
     controller.commit("update_aozora_catalog")
-    print(result_text)
+    if json_out:
+        _output_result({"message": result_text})
+    else:
+        print(result_text)
 
 
 def run_search_aozora(args: argparse.Namespace) -> None:
@@ -2164,6 +2380,8 @@ async def run_ingest_aozora(args: argparse.Namespace) -> None:
 
     from py_common_lib.httpx import ConstrainedClient  # safety:allowed
 
+    json_out = _is_json_output(args)
+
     controller, settings = _build_cli_pipeline_controller()
 
     aozora_ingester = AozoraIngester(controller.source_store)
@@ -2177,11 +2395,13 @@ async def run_ingest_aozora(args: argparse.Namespace) -> None:
                 args.book_id, client=client,
             )
     except (ValueError, TypeError) as e:
+        if json_out:
+            _output_error(str(e))
         logger.error("エラー: %s", e)
         sys.exit(1)
 
     pipeline_summary = controller.ingest_and_index(f"ingest(aozora): book_id={args.book_id}")
-    _print_ingest_result(ingest_result, pipeline_summary, context=f"作品ID: {args.book_id}")
+    _print_ingest_result(ingest_result, pipeline_summary, context=f"作品ID: {args.book_id}", json_output=json_out)
 
 
 async def run_ingest_aozora_author(args: argparse.Namespace) -> None:
@@ -2189,6 +2409,8 @@ async def run_ingest_aozora_author(args: argparse.Namespace) -> None:
     from .pipeline.ingesters.aozora import AozoraIngester
 
     from py_common_lib.httpx import ConstrainedClient  # safety:allowed
+
+    json_out = _is_json_output(args)
 
     controller, settings = _build_cli_pipeline_controller()
 
@@ -2210,11 +2432,13 @@ async def run_ingest_aozora_author(args: argparse.Namespace) -> None:
                 client=client,
             )
     except (ValueError, TypeError) as e:
+        if json_out:
+            _output_error(str(e))
         logger.error("エラー: %s", e)
         sys.exit(1)
 
     pipeline_summary = controller.ingest_and_index(f"ingest(aozora): person_id={args.person_id}")
-    _print_ingest_result(ingest_result, pipeline_summary, context=f"著者ID: {args.person_id}")
+    _print_ingest_result(ingest_result, pipeline_summary, context=f"著者ID: {args.person_id}", json_output=json_out)
 
 
 if __name__ == "__main__":
