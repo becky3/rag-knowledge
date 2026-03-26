@@ -303,6 +303,30 @@ def main() -> None:
     # stats サブコマンド
     subparsers.add_parser("stats", help="ナレッジベースの統計情報を表示")
 
+    # list-recent サブコマンド
+    list_recent_parser = subparsers.add_parser(
+        "list-recent", help="指定 source_type のソースを新しい順で一覧取得",
+    )
+    list_recent_parser.add_argument(
+        "--source-type",
+        required=True,
+        choices=["web", "bluesky", "zenn", "youtube", "aozora", "local", "journal"],
+        help="ソース種別",
+    )
+    def _validate_list_recent_limit(value: str) -> int:
+        n = int(value)
+        if n < 1 or n > 100:
+            raise argparse.ArgumentTypeError(
+                f"--limit must be 1-100 (got {n})"
+            )
+        return n
+    list_recent_parser.add_argument(
+        "--limit",
+        type=_validate_list_recent_limit,
+        default=None,
+        help="取得件数（1〜100、未指定時は設定値を使用）",
+    )
+
     # search サブコマンド
     search_parser = subparsers.add_parser("search", help="ナレッジベースを検索")
     search_parser.add_argument("--query", required=True, help="検索クエリ")
@@ -447,6 +471,7 @@ def main() -> None:
         "get-document": run_get_document,
         "rebuild": run_rebuild,
         "stats": run_stats,
+        "list-recent": run_list_recent,
         "search": run_search,
         "delete": run_delete,
         "search-aozora": run_search_aozora,
@@ -1280,6 +1305,22 @@ def run_stats(args: argparse.Namespace) -> None:
     print("\n".join(parts))
 
 
+def run_list_recent(args: argparse.Namespace) -> None:
+    """指定 source_type のソースを新しい順で一覧取得する.
+
+    MCP ツール rag_list_recent と同等の一覧取得を CLI で実行する。
+
+    Args:
+        args: コマンドライン引数
+    """
+    from .config import get_settings
+    from .rag_knowledge import list_recent_sources
+
+    settings = get_settings()
+    limit: int = args.limit if args.limit is not None else settings.rag_list_recent_limit
+    print(list_recent_sources(settings.source_store_dir, args.source_type, limit))
+
+
 def run_search(args: argparse.Namespace) -> None:
     """ナレッジベースを検索する.
 
@@ -1460,13 +1501,9 @@ def run_migrate_journal(args: argparse.Namespace) -> None:
 
 def _format_cli_size(size_bytes: int) -> str:
     """バイト数を人間が読みやすい単位に変換する."""
-    if size_bytes < 1024:
-        return f"{size_bytes} B"
-    if size_bytes < 1024 * 1024:
-        return f"{size_bytes / 1024:.1f} KB"
-    if size_bytes < 1024 * 1024 * 1024:
-        return f"{size_bytes / (1024 * 1024):.1f} MB"
-    return f"{size_bytes / (1024 * 1024 * 1024):.1f} GB"
+    from .rag_knowledge import format_file_size
+
+    return format_file_size(size_bytes)
 
 
 # --- インジェスト系 CLI コマンド ---
