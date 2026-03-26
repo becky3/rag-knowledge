@@ -26,7 +26,7 @@ class SourceRecord:
     status: SourceStatus
     content_hash: str
     file_size: int
-    created_at: str
+    collected_at: str
     updated_at: str
 
 

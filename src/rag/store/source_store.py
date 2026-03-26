@@ -122,14 +122,14 @@ class SourceStore:
         source_id = self._resolve_source_id(source_type, rel_path, metadata)
         title = self._resolve_title(source_type, rel_path, metadata)
 
-        # created_at: 既存レコード > metadata['collected_at'] > now の優先順
+        # collected_at: 既存レコード > metadata['collected_at'] > now の優先順
         existing = self._db.get_source(source_id)
         if existing:
-            created_at = existing.created_at
+            collected_at = existing.collected_at
         elif metadata and "collected_at" in metadata:
-            created_at = str(metadata["collected_at"])
+            collected_at = str(metadata["collected_at"])
         else:
-            created_at = now
+            collected_at = now
 
         self._db.register_source(
             source_id=source_id,
@@ -138,7 +138,7 @@ class SourceStore:
             title=title,
             content_hash=content_hash,
             file_size=len(data),
-            created_at=created_at,
+            collected_at=collected_at,
             updated_at=now,
         )
 
@@ -178,7 +178,7 @@ class SourceStore:
     def _build_metadata(self, record: SourceRecord) -> SourceMetadata:
         """SourceRecord と .meta ファイルから SourceMetadata を構築する.
 
-        .meta の collected_at を優先し、なければ DB の created_at を使用する。
+        .meta の collected_at を優先し、なければ DB の collected_at を使用する。
         共通フィールド（source_id, source_type, title）を除いた残りを extra に格納する。
 
         Args:
@@ -188,7 +188,7 @@ class SourceStore:
             SourceMetadata
         """
         extra: dict[str, Any] = {}
-        collected_at = record.created_at
+        collected_at = record.collected_at
         if record.source_type not in _NO_META_TYPES:
             file_path = self._root / record.file_path
             meta_file = meta_path_for(file_path)
@@ -394,7 +394,7 @@ class SourceStore:
                 title=title,
                 content_hash=content_hash,
                 file_size=len(data),
-                created_at=collected_at,
+                collected_at=collected_at,
                 updated_at=now,
             )
             count += 1

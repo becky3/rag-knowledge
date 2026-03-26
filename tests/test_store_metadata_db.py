@@ -32,7 +32,7 @@ class TestSourcesCRUD:
             title="Test Page",
             content_hash="abc123",
             file_size=1024,
-            created_at="2026-01-15T10:00:00Z",
+            collected_at="2026-01-15T10:00:00Z",
             updated_at="2026-01-15T10:00:00Z",
         )
 
@@ -53,7 +53,7 @@ class TestSourcesCRUD:
             title="Old Title",
             content_hash="old",
             file_size=100,
-            created_at="2026-01-01T00:00:00Z",
+            collected_at="2026-01-01T00:00:00Z",
             updated_at="2026-01-01T00:00:00Z",
         )
         db.register_source(
@@ -63,7 +63,7 @@ class TestSourcesCRUD:
             title="New Title",
             content_hash="new",
             file_size=200,
-            created_at="2026-01-02T00:00:00Z",
+            collected_at="2026-01-02T00:00:00Z",
             updated_at="2026-01-02T00:00:00Z",
         )
 
@@ -82,7 +82,7 @@ class TestSourcesCRUD:
             title="Test",
             content_hash="hash1",
             file_size=10,
-            created_at="2026-01-01T00:00:00Z",
+            collected_at="2026-01-01T00:00:00Z",
             updated_at="2026-01-01T00:00:00Z",
         )
         db.set_status("test", "deleted")
@@ -94,7 +94,7 @@ class TestSourcesCRUD:
             title="Test Updated",
             content_hash="hash2",
             file_size=20,
-            created_at="2026-01-02T00:00:00Z",
+            collected_at="2026-01-02T00:00:00Z",
             updated_at="2026-01-02T00:00:00Z",
         )
 
@@ -114,7 +114,7 @@ class TestSourcesCRUD:
             title="Test",
             content_hash="hash",
             file_size=10,
-            created_at="2026-01-01T00:00:00Z",
+            collected_at="2026-01-01T00:00:00Z",
             updated_at="2026-01-01T00:00:00Z",
         )
 
@@ -130,7 +130,7 @@ class TestSourcesCRUD:
             title="Old",
             content_hash="hash",
             file_size=10,
-            created_at="2026-01-01T00:00:00Z",
+            collected_at="2026-01-01T00:00:00Z",
             updated_at="2026-01-01T00:00:00Z",
         )
 
@@ -156,7 +156,7 @@ class TestSourcesCRUD:
             title="Test",
             content_hash="hash",
             file_size=10,
-            created_at="2026-01-01T00:00:00Z",
+            collected_at="2026-01-01T00:00:00Z",
             updated_at="2026-01-01T00:00:00Z",
         )
         with pytest.raises(ValueError, match="不正なフィールド"):
@@ -170,7 +170,7 @@ class TestSourcesCRUD:
             title="Web1",
             content_hash="h1",
             file_size=10,
-            created_at="2026-01-01T00:00:00Z",
+            collected_at="2026-01-01T00:00:00Z",
             updated_at="2026-01-01T00:00:00Z",
         )
         db.register_source(
@@ -180,7 +180,7 @@ class TestSourcesCRUD:
             title="Local1",
             content_hash="h2",
             file_size=20,
-            created_at="2026-01-02T00:00:00Z",
+            collected_at="2026-01-02T00:00:00Z",
             updated_at="2026-01-02T00:00:00Z",
         )
 
@@ -196,7 +196,7 @@ class TestSourcesCRUD:
             title="Active",
             content_hash="h1",
             file_size=10,
-            created_at="2026-01-01T00:00:00Z",
+            collected_at="2026-01-01T00:00:00Z",
             updated_at="2026-01-01T00:00:00Z",
         )
         db.register_source(
@@ -206,7 +206,7 @@ class TestSourcesCRUD:
             title="Deleted",
             content_hash="h2",
             file_size=20,
-            created_at="2026-01-02T00:00:00Z",
+            collected_at="2026-01-02T00:00:00Z",
             updated_at="2026-01-02T00:00:00Z",
         )
         db.set_status("deleted1", "deleted")
@@ -223,7 +223,7 @@ class TestSourcesCRUD:
             title="Test",
             content_hash="hash",
             file_size=10,
-            created_at="2026-01-01T00:00:00Z",
+            collected_at="2026-01-01T00:00:00Z",
             updated_at="2026-01-01T00:00:00Z",
         )
 
@@ -251,7 +251,7 @@ class TestSourcesCRUD:
             title="S1",
             content_hash="h",
             file_size=1,
-            created_at="2026-01-01T00:00:00Z",
+            collected_at="2026-01-01T00:00:00Z",
             updated_at="2026-01-01T00:00:00Z",
         )
         db.register_source(
@@ -261,7 +261,7 @@ class TestSourcesCRUD:
             title="S2",
             content_hash="h",
             file_size=1,
-            created_at="2026-01-01T00:00:00Z",
+            collected_at="2026-01-01T00:00:00Z",
             updated_at="2026-01-01T00:00:00Z",
         )
         db.set_status("s2", "deleted")
@@ -341,7 +341,7 @@ class TestDeleteAllSources:
             title="S1",
             content_hash="h",
             file_size=1,
-            created_at="2026-01-01T00:00:00Z",
+            collected_at="2026-01-01T00:00:00Z",
             updated_at="2026-01-01T00:00:00Z",
         )
         db.register_source(
@@ -351,7 +351,7 @@ class TestDeleteAllSources:
             title="S2",
             content_hash="h",
             file_size=1,
-            created_at="2026-01-01T00:00:00Z",
+            collected_at="2026-01-01T00:00:00Z",
             updated_at="2026-01-01T00:00:00Z",
         )
 
