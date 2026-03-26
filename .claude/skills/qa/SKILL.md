@@ -208,8 +208,14 @@ HTTP モードで MCP サーバーを起動して実行:
 
 評価フィクスチャのパスはメモリ `reference_eval_fixtures.md` を参照（メモリが利用できない場合はユーザーにパスを確認する）:
 
-1. `init-test-db` でテスト DB 初期化（`--chunk-size 200 --chunk-overlap 30 --bm25-k1 1.5 --bm25-b 0.75 --persist-dir .tmp/eval_chroma_db --bm25-persist-dir .tmp/eval_bm25_index --fixture <フィクスチャパス>`）+ ディレクトリ作成確認
-2. `evaluate` で評価実行（`--chunk-size 200 --chunk-overlap 30 --bm25-k1 1.5 --bm25-b 0.75 --vector-weight 0.6 --persist-dir .tmp/eval_chroma_db --output-dir .tmp/rag-evaluation --fixture <フィクスチャパス> --dataset <データセットパス>`）+ レポート生成確認
+1. `init-test-db` でテスト DB 初期化 + ディレクトリ作成確認
+   - パラメータ: `--chunk-size 200 --chunk-overlap 30 --bm25-k1 1.5 --bm25-b 0.75`
+   - ストレージ: `--persist-dir .tmp/eval_chroma_db --bm25-persist-dir .tmp/eval_bm25_index`
+   - フィクスチャ: `--fixture <フィクスチャパス>`
+2. `evaluate` で評価実行 + レポート生成確認
+   - パラメータ: `--chunk-size 200 --chunk-overlap 30 --bm25-k1 1.5 --bm25-b 0.75 --vector-weight 0.6`
+   - ストレージ: `--persist-dir .tmp/eval_chroma_db --output-dir .tmp/rag-evaluation`
+   - フィクスチャ: `--fixture <フィクスチャパス> --dataset <データセットパス>`
 
 ### H) Core
 
