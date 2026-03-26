@@ -99,18 +99,17 @@ class VectorStore:
             host=host, port=port, settings=chroma_settings,
         )
         try:
-            instance._collection = instance._client.get_or_create_collection(
-                name=collection_name,
-                metadata={"hnsw:space": "cosine"},
-            )
+            instance._client.heartbeat()
         except Exception as exc:
             msg = (
-                f"ChromaDB サーバー ({host}:{port}) への接続または"
-                f"コレクションの取得/作成に失敗しました: {exc}. "
-                "'chroma run' でサーバーを起動しているか、"
-                "設定やコレクション定義を確認してください。"
+                f"ChromaDB サーバー ({host}:{port}) への接続に失敗しました: {exc}. "
+                "'chroma run' でサーバーを起動してください。"
             )
             raise ConnectionError(msg) from exc
+        instance._collection = instance._client.get_or_create_collection(
+            name=collection_name,
+            metadata={"hnsw:space": "cosine"},
+        )
         return instance
 
     @classmethod

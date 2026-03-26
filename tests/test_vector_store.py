@@ -806,7 +806,7 @@ class TestCreateHttp:
         from unittest.mock import patch, MagicMock
 
         mock_client = MagicMock()
-        mock_client.get_or_create_collection.side_effect = Exception("Connection refused")
+        mock_client.heartbeat.side_effect = Exception("Connection refused")
 
         with patch("chromadb.HttpClient", return_value=mock_client):
             with pytest.raises(ConnectionError, match="ChromaDB サーバー.*失敗しました"):
