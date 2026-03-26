@@ -193,8 +193,8 @@ flowchart TB
     end
 
     CLIENT -->|stdio / http| TOOLS
-    TOOLS -->|content + filename| UL["コンテンツアップロード層"]
-    UL -->|body: str, filename| JING
+    TOOLS -->|filename| UL["コンテンツアップロード層<br>（ファイル名サニタイズ）"]
+    TOOLS -->|content: str| JING
     JING -->|ファイル配置 + .meta| JOURNAL
     JING -->|取り込み完了通知| PC
     PC -->|git add + commit + diff| SS

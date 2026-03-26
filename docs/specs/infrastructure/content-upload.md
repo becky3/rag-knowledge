@@ -84,7 +84,7 @@ flowchart TB
     T2 -->|content: str| JI
     DEC -->|data: bytes| LI
     SAN -->|filename: str| LI
-    SAN -->|filename: str| JI
+    SAN -.->|拡張子検証| T2
 ```
 
 ### MCP ツールにおける呼び出し手順

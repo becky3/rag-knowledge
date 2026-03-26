@@ -300,7 +300,7 @@ flowchart TD
 | `encoding` が `"text"` でも `"base64"` でもない | コンテンツアップロード層でバリデーションエラーとして拒否する（`rag_add_document`） |
 | `encoding=base64` で不正な base64 文字列 | コンテンツアップロード層でバリデーションエラーとして拒否する（`rag_add_document`） |
 | `filename` が空文字列 | コンテンツアップロード層でバリデーションエラーとして拒否する（`rag_add_document`） |
-| `filename` にディレクトリセパレータや `..` が含まれる | コンテンツアップロード層がファイル名部分のみ採用してサニタイズする（`rag_add_document`） |
+| `filename` にディレクトリセパレータや `..` が含まれる | コンテンツアップロード層が `Path(filename).name` でファイル名部分のみ採用する。サニタイズ後が空文字列または `..` の場合はバリデーションエラーとして拒否する（`rag_add_document`） |
 | 対応していない拡張子 | バリデーションエラーとして拒否する（`rag_add_document` 単一取り込み時）。`rag_crawl_documents` 一括取り込み時はフィルタで除外する |
 | `upload_mode=fail` かつ同日に同名ファイルが存在する | エラーを返す（`rag_add_document`） |
 | `upload_mode=replace` かつ同日に同名ファイルが存在する | 上書きする（`rag_add_document`） |
