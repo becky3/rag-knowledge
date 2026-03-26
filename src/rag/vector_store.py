@@ -98,10 +98,17 @@ class VectorStore:
         instance._client = chromadb.HttpClient(
             host=host, port=port, settings=chroma_settings,
         )
-        instance._collection = instance._client.get_or_create_collection(
-            name=collection_name,
-            metadata={"hnsw:space": "cosine"},
-        )
+        try:
+            instance._collection = instance._client.get_or_create_collection(
+                name=collection_name,
+                metadata={"hnsw:space": "cosine"},
+            )
+        except Exception as exc:
+            msg = (
+                f"ChromaDB サーバー ({host}:{port}) に接続できません。"
+                " 'chroma run' でサーバーを起動してください。"
+            )
+            raise ConnectionError(msg) from exc
         return instance
 
     @classmethod

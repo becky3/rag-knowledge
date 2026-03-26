@@ -66,6 +66,7 @@ class _EnvLoader(BaseSettings):
     # ChromaDB サーバー接続
     chromadb_server_host: str = "localhost"
     chromadb_server_port: int = Field(default=8000, ge=1, le=65535)
+    # auto_start は #407 (ChromaDB Server Manager) で参照実装予定
     chromadb_auto_start: bool = True
 
     # トランスポート
@@ -111,6 +112,7 @@ class RAGSettings(BaseModel):
     converted_store_dir: str
     chromadb_server_host: str
     chromadb_server_port: int = Field(ge=1, le=65535)
+    # auto_start は #407 (ChromaDB Server Manager) で参照実装予定
     chromadb_auto_start: bool
     rag_transport: Literal["stdio", "http"]
     rag_http_host: str

@@ -797,3 +797,21 @@ class TestCreateHttp:
 
         # persist_directory が空文字なので close() は noop
         store.close()  # 例外が出なければOK
+
+    def test_create_http_connection_error(
+        self,
+        mock_embedding: MockEmbeddingProvider,
+    ) -> None:
+        """サーバー未起動時に ConnectionError がガイダンス付きで送出されること."""
+        from unittest.mock import patch, MagicMock
+
+        mock_client = MagicMock()
+        mock_client.get_or_create_collection.side_effect = Exception("Connection refused")
+
+        with patch("chromadb.HttpClient", return_value=mock_client):
+            with pytest.raises(ConnectionError, match="ChromaDB サーバー.*接続できません"):
+                VectorStore.create_http(
+                    embedding_provider=mock_embedding,
+                    host="localhost",
+                    port=8000,
+                )
