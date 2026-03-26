@@ -59,7 +59,8 @@ def sanitize_filename(filename: str) -> str:
     if not filename:
         raise ValueError("filename が空文字列です")
 
-    name = Path(filename).name
+    # バックスラッシュを統一して OS 非依存にする
+    name = Path(filename.replace("\\", "/")).name
     if not name or name == "..":
         raise ValueError(
             f"filename からファイル名部分を取得できません: {filename!r}"

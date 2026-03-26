@@ -1882,7 +1882,7 @@ async def run_add_document(args: argparse.Namespace) -> None:
     controller, settings = _build_cli_pipeline_controller()
 
     supported_extensions = [
-        ext.strip() if ext.strip().startswith(".") else f".{ext.strip()}"
+        (ext.strip() if ext.strip().startswith(".") else f".{ext.strip()}").lower()
         for ext in settings.rag_document_supported_extensions.split(",")
         if ext.strip()
     ]
@@ -1932,7 +1932,7 @@ async def run_crawl_documents(args: argparse.Namespace) -> None:
     controller, settings = _build_cli_pipeline_controller()
 
     supported_extensions = [
-        ext.strip() if ext.strip().startswith(".") else f".{ext.strip()}"
+        (ext.strip() if ext.strip().startswith(".") else f".{ext.strip()}").lower()
         for ext in settings.rag_document_supported_extensions.split(",")
         if ext.strip()
     ]

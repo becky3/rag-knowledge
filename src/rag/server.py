@@ -285,7 +285,7 @@ def _get_supported_extensions() -> list[str]:
     """設定からサポート拡張子リストを取得する."""
     settings = get_settings()
     return [
-        ext.strip() if ext.strip().startswith(".") else f".{ext.strip()}"
+        (ext.strip() if ext.strip().startswith(".") else f".{ext.strip()}").lower()
         for ext in settings.rag_document_supported_extensions.split(",")
         if ext.strip()
     ]
