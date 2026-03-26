@@ -41,6 +41,7 @@ MCP サーバーとして独立動作し、16 個のツールを提供する。
 |---------|---------|
 | Embedding 接続 | `EMBEDDING_PROVIDER`, `LMSTUDIO_BASE_URL` |
 | ストレージ | `CHROMADB_PERSIST_DIR`, `BM25_PERSIST_DIR`, `SOURCE_STORE_DIR`, `CONVERTED_STORE_DIR` |
+| ChromaDB サーバー | `CHROMADB_SERVER_HOST`, `CHROMADB_SERVER_PORT`, `CHROMADB_AUTO_START` |
 | トランスポート | `RAG_TRANSPORT`, `RAG_HTTP_HOST`, `RAG_HTTP_PORT`, `RAG_DNS_REBINDING_PROTECTION` |
 | デバッグ | `RAG_DEBUG_LOG_ENABLED` |
 | サイト一括取り込み | `SITE_INGEST_TEMP_DIR` |
@@ -175,15 +176,20 @@ rag_search はベクトル検索と BM25 検索の生結果をチャンク単位
 
 ## コンポーネント構成
 
-### 全体アーキテクチャ（3段パイプライン）
+### 全体アーキテクチャ（3段パイプライン + ChromaDB サーバー）
 
 ```mermaid
 flowchart TB
     CLIENT["MCP クライアント"]
 
-    subgraph MCP["MCP サーバー"]
-        TOOLS["ツール定義"]
-        RETRIEVE["検索"]
+    subgraph MCP["MCP サーバー（薄層アダプター）"]
+        SEARCH["検索ツール（インプロセス）"]
+        WRITE["書き込みツール（CLI subprocess）"]
+        CSM["ChromaDB Server Manager"]
+    end
+
+    subgraph CLI_LAYER["CLI"]
+        CLI_CMD["CLI コマンド（--output json）"]
     end
 
     subgraph Pipeline["パイプライン"]
@@ -214,14 +220,17 @@ flowchart TB
         CC["ConstrainedClient"]
     end
 
-    VECTOR["ベクトルストア (ChromaDB)"]
+    CHROMA_SRV["ChromaDB サーバー（chroma run）"]
     BM25["BM25 インデックス"]
     EMBED["Embedding プロバイダー"]
     WEB["対象 Web サイト / API"]
 
-    CLIENT -->|stdio / http| TOOLS
-    TOOLS --> PC
-    TOOLS --> RETRIEVE
+    CLIENT -->|stdio / http| MCP
+    SEARCH -->|HttpClient| CHROMA_SRV
+    SEARCH --> BM25
+    WRITE -->|subprocess| CLI_CMD
+    CSM -->|起動管理| CHROMA_SRV
+    CLI_CMD --> PC
     PC --> Stage1
     Stage1 --> SS
     SS --> PC
@@ -229,14 +238,51 @@ flowchart TB
     CONV --> CS
     CS --> PC
     PC --> IDX
-    IDX --> VECTOR
+    IDX -->|HttpClient| CHROMA_SRV
     IDX --> BM25
-    VECTOR --> EMBED
-    RETRIEVE --> VECTOR
-    RETRIEVE --> BM25
+    IDX --> EMBED
     Stage1 --> CC
     CC --> WEB
 ```
+
+### ChromaDB client/server 構成
+
+ChromaDB は `chroma run` によるサーバーモードで動作し、MCP サーバー・CLI の両方が `HttpClient` で接続する。これにより、`PersistentClient` の単一プロセス制約を解消し、MCP と CLI の同時アクセスを可能にする。
+
+| 項目 | 仕様 |
+|------|------|
+| ChromaDB クライアント | `chromadb.HttpClient`（`PersistentClient` から移行） |
+| ChromaDB サーバー | `chroma run --path <persist_dir> --port <port>` |
+| ライフサイクル管理 | MCP サーバー起動時にヘルスチェック → 未起動なら自動起動 |
+| CLI からの接続 | 既存サーバーに接続（手動起動 or MCP 経由で起動済み前提） |
+| テスト時 | `EphemeralClient` を使用（ChromaDB サーバー不要） |
+| セキュリティ | デフォルトは localhost 限定。リモート接続時は TLS を要件とする |
+
+#### ChromaDB サーバー設定（`.env`）
+
+| 設定項目 | 意味 | デフォルト値 |
+|---------|------|------------|
+| `CHROMADB_SERVER_HOST` | ChromaDB サーバーのホスト | `localhost` |
+| `CHROMADB_SERVER_PORT` | ChromaDB サーバーのポート | `8000`（ChromaDB デフォルト） |
+| `CHROMADB_AUTO_START` | MCP サーバー起動時に ChromaDB サーバーを自動起動するか | `true` |
+
+### MCP 薄層アダプターパターン
+
+MCP サーバーは CLI コマンドを呼び出す薄いアダプター層として動作する。検索系ツールはパフォーマンスのためインプロセス実行を維持する。
+
+| ツール分類 | 実行方式 | 対象 |
+|-----------|---------|------|
+| 検索系 | インプロセス（RAGKnowledgeService 直接呼び出し） | `rag_search`, `rag_get_document`, `rag_stats`, `rag_crawl_preview`, `rag_search_aozora`, `rag_list_contents` |
+| 書き込み系 | CLI サブプロセス（`--output json` で結果をパース） | `rag_add`, `rag_crawl`, `rag_crawl_zenn`, `rag_crawl_bluesky`, `rag_add_youtube`, `rag_crawl_youtube`, `rag_add_document`, `rag_crawl_documents`, `rag_add_journal`, `rag_add_aozora`, `rag_crawl_aozora`, `rag_update_aozora_catalog`, `rag_delete`, `rag_rebuild` |
+| 特殊 | Scrapy サブプロセス + Bridge（現行維持） | `rag_site_ingest` |
+
+CLI の JSON 出力は JSON Lines 形式で、既存の `rag.pipeline.worker` モジュール（`src/rag/pipeline/worker.py`）のサブプロセス出力プロトコルを踏襲する:
+
+| メッセージ種別 | 用途 |
+|-------------|------|
+| `{"type": "progress", ...}` | 進捗報告（MCP `ctx.report_progress` に中継） |
+| `{"type": "result", ...}` | コマンド結果 |
+| `{"type": "error", ...}` | エラー報告 |
 
 ### 取り込みフロー（3段パイプライン）
 
@@ -399,7 +445,7 @@ flowchart LR
 
 | 連携先 | 用途 | 接続方式 |
 | --- | --- | --- |
-| ChromaDB | ベクトルの永続化・類似度検索 | 組み込みモード |
+| ChromaDB | ベクトルの永続化・類似度検索 | HttpClient（ChromaDB サーバーに接続） |
 | LM Studio | ローカル Embedding 生成 | OpenAI 互換 API |
 | OpenAI Embeddings API | オンライン Embedding 生成 | REST API |
 | Google Safe Browsing API | URL 安全性チェック | REST API（オプション） |
@@ -427,7 +473,7 @@ flowchart LR
 | 設定値がハードリミット超過 | ハードリミット値にクランプし、警告ログを出力する |
 | AsciiDoc デリミタブロックが閉じられていない | ファイル末尾までをブロック内とみなし、ブロック内での見出し分割を行わない |
 | ネストしたデリミタブロック（AsciiDoc モード） | AsciiDoc 仕様に従い、同一種類のデリミタはネスト不可。最初の閉じデリミタで終了する |
-| サブプロセスによる ChromaDB 更新後の検索（`SharedSystemClient` キャッシュ不整合） | サービスリセット時に `SharedSystemClient` キャッシュをクリアし、次回アクセスでディスクから最新状態をロードする |
+| ChromaDB サーバーがダウンしている状態でのツール呼び出し | 接続エラーを検出し、エラーメッセージを返す。MCP サーバー自体は稼働を継続する |
 
 ## 関連ドキュメント
 
