@@ -34,7 +34,7 @@ def _reset_rag_global_state() -> None:
 
 @pytest.mark.asyncio
 async def test_rag_server_exposes_tools() -> None:
-    """RAG MCPサーバーが20個のツールを公開すること."""
+    """RAG MCPサーバーが21個のツールを公開すること."""
     mod = import_module("rag.server")
     server = mod.mcp
 
@@ -50,18 +50,19 @@ async def test_rag_server_exposes_tools() -> None:
         "rag_update_aozora_catalog", "rag_search_aozora",
         "rag_add_aozora", "rag_crawl_aozora",
         "rag_delete", "rag_rebuild", "rag_stats",
+        "rag_list_recent",
     }
     assert tool_names == expected, f"Expected {expected}, got {tool_names}"
 
 
 @pytest.mark.asyncio
 async def test_rag_server_tool_count() -> None:
-    """RAG MCPサーバーのツール数が正確に20であること."""
+    """RAG MCPサーバーのツール数が正確に21であること."""
     mod = import_module("rag.server")
     server = mod.mcp
 
     tools = await server.list_tools()
-    assert len(tools) == 20
+    assert len(tools) == 21
 
 
 class TestRagSearchOutput:
