@@ -247,6 +247,8 @@ flowchart TB
 
 ### ChromaDB client/server 構成
 
+> **TODO:#406** VectorStore HttpClient 化、**TODO:#407** ChromaDB Server Manager 実装
+
 ChromaDB は `chroma run` によるサーバーモードで動作し、MCP サーバー・CLI の両方が `HttpClient` で接続する。これにより、`PersistentClient` の単一プロセス制約を解消し、MCP と CLI の同時アクセスを可能にする。
 
 | 項目 | 仕様 |
@@ -268,11 +270,13 @@ ChromaDB は `chroma run` によるサーバーモードで動作し、MCP サ�
 
 ### MCP 薄層アダプターパターン
 
+> **TODO:#408** CLI JSON 出力モード追加、**TODO:#409** MCP 薄層アダプター化
+
 MCP サーバーは CLI コマンドを呼び出す薄いアダプター層として動作する。検索系ツールはパフォーマンスのためインプロセス実行を維持する。
 
 | ツール分類 | 実行方式 | 対象 |
 |-----------|---------|------|
-| 検索系 | インプロセス（RAGKnowledgeService 直接呼び出し） | `rag_search`, `rag_get_document`, `rag_stats`, `rag_crawl_preview`, `rag_search_aozora`, `rag_list_contents` |
+| 検索系 | インプロセス（RAGKnowledgeService 直接呼び出し） | `rag_search`, `rag_get_document`, `rag_stats`, `rag_crawl_preview`, `rag_search_aozora` |
 | 書き込み系 | CLI サブプロセス（`--output json` で結果をパース） | `rag_add`, `rag_crawl`, `rag_crawl_zenn`, `rag_crawl_bluesky`, `rag_add_youtube`, `rag_crawl_youtube`, `rag_add_document`, `rag_crawl_documents`, `rag_add_journal`, `rag_add_aozora`, `rag_crawl_aozora`, `rag_update_aozora_catalog`, `rag_delete`, `rag_rebuild` |
 | 特殊 | Scrapy サブプロセス + Bridge（現行維持） | `rag_site_ingest` |
 

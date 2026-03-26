@@ -347,7 +347,7 @@ BM25 のトークナイズには日本語形態素解析（fugashi）を使用�
 
 | 連携先 | 用途 | 接続方式 |
 |--------|------|---------|
-| ChromaDB | ベクトルの永続化・類似度検索 | HttpClient（ChromaDB サーバーに接続） |
+| ChromaDB | ベクトルの永続化・類似度検索 | HttpClient（ChromaDB サーバーに接続）。接続先設定は [rag-knowledge.md](rag-knowledge.md) の「ChromaDB サーバー設定」を参照 |
 | LM Studio | ローカル Embedding 生成 | OpenAI 互換 API（localhost） |
 | OpenAI Embeddings API | オンライン Embedding 生成 | OpenAI SDK 経由の REST API |
 
