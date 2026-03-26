@@ -259,7 +259,7 @@ flowchart LR
 | `title` | str | コンテンツのタイトル。metadata.db の `title` から取得 |
 | `chunk_index` | int | チャンクの連番（0 始まり） |
 | `total_chunks` | int | 当該ソースのチャンク総数（新規フィールド。既存の rag-knowledge.md には未定義） |
-| `collected_at` | str | 取り込みタイムスタンプ（ISO 8601）。metadata.db の `created_at` から取得（.meta の `collected_at` 由来） |
+| `collected_at` | str | 取り込みタイムスタンプ（ISO 8601）。metadata.db の `collected_at` から取得 |
 | `section_path` | str | 見出し階層（`>` 区切り、現セクションを含む）。見出しチャンカーが生成する。テーブルチャンカー・テキストチャンカーでは空文字列。例: `第1章 データ処理 > 1.1 前処理 > 1.1.1 正規化` |
 
 #### カスタムフィールド

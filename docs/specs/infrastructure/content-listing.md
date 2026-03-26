@@ -130,7 +130,7 @@ flowchart TD
     VALIDATE -->|不正| ERROR["エラー返却"]
     VALIDATE -->|正常| SERVICE
     SERVICE --> METADB
-    METADB -->|"source_type フィルタ + collected_at DESC + COUNT（現DB: created_at）"| SERVICE
+    METADB -->|"source_type フィルタ + collected_at DESC + COUNT"| SERVICE
     SERVICE --> FORMAT
     FORMAT --> RESPONSE
 ```
@@ -141,7 +141,7 @@ flowchart TD
 2. `source_type` と `limit` のバリデーションを実行する（1〜100 の範囲チェック含む）
 3. `RAGKnowledgeService` の共通関数を呼び出す
 4. `MetadataDB` から以下の 2 クエリを発行する:
-   - 一覧取得: `source_type` + `status = 'active'` でフィルタし、`collected_at` 降順で `limit` 件取得（現在の DB スキーマでは `created_at` カラムでソート。カラム名の `collected_at` への統一は別途対応予定）
+   - 一覧取得: `source_type` + `status = 'active'` でフィルタし、`collected_at` 降順で `limit` 件取得
    - 総件数取得: 同条件の `COUNT(*)` で該当 source_type の全件数を取得
 5. 結果をテキスト形式にフォーマットして返却する（file_size は人間が読みやすい単位に変換）
 
@@ -152,7 +152,7 @@ flowchart TD
 | `src/rag/server.py` | MCP ツール定義。パラメータ検証と `RAGKnowledgeService` 呼び出し |
 | `src/rag/cli.py` | CLI サブコマンド定義。パラメータ検証と共通関数呼び出し |
 | `src/rag/rag_knowledge.py` | 共通ロジック。MetadataDB へのクエリとフォーマット処理 |
-| `src/rag/store/metadata_db.py` | MetadataDB。`source_type` フィルタ + `collected_at` 降順ソートのクエリ（現 DB カラム名は `created_at`。リネーム予定） |
+| `src/rag/store/metadata_db.py` | MetadataDB。`source_type` フィルタ + `collected_at` 降順ソートのクエリ |
 | `src/rag/config.py` | `rag_list_recent_limit` 設定の定義 |
 | `config.toml` | `rag_list_recent_limit` のデフォルト値 |
 
@@ -166,8 +166,6 @@ flowchart TD
 | limit に 0 以下または 101 以上を指定 | エラーメッセージを返す |
 | 論理削除済みソースが存在 | 一覧に含めない（`status = 'active'` のみ対象） |
 | `collected_at` が同一の複数ソース | ソート順序は不定（同一タイムスタンプ内の順序は保証しない） |
-
-> **TODO:#395** MetadataDB の `created_at` カラムが `collected_at` にリネームされた後、本仕様書のコンポーネント構成セクションから注記（「現 DB カラム名は `created_at`」等）を削除する
 
 ## 関連ドキュメント
 
