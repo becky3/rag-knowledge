@@ -86,14 +86,12 @@ class TestAddDocument:
         assert placed.read_bytes() == b"v2"
 
     def test_add_fail_mode_duplicate(self, ingester: LocalIngester) -> None:
-        """fail モード（デフォルト）: 同名ファイルが既にある場合にエラーになること."""
+        """fail モード（デフォルト）: 同名ファイルが既にある場合に FileExistsError が発生すること."""
         result1 = ingester.add_document(b"first", "dup.md")
         assert result1.placed == 1
 
-        result2 = ingester.add_document(b"second", "dup.md")
-        assert result2.placed == 0
-        assert result2.errors == 1
-        assert "同名ファイル" in result2.error_details[0]
+        with pytest.raises(FileExistsError, match="同名ファイル"):
+            ingester.add_document(b"second", "dup.md")
 
     def test_no_meta_for_local(self, ingester: LocalIngester, source_store: SourceStore) -> None:
         ingester.add_document(b"# Test", "sample.md")

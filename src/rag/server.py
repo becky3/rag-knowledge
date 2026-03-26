@@ -71,7 +71,10 @@ with contextlib.redirect_stdout(io.StringIO()):
     from .pipeline.ingesters.aozora import AozoraIngester as PipelineAozoraIngester
     from .pipeline.ingesters.bluesky import BlueskyIngester as PipelineBlueskyIngester
     from .pipeline.ingesters.journal import JournalIngester as PipelineJournalIngester
-    from .pipeline.ingesters.local import LocalIngester as PipelineLocalIngester
+    from .pipeline.ingesters.local import (
+        LocalIngester as PipelineLocalIngester,
+        _UPLOAD_DIR as _LOCAL_UPLOAD_DIR,
+    )
     from .pipeline.ingesters.web import WebIngester as PipelineWebIngester
     from .pipeline.ingesters.youtube import YoutubeIngester as PipelineYoutubeIngester
     from .pipeline.ingesters.zenn import ZennIngester as PipelineZennIngester
@@ -90,6 +93,8 @@ from .safe_browsing import (
 )
 
 from mcp.server.fastmcp import Context, FastMCP
+from starlette.requests import Request
+from starlette.responses import JSONResponse, Response
 
 # MCP Context の具象型パラメータ（ツール関数では型パラメータ不要のため Any で統一）
 MCPContext = Context[Any, Any, Any]
@@ -101,6 +106,31 @@ ensure_utf8_streams()
 logger = logging.getLogger(__name__)
 
 mcp = FastMCP("rag")
+
+# --- インジェスト排他制御 ---
+# 全インジェスト操作（MCP ツール + Upload HTTP API）で共有するロック。
+# ノンブロッキング: 取得失敗時は即座にエラーを返す。
+# rebuild_lock（スレッドロック）とは独立。
+_ingest_lock = asyncio.Lock()
+
+
+async def _acquire_ingest_lock() -> bool:
+    """インジェストロックの取得を試みる（ノンブロッキング）.
+
+    Returns:
+        True: ロック取得成功、False: ロック取得失敗（別のインジェスト実行中）
+
+    Note:
+        locked() と acquire() の間に TOCTOU の懸念があるが、
+        CPython の asyncio.Lock は unlocked 時に acquire() が
+        await ポイントなしで即座に完了する（内部で _locked フラグを
+        同期的にセットする）ため、他のコルーチンに制御が渡らず安全。
+    """
+    if _ingest_lock.locked():
+        return False
+    await _ingest_lock.acquire()
+    return True
+
 
 # --- 遅延初期化: RAGKnowledgeService（検索用） ---
 
@@ -990,13 +1020,16 @@ async def rag_add_document(
     except ValueError as e:
         return f"エラー: {e}"
 
-    controller = await _get_pipeline_controller()
-    local_ingester = PipelineLocalIngester(
-        controller.source_store,
-        supported_extensions=supported_extensions,
-    )
+    if not await _acquire_ingest_lock():
+        return "エラー: 別のインジェストが実行中です。しばらく待ってから再試行してください"
 
     try:
+        controller = await _get_pipeline_controller()
+        local_ingester = PipelineLocalIngester(
+            controller.source_store,
+            supported_extensions=supported_extensions,
+        )
+
         ingest_result = await asyncio.to_thread(
             local_ingester.add_document, data, sanitized_filename,
             upload_mode=upload_mode,  # type: ignore[arg-type]
@@ -1018,9 +1051,13 @@ async def rag_add_document(
         return _format_ingest_response(
             ingest_result, pipeline_summary, context=sanitized_filename,
         )
+    except FileExistsError as e:
+        return f"エラー: {e}"
     except Exception:
         logger.exception("Failed to add document: %s", sanitized_filename)
         return f"エラー: ファイルの取り込みに失敗しました: {sanitized_filename}"
+    finally:
+        _ingest_lock.release()
 
 
 @mcp.tool()
@@ -1056,10 +1093,13 @@ async def rag_add_journal(
     if not sanitized_filename.lower().endswith(".md"):
         return f"エラー: filename の拡張子が .md ではありません: {sanitized_filename!r}"
 
-    controller = await _get_pipeline_controller()
-    journal_ingester = PipelineJournalIngester(controller.source_store)
+    if not await _acquire_ingest_lock():
+        return "エラー: 別のインジェストが実行中です。しばらく待ってから再試行してください"
 
     try:
+        controller = await _get_pipeline_controller()
+        journal_ingester = PipelineJournalIngester(controller.source_store)
+
         ingest_result = await asyncio.to_thread(
             journal_ingester.add_entry,
             title,
@@ -1091,6 +1131,8 @@ async def rag_add_journal(
     except Exception:
         logger.exception("Failed to add journal entry: %s/%s", repository, title)
         return f"エラー: ジャーナルエントリの登録に失敗しました: {title}"
+    finally:
+        _ingest_lock.release()
 
 
 @mcp.tool()
@@ -2153,6 +2195,257 @@ async def rag_stats() -> str:
             parts.append("  エラー: 統計の取得に失敗しました")
 
     return "\n".join(parts)
+
+
+# --- Upload HTTP API ---
+
+
+async def _check_api_key(request: Request) -> str | None:
+    """API キー認証のプレースホルダー.
+
+    TODO:#402 認証仕様完成後に実装を差し替える。
+    現時点では常に認証成功として None を返す。
+
+    Returns:
+        None: 認証成功、str: エラーメッセージ（認証失敗）
+    """
+    return None
+
+
+def _upload_error(status_code: int, message: str) -> JSONResponse:
+    """Upload API のエラーレスポンスを生成する."""
+    return JSONResponse(
+        {"status": "error", "message": message},
+        status_code=status_code,
+    )
+
+
+def _upload_success(message: str, source_id: str) -> JSONResponse:
+    """Upload API の成功レスポンスを生成する."""
+    return JSONResponse(
+        {"status": "ok", "message": message, "source_id": source_id},
+    )
+
+
+async def _read_upload_file(
+    request: Request,
+    max_size_bytes: int,
+) -> tuple[bytes, str] | JSONResponse:
+    """multipart/form-data からファイルを読み取る.
+
+    Returns:
+        (data, filename) タプル、またはエラー時は JSONResponse
+    """
+    # Content-Length による事前チェック
+    content_length = request.headers.get("content-length")
+    if content_length is not None:
+        try:
+            if int(content_length) > max_size_bytes:
+                max_mb = max_size_bytes // (1024 * 1024)
+                return _upload_error(
+                    413,
+                    f"ファイルサイズが上限を超えています（上限: {max_mb} MB）",
+                )
+        except ValueError:
+            pass
+
+    form = await request.form()
+    file_field = form.get("file")
+    if file_field is None or not hasattr(file_field, "read"):
+        return _upload_error(400, "file フィールドが未指定です")
+
+    filename = getattr(file_field, "filename", "") or ""
+
+    # ストリーミング読み取りでサイズチェック
+    data = bytearray()
+    total = 0
+    while True:
+        chunk = await file_field.read(65536)
+        if not chunk:
+            break
+        total += len(chunk)
+        if total > max_size_bytes:
+            max_mb = max_size_bytes // (1024 * 1024)
+            return _upload_error(
+                413,
+                f"ファイルサイズが上限を超えています（上限: {max_mb} MB）",
+            )
+        data.extend(chunk)
+
+    if total == 0:
+        return _upload_error(400, "アップロードファイルが空です（0 バイト）")
+
+    return bytes(data), filename
+
+
+@mcp.custom_route("/upload/document", methods=["POST"])  # type: ignore[untyped-decorator]
+async def upload_document(request: Request) -> Response:
+    """ドキュメントファイルをアップロードしてインジェストする."""
+    # 認証チェック
+    auth_error = await _check_api_key(request)
+    if auth_error is not None:
+        return _upload_error(401, auth_error)
+
+    # インジェストロック取得（ボディ読み取り前に実施し、競合時の無駄な I/O を回避）
+    if not await _acquire_ingest_lock():
+        return _upload_error(409, "別のインジェストが実行中です")
+
+    try:
+        settings = get_settings()
+        max_size_bytes = settings.rag_upload_max_file_size_mb * 1024 * 1024
+
+        # ファイル読み取り
+        result = await _read_upload_file(request, max_size_bytes)
+        if isinstance(result, JSONResponse):
+            return result
+        data, raw_filename = result
+
+        # フォームフィールド取得
+        form = await request.form()
+        upload_mode = str(form.get("upload_mode", "fail"))
+        if upload_mode not in _VALID_UPLOAD_MODES:
+            valid = ", ".join(sorted(_VALID_UPLOAD_MODES))
+            return _upload_error(400, f"無効な upload_mode: {upload_mode!r}（有効値: {valid}）")
+
+        # ファイル名サニタイズ・拡張子チェック
+        try:
+            sanitized = sanitize_upload_filename(raw_filename)
+        except ValueError as e:
+            return _upload_error(400, str(e))
+
+        supported = _get_supported_extensions()
+        ext = Path(sanitized).suffix.lower()
+        if not ext or ext not in supported:
+            return _upload_error(
+                400,
+                f"対応していないファイル形式です: {sanitized!r}（対応: {', '.join(supported)}）",
+            )
+
+        controller = await _get_pipeline_controller()
+        local_ingester = PipelineLocalIngester(
+            controller.source_store,
+            supported_extensions=supported,
+        )
+
+        ingest_result = await asyncio.to_thread(
+            local_ingester.add_document, data, sanitized,
+            upload_mode=upload_mode,  # type: ignore[arg-type]
+        )
+
+        if ingest_result.errors > 0:
+            return _upload_error(400, ingest_result.error_details[0])
+
+        if ingest_result.placed == 0:
+            return _upload_error(500, "ファイルの取り込みに失敗しました")
+
+        await _run_ingest_and_index_subprocess(
+            f"ingest(local): upload {sanitized}",
+        )
+        _reset_pipeline_controller()
+        _reset_rag_service()
+
+        import datetime as _dt
+        _today = _dt.date.today()
+        source_id = f"local/{_LOCAL_UPLOAD_DIR}/{_today.year}/{_today.month:02d}/{_today.day:02d}/{sanitized}"
+        return _upload_success(
+            f"ドキュメントを取り込みました: {sanitized}",
+            source_id=source_id,
+        )
+    except FileExistsError as e:
+        return _upload_error(409, str(e))
+    except Exception:
+        logger.exception("Upload document failed: %s", sanitized)
+        return _upload_error(500, "インジェスト処理中にエラーが発生しました")
+    finally:
+        _ingest_lock.release()
+
+
+@mcp.custom_route("/upload/journal", methods=["POST"])  # type: ignore[untyped-decorator]
+async def upload_journal(request: Request) -> Response:
+    """ジャーナル Markdown ファイルをアップロードしてインジェストする."""
+    # 認証チェック
+    auth_error = await _check_api_key(request)
+    if auth_error is not None:
+        return _upload_error(401, auth_error)
+
+    # インジェストロック取得（ボディ読み取り前に実施し、競合時の無駄な I/O を回避）
+    if not await _acquire_ingest_lock():
+        return _upload_error(409, "別のインジェストが実行中です")
+
+    try:
+        settings = get_settings()
+        max_size_bytes = settings.rag_upload_max_file_size_mb * 1024 * 1024
+
+        # ファイル読み取り
+        result = await _read_upload_file(request, max_size_bytes)
+        if isinstance(result, JSONResponse):
+            return result
+        data, raw_filename = result
+
+        # ファイル名サニタイズ・拡張子チェック
+        try:
+            sanitized = sanitize_upload_filename(raw_filename)
+        except ValueError as e:
+            return _upload_error(400, str(e))
+
+        if not sanitized.lower().endswith(".md"):
+            return _upload_error(
+                400,
+                f"ジャーナルは .md ファイルのみ対応しています: {sanitized!r}",
+            )
+
+        # フォームフィールド取得
+        form = await request.form()
+        title = str(form.get("title", "")).strip()
+        repository = str(form.get("repository", "")).strip()
+        entry_id = form.get("entry_id")
+        entry_id_str = str(entry_id).strip() if entry_id else None
+
+        if not title:
+            return _upload_error(400, "title が未指定です")
+        if not repository:
+            return _upload_error(400, "repository が未指定です")
+
+        # UTF-8 テキストとしてデコード
+        try:
+            body = data.decode("utf-8")
+        except UnicodeDecodeError:
+            return _upload_error(400, "ファイルが UTF-8 テキストではありません")
+
+        controller = await _get_pipeline_controller()
+        journal_ingester = PipelineJournalIngester(controller.source_store)
+
+        ingest_result = await asyncio.to_thread(
+            journal_ingester.add_entry,
+            title,
+            body,
+            repository,
+            entry_id=entry_id_str,
+        )
+
+        if ingest_result.errors > 0:
+            return _upload_error(400, ingest_result.error_details[0])
+
+        if ingest_result.placed == 0:
+            return _upload_error(500, "ジャーナルエントリの登録に失敗しました")
+
+        await _run_ingest_and_index_subprocess(
+            f"ingest(journal): upload {repository}/{entry_id_str or title}",
+        )
+        _reset_pipeline_controller()
+        _reset_rag_service()
+
+        resolved_entry_id = journal_ingester.last_entry_id or entry_id_str or title
+        source_id = f"journal/{repository}/{resolved_entry_id}.md"
+        return _upload_success(
+            f"ジャーナルエントリを登録しました: {repository}/{resolved_entry_id}",
+            source_id=source_id,
+        )
+    except Exception:
+        logger.exception("Upload journal failed: %s/%s", repository, title)
+        return _upload_error(500, "インジェスト処理中にエラーが発生しました")
+    finally:
+        _ingest_lock.release()
 
 
 def _configure_and_run() -> None:

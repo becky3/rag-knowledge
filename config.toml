@@ -59,6 +59,9 @@ rag_document_supported_extensions = ".md,.txt,.pdf,.adoc"
 rag_document_http_mode_enabled = false
 rag_document_allowed_dirs = ""
 
+# Upload HTTP API
+rag_upload_max_file_size_mb = 500
+
 # PDF バックエンド (auto / mineru / pymupdf4llm)
 rag_pdf_backend = "auto"
 rag_pdf_mineru_mfd_conf_thres = 0.6
