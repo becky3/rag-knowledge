@@ -53,7 +53,7 @@ metadata.db、converted_store、検索インデックスは全て source_store �
 - 自動取り込み媒体（web、bluesky、zenn、youtube、aozora、journal）のファイルには `.meta` サイドカーファイルを同階層に配置する
 - local 媒体は `.meta` 不要。sources テーブルの各フィールドは以下から導出する:
   - `title`: ファイル名（拡張子除去）
-  - `created_at`: git の初回コミット日時
+  - `collected_at`: git の初回コミット日時
   - `updated_at`: git の最終コミット日時
   - `content_hash`: ファイル内容から算出
   - `file_size`: ファイルシステムから取得
@@ -402,7 +402,7 @@ source_store 内の全ファイルのメタデータ索引。
 | `status` | TEXT | NOT NULL, DEFAULT 'active' | `active` または `deleted` |
 | `content_hash` | TEXT | NOT NULL | ファイル内容の SHA-256 ハッシュ |
 | `file_size` | INTEGER | NOT NULL | ファイルサイズ（バイト） |
-| `created_at` | TEXT | NOT NULL | 初回登録日時（ISO 8601） |
+| `collected_at` | TEXT | NOT NULL | 初回取り込み日時（ISO 8601） |
 | `updated_at` | TEXT | NOT NULL | 最終更新日時（ISO 8601） |
 
 #### pipeline_history テーブル
