@@ -108,7 +108,14 @@ QA 検証グループ:
 
 選択されたグループを ID 順に実行する。各グループの詳細手順はグループ別検証手順に定義する。
 
-CLI → MCP の順で実行する（both 選択時）。
+インターフェース選択に応じた実行方針:
+
+- **CLI のみ**: MCP サーバーが disabled であることを確認し、全グループを CLI で実行する
+- **MCP のみ**: MCP サーバーが enabled であることを確認し、全グループを MCP で実行する
+- **both**: 2フェーズで実行する
+  1. **CLI フェーズ**: MCP disabled を確認し、全グループを CLI で実行する
+  2. **切り替え**: ユーザーに `/mcp` で MCP サーバーを enabled に切り替えてもらう
+  3. **MCP フェーズ**: MCP enabled を確認し、全グループを MCP で実行する
 
 YouTube（E）選択時は、グループ実行直前に以下を表示してユーザー確認を取る:
 
@@ -190,7 +197,7 @@ CLI 対応コマンド:
 手順:
 
 1. **add-document** — テスト用 Markdown ファイルを取り込み。共通検証フローを実行
-2. **add-document（上書き）** — 同名ファイルで `upload_mode=replace` を指定して上書き。共通検証フローを実行
+2. **add-document（上書き）** — 同名ファイルで上書きオプションを指定（CLI: `--upload-mode replace`、MCP: `upload_mode="replace"`）。共通検証フローを実行
 3. **crawl-documents** — テスト用ディレクトリ（複数ファイル）を一括取り込み。共通検証フローを実行
 4. **add-journal** — テスト用ジャーナルエントリを登録。共通検証フローを実行
 5. **migrate-journal** — テスト用ジャーナルディレクトリを一括配置。`rebuild --mode incremental` 後に共通検証フローを実行

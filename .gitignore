@@ -221,3 +221,4 @@ reports/
 .claude/*.lock
 scheduled_tasks.lock
 aidlc-archive/
+.pr-creation-authorized

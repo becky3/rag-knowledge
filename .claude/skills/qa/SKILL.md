@@ -45,13 +45,22 @@ QA 検証グループ:
 ### 3. 環境確認
 
 - 現在のブランチ・作業ディレクトリを表示
-- MCP サーバーの状態確認（CLI 検証時は disabled であることを確認）
+- MCP サーバーの状態確認（CLI 検証時は disabled、MCP 検証時は enabled であることを確認）
 - worktree 環境の場合、`.env` のストレージパスが worktree 内を指していることを確認
 - 問題があればユーザーに報告し、解決してから続行
 
 ### 4. グループ実行
 
-選択されたグループを ID 順（A→H）に実行する。both 選択時は各グループ内で CLI → MCP の順。
+選択されたグループを ID 順（A→H）に実行する。
+
+インターフェース選択に応じた実行方針:
+
+- **CLI のみ**: MCP disabled を確認し、全グループを CLI で実行
+- **MCP のみ**: MCP enabled を確認し、全グループを MCP で実行
+- **both**: 2フェーズで実行
+  1. CLI フェーズ: MCP disabled を確認 → 全グループを CLI で実行
+  2. 切り替え: ユーザーに `/mcp` で enabled に切り替えてもらう
+  3. MCP フェーズ: MCP enabled を確認 → 全グループを MCP で実行
 
 **全ステップ共通ルール:**
 
@@ -113,7 +122,7 @@ NG を検出した場合、Issue 起票を提案する。
 ### B) Local
 
 1. `add-document` で Markdown 取り込み + 共通検証
-2. `add-document` で同名上書き（upload_mode=replace）+ 共通検証
+2. `add-document` で同名上書き（CLI: `--upload-mode replace` / MCP: `upload_mode="replace"`）+ 共通検証
 3. `crawl-documents` でディレクトリ一括 + 共通検証
 4. `add-journal` でジャーナル登録 + 共通検証
 5. `migrate-journal` で一括配置 + `rebuild --mode incremental` + 共通検証
@@ -153,7 +162,7 @@ HTTP モードで MCP サーバーを起動して実行:
 
 ### H) Eval（CLI 固定）
 
-評価フィクスチャのパスはメモリ `reference_eval_fixtures.md` を参照:
+評価フィクスチャのパスはメモリ `reference_eval_fixtures.md` を参照（メモリが利用できない場合はユーザーにパスを確認する）:
 
 1. `init-test-db` でテスト DB 初期化 + ディレクトリ作成確認
 2. `evaluate` で評価実行 + レポート生成確認
