@@ -177,6 +177,9 @@ def _build_rag_service() -> RAGKnowledgeService:
     embedding_provider = get_embedding_provider(settings, settings.embedding_provider)
 
     with contextlib.redirect_stdout(io.StringIO()):
+        # HttpClient で ChromaDB サーバーに接続。
+        # chromadb_persist_dir はサーバー側の永続化パス（chroma run --path）で使用。
+        # auto_start による自動起動は #407 で実装予定。
         vector_store = VectorStore.create_http(
             embedding_provider=embedding_provider,
             host=settings.chromadb_server_host,

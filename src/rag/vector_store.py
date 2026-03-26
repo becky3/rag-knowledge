@@ -105,8 +105,10 @@ class VectorStore:
             )
         except Exception as exc:
             msg = (
-                f"ChromaDB サーバー ({host}:{port}) に接続できません。"
-                " 'chroma run' でサーバーを起動してください。"
+                f"ChromaDB サーバー ({host}:{port}) への接続または"
+                f"コレクションの取得/作成に失敗しました: {exc}. "
+                "'chroma run' でサーバーを起動しているか、"
+                "設定やコレクション定義を確認してください。"
             )
             raise ConnectionError(msg) from exc
         return instance

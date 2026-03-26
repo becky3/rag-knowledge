@@ -809,7 +809,7 @@ class TestCreateHttp:
         mock_client.get_or_create_collection.side_effect = Exception("Connection refused")
 
         with patch("chromadb.HttpClient", return_value=mock_client):
-            with pytest.raises(ConnectionError, match="ChromaDB サーバー.*接続できません"):
+            with pytest.raises(ConnectionError, match="ChromaDB サーバー.*失敗しました"):
                 VectorStore.create_http(
                     embedding_provider=mock_embedding,
                     host="localhost",

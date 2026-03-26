@@ -17,7 +17,7 @@ TEST_SETTINGS_DEFAULTS: dict[str, object] = {
     "converted_store_dir": "./converted_store",
     "chromadb_server_host": "localhost",
     "chromadb_server_port": 8000,
-    "chromadb_auto_start": True,
+    "chromadb_auto_start": False,
     "rag_transport": "stdio",
     "rag_http_host": "127.0.0.1",
     "rag_http_port": 8081,
