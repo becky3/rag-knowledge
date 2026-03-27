@@ -80,7 +80,7 @@ class ChromaDBServerManager:
         """
         try:
             resp = httpx.get(  # safety:allowed — ローカルヘルスチェック
-                f"{self._base_url}/api/v1/heartbeat",
+                f"{self._base_url}/api/v2/heartbeat",
                 timeout=timeout,
             )
             return resp.status_code == 200

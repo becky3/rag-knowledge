@@ -47,6 +47,8 @@ _NO_META_TYPES: frozenset[SourceType] = frozenset({"local"})
 # パイプライン処理対象外のファイル（git メタデータ等）
 _PIPELINE_EXCLUDE_FILES: frozenset[str] = frozenset({
     ".gitignore",
+    ".ingest.lock",
+    ".rebuild.lock",
     "aozora/catalog.csv",
     "aozora/catalog.csv.meta",
 })
