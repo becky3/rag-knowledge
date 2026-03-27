@@ -99,7 +99,7 @@ API キーは py-common-lib の `get_secret` で OS セキュアストレージ�
 MCP サーバー起動時に ChromaDB サーバーが自動起動される（`CHROMADB_AUTO_START=true`、デフォルト）。CLI 単体で使用する場合は手動起動が必要:
 
 ```bash
-chroma run --path <CHROMADB_PERSIST_DIR>
+uv run chroma run --path <CHROMADB_PERSIST_DIR>
 ```
 
 ### MCP サーバー / CLI

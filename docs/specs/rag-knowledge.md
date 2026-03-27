@@ -247,12 +247,12 @@ flowchart TB
 
 ### ChromaDB client/server 構成
 
-ChromaDB は `chroma run` によるサーバーモードで動作し、MCP サーバー・CLI の両方が `HttpClient` で接続する。これにより、`PersistentClient` の単一プロセス制約を解消し、MCP と CLI の同時アクセスを可能にする。
+ChromaDB は `uv run chroma run` によるサーバーモードで動作し、MCP サーバー・CLI の両方が `HttpClient` で接続する。これにより、`PersistentClient` の単一プロセス制約を解消し、MCP と CLI の同時アクセスを可能にする。
 
 | 項目 | 仕様 |
 |------|------|
 | ChromaDB クライアント | `chromadb.HttpClient`（`PersistentClient` から移行） |
-| ChromaDB サーバー | `chroma run --path <persist_dir> --port <port>` |
+| ChromaDB サーバー | `uv run chroma run --path <persist_dir> --port <port>` |
 | ライフサイクル管理 | MCP サーバー起動時にヘルスチェック → 未起動なら自動起動 |
 | CLI からの接続 | 既存サーバーに接続（手動起動 or MCP 経由で起動済み前提） |
 | テスト時 | `EphemeralClient` を使用（ChromaDB サーバー不要） |
