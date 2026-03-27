@@ -36,7 +36,6 @@ import json
 import logging
 import os
 import sys
-import threading
 from pathlib import Path
 from typing import Any
 
@@ -68,17 +67,10 @@ with contextlib.redirect_stdout(io.StringIO()):
     # パイプライン関連
     from .pipeline.controller import PipelineController
     from .pipeline.ingesters._common import IngestResult
-    from .upload import decode_upload_content, sanitize_filename as sanitize_upload_filename
+    from .upload import sanitize_filename as sanitize_upload_filename
     from .pipeline.ingesters.aozora import AozoraIngester as PipelineAozoraIngester
-    from .pipeline.ingesters.bluesky import BlueskyIngester as PipelineBlueskyIngester
-    from .pipeline.ingesters.journal import JournalIngester as PipelineJournalIngester
-    from .pipeline.ingesters.local import (
-        LocalIngester as PipelineLocalIngester,
-        _UPLOAD_DIR as _LOCAL_UPLOAD_DIR,
-    )
+    from .pipeline.ingesters.local import _UPLOAD_DIR as _LOCAL_UPLOAD_DIR
     from .pipeline.ingesters.web import WebIngester as PipelineWebIngester
-    from .pipeline.ingesters.youtube import YoutubeIngester as PipelineYoutubeIngester
-    from .pipeline.ingesters.zenn import ZennIngester as PipelineZennIngester
     from .pipeline.models import PipelineMode, PipelineSummary, detect_source_type
     from .store.metadata_db import MetadataDB
     from .store.models import NULL_COMMIT_HASH
@@ -88,8 +80,6 @@ from py_common_lib.httpx import ConstrainedClient  # safety:allowed
 
 from .safe_browsing import (
     SafeBrowsingClient,
-    SafeBrowsingConfigError,
-    SafetyCheckError,
     create_safe_browsing_client,
 )
 
@@ -107,31 +97,6 @@ ensure_utf8_streams()
 logger = logging.getLogger(__name__)
 
 mcp = FastMCP("rag")
-
-# --- インジェスト排他制御 ---
-# 全インジェスト操作（MCP ツール + Upload HTTP API）で共有するロック。
-# ノンブロッキング: 取得失敗時は即座にエラーを返す。
-# rebuild_lock（スレッドロック）とは独立。
-_ingest_lock = asyncio.Lock()
-
-
-async def _acquire_ingest_lock() -> bool:
-    """インジェストロックの取得を試みる（ノンブロッキング）.
-
-    Returns:
-        True: ロック取得成功、False: ロック取得失敗（別のインジェスト実行中）
-
-    Note:
-        locked() と acquire() の間に TOCTOU の懸念があるが、
-        CPython の asyncio.Lock は unlocked 時に acquire() が
-        await ポイントなしで即座に完了する（内部で _locked フラグを
-        同期的にセットする）ため、他のコルーチンに制御が渡らず安全。
-    """
-    if _ingest_lock.locked():
-        return False
-    await _ingest_lock.acquire()
-    return True
-
 
 # --- 遅延初期化: RAGKnowledgeService（検索用） ---
 
@@ -449,38 +414,13 @@ async def rag_add(url: str, ctx: MCPContext | None = None) -> str:
     Returns:
         取り込み結果のメッセージ
     """
-    controller = await _get_pipeline_controller()
     try:
-        sb_client = _get_safe_browsing_client()
-    except SafeBrowsingConfigError as e:
-        return f"Safe Browsing 設定エラー: {e}"
-    web_ingester = _create_web_ingester(controller.source_store, sb_client)
-    settings = get_settings()
-
-    try:
-        async with ConstrainedClient(
-            request_timeout=settings.rag_crawl_request_timeout,
-            request_interval=settings.rag_crawl_delay_sec,
-        ) as client:
-            ingest_result = await web_ingester.add(
-                url, client=client,
-            )
-
-        if ingest_result.placed == 0 and ingest_result.errors == 0:
-            return f"取り込み対象がありませんでした: {url}"
-
-        pipeline_summary = await _run_ingest_and_index_subprocess(
-            f"ingest(web): add {url}",
-            ctx=ctx,
-        )
-        _reset_pipeline_controller()
-        _reset_rag_service()
-
-        return _format_ingest_response(ingest_result, pipeline_summary, context=url)
-    except (SafetyCheckError, SafeBrowsingConfigError) as e:
-        return f"Safe Browsing エラー: {e}"
-    except ValueError as e:
-        return f"エラー: {e}"
+        result = await _run_cli_subprocess("add", [url], ctx=ctx)
+        return _format_cli_ingest_result(result, context=url)
+    except CLISubprocessError as e:
+        if e.lock_conflict:
+            return "エラー: 別のインジェストが実行中です。しばらく待ってから再試行してください"
+        return f"エラー: ページの取り込みに失敗しました。URL: {url} ({e})"
     except Exception:
         logger.exception("Failed to add page: %s", url)
         return f"エラー: ページの取り込みに失敗しました。URL: {url}"
@@ -505,58 +445,19 @@ async def rag_crawl(
     Returns:
         クロール結果のサマリー
     """
-    settings = get_settings()
-
-    if depth is None:
-        depth = settings.rag_crawl_default_depth
-
-    # depth >= 2 の場合は pattern 必須
-    if depth >= 2 and not pattern:
-        return (
-            "エラー: depth が 2 以上の場合は pattern の指定が必須です。"
-            "再帰クロールではパターンなしだと無関係なページまで辿る恐れがあります"
-        )
-
-    # MSYS パス変換検出（Git Bash 環境で /pattern が C:/Program Files/... に変換される）
-    from .pipeline.ingesters.web import _looks_like_msys_path
-    if pattern and _looks_like_msys_path(pattern):
-        return (
-            f"エラー: pattern が Windows パスに変換されています: {pattern!r}。"
-            "Git Bash 環境では先頭の / が自動変換されます。"
-            "先頭の / を除去するか、MSYS_NO_PATHCONV=1 を設定してください"
-        )
-
-    controller = await _get_pipeline_controller()
-    try:
-        sb_client = _get_safe_browsing_client()
-    except SafeBrowsingConfigError as e:
-        return f"Safe Browsing 設定エラー: {e}"
-    web_ingester = _create_web_ingester(controller.source_store, sb_client)
+    args: list[str] = [url]
+    if pattern:
+        args.extend(["--pattern", pattern])
+    if depth is not None:
+        args.extend(["--depth", str(depth)])
 
     try:
-        async with ConstrainedClient(
-            request_timeout=settings.rag_crawl_request_timeout,
-            request_interval=settings.rag_crawl_delay_sec,
-        ) as client:
-            ingest_result = await web_ingester.crawl(
-                url, pattern=pattern, depth=depth, client=client,
-            )
-
-        if ingest_result.placed == 0 and ingest_result.errors == 0:
-            return f"対象ページが見つかりませんでした: {url}"
-
-        pipeline_summary = await _run_ingest_and_index_subprocess(
-            f"ingest(web): crawl {url}",
-            ctx=ctx,
-        )
-        _reset_pipeline_controller()
-        _reset_rag_service()
-
-        return _format_ingest_response(ingest_result, pipeline_summary, context=url)
-    except (SafetyCheckError, SafeBrowsingConfigError) as e:
-        return f"Safe Browsing エラー: {e}"
-    except ValueError as e:
-        return f"エラー: {e}"
+        result = await _run_cli_subprocess("crawl", args, ctx=ctx)
+        return _format_cli_ingest_result(result, context=url)
+    except CLISubprocessError as e:
+        if e.lock_conflict:
+            return "エラー: 別のインジェストが実行中です。しばらく待ってから再試行してください"
+        return f"エラー: クロールに失敗しました。URL: {url} ({e})"
     except Exception:
         logger.exception("Failed to crawl: %s", url)
         return f"エラー: クロールに失敗しました。URL: {url}"
@@ -660,59 +561,21 @@ async def rag_crawl_zenn(
     Returns:
         取り込み結果のサマリーテキスト
     """
-    settings = get_settings()
-
-    if max_articles is None:
-        max_articles = settings.rag_zenn_max_articles
-
-    if not isinstance(max_articles, int) or isinstance(max_articles, bool):
-        return f"エラー: max_articles は整数で指定してください（入力値: {max_articles!r}）"
-    if max_articles <= 0:
-        return f"エラー: max_articles は正の整数で指定してください（入力値: {max_articles}）"
-
-    if not username or not username.strip():
-        return "エラー: username を指定してください"
-
-    if content_type not in _VALID_ZENN_CONTENT_TYPES:
-        valid = ", ".join(sorted(_VALID_ZENN_CONTENT_TYPES))
-        return f"エラー: 無効な content_type: {content_type!r}（有効値: {valid}）"
-
-    controller = await _get_pipeline_controller()
-    zenn_ingester = PipelineZennIngester(
-        controller.source_store,
-        max_articles=max_articles,
-    )
+    args: list[str] = [username]
+    if content_type != "all":
+        args.extend(["--content-type", content_type])
+    if max_articles is not None:
+        args.extend(["--max-articles", str(max_articles)])
+    if force:
+        args.append("--force")
 
     try:
-        async with ConstrainedClient(
-            request_timeout=settings.rag_zenn_request_timeout,
-            request_interval=settings.rag_zenn_request_interval,
-        ) as client:
-            ingest_result = await zenn_ingester.crawl_zenn(
-                username.strip(),
-                max_articles=max_articles,
-                content_type=content_type,
-                force=force,
-                client=client,
-            )
-
-        if ingest_result.placed == 0 and ingest_result.errors == 0:
-            if ingest_result.skipped > 0:
-                return f"全 {ingest_result.skipped} 件のコンテンツがスキップされました（ユーザー: {username}）。上書きするには force=true を指定してください"
-            return f"コンテンツが見つかりませんでした（ユーザー: {username}）"
-
-        pipeline_summary = await _run_ingest_and_index_subprocess(
-            f"ingest(zenn): {username.strip()}",
-            ctx=ctx,
-        )
-        _reset_pipeline_controller()
-        _reset_rag_service()
-
-        return _format_ingest_response(
-            ingest_result, pipeline_summary, context=f"ユーザー: {username}",
-        )
-    except (ValueError, TypeError) as e:
-        return f"エラー: {e}"
+        result = await _run_cli_subprocess("crawl-zenn", args, ctx=ctx)
+        return _format_cli_ingest_result(result, context=f"ユーザー: {username}")
+    except CLISubprocessError as e:
+        if e.lock_conflict:
+            return "エラー: 別のインジェストが実行中です。しばらく待ってから再試行してください"
+        return f"エラー: Zenn 記事の取り込みに失敗しました（ユーザー: {username}） ({e})"
     except Exception:
         logger.exception("Failed to crawl Zenn articles for user: %s", username)
         return f"エラー: Zenn 記事の取り込みに失敗しました（ユーザー: {username}）"
@@ -739,101 +602,19 @@ async def rag_crawl_bluesky(
     Returns:
         取り込み結果のサマリーテキスト
     """
-    settings = get_settings()
-
-    if max_posts is None:
-        max_posts = settings.rag_bluesky_max_posts
-    if include_reposts is None:
-        include_reposts = settings.rag_bluesky_include_reposts
-
-    if not isinstance(max_posts, int) or isinstance(max_posts, bool):
-        return f"エラー: max_posts は整数で指定してください（入力値: {max_posts!r}）"
-    if max_posts <= 0:
-        return f"エラー: max_posts は正の整数で指定してください（入力値: {max_posts}）"
-
-    if not handle or not handle.strip():
-        return "エラー: handle を指定してください"
-
-    handle = handle.strip()
-    if handle.startswith("did:"):
-        return (
-            f"エラー: DID 形式は使用できません: {handle!r}。"
-            "ハンドル（例: user.bsky.social）を指定してください"
-        )
-
-    controller = await _get_pipeline_controller()
-    bluesky_ingester = PipelineBlueskyIngester(
-        controller.source_store,
-        appview_url=settings.rag_bluesky_appview_url,
-        max_posts=max_posts,
-        include_reposts=include_reposts,
-    )
+    args: list[str] = [handle]
+    if max_posts is not None:
+        args.extend(["--max-posts", str(max_posts)])
+    if include_reposts is True:
+        args.append("--include-reposts")
 
     try:
-        async with ConstrainedClient(
-            request_timeout=settings.rag_bluesky_request_timeout,
-            request_interval=settings.rag_bluesky_request_interval,
-        ) as client:
-            ingest_result, placed_items = await bluesky_ingester.crawl_bluesky(
-                handle,
-                max_posts=max_posts,
-                include_reposts=include_reposts,
-                client=client,
-            )
-
-            # 投稿内 URL の自動取り込み
-            url_stats: dict[str, int] = {}
-            if placed_items:
-                try:
-                    sb_client = _get_safe_browsing_client()
-                except SafeBrowsingConfigError as e:
-                    return f"Safe Browsing 設定エラー: {e}"
-                web_ingester = _create_web_ingester(controller.source_store, sb_client)
-                youtube_ingester = PipelineYoutubeIngester(
-                    controller.source_store,
-                    max_videos=settings.rag_youtube_max_videos,
-                    request_interval=settings.rag_youtube_request_interval,
-                    request_timeout=settings.rag_youtube_request_timeout,
-                    whisper_model=settings.rag_youtube_whisper_model,
-                    whisper_device=settings.rag_youtube_whisper_device,
-                    transcript_languages=settings.rag_youtube_transcript_languages,
-                    max_duration=settings.rag_youtube_max_duration,
-                )
-                url_stats = await bluesky_ingester.follow_urls(
-                    placed_items,
-                    client=client,
-                    web_ingester=web_ingester,
-                    youtube_ingester=youtube_ingester,
-                )
-
-        if ingest_result.placed == 0 and ingest_result.errors == 0:
-            return f"投稿が見つかりませんでした（ハンドル: {handle}）"
-
-        pipeline_summary = await _run_ingest_and_index_subprocess(
-            f"ingest(bluesky): {handle}",
-            ctx=ctx,
-        )
-        _reset_pipeline_controller()
-        _reset_rag_service()
-
-        summary = _format_ingest_response(
-            ingest_result, pipeline_summary, context=f"ハンドル: {handle}",
-        )
-        if url_stats and any(url_stats.get(k, 0) > 0 for k in ("web_placed", "youtube_placed", "errors")):
-            parts = ["\n\nURL 自動取り込み:"]
-            web_n = url_stats.get("web_placed", 0)
-            yt_n = url_stats.get("youtube_placed", 0)
-            err_n = url_stats.get("errors", 0)
-            if web_n > 0 or yt_n > 0:
-                parts.append(f"Web {web_n}件, YouTube {yt_n}件")
-            if err_n > 0:
-                parts.append(f"エラー {err_n}件")
-            summary += " ".join(parts)
-        return summary
-    except (SafetyCheckError, SafeBrowsingConfigError) as e:
-        return f"Safe Browsing エラー: {e}"
-    except (ValueError, TypeError) as e:
-        return f"エラー: {e}"
+        result = await _run_cli_subprocess("crawl-bluesky", args, ctx=ctx)
+        return _format_cli_ingest_result(result, context=f"ハンドル: {handle}")
+    except CLISubprocessError as e:
+        if e.lock_conflict:
+            return "エラー: 別のインジェストが実行中です。しばらく待ってから再試行してください"
+        return f"エラー: BlueSky 投稿の取り込みに失敗しました（ハンドル: {handle}） ({e})"
     except Exception:
         logger.exception(
             "Failed to crawl BlueSky posts for handle: %s", handle
@@ -857,42 +638,13 @@ async def rag_add_youtube(
     Returns:
         取り込み結果のサマリーテキスト
     """
-    if not video_url or not video_url.strip():
-        return "エラー: video_url を指定してください"
-
-    video_url = video_url.strip()
-    settings = get_settings()
-
-    controller = await _get_pipeline_controller()
-    youtube_ingester = PipelineYoutubeIngester(
-        controller.source_store,
-        max_videos=settings.rag_youtube_max_videos,
-        request_interval=settings.rag_youtube_request_interval,
-        request_timeout=settings.rag_youtube_request_timeout,
-        whisper_model=settings.rag_youtube_whisper_model,
-        whisper_device=settings.rag_youtube_whisper_device,
-        transcript_languages=settings.rag_youtube_transcript_languages,
-        max_duration=settings.rag_youtube_max_duration,
-    )
-
     try:
-        ingest_result = await youtube_ingester.ingest_video(video_url)
-
-        if ingest_result.placed == 0:
-            return ingest_result.summary(context=f"動画: {video_url}")
-
-        pipeline_summary = await _run_ingest_and_index_subprocess(
-            f"ingest(youtube): {video_url}",
-            ctx=ctx,
-        )
-        _reset_pipeline_controller()
-        _reset_rag_service()
-
-        return _format_ingest_response(
-            ingest_result, pipeline_summary, context=f"動画: {video_url}",
-        )
-    except (ValueError, TypeError) as e:
-        return f"エラー: {e}"
+        result = await _run_cli_subprocess("ingest-youtube", [video_url], ctx=ctx)
+        return _format_cli_ingest_result(result, context=f"動画: {video_url}")
+    except CLISubprocessError as e:
+        if e.lock_conflict:
+            return "エラー: 別のインジェストが実行中です。しばらく待ってから再試行してください"
+        return f"エラー: YouTube 動画の取り込みに失敗しました: {video_url} ({e})"
     except Exception:
         logger.exception(
             "Failed to ingest YouTube video: %s", video_url
@@ -918,58 +670,17 @@ async def rag_crawl_youtube(
     Returns:
         取り込み結果のサマリーテキスト
     """
-    settings = get_settings()
-
-    if max_videos is None:
-        max_videos = settings.rag_youtube_max_videos
-
-    if not isinstance(max_videos, int) or isinstance(max_videos, bool):
-        return f"エラー: max_videos は整数で指定してください（入力値: {max_videos!r}）"
-    if max_videos <= 0:
-        return f"エラー: max_videos は正の整数で指定してください（入力値: {max_videos}）"
-    from .pipeline.ingesters.youtube import MAX_VIDEOS_HARD_LIMIT as _YT_MAX
-    if max_videos > _YT_MAX:
-        logger.warning("max_videos (%d) が上限 %d を超えています。クランプします", max_videos, _YT_MAX)
-        max_videos = _YT_MAX
-
-    if not playlist_url or not playlist_url.strip():
-        return "エラー: playlist_url を指定してください"
-
-    playlist_url = playlist_url.strip()
-
-    controller = await _get_pipeline_controller()
-    youtube_ingester = PipelineYoutubeIngester(
-        controller.source_store,
-        max_videos=max_videos,
-        request_interval=settings.rag_youtube_request_interval,
-        request_timeout=settings.rag_youtube_request_timeout,
-        whisper_model=settings.rag_youtube_whisper_model,
-        whisper_device=settings.rag_youtube_whisper_device,
-        transcript_languages=settings.rag_youtube_transcript_languages,
-        max_duration=settings.rag_youtube_max_duration,
-    )
+    args: list[str] = [playlist_url]
+    if max_videos is not None:
+        args.extend(["--max-videos", str(max_videos)])
 
     try:
-        ingest_result = await youtube_ingester.crawl_playlist(
-            playlist_url,
-            max_videos=max_videos,
-        )
-
-        if ingest_result.placed == 0:
-            return ingest_result.summary(context=f"プレイリスト: {playlist_url}")
-
-        pipeline_summary = await _run_ingest_and_index_subprocess(
-            f"ingest(youtube-playlist): {playlist_url}",
-            ctx=ctx,
-        )
-        _reset_pipeline_controller()
-        _reset_rag_service()
-
-        return _format_ingest_response(
-            ingest_result, pipeline_summary, context=f"プレイリスト: {playlist_url}",
-        )
-    except (ValueError, TypeError) as e:
-        return f"エラー: {e}"
+        result = await _run_cli_subprocess("ingest-youtube-playlist", args, ctx=ctx)
+        return _format_cli_ingest_result(result, context=f"プレイリスト: {playlist_url}")
+    except CLISubprocessError as e:
+        if e.lock_conflict:
+            return "エラー: 別のインジェストが実行中です。しばらく待ってから再試行してください"
+        return f"エラー: YouTube プレイリストの取り込みに失敗しました: {playlist_url} ({e})"
     except Exception:
         logger.exception(
             "Failed to crawl YouTube playlist: %s", playlist_url
@@ -1006,63 +717,35 @@ async def rag_add_document(
     Returns:
         取り込み結果のメッセージ
     """
-    if upload_mode not in _VALID_UPLOAD_MODES:
-        valid = ", ".join(sorted(_VALID_UPLOAD_MODES))
-        return f"エラー: 無効な upload_mode: {upload_mode!r}（有効値: {valid}）"
+    # MCP 側バリデーション（仕様: content-upload.md）
+    if encoding not in ("text", "base64"):
+        return f"エラー: 無効な encoding: {encoding!r}（有効値: text, base64）"
+    if not content:
+        return "エラー: content が空です"
 
     try:
         sanitized_filename = sanitize_upload_filename(filename)
     except ValueError as e:
         return f"エラー: {e}"
 
-    supported_extensions = _get_supported_extensions()
-    ext = Path(sanitized_filename).suffix.lower()
-    if not ext or ext not in supported_extensions:
-        return f"エラー: 対応していないファイル形式です: {sanitized_filename!r}（対応: {', '.join(supported_extensions)}）"
+    args: list[str] = ["--stdin", "--filename", sanitized_filename]
+    if encoding != "text":
+        args.extend(["--encoding", encoding])
+    if upload_mode != "fail":
+        args.extend(["--upload-mode", upload_mode])
 
     try:
-        data = decode_upload_content(content, encoding)
-    except ValueError as e:
-        return f"エラー: {e}"
-
-    if not await _acquire_ingest_lock():
-        return "エラー: 別のインジェストが実行中です。しばらく待ってから再試行してください"
-
-    try:
-        controller = await _get_pipeline_controller()
-        local_ingester = PipelineLocalIngester(
-            controller.source_store,
-            supported_extensions=supported_extensions,
+        result = await _run_cli_subprocess(
+            "add-document", args, ctx=ctx, stdin_data=content,
         )
-
-        ingest_result = await asyncio.to_thread(
-            local_ingester.add_document, data, sanitized_filename,
-            upload_mode=upload_mode,  # type: ignore[arg-type]
-        )
-
-        if ingest_result.placed == 0 and ingest_result.errors == 0:
-            return f"エラー: ファイルの取り込みに失敗しました: {sanitized_filename}"
-
-        if ingest_result.errors > 0:
-            return f"エラー: {ingest_result.error_details[0]}"
-
-        pipeline_summary = await _run_ingest_and_index_subprocess(
-            f"ingest(local): add {sanitized_filename}",
-            ctx=ctx,
-        )
-        _reset_pipeline_controller()
-        _reset_rag_service()
-
-        return _format_ingest_response(
-            ingest_result, pipeline_summary, context=sanitized_filename,
-        )
-    except FileExistsError as e:
-        return f"エラー: {e}"
+        return _format_cli_ingest_result(result, context=sanitized_filename)
+    except CLISubprocessError as e:
+        if e.lock_conflict:
+            return "エラー: 別のインジェストが実行中です。しばらく待ってから再試行してください"
+        return f"エラー: ファイルの取り込みに失敗しました: {sanitized_filename} ({e})"
     except Exception:
         logger.exception("Failed to add document: %s", sanitized_filename)
         return f"エラー: ファイルの取り込みに失敗しました: {sanitized_filename}"
-    finally:
-        _ingest_lock.release()
 
 
 @mcp.tool()
@@ -1098,46 +781,24 @@ async def rag_add_journal(
     if not sanitized_filename.lower().endswith(".md"):
         return f"エラー: filename の拡張子が .md ではありません: {sanitized_filename!r}"
 
-    if not await _acquire_ingest_lock():
-        return "エラー: 別のインジェストが実行中です。しばらく待ってから再試行してください"
+    args: list[str] = ["--stdin", "--title", title, "--repository", repository]
+    if entry_id:
+        args.extend(["--entry-id", entry_id])
 
     try:
-        controller = await _get_pipeline_controller()
-        journal_ingester = PipelineJournalIngester(controller.source_store)
-
-        ingest_result = await asyncio.to_thread(
-            journal_ingester.add_entry,
-            title,
-            content,
-            repository,
-            entry_id=entry_id,
+        result = await _run_cli_subprocess(
+            "add-journal", args, ctx=ctx, stdin_data=content,
         )
-
-        if ingest_result.placed == 0 and ingest_result.errors == 0:
-            return "エラー: ジャーナルエントリの登録に失敗しました"
-
-        if ingest_result.errors > 0:
-            return f"エラー: {ingest_result.error_details[0]}"
-
-        pipeline_summary = await _run_ingest_and_index_subprocess(
-            f"ingest(journal): {repository}/{entry_id or title}",
-            ctx=ctx,
+        return _format_cli_ingest_result(
+            result, context=f"journal: {repository}/{entry_id or title}",
         )
-        _reset_pipeline_controller()
-        _reset_rag_service()
-
-        resolved_entry_id = journal_ingester.last_entry_id or entry_id or title
-        return _format_ingest_response(
-            ingest_result, pipeline_summary,
-            context=f"journal: {repository}/{resolved_entry_id}",
-        )
-    except ValueError as e:
-        return f"エラー: {e}"
+    except CLISubprocessError as e:
+        if e.lock_conflict:
+            return "エラー: 別のインジェストが実行中です。しばらく待ってから再試行してください"
+        return f"エラー: ジャーナルエントリの登録に失敗しました: {title} ({e})"
     except Exception:
         logger.exception("Failed to add journal entry: %s/%s", repository, title)
         return f"エラー: ジャーナルエントリの登録に失敗しました: {title}"
-    finally:
-        _ingest_lock.release()
 
 
 @mcp.tool()
@@ -1165,37 +826,19 @@ async def rag_crawl_documents(
     if get_settings().rag_transport == "http":
         return "エラー: rag_crawl_documents は HTTP モードでは無効です（セキュリティ上の制約）"
 
-    if upload_mode not in _VALID_UPLOAD_MODES:
-        valid = ", ".join(sorted(_VALID_UPLOAD_MODES))
-        return f"エラー: 無効な upload_mode: {upload_mode!r}（有効値: {valid}）"
-
-    controller = await _get_pipeline_controller()
-    local_ingester = PipelineLocalIngester(
-        controller.source_store,
-        supported_extensions=_get_supported_extensions(),
-    )
+    args: list[str] = [dir_path]
+    if pattern != "**/*":
+        args.extend(["--pattern", pattern])
+    if upload_mode != "fail":
+        args.extend(["--upload-mode", upload_mode])
 
     try:
-        ingest_result = await asyncio.to_thread(
-            local_ingester.crawl_documents, dir_path, pattern,
-            upload_mode=upload_mode,  # type: ignore[arg-type]
-        )
-
-        if ingest_result.placed == 0 and ingest_result.errors == 0:
-            return f"対象ファイルが見つかりませんでした（ディレクトリ: {dir_path}）"
-
-        pipeline_summary = await _run_ingest_and_index_subprocess(
-            f"ingest(local): crawl {dir_path}",
-            ctx=ctx,
-        )
-        _reset_pipeline_controller()
-        _reset_rag_service()
-
-        return _format_ingest_response(
-            ingest_result, pipeline_summary, context=f"ディレクトリ: {dir_path}",
-        )
-    except ValueError as e:
-        return f"エラー: {e}"
+        result = await _run_cli_subprocess("crawl-documents", args, ctx=ctx)
+        return _format_cli_ingest_result(result, context=f"ディレクトリ: {dir_path}")
+    except CLISubprocessError as e:
+        if e.lock_conflict:
+            return "エラー: 別のインジェストが実行中です。しばらく待ってから再試行してください"
+        return f"エラー: ドキュメントの取り込みに失敗しました（ディレクトリ: {dir_path}） ({e})"
     except Exception:
         logger.exception("Failed to crawl documents: %s", dir_path)
         return f"エラー: ドキュメントの取り込みに失敗しました（ディレクトリ: {dir_path}）"
@@ -1306,12 +949,15 @@ async def rag_site_ingest(
         pipeline_summary: PipelineSummary | None = None
         has_changes = (bridge_result.ingest.placed + bridge_result.ingest.overwritten) > 0
         if has_changes and not download_only:
-            pipeline_summary = await _run_ingest_and_index_subprocess(
-                f"ingest(web): site-ingest {url}",
-                ctx=ctx,
+            # 先行 commit（サイトURLを含むコミットメッセージを記録）
+            await asyncio.to_thread(
+                controller.commit, f"ingest(web): site-ingest {url}",
             )
-            _reset_pipeline_controller()
-            _reset_rag_service()
+            # CLI サブプロセスで差分更新（キャッシュリセットは内部で自動実行）
+            rebuild_result = await _run_cli_subprocess(
+                "rebuild", ["--mode", "incremental"], ctx=ctx,
+            )
+            pipeline_summary = _parse_pipeline_summary(rebuild_result)
         elif has_changes and download_only:
             # download_only でもコミットは実行する（パイプライン処理のみスキップ）
             await asyncio.to_thread(
@@ -1358,23 +1004,13 @@ async def rag_update_aozora_catalog(
     Returns:
         カタログ更新結果のサマリーテキスト
     """
-    settings = get_settings()
-
-    controller = await _get_pipeline_controller()
-    aozora_ingester = PipelineAozoraIngester(controller.source_store)
-
     try:
-        async with ConstrainedClient(
-            request_timeout=settings.rag_aozora_request_timeout,
-            request_interval=settings.rag_aozora_request_interval,
-        ) as client:
-            result_text = await aozora_ingester.update_catalog(client=client)
-        # カタログはパイプライン処理対象外だが、未コミット変更が残ると
-        # 後続の rebuild で失敗するためコミットしておく
-        controller.commit("update_aozora_catalog")
-        return result_text
-    except (ValueError, TypeError) as e:
-        return f"エラー: {e}"
+        result = await _run_cli_subprocess("update-aozora-catalog", ctx=ctx)
+        return str(result.get("message", "カタログ更新完了"))
+    except CLISubprocessError as e:
+        if e.lock_conflict:
+            return "エラー: 別のインジェストが実行中です。しばらく待ってから再試行してください"
+        return f"エラー: 青空文庫カタログの更新に失敗しました ({e})"
     except Exception:
         logger.exception("Failed to update Aozora catalog")
         return "エラー: 青空文庫カタログの更新に失敗しました"
@@ -1444,39 +1080,13 @@ async def rag_add_aozora(
     Returns:
         取り込み結果のサマリーテキスト
     """
-    if not book_id or not book_id.strip():
-        return "エラー: book_id を指定してください"
-
-    book_id = book_id.strip()
-    settings = get_settings()
-
-    controller = await _get_pipeline_controller()
-    aozora_ingester = PipelineAozoraIngester(controller.source_store)
-
     try:
-        async with ConstrainedClient(
-            request_timeout=settings.rag_aozora_request_timeout,
-            request_interval=settings.rag_aozora_request_interval,
-        ) as client:
-            ingest_result = await aozora_ingester.add_work(
-                book_id, client=client,
-            )
-
-        if ingest_result.placed == 0:
-            return ingest_result.summary(context=f"作品ID: {book_id}")
-
-        pipeline_summary = await _run_ingest_and_index_subprocess(
-            f"ingest(aozora): book_id={book_id}",
-            ctx=ctx,
-        )
-        _reset_pipeline_controller()
-        _reset_rag_service()
-
-        return _format_ingest_response(
-            ingest_result, pipeline_summary, context=f"作品ID: {book_id}",
-        )
-    except (ValueError, TypeError) as e:
-        return f"エラー: {e}"
+        result = await _run_cli_subprocess("ingest-aozora", [book_id], ctx=ctx)
+        return _format_cli_ingest_result(result, context=f"作品ID: {book_id}")
+    except CLISubprocessError as e:
+        if e.lock_conflict:
+            return "エラー: 別のインジェストが実行中です。しばらく待ってから再試行してください"
+        return f"エラー: 青空文庫作品の取り込みに失敗しました（作品ID: {book_id}） ({e})"
     except Exception:
         logger.exception("Failed to add Aozora work: %s", book_id)
         return f"エラー: 青空文庫作品の取り込みに失敗しました（作品ID: {book_id}）"
@@ -1500,55 +1110,17 @@ async def rag_crawl_aozora(
     Returns:
         取り込み結果のサマリーテキスト
     """
-    settings = get_settings()
-
-    if max_works is None:
-        max_works = settings.rag_aozora_max_works
-
-    if not isinstance(max_works, int) or isinstance(max_works, bool):
-        return f"エラー: max_works は整数で指定してください（入力値: {max_works!r}）"
-    if max_works <= 0:
-        return f"エラー: max_works は正の整数で指定してください（入力値: {max_works}）"
-
-    if not person_id or not person_id.strip():
-        return "エラー: person_id を指定してください"
-
-    person_id = person_id.strip()
-
-    controller = await _get_pipeline_controller()
-    aozora_ingester = PipelineAozoraIngester(
-        controller.source_store,
-        max_works=max_works,
-    )
+    args: list[str] = [person_id]
+    if max_works is not None:
+        args.extend(["--max-works", str(max_works)])
 
     try:
-        async with ConstrainedClient(
-            request_timeout=settings.rag_aozora_request_timeout,
-            request_interval=settings.rag_aozora_request_interval,
-        ) as client:
-            ingest_result = await aozora_ingester.crawl_author(
-                person_id,
-                max_works=max_works,
-                client=client,
-            )
-
-        if ingest_result.placed == 0 and ingest_result.errors == 0 and ingest_result.skipped == 0:
-            return f"対象作品が見つかりませんでした（人物ID: {person_id}）"
-
-        pipeline_summary = None
-        if ingest_result.placed > 0:
-            pipeline_summary = await _run_ingest_and_index_subprocess(
-                f"ingest(aozora): person_id={person_id}",
-                ctx=ctx,
-            )
-            _reset_pipeline_controller()
-            _reset_rag_service()
-
-        return _format_ingest_response(
-            ingest_result, pipeline_summary, context=f"人物ID: {person_id}",
-        )
-    except (ValueError, TypeError) as e:
-        return f"エラー: {e}"
+        result = await _run_cli_subprocess("ingest-aozora-author", args, ctx=ctx)
+        return _format_cli_ingest_result(result, context=f"人物ID: {person_id}")
+    except CLISubprocessError as e:
+        if e.lock_conflict:
+            return "エラー: 別のインジェストが実行中です。しばらく待ってから再試行してください"
+        return f"エラー: 青空文庫作品の取り込みに失敗しました（人物ID: {person_id}） ({e})"
     except Exception:
         logger.exception(
             "Failed to crawl Aozora works for person_id: %s", person_id
@@ -1571,24 +1143,23 @@ async def rag_delete(url: str, ctx: MCPContext | None = None) -> str:
     Returns:
         削除結果のメッセージ
     """
-    # BM25 はインメモリインデックスのため、別プロセス（CLI）が
-    # ディスク上のインデックスを更新していても反映されない。
-    # delete 前にコントローラをリセットし、最新のディスク状態をロードする。
-    _reset_pipeline_controller()
-
     try:
-        result = await _run_delete_subprocess(url, ctx=ctx)
+        result = await _run_cli_subprocess("delete", [url], ctx=ctx)
+
         if result.get("not_found"):
             return f"該当するソースが見つかりませんでした: {url}"
 
-        _reset_pipeline_controller()
-        _reset_rag_service()
-
-        pipeline = result.get("pipeline")
-        if pipeline and pipeline.errors:
-            errors_text = "; ".join(pipeline.errors)
-            return f"削除しましたが、パイプラインでエラーが発生しました: {url} ({errors_text})"
+        pipeline_data = result.get("pipeline")
+        if pipeline_data:
+            pipeline_summary = _parse_pipeline_summary(pipeline_data)
+            if pipeline_summary and pipeline_summary.errors:
+                errors_text = "; ".join(pipeline_summary.errors)
+                return f"削除しましたが、パイプラインでエラーが発生しました: {url} ({errors_text})"
         return f"削除しました: {url}"
+    except CLISubprocessError as e:
+        if e.lock_conflict:
+            return "エラー: 別の操作が実行中です。しばらく待ってから再試行してください"
+        return f"エラー: 削除に失敗しました。URL: {url} ({e})"
     except Exception:
         logger.exception("Failed to delete: %s", url)
         return f"エラー: 削除に失敗しました。URL: {url}"
@@ -1602,7 +1173,6 @@ _VALID_REBUILD_MODES: frozenset[str] = frozenset({
 _VALID_PIPELINE_SOURCE_TYPES: frozenset[str] = frozenset({
     "web", "bluesky", "zenn", "youtube", "aozora", "local",
 })
-_rebuild_lock = threading.Lock()
 
 
 _format_size = format_file_size
@@ -1753,85 +1323,103 @@ async def rag_rebuild(
     Returns:
         処理結果サマリ（処理件数、スキップ件数、エラー件数、所要時間）
     """
-    # パラメータ検証
-    if mode not in _VALID_REBUILD_MODES:
-        valid = ", ".join(sorted(_VALID_REBUILD_MODES))
-        return f"エラー: 無効なモード: {mode!r}（有効値: {valid}）"
-
-    if source_type is not None and source_type not in _VALID_PIPELINE_SOURCE_TYPES:
-        valid = ", ".join(sorted(_VALID_PIPELINE_SOURCE_TYPES))
-        return f"エラー: 無効な source_type: {source_type!r}（有効値: {valid}）"
-
-    if mode == "incremental" and source_type is not None:
-        return (
-            "エラー: incremental モードでは source_type を指定できません"
-            "（git diff に従います）"
-        )
-
-    # 設定の検証
-    settings = get_settings()
-    if not settings.source_store_dir:
-        return "エラー: SOURCE_STORE_DIR が設定されていません"
-    if not settings.converted_store_dir:
-        return "エラー: CONVERTED_STORE_DIR が設定されていません"
-
-    source_dir = Path(settings.source_store_dir)
-    if not source_dir.exists():
-        return f"エラー: source_store ディレクトリが存在しません: {source_dir}"
-
-    # 排他制御
-    if not _rebuild_lock.acquire(blocking=False):
-        return "エラー: 別の再構築が実行中です"
+    args: list[str] = ["--mode", mode]
+    if source_type is not None:
+        args.extend(["--source-type", source_type])
 
     try:
-        result = await _run_rebuild_subprocess(mode, source_type, ctx=ctx)
+        result = await _run_cli_subprocess("rebuild", args, ctx=ctx)
 
-        # rebuild はインデックスを全操作するため、両方リセット
-        _reset_pipeline_controller()
-        _reset_rag_service()
-
-        return result
+        # result dict → フォーマット済みテキスト
+        summary = _parse_pipeline_summary(result)
+        elapsed = result.get("elapsed", 0.0)
+        if summary is not None:
+            return _format_rebuild_summary(summary, float(elapsed))
+        return "再構築完了（結果の解析に失敗）"
+    except CLISubprocessError as e:
+        if e.lock_conflict:
+            return "エラー: 別の再構築が実行中です"
+        return f"エラー: 再構築中にエラーが発生しました ({e})"
     except Exception:
         logger.exception("再構築中にエラーが発生しました")
         return "エラー: 再構築中にエラーが発生しました"
-    finally:
-        _rebuild_lock.release()
 
 
-async def _run_worker_subprocess(
-    subcommand: str,
-    args: list[str],
+# --- ロック競合判定キーワード ---
+_LOCK_CONFLICT_KEYWORDS: frozenset[str] = frozenset({
+    "lock",
+    "ロック",
+    "排他",
+})
+
+
+def _is_lock_conflict_error(message: str) -> bool:
+    """エラーメッセージがロック競合を示すかを判定する."""
+    lower = message.lower()
+    return any(kw in lower for kw in _LOCK_CONFLICT_KEYWORDS)
+
+
+class CLISubprocessError(Exception):
+    """CLI サブプロセスの実行エラー."""
+
+    def __init__(self, message: str, *, lock_conflict: bool = False) -> None:
+        super().__init__(message)
+        self.lock_conflict = lock_conflict
+
+
+async def _run_cli_subprocess(
+    command: str,
+    args: list[str] | None = None,
+    *,
     ctx: MCPContext | None = None,
-) -> tuple[int, str, str]:
-    """worker.py サブコマンドをサブプロセスで実行する.
+    stdin_data: str | None = None,
+) -> dict[str, Any]:
+    """CLI コマンドをサブプロセスで実行し結果を返す.
 
-    C 拡張（BM25s 等）の SEGFAULT がサーバープロセスを巻き込まないよう、
-    別プロセスで実行してエラーを安全にハンドリングする。
+    MCP 薄層アダプターの中核関数。書き込み系ツールを CLI サブプロセスとして実行し、
+    C 拡張（BM25s 等）の SEGFAULT からサーバープロセスを隔離する。
 
     Args:
-        subcommand: worker サブコマンド名
-        args: サブコマンド引数
+        command: CLI サブコマンド名（例: "add", "crawl", "rebuild"）
+        args: サブコマンド引数のリスト
         ctx: MCP Context（進捗通知用、任意）
+        stdin_data: stdin に書き込むデータ（add-journal, add-document 用）
 
     Returns:
-        (exit_code, stdout_text, stderr_tail) のタプル
-        stdout_text には progress 行を除いた最終結果行のみが含まれる
+        CLI が出力した result JSON の dict
+
+    Raises:
+        CLISubprocessError: サブプロセスの異常終了・クラッシュ・結果パース失敗時。
+            lock_conflict=True の場合はロック競合エラー。
     """
     cmd = [
-        sys.executable, "-m", "rag.pipeline.worker",
-        subcommand, *args,
+        sys.executable, "-m", "rag.cli",
+        command, "--output", "json",
+        *(args or []),
     ]
 
     env = os.environ.copy()
     env["PYTHONIOENCODING"] = "utf-8"
 
+    stdin_mode = asyncio.subprocess.PIPE if stdin_data is not None else asyncio.subprocess.DEVNULL
+
     process = await asyncio.create_subprocess_exec(
         *cmd,
         stdout=asyncio.subprocess.PIPE,
-        stdin=asyncio.subprocess.DEVNULL,
+        stdin=stdin_mode,
         stderr=asyncio.subprocess.PIPE,
         env=env,
     )
+
+    # stdin にデータを書き込んでクローズする
+    if stdin_data is not None:
+        assert process.stdin is not None  # noqa: S101
+        try:
+            process.stdin.write(stdin_data.encode("utf-8"))
+            await process.stdin.drain()
+        finally:
+            process.stdin.close()
+            await process.stdin.wait_closed()
 
     result_line = ""
     try:
@@ -1857,7 +1445,7 @@ async def _run_worker_subprocess(
                             await ctx.info(f"処理中: {processed}/{total} - {current}")
                             await ctx.report_progress(float(processed), float(total))
                         continue
-                    # result/error のみ最終結果として保持（ログ等の非JSON行で上書きしない）
+                    # result/error のみ最終結果として保持
                     if msg_type in {"result", "error"}:
                         result_line = line
             except json.JSONDecodeError:
@@ -1872,11 +1460,6 @@ async def _run_worker_subprocess(
         raise
 
     # stderr 読み取り + wait
-    # NOTE: stderr はプロセス終了後に読み取る。worker が stderr に大量出力
-    # （64KB超）した場合、stdout readline 中にパイプバッファが満杯になり
-    # デッドロックするリスクがある。現時点では worker の stderr 出力量は
-    # 少量のため問題ないが、大規模処理で顕在化する場合は stderr の
-    # 並行読み取りへの変更を検討する。
     stderr_bytes = await process.stderr.read() if process.stderr else b""
     await process.wait()
 
@@ -1887,7 +1470,69 @@ async def _run_worker_subprocess(
     stderr_lines = stderr_text.rstrip().splitlines()
     stderr_tail = "\n".join(stderr_lines[-10:])
 
-    return exit_code, result_line, stderr_tail
+    # キャッシュリセット（サブプロセスが DB を更新するため）
+    _reset_pipeline_controller()
+    _reset_rag_service()
+
+    # SEGFAULT 検出
+    if exit_code in _SEGFAULT_EXIT_CODES:
+        raise CLISubprocessError(
+            f"CLI サブプロセスがクラッシュしました (SEGFAULT, exit_code={exit_code})"
+        )
+
+    # エラー処理
+    if exit_code != 0:
+        if result_line:
+            try:
+                error_data = json.loads(result_line)
+                if error_data.get("error") or error_data.get("type") == "error":
+                    error_msg = error_data.get("message", "不明なエラー")
+                    raise CLISubprocessError(
+                        error_msg,
+                        lock_conflict=_is_lock_conflict_error(error_msg),
+                    )
+            except json.JSONDecodeError:
+                pass
+        raise CLISubprocessError(
+            f"CLI サブプロセスが異常終了しました (exit_code={exit_code})\n{stderr_tail}"
+        )
+
+    # 結果パース
+    if not result_line:
+        raise CLISubprocessError("CLI サブプロセスの出力が空です")
+
+    try:
+        result: dict[str, Any] = json.loads(result_line)
+    except json.JSONDecodeError as exc:
+        raise CLISubprocessError(
+            f"CLI サブプロセスの結果パースに失敗: {result_line}"
+        ) from exc
+
+    return result
+
+
+def _format_cli_ingest_result(
+    result: dict[str, Any],
+    *,
+    context: str = "",
+) -> str:
+    """CLI サブプロセスの result dict を MCP レスポンス文字列に変換する.
+
+    _run_cli_subprocess の戻り値（IngestResult + PipelineSummary の dict 表現）を
+    既存の _format_ingest_response と同等のフォーマットに変換する。
+    """
+    ingest_result = IngestResult(
+        placed=result.get("placed", 0),
+        skipped=result.get("skipped", 0),
+        overwritten=result.get("overwritten", 0),
+        errors=result.get("errors", 0),
+        error_details=result.get("error_details", []),
+    )
+
+    pipeline_data = result.get("pipeline")
+    pipeline_summary = _parse_pipeline_summary(pipeline_data) if pipeline_data else None
+
+    return _format_ingest_response(ingest_result, pipeline_summary, context=context)
 
 
 def _parse_pipeline_summary(data: dict[str, Any]) -> PipelineSummary | None:
@@ -1905,155 +1550,6 @@ def _parse_pipeline_summary(data: dict[str, Any]) -> PipelineSummary | None:
         )
     except ValueError:
         return None
-
-
-async def _run_ingest_and_index_subprocess(
-    commit_message: str,
-    ctx: MCPContext | None = None,
-) -> PipelineSummary:
-    """ingest_and_index をサブプロセスで実行し PipelineSummary を返す.
-
-    Raises:
-        RuntimeError: サブプロセスの異常終了・クラッシュ・結果パース失敗時
-    """
-    exit_code, stdout_text, stderr_tail = await _run_worker_subprocess(
-        "ingest-and-index", ["--commit-message", commit_message],
-        ctx=ctx,
-    )
-
-    if exit_code != 0:
-        if exit_code in _SEGFAULT_EXIT_CODES:
-            raise RuntimeError(
-                f"ingest-and-index がクラッシュしました (SEGFAULT, exit_code={exit_code})"
-            )
-        # worker がエラー JSON を出力している場合
-        if stdout_text:
-            try:
-                error_data = json.loads(stdout_text.splitlines()[-1])
-                if error_data.get("error"):
-                    raise RuntimeError(
-                        f"ingest-and-index エラー: {error_data.get('message', '不明なエラー')}"
-                    )
-            except (json.JSONDecodeError, IndexError):
-                pass
-        raise RuntimeError(
-            f"ingest-and-index 異常終了 (exit_code={exit_code})\n{stderr_tail}"
-        )
-
-    if not stdout_text:
-        raise RuntimeError("ingest-and-index の出力が空です")
-
-    last_line = stdout_text.splitlines()[-1]
-    try:
-        result = json.loads(last_line)
-    except json.JSONDecodeError as exc:
-        raise RuntimeError(f"ingest-and-index の結果パースに失敗: {stdout_text}") from exc
-
-    summary = _parse_pipeline_summary(result)
-    if summary is None:
-        raise RuntimeError(f"ingest-and-index の結果解析に失敗: {stdout_text}")
-    return summary
-
-
-async def _run_delete_subprocess(
-    source_id: str,
-    ctx: MCPContext | None = None,
-) -> dict[str, Any]:
-    """delete をサブプロセスで実行する.
-
-    Returns:
-        {"not_found": True} or {"deleted": True, "pipeline": PipelineSummary | None}
-    """
-    exit_code, stdout_text, stderr_tail = await _run_worker_subprocess(
-        "delete", ["--source-id", source_id],
-        ctx=ctx,
-    )
-
-    if exit_code != 0:
-        if exit_code in _SEGFAULT_EXIT_CODES:
-            raise RuntimeError(f"delete プロセスがクラッシュしました (SEGFAULT, exit_code={exit_code})")
-        if stdout_text:
-            try:
-                error_data = json.loads(stdout_text.splitlines()[-1])
-                if error_data.get("error"):
-                    raise RuntimeError(error_data.get("message", "不明なエラー"))
-            except (json.JSONDecodeError, IndexError):
-                pass
-        raise RuntimeError(f"delete プロセスが異常終了しました (exit_code={exit_code})\n{stderr_tail}")
-
-    if not stdout_text:
-        raise RuntimeError("delete プロセスの出力が空です")
-
-    last_line = stdout_text.splitlines()[-1]
-    try:
-        result = json.loads(last_line)
-    except json.JSONDecodeError as exc:
-        raise RuntimeError(f"delete の結果パースに失敗: {stdout_text}") from exc
-
-    if result.get("not_found"):
-        return {"not_found": True}
-
-    # pipeline summary の復元
-    pipeline_data = result.get("pipeline", {})
-    pipeline_summary = _parse_pipeline_summary(pipeline_data) if pipeline_data else None
-
-    return {"deleted": True, "pipeline": pipeline_summary}
-
-
-async def _run_rebuild_subprocess(
-    mode: str,
-    source_type: str | None,
-    ctx: MCPContext | None = None,
-) -> str:
-    """rebuild を CLI サブプロセスで実行する."""
-    args = ["--mode", mode]
-    if source_type is not None:
-        args.extend(["--source-type", source_type])
-
-    exit_code, stdout_text, stderr_tail = await _run_worker_subprocess(
-        "rebuild", args, ctx=ctx,
-    )
-
-    # クラッシュ検出
-    if exit_code != 0:
-        if exit_code in _SEGFAULT_EXIT_CODES:
-            return (
-                f"エラー: 再構築プロセスがクラッシュしました"
-                f"（SEGFAULT, exit_code={exit_code}）\n"
-                f"インデックスが破損している可能性があります。"
-                f"インデックスを手動削除して再実行してください。"
-            )
-        # worker がエラー JSON を stdout に出力している場合はそちらを優先
-        if stdout_text:
-            try:
-                error_data = json.loads(stdout_text.splitlines()[-1])
-                if error_data.get("error"):
-                    return f"エラー: {error_data.get('message', '不明なエラー')}"
-            except (json.JSONDecodeError, IndexError):
-                pass
-        return (
-            f"エラー: 再構築プロセスが異常終了しました"
-            f"（exit_code={exit_code}）\n{stderr_tail}"
-        )
-
-    # 正常終了: stdout の最終行を JSON としてパース
-    # （BM25s 等が stdout に警告を出す場合があるため、最終行のみを対象にする）
-    if not stdout_text:
-        return "再構築完了（結果なし）"
-
-    last_line = stdout_text.splitlines()[-1]
-    try:
-        result = json.loads(last_line)
-    except json.JSONDecodeError:
-        return f"再構築完了（結果の解析に失敗）\n{stdout_text}"
-
-    summary = _parse_pipeline_summary(result)
-    if summary is None:
-        return f"再構築完了（結果の解析に失敗）\n{stdout_text}"
-
-    elapsed = result.get("elapsed", 0)
-
-    return _format_rebuild_summary(summary, elapsed)
 
 
 @mcp.tool()
@@ -2316,15 +1812,14 @@ async def _read_upload_file(
 @mcp.custom_route("/upload/document", methods=["POST"])  # type: ignore[untyped-decorator]
 async def upload_document(request: Request) -> Response:
     """ドキュメントファイルをアップロードしてインジェストする."""
+    import tempfile
+
     # 認証チェック
     auth_error = await _check_api_key(request)
     if auth_error is not None:
         return _upload_error(401, auth_error)
 
-    # インジェストロック取得（ボディ読み取り前に実施し、競合時の無駄な I/O を回避）
-    if not await _acquire_ingest_lock():
-        return _upload_error(409, "別のインジェストが実行中です")
-
+    sanitized = ""
     try:
         settings = get_settings()
         max_size_bytes = settings.rag_upload_max_file_size_mb * 1024 * 1024
@@ -2356,57 +1851,54 @@ async def upload_document(request: Request) -> Response:
                 f"対応していないファイル形式です: {sanitized!r}（対応: {', '.join(supported)}）",
             )
 
-        controller = await _get_pipeline_controller()
-        local_ingester = PipelineLocalIngester(
-            controller.source_store,
-            supported_extensions=supported,
-        )
+        # 一時ファイルにコンテンツを書き出し、CLI --file 経由で処理
+        tmp_path = None
+        try:
+            with tempfile.NamedTemporaryFile(
+                delete=False, suffix=Path(sanitized).suffix,
+            ) as tmp:
+                tmp.write(data)
+                tmp_path = tmp.name
 
-        ingest_result = await asyncio.to_thread(
-            local_ingester.add_document, data, sanitized,
-            upload_mode=upload_mode,  # type: ignore[arg-type]
-        )
+            args = ["--file", tmp_path, "--filename", sanitized]
+            if upload_mode != "fail":
+                args.extend(["--upload-mode", upload_mode])
 
-        if ingest_result.errors > 0:
-            return _upload_error(400, ingest_result.error_details[0])
+            await _run_cli_subprocess("add-document", args)
 
-        if ingest_result.placed == 0:
-            return _upload_error(500, "ファイルの取り込みに失敗しました")
+            import datetime as _dt
+            _today = _dt.date.today()
+            source_id = f"local/{_LOCAL_UPLOAD_DIR}/{_today.year}/{_today.month:02d}/{_today.day:02d}/{sanitized}"
+            return _upload_success(
+                f"ドキュメントを取り込みました: {sanitized}",
+                source_id=source_id,
+            )
+        finally:
+            if tmp_path is not None:
+                with contextlib.suppress(OSError):
+                    os.unlink(tmp_path)
 
-        await _run_ingest_and_index_subprocess(
-            f"ingest(local): upload {sanitized}",
-        )
-        _reset_pipeline_controller()
-        _reset_rag_service()
-
-        import datetime as _dt
-        _today = _dt.date.today()
-        source_id = f"local/{_LOCAL_UPLOAD_DIR}/{_today.year}/{_today.month:02d}/{_today.day:02d}/{sanitized}"
-        return _upload_success(
-            f"ドキュメントを取り込みました: {sanitized}",
-            source_id=source_id,
-        )
-    except FileExistsError as e:
-        return _upload_error(409, str(e))
+    except CLISubprocessError as e:
+        if e.lock_conflict:
+            return _upload_error(409, "別のインジェストが実行中です")
+        return _upload_error(500, f"インジェスト処理中にエラーが発生しました: {e}")
     except Exception:
         logger.exception("Upload document failed: %s", sanitized)
         return _upload_error(500, "インジェスト処理中にエラーが発生しました")
-    finally:
-        _ingest_lock.release()
 
 
 @mcp.custom_route("/upload/journal", methods=["POST"])  # type: ignore[untyped-decorator]
 async def upload_journal(request: Request) -> Response:
     """ジャーナル Markdown ファイルをアップロードしてインジェストする."""
+    import tempfile
+
     # 認証チェック
     auth_error = await _check_api_key(request)
     if auth_error is not None:
         return _upload_error(401, auth_error)
 
-    # インジェストロック取得（ボディ読み取り前に実施し、競合時の無駄な I/O を回避）
-    if not await _acquire_ingest_lock():
-        return _upload_error(409, "別のインジェストが実行中です")
-
+    title = ""
+    repository = ""
     try:
         settings = get_settings()
         max_size_bytes = settings.rag_upload_max_file_size_mb * 1024 * 1024
@@ -2441,46 +1933,46 @@ async def upload_journal(request: Request) -> Response:
         if not repository:
             return _upload_error(400, "repository が未指定です")
 
-        # UTF-8 テキストとしてデコード
+        # UTF-8 デコードチェック（ジャーナルは Markdown テキストのため）
         try:
-            body = data.decode("utf-8")
+            data.decode("utf-8")
         except UnicodeDecodeError:
-            return _upload_error(400, "ファイルが UTF-8 テキストではありません")
+            return _upload_error(400, "ファイルが UTF-8 としてデコードできません")
 
-        controller = await _get_pipeline_controller()
-        journal_ingester = PipelineJournalIngester(controller.source_store)
+        # 一時ファイルにコンテンツを書き出し、CLI --file 経由で処理
+        tmp_path = None
+        try:
+            with tempfile.NamedTemporaryFile(
+                delete=False, suffix=".md",
+            ) as tmp:
+                tmp.write(data)
+                tmp_path = tmp.name
 
-        ingest_result = await asyncio.to_thread(
-            journal_ingester.add_entry,
-            title,
-            body,
-            repository,
-            entry_id=entry_id_str,
-        )
+            args = ["--file", tmp_path, "--title", title, "--repository", repository]
+            if entry_id_str:
+                args.extend(["--entry-id", entry_id_str])
 
-        if ingest_result.errors > 0:
-            return _upload_error(400, ingest_result.error_details[0])
+            cli_result = await _run_cli_subprocess("add-journal", args)
 
-        if ingest_result.placed == 0:
-            return _upload_error(500, "ジャーナルエントリの登録に失敗しました")
+            # CLI の result から entry_id を取得（利用可能な場合）
+            resolved_entry_id = cli_result.get("entry_id") or entry_id_str or title
+            source_id = f"journal/{repository}/{resolved_entry_id}.md"
+            return _upload_success(
+                f"ジャーナルエントリを登録しました: {repository}/{resolved_entry_id}",
+                source_id=source_id,
+            )
+        finally:
+            if tmp_path is not None:
+                with contextlib.suppress(OSError):
+                    os.unlink(tmp_path)
 
-        await _run_ingest_and_index_subprocess(
-            f"ingest(journal): upload {repository}/{entry_id_str or title}",
-        )
-        _reset_pipeline_controller()
-        _reset_rag_service()
-
-        resolved_entry_id = journal_ingester.last_entry_id or entry_id_str or title
-        source_id = f"journal/{repository}/{resolved_entry_id}.md"
-        return _upload_success(
-            f"ジャーナルエントリを登録しました: {repository}/{resolved_entry_id}",
-            source_id=source_id,
-        )
+    except CLISubprocessError as e:
+        if e.lock_conflict:
+            return _upload_error(409, "別のインジェストが実行中です")
+        return _upload_error(500, f"インジェスト処理中にエラーが発生しました: {e}")
     except Exception:
         logger.exception("Upload journal failed: %s/%s", repository, title)
         return _upload_error(500, "インジェスト処理中にエラーが発生しました")
-    finally:
-        _ingest_lock.release()
 
 
 def _configure_and_run() -> None:

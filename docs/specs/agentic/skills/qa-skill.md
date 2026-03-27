@@ -203,7 +203,7 @@ CLI 対応コマンド:
 
 | MCP ツール | CLI コマンド |
 |-----------|------------|
-| `rag_add_document` | `add-document <file_path>` |
+| `rag_add_document` | `add-document --file <file_path>` |
 | `rag_crawl_documents` | `crawl-documents <dir_path>` |
 | `rag_add_journal` | `add-journal --title <title> --file <file> --repository <repo>` |
 | — | `migrate-journal --dir <dir> --repository <repo>` |

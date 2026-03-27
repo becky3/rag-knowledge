@@ -1,7 +1,7 @@
 """CLI JSON 出力モードのテスト.
 
 --output json オプションによる JSON Lines 出力が
-pipeline.worker プロトコルと互換であることを検証する。
+CLI JSON Lines プロトコルと互換であることを検証する。
 """
 
 from __future__ import annotations
@@ -211,7 +211,7 @@ class TestCommandsHaveOutputOption:
 
 
 class TestJsonOutputProtocolCompatibility:
-    """JSON Lines 出力が pipeline.worker プロトコルと互換であることを検証する."""
+    """JSON Lines 出力が CLI JSON Lines プロトコルと互換であることを検証する."""
 
     def test_progress_has_required_fields(self, capsys: pytest.CaptureFixture[str]) -> None:
         """progress メッセージが worker.py と同じフィールドを持つ."""
