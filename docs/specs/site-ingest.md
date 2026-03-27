@@ -368,7 +368,7 @@ sequenceDiagram
     BRIDGE->>SS: ファイル配置 + .meta 生成
     BRIDGE->>CMD: 配置結果
     alt download_only = false
-        CMD->>PC: パイプライン処理（git commit + converter + indexer、MCP: サブプロセス経由）
+        CMD->>PC: パイプライン処理（git commit + converter + indexer、MCP: CLI サブプロセス経由）
         PC->>CMD: パイプライン処理結果
     else download_only = true
         CMD->>PC: git commit（source_store のみ）

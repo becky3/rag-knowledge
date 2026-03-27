@@ -268,23 +268,77 @@ ChromaDB は `chroma run` によるサーバーモードで動作し、MCP サ�
 
 ### MCP 薄層アダプターパターン
 
-> **TODO:#408** CLI JSON 出力モード追加、**TODO:#409** MCP 薄層アダプター化
+MCP サーバーは CLI コマンドを呼び出す薄いアダプター層として動作する。書き込み系ツールは CLI サブプロセスとして実行し、C 拡張（BM25s 等）の SEGFAULT からサーバープロセスを隔離する。検索系ツールはパフォーマンスのためインプロセス実行を維持する。
 
-MCP サーバーは CLI コマンドを呼び出す薄いアダプター層として動作する。検索系ツールはパフォーマンスのためインプロセス実行を維持する。
+#### ツール分類
 
 | ツール分類 | 実行方式 | 対象 |
 |-----------|---------|------|
-| 検索系 | インプロセス（RAGKnowledgeService 直接呼び出し） | `rag_search`, `rag_get_document`, `rag_stats`, `rag_crawl_preview`, `rag_search_aozora` |
+| 検索系 | インプロセス（RAGKnowledgeService 直接呼び出し） | `rag_search`, `rag_get_document`, `rag_stats`, `rag_crawl_preview`, `rag_search_aozora`, `rag_list_recent` |
 | 書き込み系 | CLI サブプロセス（`--output json` で結果をパース） | `rag_add`, `rag_crawl`, `rag_crawl_zenn`, `rag_crawl_bluesky`, `rag_add_youtube`, `rag_crawl_youtube`, `rag_add_document`, `rag_crawl_documents`, `rag_add_journal`, `rag_add_aozora`, `rag_crawl_aozora`, `rag_update_aozora_catalog`, `rag_delete`, `rag_rebuild` |
+| Upload HTTP API | CLI サブプロセス（書き込み系と同一方式） | `/upload/document`, `/upload/journal` |
 | 特殊 | Scrapy サブプロセス + Bridge（現行維持） | `rag_site_ingest` |
 
-CLI の JSON 出力は JSON Lines 形式で、既存の `rag.pipeline.worker` モジュール（`src/rag/pipeline/worker.py`）のサブプロセス出力プロトコルを踏襲する:
+#### MCP ツール → CLI コマンドマッピング
+
+| MCP ツール / エンドポイント | CLI コマンド | 備考 |
+|---------------------------|------------|------|
+| `rag_add` | `add` | |
+| `rag_crawl` | `crawl` | |
+| `rag_crawl_zenn` | `crawl-zenn` | |
+| `rag_crawl_bluesky` | `crawl-bluesky` | |
+| `rag_add_youtube` | `ingest-youtube` | |
+| `rag_crawl_youtube` | `ingest-youtube-playlist` | |
+| `rag_add_document` | `add-document` | stdin 入力（後述） |
+| `rag_crawl_documents` | `crawl-documents` | |
+| `rag_add_journal` | `add-journal` | stdin 入力（後述） |
+| `rag_add_aozora` | `ingest-aozora` | |
+| `rag_crawl_aozora` | `ingest-aozora-author` | |
+| `rag_update_aozora_catalog` | `update-aozora-catalog` | |
+| `rag_delete` | `delete` | |
+| `rag_rebuild` | `rebuild` | |
+| `/upload/document` | `add-document` | 一時ファイル経由 |
+| `/upload/journal` | `add-journal` | 一時ファイル経由 |
+
+#### CLI サブプロセス実行方式
+
+MCP サーバーは `_run_cli_subprocess` で CLI コマンドを実行する:
+
+1. コマンド構築: `python -m rag.cli <command> --output json [args...]`
+2. `asyncio.create_subprocess_exec` でサブプロセスを起動
+3. stdout を行単位で非同期に読み取り、各行を JSON パース:
+   - `type: "progress"` → `ctx.info()` でログ通知 + `ctx.report_progress()` で数値通知
+   - `type: "result"` → 結果として返却
+   - `type: "error"` → エラーとして処理
+4. stderr はプロセス終了後に読み取る
+5. SEGFAULT 検出: exit code が SEGFAULT シグナル（Unix: -11/139、Windows: -1073741819/3221225477）の場合、エラーメッセージを返却
+6. サブプロセス完了後、RAGKnowledgeService と PipelineController のキャッシュをリセットする（サブプロセスが ChromaDB・source_store を更新するため、インプロセスのキャッシュが古くなる）
+
+CLI の JSON 出力は JSON Lines 形式:
 
 | メッセージ種別 | 用途 |
 |-------------|------|
-| `{"type": "progress", ...}` | 進捗報告（MCP `ctx.report_progress` に中継） |
-| `{"type": "result", ...}` | コマンド結果 |
-| `{"type": "error", ...}` | エラー報告 |
+| `{"type": "progress", "processed": N, "total": M, "current": "..."}` | 進捗報告（MCP `ctx.report_progress` に中継） |
+| `{"type": "result", ...}` | コマンド結果（コマンド固有のフィールドを含む） |
+| `{"type": "error", "error": true, "message": "..."}` | エラー報告（exit code 1） |
+
+#### CLI stdin 入力プロトコル
+
+`rag_add_journal` と `rag_add_document` は MCP クライアントからコンテンツを文字列で受け取る。CLI コマンドはファイルパスを期待するため、`--stdin` オプションで stdin からコンテンツを読み取る方式を提供する。
+
+| MCP ツール | CLI コマンド | stdin の内容 | 追加引数 |
+|-----------|------------|------------|---------|
+| `rag_add_journal` | `add-journal --stdin --title T --repository R` | UTF-8 テキスト（Markdown 本文） | `--title`, `--repository`, `--entry-id`（任意） |
+| `rag_add_document` | `add-document --stdin --filename F --encoding E` | encoding に応じたデータ（`text`: UTF-8 テキスト、`base64`: base64 文字列） | `--filename`, `--encoding`（デフォルト: `text`）、`--upload-mode` |
+
+MCP 側の処理フロー:
+
+1. MCP ツールが `content` パラメータを受け取る
+2. `_run_cli_subprocess` でサブプロセスを起動し、stdin パイプを確保する
+3. `content` を subprocess の stdin に書き込み、stdin をクローズする
+4. CLI が stdin からコンテンツを読み取り、通常のファイル読み取りと同様に処理する
+
+Upload HTTP API（`/upload/document`, `/upload/journal`）はリクエストボディからファイルを受信し、一時ファイルに書き出した上で CLI の `--file` オプション経由で渡す。stdin は使用しない。
 
 ### 取り込みフロー（3段パイプライン）
 
