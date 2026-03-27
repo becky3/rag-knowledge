@@ -82,6 +82,7 @@ class TestIsTextResponse:
         spider = SiteSpider.__new__(SiteSpider)
         spider._url_pattern = None
         spider._output_dir = tmp_path
+        spider._max_pages = 0
         spider._page_count = 0
         spider._error_count = 0
         return spider
@@ -177,6 +178,23 @@ class TestSpiderInit:
         )
         assert out.exists()
 
+    def test_max_pages_default_zero(self, tmp_path: Path) -> None:
+        """max_pages 未指定時は 0（無制限）になること."""
+        spider = SiteSpider(
+            start_url="https://example.com",
+            output_dir=str(tmp_path),
+        )
+        assert spider._max_pages == 0
+
+    def test_max_pages_set(self, tmp_path: Path) -> None:
+        """max_pages が設定されること."""
+        spider = SiteSpider(
+            start_url="https://example.com",
+            output_dir=str(tmp_path),
+            max_pages=20,
+        )
+        assert spider._max_pages == 20
+
 
 # --- parse() の filepath 回帰テスト ---
 
@@ -201,6 +219,7 @@ class TestParseFilepathRegression:
         spider.name = "site_spider"
         spider._url_pattern = None
         spider._output_dir = output_dir
+        spider._max_pages = 0
         spider._page_count = 0
         spider._error_count = 0
 

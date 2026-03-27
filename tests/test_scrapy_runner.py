@@ -153,8 +153,9 @@ class TestBuildSpiderScript:
         # JSON から設定を読み込む構造
         assert "params['delay_sec']" in script
         assert "params['download_timeout']" in script
-        assert "params['max_pages']" in script
         assert "'LOG_LEVEL': 'INFO'" in script
+        # max_pages は Spider パラメータとして渡される（CLOSESPIDER_PAGECOUNT ではない）
+        assert "max_pages=params['max_pages']" in script
 
     def test_script_contains_spider_args(self, tmp_path: Path) -> None:
         """スクリプトに Spider 引数が JSON 経由で渡される構造を含むこと."""
@@ -199,6 +200,24 @@ class TestBuildSpiderScript:
 
         assert "json.load(f)" in script
         assert str(params_path).replace("\\", "/") in script
+
+    def test_script_contains_bfs_settings(self, tmp_path: Path) -> None:
+        """スクリプトに BFS 設定が含まれること."""
+        runner = ScrapyRunner(temp_dir=tmp_path)
+        params_path = _write_params(tmp_path)
+        script = runner._build_spider_script(params_path=params_path)
+
+        assert "'DEPTH_PRIORITY': 1" in script
+        assert "PickleFifoDiskQueue" in script
+        assert "FifoMemoryQueue" in script
+
+    def test_script_does_not_contain_closespider_pagecount(self, tmp_path: Path) -> None:
+        """スクリプトに CLOSESPIDER_PAGECOUNT が含まれないこと."""
+        runner = ScrapyRunner(temp_dir=tmp_path)
+        params_path = _write_params(tmp_path)
+        script = runner._build_spider_script(params_path=params_path)
+
+        assert "CLOSESPIDER_PAGECOUNT" not in script
 
     def test_script_contains_closespider_timeout_conditional(self, tmp_path: Path) -> None:
         """スクリプトに CLOSESPIDER_TIMEOUT の条件分岐が含まれること."""

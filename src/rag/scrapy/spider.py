@@ -53,6 +53,7 @@ class SiteSpider(scrapy.Spider):  # type: ignore[misc]
         allowed_domains: str = "",
         url_pattern: str = "",
         output_dir: str = "",
+        max_pages: int = 0,
         **kwargs: Any,
     ) -> None:
         super().__init__(**kwargs)
@@ -85,6 +86,9 @@ class SiteSpider(scrapy.Spider):  # type: ignore[misc]
         self._output_dir = Path(output_dir)
         self._output_dir.mkdir(parents=True, exist_ok=True)
 
+        # ページ数上限（0 = 無制限）
+        self._max_pages = int(max_pages)
+
         # 統計
         self._page_count = 0
         self._error_count = 0
@@ -113,7 +117,10 @@ class SiteSpider(scrapy.Spider):  # type: ignore[misc]
             )
             return
 
-        self._page_count += 1
+        # 200 OK のみカウント（404 等を除外して正確なページ数制限を実現）
+        if response.status == 200:
+            self._page_count += 1
+
         self.logger.info(
             "[%d] Crawled: %s (status=%d, size=%d)",
             self._page_count,
@@ -142,6 +149,10 @@ class SiteSpider(scrapy.Spider):  # type: ignore[misc]
 
         # リンクを辿る
         yield from self._follow_links(response)
+
+        # 200 OK ページ数が上限に達したら Spider をクローズ
+        if self._max_pages and self._page_count >= self._max_pages:
+            self.crawler.engine.close_spider(self, "max_pages_reached")
 
     def _is_text_response(self, content_type: str) -> bool:
         """Content-Type がテキスト系かどうか判定する."""
