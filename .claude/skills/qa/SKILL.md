@@ -52,11 +52,13 @@ QA 検証グループ:
 2. worktree を作成する: `git worktree add -b qa/qa-skill-<Issue番号> <worktree-path> develop`
    - 配置: リポジトリの親ディレクトリ、命名: `<リポジトリ名>-wt-<Issue番号>`
 3. メインリポジトリから `.env` をコピーする
-4. `.env` のストレージパスを worktree 内の**絶対パス**に変更する（相対パスだとメインリポジトリのストレージを参照してしまう）。`CHROMADB_SERVER_PORT=8001` を追加する（メインリポジトリの MCP サーバーとのポート競合回避）
+4. `.env` のストレージパスを worktree 内の**絶対パス**に変更する（相対パスだとメインリポジトリのストレージを参照してしまう）。以下も設定する:
+   - `CHROMADB_SERVER_PORT=8001`（メインリポジトリの MCP サーバーとのポート競合回避）
+   - `CHROMADB_AUTO_START=false`（worktree では手動起動するため。`true` のままだと MCP サーバー起動時に競合する可能性がある）
 5. LM Studio の接続先を確認し、必要に応じて `localhost` に変更する
 6. `.tmp` ディレクトリを作成する
 7. メインリポジトリから `.qa/` ディレクトリをコピーする（`.qa/` は `.gitignore` 対象のため worktree に含まれない）
-8. CLI フェーズを含む場合、ChromaDB サーバーを手動起動する: `chroma run --path <persist_dir> --port <CHROMADB_SERVER_PORT>`。「MCP のみ」選択時は MCP サーバーが自動起動するためスキップする
+8. CLI フェーズを含む場合、ChromaDB サーバーを手動起動する: `uv run chroma run --path <persist_dir> --port <CHROMADB_SERVER_PORT>`（初回は venv 構築のため起動に時間がかかる。目安: 10〜20 秒。heartbeat 確認前に十分待機すること）。「MCP のみ」選択時は MCP サーバーが自動起動するためスキップする
 
 以降の全コマンドは worktree ディレクトリで実行する。
 
@@ -64,7 +66,7 @@ QA 検証グループ:
 
 - 現在のブランチ・作業ディレクトリを表示
 - MCP サーバーの状態確認（CLI 検証時は disabled 推奨、MCP 検証時は enabled であることを確認）
-- ChromaDB サーバー疎通確認（CLI フェーズを含む場合のみ）: `curl http://localhost:<CHROMADB_SERVER_PORT>/api/v1/heartbeat` で応答を確認。「MCP のみ」選択時はスキップ
+- ChromaDB サーバー疎通確認（CLI フェーズを含む場合のみ）: `curl http://localhost:<CHROMADB_SERVER_PORT>/api/v2/heartbeat` で応答を確認。「MCP のみ」選択時はスキップ
 - LM Studio の接続確認（Embedding API が必要なグループの場合）
 - `.env` のストレージパスが worktree 内の絶対パスを指していることを確認
 - 問題があればユーザーに報告し、解決してから続行
@@ -173,7 +175,7 @@ NG を検出した場合、Issue 起票を提案する。
 | 1 | `add-document --file README.md` | Markdown 取り込み成功 | `ingest` |
 | 2 | `add-document --file .qa/pdf_add_test.pdf` | PDF 取り込み成功 | `ingest` |
 | 3 | `add-document --file README.md --upload-mode replace` | 上書き成功、エラーなし | `none` |
-| 4 | `crawl-documents docs/specs/` | ディレクトリ一括取り込み成功 | `ingest` |
+| 4 | `crawl-documents docs/specs/`（`dir_path` は positional 引数） | ディレクトリ一括取り込み成功 | `ingest` |
 | 5 | `add-journal --title "コンテンツ一覧取得機能の実装" --file .qa/journal_add_test.md --repository rag-knowledge` | ジャーナル登録成功 | `ingest` |
 | 6a | `migrate-journal --dir .qa/journals --repository rag-knowledge` | ジャーナル一括配置成功 | `none` |
 | 6b | `rebuild --mode incremental` | 再構築成功、migrate 分がインデックスに反映 | `ingest` |
@@ -230,14 +232,16 @@ MCP 対応: `rag_update_aozora_catalog` / `rag_search_aozora` / `rag_add_aozora`
 
 HTTP モードで MCP サーバーを起動して実行:
 
+ベース URL: `http://localhost:<RAG_HTTP_PORT>`（デフォルト: `8081`）
+
 | # | コマンド（curl） | 期待結果 | 検証種別 |
 |---|----------------|---------|---------|
-| 1 | `POST /upload/document` で `README.md` をアップロード | HTTP 200、`status: ok` と `source_id` が返る | `ingest` |
-| 2 | `POST /upload/document` で同ファイルを再アップロード（`upload_mode=fail`） | HTTP 409（重複検出エラー） | `none` |
-| 3 | `POST /upload/document` で `upload_mode=replace` で上書き | HTTP 200 | `none` |
-| 4 | `POST /upload/journal` で `.qa/journal_upload_test.md` をアップロード（`title: "QA スキルの仕様書・スキル定義作成"` `repository: rag-knowledge`） | HTTP 200、`status: ok` と `source_id` が返る | `ingest` |
-| 5 | `POST /upload/journal` で title なしアップロード | HTTP 400（必須フィールド欠落） | `none` |
-| 6 | `curl -X POST ... &` でバックグラウンド送信 + 同一コマンドをフォアグラウンドで実行 | いずれか一方が HTTP 409 Conflict（ロック競合） | `none` |
+| 1 | `curl -X POST http://localhost:8081/upload/document -F "file=@README.md"` | HTTP 200、`status: ok` と `source_id` が返る | `ingest` |
+| 2 | `curl -X POST http://localhost:8081/upload/document -F "file=@README.md"` | HTTP 409（重複検出エラー、`upload_mode` デフォルト `fail`） | `none` |
+| 3 | `curl -X POST http://localhost:8081/upload/document -F "file=@README.md" -F "upload_mode=replace"` | HTTP 200 | `none` |
+| 4 | `curl -X POST http://localhost:8081/upload/journal -F "file=@.qa/journal_upload_test.md" -F "title=QA スキルの仕様書・スキル定義作成" -F "repository=rag-knowledge"` | HTTP 200、`status: ok` と `source_id` が返る | `ingest` |
+| 5 | `curl -X POST http://localhost:8081/upload/journal -F "file=@.qa/journal_upload_test.md" -F "repository=rag-knowledge"` | HTTP 400（必須フィールド `title` 欠落） | `none` |
+| 6 | ステップ 1 のコマンドを `&` でバックグラウンド送信 + 同一コマンドをフォアグラウンドで実行 | いずれか一方が HTTP 409 Conflict（ロック競合） | `none` |
 
 ### G) Eval（CLI 固定）
 
@@ -258,13 +262,40 @@ A〜G の取り込みデータを使ってパイプライン基盤を検証す�
 | 2 | `list-recent --source-type local` | 取り込み済み local ソースが一覧に表示される | `none` |
 | 3 | `list-recent --source-type journal` | 取り込み済み journal ソースが一覧に表示される | `none` |
 | 4 | `search --query <取り込み内容に関連するワード>` | ベクトル検索・BM25 の両方で結果が返る | `none` |
-| 5a | `get-document <source_id> --format text` | A) の README.md の全文がテキスト形式で取得できる | `none` |
+| 5a | `get-document <source_id> --format text`（`source_id` は positional 引数） | A) の README.md の全文がテキスト形式で取得できる | `none` |
 | 5b | `get-document <source_id> --format original` | A) の README.md の全文がオリジナル形式で取得できる | `none` |
-| 6 | `delete <source_id>` | A) の README.md が削除される | `delete` |
+| 6 | `delete <source_id>`（`source_id` は positional 引数） | A) の README.md が削除される | `delete` |
 | 7 | `rebuild --mode incremental` | 差分再構築が成功する | `none` |
 | 8 | `stats` | 再構築後の統計が更新されている | `none` |
 
 MCP 対応: `rag_stats` / `rag_list_recent` / `rag_search` / `rag_get_document` / `rag_delete` / `rag_rebuild`
+
+### 7. クリーンアップ
+
+QA 完了後、worktree 環境を片付ける。ChromaDB や MCP サーバーのプロセスがファイルをロックしているため、先にプロセスを停止する必要がある。
+
+1. バックグラウンドの ChromaDB サーバーを停止する:
+
+   ```bash
+   # worktree のプロセスを特定（Windows）
+   wmic process where "CommandLine like '%<worktree-path>%'" get ProcessId,CommandLine
+   # または、ポートで特定
+   netstat -ano | grep <CHROMADB_SERVER_PORT>
+   # 停止
+   taskkill //PID <pid> //F
+   ```
+
+2. worktree ディレクトリを削除する:
+
+   ```bash
+   git worktree remove <worktree-path>
+   ```
+
+3. worktree の参照をクリーンアップする:
+
+   ```bash
+   git worktree prune
+   ```
 
 ## 制約
 

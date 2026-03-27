@@ -32,7 +32,7 @@ ChromaDB は HttpClient 経由でサーバーに接続するため、MCP と CLI
 
 ### DB 破損時の復旧
 
-MCP を disable → ChromaDB サーバーが起動していることを確認（停止していれば `chroma run --path <CHROMADB_PERSIST_DIR>` で手動起動）→ CLI `rebuild --mode full` で復旧する。
+MCP を disable → ChromaDB サーバーが起動していることを確認（停止していれば `uv run chroma run --path <CHROMADB_PERSIST_DIR>` で手動起動）→ CLI `rebuild --mode full` で復旧する。
 
 ### worktree 環境セットアップ
 
@@ -66,10 +66,10 @@ worktree で CLI 操作・動作確認を行う場合、以下のセットアッ
    mkdir -p <worktree-path>/.tmp
    ```
 
-5. ChromaDB サーバーを起動する（メインリポジトリの MCP が enabled の場合はポート 8000 が使用中のため、`.env` で `CHROMADB_SERVER_PORT` を変更すること）:
+5. ChromaDB サーバーを起動する（メインリポジトリの MCP が enabled の場合はポート 8000 が使用中のため、`.env` で `CHROMADB_SERVER_PORT` を変更すること）。初回は venv 構築のため起動に時間がかかる（目安: 10〜20 秒）。heartbeat 確認前に十分待機すること:
 
    ```bash
-   chroma run --path <worktree-path>/.tmp/test_chroma_db --port <別ポート>
+   uv run chroma run --path <worktree-path>/.tmp/test_chroma_db --port <別ポート>
    ```
 
 ### CLI 動作確認の確認観点
