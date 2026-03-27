@@ -195,8 +195,8 @@ class TestUploadDocumentIntegration:
         assert "source_id" in body
 
     @pytest.mark.asyncio
-    async def test_duplicate_file_returns_500(self, client: httpx.AsyncClient) -> None:
-        """upload_mode=fail で同名ファイルが存在する場合、CLI エラーとして 500 を返す."""
+    async def test_duplicate_file_returns_409(self, client: httpx.AsyncClient) -> None:
+        """upload_mode=fail で同名ファイルが存在する場合 409 を返す."""
         with patch(
             "rag.server._run_cli_subprocess",
             new_callable=AsyncMock,
@@ -210,8 +210,8 @@ class TestUploadDocumentIntegration:
                 data={"upload_mode": "fail"},
             )
 
-        assert resp.status_code == 500
-        assert "エラー" in resp.json()["message"]
+        assert resp.status_code == 409
+        assert "同名ファイル" in resp.json()["message"]
 
 
 # --- /upload/journal 結合テスト ---

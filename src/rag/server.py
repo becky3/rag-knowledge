@@ -949,13 +949,12 @@ async def rag_site_ingest(
         pipeline_summary: PipelineSummary | None = None
         has_changes = (bridge_result.ingest.placed + bridge_result.ingest.overwritten) > 0
         if has_changes and not download_only:
-            # 先行 commit（サイトURLを含むコミットメッセージを記録）
-            await asyncio.to_thread(
-                controller.commit, f"ingest(web): site-ingest {url}",
-            )
-            # CLI サブプロセスで差分更新（キャッシュリセットは内部で自動実行）
+            # CLI サブプロセスで差分更新（commit も CLI 内でロック保護下で実行）
+            commit_msg = f"ingest(web): site-ingest {url}"
             rebuild_result = await _run_cli_subprocess(
-                "rebuild", ["--mode", "incremental"], ctx=ctx,
+                "rebuild",
+                ["--mode", "incremental", "--commit-message", commit_msg],
+                ctx=ctx,
             )
             pipeline_summary = _parse_pipeline_summary(rebuild_result)
         elif has_changes and download_only:
@@ -1881,7 +1880,11 @@ async def upload_document(request: Request) -> Response:
     except CLISubprocessError as e:
         if e.lock_conflict:
             return _upload_error(409, "別のインジェストが実行中です")
-        return _upload_error(500, f"インジェスト処理中にエラーが発生しました: {e}")
+        message = str(e)
+        if "同名" in message:
+            return _upload_error(409, message)
+        logger.error("Upload document CLI error for %s: %s", sanitized, e)
+        return _upload_error(500, "インジェスト処理中にエラーが発生しました")
     except Exception:
         logger.exception("Upload document failed: %s", sanitized)
         return _upload_error(500, "インジェスト処理中にエラーが発生しました")
@@ -1969,7 +1972,11 @@ async def upload_journal(request: Request) -> Response:
     except CLISubprocessError as e:
         if e.lock_conflict:
             return _upload_error(409, "別のインジェストが実行中です")
-        return _upload_error(500, f"インジェスト処理中にエラーが発生しました: {e}")
+        message = str(e)
+        if "同名" in message:
+            return _upload_error(409, message)
+        logger.error("Upload journal CLI error for %s/%s: %s", repository, title, e)
+        return _upload_error(500, "インジェスト処理中にエラーが発生しました")
     except Exception:
         logger.exception("Upload journal failed: %s/%s", repository, title)
         return _upload_error(500, "インジェスト処理中にエラーが発生しました")

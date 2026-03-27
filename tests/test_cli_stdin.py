@@ -312,6 +312,48 @@ class TestAddDocumentStdinExecution:
         assert parsed["type"] == "error"
         assert "ロック競合" in parsed["message"]
 
+    def test_file_exists_error_exits_with_error(
+        self, capsys: pytest.CaptureFixture[str],
+    ) -> None:
+        """upload_mode=fail で同名ファイルが存在する場合、exit code 1 でエラー終了する."""
+        args = argparse.Namespace(
+            stdin=True,
+            file_path=None,
+            filename="test.md",
+            encoding="text",
+            upload_mode="fail",
+            output_format="json",
+        )
+
+        mock_lock = MagicMock()
+        mock_ingester = MagicMock()
+        mock_ingester.return_value.add_document.side_effect = FileExistsError("test.md already exists")
+
+        with (
+            patch("sys.stdin", io.StringIO("some content")),
+            patch("rag.cli._build_cli_pipeline_controller") as mock_ctrl,
+            patch("rag.infrastructure.file_lock.ingest_lock", return_value=mock_lock),
+            patch("rag.pipeline.ingesters.local.LocalIngester", mock_ingester),
+        ):
+            mock_controller = MagicMock()
+            mock_controller.source_store.root_dir = Path("/tmp/test_store")
+            mock_settings = MagicMock()
+            mock_settings.rag_document_supported_extensions = ".md,.txt,.pdf,.adoc"
+            mock_ctrl.return_value = (mock_controller, mock_settings)
+
+            with pytest.raises(SystemExit) as exc_info:
+                import asyncio
+                from rag.cli import run_add_document
+                asyncio.run(run_add_document(args))
+
+            assert exc_info.value.code == 1
+
+        captured = capsys.readouterr()
+        parsed = json.loads(captured.out.strip())
+        assert parsed["type"] == "error"
+        assert "同名ファイル" in parsed["message"]
+        assert "test.md" in parsed["message"]
+
 
 class TestAddDocumentFilenamePriority:
     """--file モードで --filename が指定された場合の優先度テスト."""

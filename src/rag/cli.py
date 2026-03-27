@@ -366,6 +366,11 @@ def main() -> None:
         default=None,
         help="対象媒体フィルタ（incremental では指定不可）",
     )
+    rebuild_parser.add_argument(
+        "--commit-message",
+        default=None,
+        help="再構築前に source_store を git commit するメッセージ",
+    )
     _add_output_option(rebuild_parser)
     # stats サブコマンド
     subparsers.add_parser("stats", help="ナレッジベースの統計情報を表示")
@@ -1236,6 +1241,15 @@ def run_rebuild(args: argparse.Namespace) -> None:
     start = time.monotonic()
 
     progress_cb = _output_progress if json_out else None
+
+    # --commit-message 指定時は再構築前に source_store を git commit
+    commit_message: str | None = getattr(args, "commit_message", None)
+    if commit_message:
+        sha = controller.commit(commit_message)
+        if sha:
+            logger.info("source_store コミット: %s", sha)
+        else:
+            logger.info("source_store に変更なし（コミットなし）")
 
     if mode == "full":
         summary = controller.run_full_rebuild(
@@ -2232,9 +2246,16 @@ async def run_add_document(args: argparse.Namespace) -> None:
             supported_extensions=supported_extensions,
         )
 
-        ingest_result = local_ingester.add_document(
-            data, filename, upload_mode=args.upload_mode,
-        )
+        try:
+            ingest_result = local_ingester.add_document(
+                data, filename, upload_mode=args.upload_mode,
+            )
+        except FileExistsError as e:
+            msg = f"同名ファイルが既に存在します: {filename} ({e})"
+            if json_out:
+                _output_error(msg)
+            print(f"エラー: {msg}", file=sys.stderr)
+            raise SystemExit(1)
 
         if ingest_result.placed == 0 and ingest_result.errors == 0:
             if json_out:
