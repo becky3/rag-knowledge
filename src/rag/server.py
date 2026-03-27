@@ -1760,6 +1760,30 @@ def _upload_success(message: str, source_id: str) -> JSONResponse:
     )
 
 
+def _decode_form_value(value: str) -> str:
+    """Starlette の Latin-1 フォールバックで壊れたフォーム値を UTF-8/cp932 に復元する.
+
+    Starlette の MultiPartParser は非 UTF-8 バイト列を受信すると UTF-8 デコードに
+    失敗し Latin-1 にフォールバックする。この関数は Latin-1 文字列をバイト列に戻し、
+    UTF-8 → cp932 の順で再デコードすることで元の文字列を復元する。
+
+    主な発生パターン:
+    - Windows curl（cp932 コンソール）から日本語を送信した場合
+    - UTF-8 バイト列が Latin-1 にフォールバックした場合
+    """
+    try:
+        raw_bytes = value.encode("latin-1")
+    except UnicodeEncodeError:
+        return value
+    # UTF-8 を優先（cp932 の一部バイト列が偶然 UTF-8 として解釈されるのを防ぐ）
+    for codec in ("utf-8", "cp932"):
+        try:
+            return raw_bytes.decode(codec)
+        except (UnicodeDecodeError, ValueError):
+            continue
+    return value
+
+
 async def _read_upload_file(
     request: Request,
     max_size_bytes: int,
@@ -1787,7 +1811,7 @@ async def _read_upload_file(
     if file_field is None or not hasattr(file_field, "read"):
         return _upload_error(400, "file フィールドが未指定です")
 
-    filename = getattr(file_field, "filename", "") or ""
+    filename = _decode_form_value(getattr(file_field, "filename", "") or "")
 
     # ストリーミング読み取りでサイズチェック
     data = bytearray()
@@ -1929,10 +1953,10 @@ async def upload_journal(request: Request) -> Response:
 
         # フォームフィールド取得
         form = await request.form()
-        title = str(form.get("title", "")).strip()
-        repository = str(form.get("repository", "")).strip()
+        title = _decode_form_value(str(form.get("title", ""))).strip()
+        repository = _decode_form_value(str(form.get("repository", ""))).strip()
         entry_id = form.get("entry_id")
-        entry_id_str = str(entry_id).strip() if entry_id else None
+        entry_id_str = _decode_form_value(str(entry_id)).strip() if entry_id else None
 
         if not title:
             return _upload_error(400, "title が未指定です")

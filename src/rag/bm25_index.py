@@ -5,11 +5,13 @@
 
 from __future__ import annotations
 
+import io
 import json
 import logging
 import re
 import shutil
 import tempfile
+from contextlib import redirect_stdout
 from dataclasses import dataclass
 from functools import lru_cache
 from pathlib import Path
@@ -338,7 +340,8 @@ class BM25Index:
     def _rebuild_index(self) -> None:
         """BM25インデックスを再構築する."""
         try:
-            import bm25s
+            with redirect_stdout(io.StringIO()):
+                import bm25s
         except ImportError:
             logger.warning("bm25s not installed, BM25 search disabled")
             self._bm25 = None
@@ -508,7 +511,8 @@ class BM25Index:
                 self._doc_metadata_map = {}
                 return
 
-            import bm25s as bm25s_lib
+            with redirect_stdout(io.StringIO()):
+                import bm25s as bm25s_lib
 
             self._bm25 = bm25s_lib.BM25.load(str(bm25s_dir))
             self._needs_rebuild = False
