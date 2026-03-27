@@ -29,8 +29,9 @@ MCP ツール・CLI コマンド・HTTP API の機能を実際に実行し、正
 - **YouTube の実行制限**: YouTube グループ（D）を選択した場合、実行直前にユーザー確認を必ず挟む。IP ブロックリスクがあるため
 - **外部 API への最小アクセス**: 外部 API を使用するグループでは、取り込み件数を最小限に制限する（具体値は検証リソース定義に従う）
 - **エラー時の継続動作**: 各ステップでエラーが発生した場合、NG として記録し次のステップに進む。グループ全体を中断しない
-- **取り込み後の共通検証フロー**: 取り込み・再構築を行うステップの後には、必ず共通検証フローを実行する（後述）
+- **取り込み後の共通検証フロー**: 取り込み・再構築を行うステップの後には、必ず共通検証フローを実行する（詳細は [QA 実行スキル](qa-execute-skill.md) に定義）
 - **実行パラメータの明示**: 全ステップで実行するコマンド・パラメータを表示してから実行する
+- **qa-execute による実行制御**: 各検証ステップの実行は [QA 実行スキル](qa-execute-skill.md) に委譲する。コマンドの直接実行・共通検証フローの省略は禁止
 
 ## コマンド体系
 
@@ -127,6 +128,8 @@ QA 検証グループ:
 
 選択されたグループを ID 順（A→H）に実行する。各グループの詳細手順はグループ別検証手順に定義する。
 
+各検証ステップの実行は [QA 実行スキル](qa-execute-skill.md) に委譲する。取り込み系ステップは検証種別 `ingest`、削除系ステップは `delete`、それ以外は `none` を指定する。
+
 インターフェース選択に応じた実行方針:
 
 - **CLI のみ**: MCP サーバーが disabled であることを確認し、全グループを CLI で実行する
@@ -141,7 +144,7 @@ MCP フェーズでの追加確認（書き込み系ツール実行時）:
 - MCP ツールの実行結果が正常に返されること（CLI サブプロセス経由の JSON パースが成功していることの間接確認）
 - エラー発生時にエラーメッセージが適切に返されること
 
-YouTube（D）選択時は、グループ実行直前に以下を表示してユーザー確認を取る:
+YouTube（D）選択時は、グループ実行直前に以下を表示してユーザー確認を取る（qa-execute の都度確認とは別に、グループレベルで事前確認する）:
 
 ```
 YouTube 検証を実行します。
@@ -170,117 +173,79 @@ NG が検出された場合、Issue 起票を提案する。
 
 ## グループ別検証手順
 
-### 共通検証フロー（取り込み後）
+### 共通検証フロー
 
-取り込み・再構築を行うステップの後に、以下を必ず実行する。
-
-| # | 検証 | 方法 | 確認観点 |
-|---|------|------|---------|
-| 1 | 実データ確認 | source_store / converted_store のファイルを `ls` で確認 | ファイルが存在すること。メタデータの確認方法は媒体により異なる（後述） |
-| 2 | Git 状態確認 | source_store 内の git リポジトリで `git status` を実行 | 新規ファイルが追加されていること。意図しない変更がないこと |
-| 3 | 検索確認 | `search --query <取り込み内容に関連するクエリ>` | 取り込んだソースがヒットすること。メタデータ行（Source, Title, Type, Section, Collected）が正しいこと |
-
-メタデータ確認方法:
-
-- **local 以外**（web, bluesky, zenn, youtube, aozora, journal）: `.meta` サイドカーファイルの内容を確認（source_type, title, collected_at）
-- **local**: `.meta` は存在しない。metadata.db の sources テーブルで確認する（source_type, title, collected_at は DB から導出される）
-
-削除ステップの後は逆方向を確認する:
-
-| # | 検証 | 確認観点 |
-|---|------|---------|
-| 1 | 実データ確認 | source_store からファイルが削除されていること |
-| 2 | Git 状態確認 | ファイル削除が `git status` に反映されていること |
-| 3 | 検索確認 | 削除したソースが検索結果に含まれないこと |
+共通検証フロー（取り込み後・削除後）の詳細は [QA 実行スキル仕様](qa-execute-skill.md) のステップ 4 に定義する。各グループの検証種別テーブルで `ingest` / `delete` を指定したステップで自動的に実行される。
 
 ### A) Local
 
 目的: ローカルファイル取り込み（ドキュメント・ジャーナル）の動作確認。
 
-手順:
+各ステップを qa-execute に委譲する:
 
-1. **add-document（Markdown）** — Markdown ファイルを取り込み。共通検証フローを実行
-2. **add-document（PDF）** — PDF ファイルを取り込み。共通検証フローを実行
-3. **add-document（上書き）** — 同名ファイルで上書きオプションを指定（CLI: `--upload-mode replace`、MCP: `upload_mode="replace"`）。上書きが成功しエラーにならないことを確認
-4. **crawl-documents** — ディレクトリ一括取り込み。共通検証フローを実行
-5. **add-journal** — ジャーナルエントリを登録。共通検証フローを実行
-6. **migrate-journal** — ジャーナルディレクトリを一括配置。`rebuild --mode incremental` 後に共通検証フローを実行
+| # | コマンド（CLI） | 期待結果 | 検証種別 |
+|---|----------------|---------|---------|
+| 1 | `add-document --file README.md` | Markdown 取り込み成功 | `ingest` |
+| 2 | `add-document --file .qa/pdf_add_test.pdf` | PDF 取り込み成功 | `ingest` |
+| 3 | `add-document --file README.md --upload-mode replace` | 上書き成功、エラーなし | `none` |
+| 4 | `crawl-documents docs/specs/` | ディレクトリ一括取り込み成功 | `ingest` |
+| 5 | `add-journal --title "コンテンツ一覧取得機能の実装" --file .qa/journal_add_test.md --repository rag-knowledge` | ジャーナル登録成功 | `ingest` |
+| 6a | `migrate-journal --dir .qa/journals --repository rag-knowledge` | ジャーナル一括配置成功 | `none` |
+| 6b | `rebuild --mode incremental` | 再構築成功、migrate 分がインデックスに反映 | `ingest` |
 
-CLI 対応コマンド:
+CLI / MCP 対応:
 
-| MCP ツール | CLI コマンド |
-|-----------|------------|
-| `rag_add_document` | `add-document --file <file_path>` |
-| `rag_crawl_documents` | `crawl-documents <dir_path>` |
-| `rag_add_journal` | `add-journal --title <title> --file <file> --repository <repo>` |
-| — | `migrate-journal --dir <dir> --repository <repo>` |
+| CLI コマンド | MCP ツール |
+|------------|-----------|
+| `add-document --file <path>` | `rag_add_document` |
+| `crawl-documents <dir>` | `rag_crawl_documents` |
+| `add-journal --title <t> --file <f> --repository <r>` | `rag_add_journal` |
+| `migrate-journal --dir <d> --repository <r>` | （CLI のみ） |
 
 ### B) Web
 
 目的: Web ページ取り込み・サイト一括取り込みの動作確認。
 
-手順:
+| # | コマンド（CLI） | 期待結果 | 検証種別 |
+|---|----------------|---------|---------|
+| 1 | `add https://github.com/becky3/rag-knowledge` | Web ページ 1 件取り込み成功 | `ingest` |
+| 2 | `site-ingest https://books.toscrape.com --max-pages 20` | Scrapy 一括取り込み成功 | `ingest` |
 
-1. **add** — Web ページ 1 件を取り込み。共通検証フローを実行
-2. **site-ingest** — Scrapy 一括取り込み。共通検証フローを実行
-
-CLI 対応コマンド:
-
-| MCP ツール | CLI コマンド |
-|-----------|------------|
-| `rag_add` | `add <url>` |
-| `rag_site_ingest` | `site-ingest <url> --max-pages <N>` |
+CLI / MCP 対応: `rag_add` / `rag_site_ingest`
 
 ### C) SNS
 
 目的: Zenn・BlueSky インジェスターの動作確認。
 
-手順:
+| # | コマンド（CLI） | 期待結果 | 検証種別 |
+|---|----------------|---------|---------|
+| 1 | `crawl-zenn rhythmcan --max-articles 1` | Zenn 記事 1 件取り込み成功 | `ingest` |
+| 2 | `crawl-bluesky rhythmcan.bsky.social --max-posts 1` | BlueSky 投稿 1 件取り込み成功 | `ingest` |
 
-1. **crawl-zenn** — Zenn ユーザーの記事を 1 件取り込み（`--max-articles 1`）。共通検証フローを実行
-2. **crawl-bluesky** — BlueSky ユーザーの投稿を 1 件取り込み（`--max-posts 1`）。共通検証フローを実行
-
-CLI 対応コマンド:
-
-| MCP ツール | CLI コマンド |
-|-----------|------------|
-| `rag_crawl_zenn` | `crawl-zenn <username> --max-articles 1` |
-| `rag_crawl_bluesky` | `crawl-bluesky <handle> --max-posts 1` |
+CLI / MCP 対応: `rag_crawl_zenn` / `rag_crawl_bluesky`
 
 ### D) YouTube
 
-目的: YouTube インジェスターの動作確認。実行前にユーザー確認を必須とする。
+目的: YouTube インジェスターの動作確認。グループ実行前にユーザー確認を必須とする（qa-execute の都度確認とは別）。
 
-手順:
+| # | コマンド（CLI） | 期待結果 | 検証種別 |
+|---|----------------|---------|---------|
+| 1 | `ingest-youtube https://www.youtube.com/watch?v=GuFBDpzH3ck` | 動画 1 件取り込み成功 | `ingest` |
+| 2 | `ingest-youtube-playlist https://www.youtube.com/playlist?list=PLaFZvPBpvhKKgHIDI16ja0jwEG_vIH55K --max-videos 1` | プレイリストから 1 件取り込み成功 | `ingest` |
 
-1. **ユーザー確認** — IP ブロックリスクを説明し、実行可否を確認する
-2. **ingest-youtube** — YouTube 動画 1 件を取り込み。共通検証フローを実行
-3. **ingest-youtube-playlist** — プレイリストから 1 件取り込み（`--max-videos 1`）。共通検証フローを実行
-
-CLI 対応コマンド:
-
-| MCP ツール | CLI コマンド |
-|-----------|------------|
-| `rag_add_youtube` | `ingest-youtube <video_url>` |
-| `rag_crawl_youtube` | `ingest-youtube-playlist <playlist_url> --max-videos 1` |
+CLI / MCP 対応: `rag_add_youtube` / `rag_crawl_youtube`
 
 ### E) Aozora
 
 目的: 青空文庫インジェスターの動作確認。
 
-手順:
+| # | コマンド（CLI） | 期待結果 | 検証種別 |
+|---|----------------|---------|---------|
+| 1 | `update-aozora-catalog` | カタログ CSV が source_store に配置される | `none` |
+| 2 | `search-aozora --author 太宰` | 結果に `001567`（走れメロス）が含まれる | `none` |
+| 3 | `ingest-aozora 001567` | 作品 1 件取り込み成功 | `ingest` |
 
-1. **update-aozora-catalog** — カタログ CSV を更新。source_store にカタログファイルが配置されること
-2. **search-aozora** — カタログから著者名で検索。結果が返ること
-3. **ingest-aozora** — 作品 1 件を取り込み。共通検証フローを実行
-
-CLI 対応コマンド:
-
-| MCP ツール | CLI コマンド |
-|-----------|------------|
-| `rag_update_aozora_catalog` | `update-aozora-catalog` |
-| `rag_search_aozora` | `search-aozora --author <著者名>` |
-| `rag_add_aozora` | `ingest-aozora <book_id>` |
+CLI / MCP 対応: `rag_update_aozora_catalog` / `rag_search_aozora` / `rag_add_aozora`
 
 著者一括（`rag_crawl_aozora` / `ingest-aozora-author`）は単一取り込みで検証十分なため、QA ではスキップする。
 
@@ -290,14 +255,14 @@ CLI 対応コマンド:
 
 前提: MCP サーバーを HTTP モードで起動する（`.env` で `RAG_TRANSPORT=http` を設定）。
 
-手順:
-
-1. **POST /upload/document（正常系）** — ファイルをアップロード。レスポンスの `status: ok` と `source_id` を確認。共通検証フローを実行
-2. **POST /upload/document（同名エラー）** — 同じファイルを再度アップロード（`upload_mode=fail`）。HTTP 409 が返ること（重複検出エラー。ロック競合の 409 とは異なる）
-3. **POST /upload/document（上書き）** — `upload_mode=replace` で上書き。HTTP 200 が返ること
-4. **POST /upload/journal（正常系）** — ジャーナルをアップロード。レスポンスの `status: ok` と `source_id` を確認。共通検証フローを実行
-5. **POST /upload/journal（必須フィールド欠落）** — title なしでアップロード。HTTP 400 が返ること
-6. **ロック競合検証** — `curl -X POST ... &` でバックグラウンド送信した直後に同一コマンドをフォアグラウンドで実行し、いずれか一方が HTTP 409 Conflict（ロック競合）を返すことを確認する。エラーレスポンスにロック競合を示すメッセージが含まれることを確認する
+| # | コマンド（curl） | 期待結果 | 検証種別 |
+|---|----------------|---------|---------|
+| 1 | `POST /upload/document` で `README.md` をアップロード | HTTP 200、`status: ok` と `source_id` が返る | `ingest` |
+| 2 | `POST /upload/document` で同ファイルを再アップロード（`upload_mode=fail`） | HTTP 409（重複検出エラー） | `none` |
+| 3 | `POST /upload/document` で `upload_mode=replace` で上書き | HTTP 200 | `none` |
+| 4 | `POST /upload/journal` で `.qa/journal_upload_test.md` をアップロード（`title: "QA スキルの仕様書・スキル定義作成"` `repository: rag-knowledge`） | HTTP 200、`status: ok` と `source_id` が返る | `ingest` |
+| 5 | `POST /upload/journal` で title なしアップロード | HTTP 400（必須フィールド欠落） | `none` |
+| 6 | `curl -X POST ... &` でバックグラウンド送信 + 同一コマンドをフォアグラウンドで実行 | いずれか一方が HTTP 409 Conflict（ロック競合） | `none` |
 
 ### G) Eval
 
@@ -305,10 +270,10 @@ CLI 対応コマンド:
 
 前提: テストドキュメントフィクスチャ（JSON）と評価データセット（JSON）がローカルに存在すること。
 
-手順:
-
-1. **init-test-db** — テスト用 DB を初期化。ChromaDB・BM25 ディレクトリが作成されること
-2. **evaluate** — 検索精度評価を実行。レポートファイル（report.json, report.md）が生成されること。レポート内容を表示
+| # | コマンド（CLI） | 期待結果 | 検証種別 |
+|---|----------------|---------|---------|
+| 1 | `init-test-db --chunk-size 200 --chunk-overlap 30 --bm25-k1 1.5 --bm25-b 0.75 --persist-dir .tmp/eval_chroma_db --bm25-persist-dir .tmp/eval_bm25_index --fixture <フィクスチャパス>` | ChromaDB・BM25 ディレクトリが作成される | `none` |
+| 2 | `evaluate --chunk-size 200 --chunk-overlap 30 --bm25-k1 1.5 --bm25-b 0.75 --vector-weight 0.6 --persist-dir .tmp/eval_chroma_db --output-dir .tmp/rag-evaluation --fixture <フィクスチャパス> --dataset <データセットパス>` | レポートファイル（report.json, report.md）が生成される | `none` |
 
 ### H) Core
 
@@ -316,26 +281,19 @@ CLI 対応コマンド:
 
 前提: H 単独実行時は、先にテスト用 Markdown を add-document で取り込んでからテストする。
 
-手順:
+| # | コマンド（CLI） | 期待結果 | 検証種別 |
+|---|----------------|---------|---------|
+| 1 | `stats` | 統計情報が表示される | `none` |
+| 2 | `list-recent --source-type local` | 取り込み済み local ソースが一覧に表示される | `none` |
+| 3 | `list-recent --source-type journal` | 取り込み済み journal ソースが一覧に表示される | `none` |
+| 4 | `search --query <取り込み内容に関連するワード>` | ベクトル検索・BM25 の両方で結果が返る | `none` |
+| 5a | `get-document <source_id> --format text` | A) の README.md の全文がテキスト形式で取得できる | `none` |
+| 5b | `get-document <source_id> --format original` | A) の README.md の全文がオリジナル形式で取得できる | `none` |
+| 6 | `delete <source_id>` | A) の README.md が削除される | `delete` |
+| 7 | `rebuild --mode incremental` | 差分再構築が成功する | `none` |
+| 8 | `stats` | 再構築後の統計が更新されている | `none` |
 
-1. **stats** — 現在の統計情報を取得・表示する
-2. **list-recent** — `source_type` を指定してソース一覧を取得。取り込み済みソースが一覧に表示されること
-3. **search** — 取り込み済みコンテンツに関連するクエリで検索。ベクトル検索・BM25 の両方で結果が返ること
-4. **get-document** — 検索結果の source_id を指定して全文取得。`text` 形式と `original` 形式の両方を確認
-5. **delete** — 取り込んだソースを削除。共通検証フロー（削除版）を実行
-6. **rebuild --mode incremental** — 差分再構築を実行。stats で統計が更新されていること
-7. **stats** — 再構築後の統計を確認
-
-CLI 対応コマンド:
-
-| MCP ツール | CLI コマンド |
-|-----------|------------|
-| `rag_stats` | `stats` |
-| `rag_list_recent` | `list-recent --source-type <type>` |
-| `rag_search` | `search --query <クエリ>` |
-| `rag_get_document` | `get-document <source_id>` |
-| `rag_delete` | `delete <source_id>` |
-| `rag_rebuild` | `rebuild --mode <mode>` |
+CLI / MCP 対応: `rag_stats` / `rag_list_recent` / `rag_search` / `rag_get_document` / `rag_delete` / `rag_rebuild`
 
 ## 入出力
 
@@ -354,6 +312,7 @@ CLI 対応コマンド:
 
 ## 関連ドキュメント
 
+- [QA 実行スキル](qa-execute-skill.md) — 各検証ステップの実行制御
 - 品質ゲート（`~/.claude/rules/quality-gate.md`）— QA フェーズの位置づけ
 - 仕様駆動開発（`~/.claude/rules/spec-driven.md`）— QA フェーズの原則
 - [RAG Knowledge 全体仕様](../../overview.md) — 機能一覧

@@ -10,6 +10,8 @@ argument-hint: ""
 
 マージ後の動作確認スキル。MCP ツール・CLI コマンド・HTTP API の機能を実際に実行し、正常動作を検証する。仕様書: `docs/specs/agentic/skills/qa-skill.md`
 
+各検証ステップの実行は `/qa-execute` スキル（`.claude/skills/qa-execute/SKILL.md`）に委譲する。コマンドの直接実行・共通検証フローの省略は禁止。
+
 ## 処理手順
 
 ### 1. グループ選択
@@ -82,12 +84,13 @@ QA 検証グループ:
 
 **全ステップ共通ルール:**
 
-- 実行するコマンドとパラメータを表示してから実行する
+- 各検証ステップは `/qa-execute` スキルに委譲する。コマンド・期待結果・検証種別を渡し、qa-execute の「事前表示 → 許可 → 実行 → 検証 → 結果表示」フローに従う
 - 外部 API を使用するグループでは取り込み件数を最小限に制限する（検証リソースの定義値に従う）
+- 取り込み系ステップは検証種別 `ingest`、削除系ステップは検証種別 `delete`、それ以外は `none` を指定する
 
 **YouTube（D）選択時の必須確認:**
 
-グループ D の実行直前に以下を表示し、ユーザー確認を取る。確認なしに実行してはならない:
+グループ D の実行直前に以下を表示し、ユーザー確認を取る。確認なしに実行してはならない（qa-execute の都度確認とは別に、グループレベルで事前確認する）:
 
 ```
 YouTube 検証を実行します。
@@ -101,18 +104,6 @@ MCP フェーズで書き込み系ツール（取り込み・削除・再構築�
 
 - MCP ツールの実行結果が正常に返されること（CLI サブプロセス経由の JSON パースが成功していることの間接確認）
 - エラー発生時にエラーメッセージが適切に返されること
-
-**取り込み後の共通検証フロー:**
-
-取り込み・再構築を行うステップの後に、以下を必ず実行する:
-
-1. **実データ確認**: source_store / converted_store のファイルを `ls` で確認。メタデータの確認方法は媒体により異なる:
-   - **local 以外**（web, bluesky, zenn, youtube, aozora, journal）: `.meta` サイドカーファイルの内容を確認（source_type, title, collected_at）
-   - **local**: `.meta` は存在しない。metadata.db の sources テーブルで確認する: `sqlite3 <source_store>/metadata.db "SELECT source_id, source_type, title, collected_at FROM sources WHERE source_type='local'"`
-2. **Git 状態確認**: source_store 内の git リポジトリで `git status` を実行し、新規ファイルの追加を確認（source_store は独立した git リポジトリ）
-3. **検索確認**: `search --query <取り込み内容に関連するクエリ>` で検索し、取り込んだソースがヒットすること、メタデータ行が正しいことを確認
-
-削除ステップの後は逆方向（ファイル削除、git status 反映、検索結果から消失）を確認する。
 
 ### 6. 結果サマリー
 
@@ -171,74 +162,109 @@ NG を検出した場合、Issue 起票を提案する。
 
 ## グループ別の検証内容
 
-仕様書 `docs/specs/agentic/skills/qa-skill.md` の「グループ別検証手順」セクションに従う。以下は各グループの要約:
+仕様書 `docs/specs/agentic/skills/qa-skill.md` の「グループ別検証手順」セクションに従う。
+
+各ステップは qa-execute に委譲する。以下のテーブルの各行が 1 回の qa-execute 呼び出しに対応する。
 
 ### A) Local
 
-1. `add-document` で `README.md`（Markdown）を取り込み + 共通検証
-2. `add-document` で `.qa/pdf_add_test.pdf`（PDF）を取り込み + 共通検証
-3. `add-document` で `README.md` を `--upload-mode replace` で再取り込み（上書きが成功しエラーにならないことを確認）
-4. `crawl-documents` で `docs/specs/` ディレクトリ一括 + 共通検証
-5. `add-journal` で `.qa/journal_add_test.md` を登録（`--title "コンテンツ一覧取得機能の実装" --repository rag-knowledge`）+ 共通検証
-6. `migrate-journal` で `.qa/journals/` を一括配置（`--dir .qa/journals --repository rag-knowledge`）+ `rebuild --mode incremental` + 共通検証
+| # | コマンド（CLI） | 期待結果 | 検証種別 |
+|---|----------------|---------|---------|
+| 1 | `add-document --file README.md` | Markdown 取り込み成功 | `ingest` |
+| 2 | `add-document --file .qa/pdf_add_test.pdf` | PDF 取り込み成功 | `ingest` |
+| 3 | `add-document --file README.md --upload-mode replace` | 上書き成功、エラーなし | `none` |
+| 4 | `crawl-documents docs/specs/` | ディレクトリ一括取り込み成功 | `ingest` |
+| 5 | `add-journal --title "コンテンツ一覧取得機能の実装" --file .qa/journal_add_test.md --repository rag-knowledge` | ジャーナル登録成功 | `ingest` |
+| 6a | `migrate-journal --dir .qa/journals --repository rag-knowledge` | ジャーナル一括配置成功 | `none` |
+| 6b | `rebuild --mode incremental` | 再構築成功、migrate 分がインデックスに反映 | `ingest` |
+
+MCP 対応コマンド:
+
+| CLI コマンド | MCP ツール |
+|------------|-----------|
+| `add-document --file <path>` | `rag_add_document` |
+| `crawl-documents <dir>` | `rag_crawl_documents` |
+| `add-journal --title <t> --file <f> --repository <r>` | `rag_add_journal` |
+| `migrate-journal --dir <d> --repository <r>` | （CLI のみ） |
 
 ### B) Web
 
-1. `add` で `https://github.com/becky3/rag-knowledge` を 1 ページ取り込み + 共通検証
-2. `site-ingest` で `https://books.toscrape.com` から Scrapy 取り込み（--max-pages 20）+ 共通検証
+| # | コマンド（CLI） | 期待結果 | 検証種別 |
+|---|----------------|---------|---------|
+| 1 | `add https://github.com/becky3/rag-knowledge` | Web ページ 1 件取り込み成功 | `ingest` |
+| 2 | `site-ingest https://books.toscrape.com --max-pages 20` | Scrapy 一括取り込み成功 | `ingest` |
+
+MCP 対応: `rag_add` / `rag_site_ingest`
 
 ### C) SNS
 
-1. `crawl-zenn` で `rhythmcan` の記事 1 件（--max-articles 1）+ 共通検証
-2. `crawl-bluesky` で `rhythmcan.bsky.social` の投稿 1 件（--max-posts 1）+ 共通検証
+| # | コマンド（CLI） | 期待結果 | 検証種別 |
+|---|----------------|---------|---------|
+| 1 | `crawl-zenn rhythmcan --max-articles 1` | Zenn 記事 1 件取り込み成功 | `ingest` |
+| 2 | `crawl-bluesky rhythmcan.bsky.social --max-posts 1` | BlueSky 投稿 1 件取り込み成功 | `ingest` |
+
+MCP 対応: `rag_crawl_zenn` / `rag_crawl_bluesky`
 
 ### D) YouTube
 
-1. ユーザー確認（必須）
-2. `ingest-youtube` で `https://www.youtube.com/watch?v=GuFBDpzH3ck` を取り込み + 共通検証
-3. `ingest-youtube-playlist` で `https://www.youtube.com/playlist?list=PLaFZvPBpvhKKgHIDI16ja0jwEG_vIH55K`（`--max-videos 1`）を取り込み + 共通検証
+グループ実行前にユーザー確認（必須）を行った上で、各ステップを qa-execute に委譲する。
+
+| # | コマンド（CLI） | 期待結果 | 検証種別 |
+|---|----------------|---------|---------|
+| 1 | `ingest-youtube https://www.youtube.com/watch?v=GuFBDpzH3ck` | 動画 1 件取り込み成功 | `ingest` |
+| 2 | `ingest-youtube-playlist https://www.youtube.com/playlist?list=PLaFZvPBpvhKKgHIDI16ja0jwEG_vIH55K --max-videos 1` | プレイリストから 1 件取り込み成功 | `ingest` |
+
+MCP 対応: `rag_add_youtube` / `rag_crawl_youtube`
 
 ### E) Aozora
 
-1. `update-aozora-catalog` でカタログ更新 + ファイル配置確認
-2. `search-aozora --author 太宰` で検索し、結果に `001567`（走れメロス）が含まれることを確認
-3. `ingest-aozora 001567` で走れメロスを取り込み + 共通検証
+| # | コマンド（CLI） | 期待結果 | 検証種別 |
+|---|----------------|---------|---------|
+| 1 | `update-aozora-catalog` | カタログ CSV が source_store に配置される | `none` |
+| 2 | `search-aozora --author 太宰` | 結果に `001567`（走れメロス）が含まれる | `none` |
+| 3 | `ingest-aozora 001567` | 作品 1 件取り込み成功 | `ingest` |
+
+MCP 対応: `rag_update_aozora_catalog` / `rag_search_aozora` / `rag_add_aozora`
 
 ### F) Upload（HTTP モード固定）
 
 HTTP モードで MCP サーバーを起動して実行:
 
-1. `POST /upload/document` で `README.md` をアップロード（正常系）+ 共通検証
-2. `POST /upload/document` で同ファイルを再アップロード（同名エラー、409 — 重複検出エラー。ロック競合の 409 とは異なる）
-3. `POST /upload/document` で `upload_mode=replace` で上書き（200）
-4. `POST /upload/journal` で `.qa/journal_upload_test.md` をアップロード（`title: "QA スキルの仕様書・スキル定義作成"` `repository: rag-knowledge`）+ 共通検証
-5. `POST /upload/journal` で title なしアップロード（必須フィールド欠落、400）
-6. **ロック競合検証**: `curl -X POST ... &` でバックグラウンド送信した直後に同一コマンドをフォアグラウンドで実行し、いずれか一方が HTTP 409 Conflict（ロック競合）を返すことを確認。エラーレスポンスにロック競合を示すメッセージが含まれることを確認
+| # | コマンド（curl） | 期待結果 | 検証種別 |
+|---|----------------|---------|---------|
+| 1 | `POST /upload/document` で `README.md` をアップロード | HTTP 200、`status: ok` と `source_id` が返る | `ingest` |
+| 2 | `POST /upload/document` で同ファイルを再アップロード（`upload_mode=fail`） | HTTP 409（重複検出エラー） | `none` |
+| 3 | `POST /upload/document` で `upload_mode=replace` で上書き | HTTP 200 | `none` |
+| 4 | `POST /upload/journal` で `.qa/journal_upload_test.md` をアップロード（`title: "QA スキルの仕様書・スキル定義作成"` `repository: rag-knowledge`） | HTTP 200、`status: ok` と `source_id` が返る | `ingest` |
+| 5 | `POST /upload/journal` で title なしアップロード | HTTP 400（必須フィールド欠落） | `none` |
+| 6 | `curl -X POST ... &` でバックグラウンド送信 + 同一コマンドをフォアグラウンドで実行 | いずれか一方が HTTP 409 Conflict（ロック競合） | `none` |
 
 ### G) Eval（CLI 固定）
 
 評価フィクスチャのパスはメモリ `reference_eval_fixtures.md` を参照（メモリが利用できない場合はユーザーにパスを確認する）:
 
-1. `init-test-db` でテスト DB 初期化 + ディレクトリ作成確認
-   - パラメータ: `--chunk-size 200 --chunk-overlap 30 --bm25-k1 1.5 --bm25-b 0.75`
-   - ストレージ: `--persist-dir .tmp/eval_chroma_db --bm25-persist-dir .tmp/eval_bm25_index`
-   - フィクスチャ: `--fixture <フィクスチャパス>`
-2. `evaluate` で評価実行 + レポート生成確認
-   - パラメータ: `--chunk-size 200 --chunk-overlap 30 --bm25-k1 1.5 --bm25-b 0.75 --vector-weight 0.6`
-   - ストレージ: `--persist-dir .tmp/eval_chroma_db --output-dir .tmp/rag-evaluation`
-   - フィクスチャ: `--fixture <フィクスチャパス> --dataset <データセットパス>`
+| # | コマンド（CLI） | 期待結果 | 検証種別 |
+|---|----------------|---------|---------|
+| 1 | `init-test-db --chunk-size 200 --chunk-overlap 30 --bm25-k1 1.5 --bm25-b 0.75 --persist-dir .tmp/eval_chroma_db --bm25-persist-dir .tmp/eval_bm25_index --fixture <フィクスチャパス>` | ChromaDB・BM25 ディレクトリが作成される | `none` |
+| 2 | `evaluate --chunk-size 200 --chunk-overlap 30 --bm25-k1 1.5 --bm25-b 0.75 --vector-weight 0.6 --persist-dir .tmp/eval_chroma_db --output-dir .tmp/rag-evaluation --fixture <フィクスチャパス> --dataset <データセットパス>` | レポートファイル（report.json, report.md）が生成される | `none` |
 
 ### H) Core
 
 A〜G の取り込みデータを使ってパイプライン基盤を検証する。H 単独実行時は、先に `README.md` を add-document で取り込んでからステップ 2 以降を実行する。
 
-1. `stats` で統計表示
-2. `list-recent --source-type local` で local ソース一覧を確認
-3. `list-recent --source-type journal` で journal ソース一覧を確認
-4. `search` で直前に取り込んだ内容に関連するワードで検索確認
-5. `get-document` で A) の README.md の source_id を指定して全文取得（text / original）
-6. `delete` で同 source_id を削除 + 共通検証（削除版）
-7. `rebuild --mode incremental` で再構築 + `stats` 確認
+| # | コマンド（CLI） | 期待結果 | 検証種別 |
+|---|----------------|---------|---------|
+| 1 | `stats` | 統計情報が表示される | `none` |
+| 2 | `list-recent --source-type local` | 取り込み済み local ソースが一覧に表示される | `none` |
+| 3 | `list-recent --source-type journal` | 取り込み済み journal ソースが一覧に表示される | `none` |
+| 4 | `search --query <取り込み内容に関連するワード>` | ベクトル検索・BM25 の両方で結果が返る | `none` |
+| 5a | `get-document <source_id> --format text` | A) の README.md の全文がテキスト形式で取得できる | `none` |
+| 5b | `get-document <source_id> --format original` | A) の README.md の全文がオリジナル形式で取得できる | `none` |
+| 6 | `delete <source_id>` | A) の README.md が削除される | `delete` |
+| 7 | `rebuild --mode incremental` | 差分再構築が成功する | `none` |
+| 8 | `stats` | 再構築後の統計が更新されている | `none` |
+
+MCP 対応: `rag_stats` / `rag_list_recent` / `rag_search` / `rag_get_document` / `rag_delete` / `rag_rebuild`
 
 ## 制約
 
