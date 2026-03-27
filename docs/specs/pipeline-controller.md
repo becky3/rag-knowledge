@@ -207,6 +207,18 @@ sequenceDiagram
 
 変換不要なファイル（md/txt/adoc）はコンバーターが source_store から converted_store にそのままコピーする。これによりインデクサーは常に converted_store のみを参照すればよく、フォールバックロジックは不要。
 
+### パイプライン処理対象外ファイル
+
+source_store 内の以下のファイルは、git diff で検出されてもパイプライン処理をスキップする。
+
+| ファイル | 理由 |
+|---------|------|
+| `.gitignore` | git メタデータ |
+| `.ingest.lock` | インジェスト排他制御用ロックファイル |
+| `.rebuild.lock` | 再構築排他制御用ロックファイル |
+| `aozora/catalog.csv` | 青空文庫カタログ（検索用、インデックス対象外） |
+| `aozora/catalog.csv.meta` | カタログのメタデータ |
+
 ### 変更種別と処理の対応
 
 | git diff status | 変更種別 | コンバーター | インデクサー | metadata.db |

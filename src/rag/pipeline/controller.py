@@ -16,6 +16,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from rag.converter.converter import get_converted_rel_path
+from rag.infrastructure.file_lock import INGEST_LOCK_FILENAME, REBUILD_LOCK_FILENAME
 from rag.pipeline.git_ops import GitOperations
 from rag.pipeline.models import (
     ChangeEntry,
@@ -47,6 +48,8 @@ _NO_META_TYPES: frozenset[SourceType] = frozenset({"local"})
 # パイプライン処理対象外のファイル（git メタデータ等）
 _PIPELINE_EXCLUDE_FILES: frozenset[str] = frozenset({
     ".gitignore",
+    INGEST_LOCK_FILENAME,
+    REBUILD_LOCK_FILENAME,
     "aozora/catalog.csv",
     "aozora/catalog.csv.meta",
 })

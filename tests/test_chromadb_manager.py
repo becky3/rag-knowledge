@@ -91,7 +91,7 @@ class TestHealthCheck:
         with patch("rag.infrastructure.chromadb_manager.httpx.get", return_value=mock_response) as mock_get:
             manager.health_check(timeout=3.0)
             mock_get.assert_called_once_with(
-                "http://localhost:8000/api/v1/heartbeat",
+                "http://localhost:8000/api/v2/heartbeat",
                 timeout=3.0,
             )
 
