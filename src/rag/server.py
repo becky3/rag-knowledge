@@ -107,9 +107,9 @@ _init_lock = asyncio.Lock()
 def _reset_rag_service() -> None:
     """グローバルな RAGKnowledgeService をリセットする.
 
-    SharedSystemClient キャッシュをクリアしてから破棄する。
-    サブプロセスが ChromaDB を更新した後、キャッシュが残っていると
-    古い HNSW インメモリ状態が再利用され where フィルタ付き検索が失敗する。
+    CLI サブプロセスが BM25 インデックスをディスク上で更新した後、
+    MCP プロセス内のインメモリ BM25 キャッシュが陳腐化するためリセットが必要。
+    ChromaDB は HttpClient 経由のためクライアント側キャッシュの問題はない。
     """
     global _rag_service
     if _rag_service is not None:
@@ -858,6 +858,9 @@ async def rag_site_ingest(
     knowledge base, bulk ingest, site crawl, large scale, scrapy.
     数千ページ規模の大規模サイトを Scrapy subprocess で一括取り込みする。
     既存の rag_crawl（上限500ページ）では足りない大規模サイト向け。
+
+    並行実行非対応: Bridge が source_store へのファイル配置をロック保護外で
+    実行するため、同一サイトに対する同時実行はデータ競合のリスクがある。
 
     Args:
         url: クロール開始 URL

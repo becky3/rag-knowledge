@@ -7,29 +7,32 @@
 
 ## MCP サーバー運用ルール
 
-本リポジトリは MCP サーバーの実装リポジトリであり、`.mcp.json` で Claude Code の MCP サーバーとして登録されている。MCP サーバーが enabled の場合、Claude Code セッション中はサーバープロセスが常駐し、ChromaDB・BM25 等のリソースを占有する。
+本リポジトリは MCP サーバーの実装リポジトリであり、`.mcp.json` で Claude Code の MCP サーバーとして登録されている。MCP サーバーが enabled の場合、Claude Code セッション中はサーバープロセスが常駐する。
 
 ### セッション開始時の状態確認
 
 作業開始時に MCP サーバーの状態を確認すること。前回セッションの状態が引き継がれるため、意図しない状態で作業を始めるリスクがある。
 
-- **enabled の場合**: MCP サーバーが DB を占有している。CLI や テストで DB にアクセスする作業は競合する
+- **enabled の場合**: MCP サーバーが稼働中。CLI 操作はファイルベースロックにより共存可能だが、テスト実行は DB 分離のため disabled 推奨
 - **disabled の場合**: MCP ツールは使用できないが、CLI・テスト・開発作業は自由に行える
 
 状態に応じて必要なら、ユーザーに `/mcp` での状態変更を依頼する。`/mcp` での状態変更はエージェントからは実行できない。
 
-### MCP サーバーと他プロセスの排他
+### MCP サーバーと他プロセスの共存
 
-MCP サーバー enabled 中は、**同じ DB に対する CLI 操作・テスト実行・別プロセスからのアクセスを行わないこと**。ChromaDB の PersistentClient は単一プロセスアクセスを前提としており、複数プロセスからの同時アクセスでインデックスが破損する。
+ChromaDB は HttpClient 経由でサーバーに接続するため、MCP と CLI の同時アクセスが可能。書き込み操作はファイルベースロック（fcntl/msvcrt）でプロセス間排他制御される。
 
 | 作業 | 必要な MCP 状態 |
 |------|---------------|
-| 通常開発・CLI 操作・テスト実行 | disabled |
+| 通常開発・CLI 操作 | enabled / disabled どちらでも可 |
+| テスト実行 | disabled 推奨（テスト用 DB との分離のため） |
 | MCP ツールの動作確認 | enabled |
+
+**注意**: BM25 インデックスは単一プロセス前提のインメモリキャッシュを持つ。MCP 経由の書き込み後はキャッシュが自動リセットされるが、CLI 直接実行で BM25 を更新した場合、MCP 側の検索結果に反映されるのは次回のサービスリセット後となる。
 
 ### DB 破損時の復旧
 
-MCP を disable → CLI `rebuild --mode full` で復旧する。
+MCP を disable → ChromaDB サーバーが起動していることを確認（停止していれば `chroma run --path <CHROMADB_PERSIST_DIR>` で手動起動）→ CLI `rebuild --mode full` で復旧する。
 
 ### worktree 環境セットアップ
 
@@ -48,6 +51,7 @@ worktree で CLI 操作・動作確認を行う場合、以下のセットアッ
    BM25_PERSIST_DIR=D:/GitHub/becky3/rag-knowledge-wt-XXX/.tmp/test_bm25_index
    SOURCE_STORE_DIR=D:/GitHub/becky3/rag-knowledge-wt-XXX/.tmp/test_source_store
    CONVERTED_STORE_DIR=D:/GitHub/becky3/rag-knowledge-wt-XXX/.tmp/test_converted_store
+   CHROMADB_SERVER_PORT=8001
    ```
 
 3. LM Studio の接続先を確認し、必要に応じて `localhost` に変更する:
@@ -60,6 +64,12 @@ worktree で CLI 操作・動作確認を行う場合、以下のセットアッ
 
    ```bash
    mkdir -p <worktree-path>/.tmp
+   ```
+
+5. ChromaDB サーバーを起動する（メインリポジトリの MCP が enabled の場合はポート 8000 が使用中のため、`.env` で `CHROMADB_SERVER_PORT` を変更すること）:
+
+   ```bash
+   chroma run --path <worktree-path>/.tmp/test_chroma_db --port <別ポート>
    ```
 
 ### CLI 動作確認の確認観点

@@ -12,7 +12,7 @@ RAG Knowledge は、外部 Web ページから収集した知識をベクトル 
 | 2 | チャンキング | テキストを適切なサイズに分割（見出し・テーブル対応） | [rag-knowledge.md](rag-knowledge.md) |
 | 3 | ベクトル検索 | ChromaDB による類似度検索 | [rag-knowledge.md](rag-knowledge.md) |
 | 4 | ハイブリッド検索 | ベクトル検索 + BM25 のスコア統合 | [rag-knowledge.md](rag-knowledge.md) |
-| 5 | MCP サーバー | FastMCP による stdio/HTTP インターフェース | [rag-knowledge.md](rag-knowledge.md) |
+| 5 | MCP サーバー | FastMCP による stdio/HTTP インターフェース（CLI 薄層アダプター） | [rag-knowledge.md](rag-knowledge.md) |
 | 6 | 評価 CLI | 検索精度の評価パイプライン | [rag-knowledge.md](rag-knowledge.md) |
 | 7 | URL 安全性チェック | Google Safe Browsing API による URL 検証 | [rag-knowledge.md](rag-knowledge.md) |
 | 8 | クロールプレビュー | クロール対象ページのタイトル・URL 一覧を事前確認 | [rag-knowledge.md](rag-knowledge.md) |
@@ -32,6 +32,7 @@ RAG Knowledge は、外部 Web ページから収集した知識をベクトル 
 | 22 | 青空文庫インジェスター | 青空文庫の著作権切れ作品を取り込み | [ingesters/aozora.md](ingesters/aozora.md) |
 | 23 | Journal インジェスター | 開発ジャーナルの登録・検索 | [ingesters/journal.md](ingesters/journal.md) |
 | 24 | コンテンツ一覧取得 | source_type 別の最新ソース一覧取得 | [infrastructure/content-listing.md](infrastructure/content-listing.md) |
+| 25 | コンテンツアップロード | HTTP モードでのファイル直接アップロード（multipart/form-data） | [infrastructure/content-upload.md](infrastructure/content-upload.md) |
 
 ## 3. 技術スタック
 
@@ -42,12 +43,13 @@ RAG Knowledge は、外部 Web ページから収集した知識をベクトル 
 | MCP SDK | FastMCP |
 | HTTP クライアント | httpx |
 | 制約付き HTTP クライアント | py-common-lib (ConstrainedClient) |
-| ベクトル DB | ChromaDB |
+| ベクトル DB | ChromaDB（client/server 構成、HttpClient 接続） |
 | キーワード検索 | BM25s |
 | Embedding | OpenAI SDK / LM Studio (OpenAI 互換 API) |
 | HTML 解析 | BeautifulSoup4 |
 | HTML→Markdown 変換 | markdownify |
 | PDF テキスト抽出 | pymupdf4llm / MinerU（CUDA 環境、未インストール時は pymupdf4llm にフォールバック） |
+| プロセス間排他制御 | ファイルベースロック（fcntl/msvcrt） |
 | 設定管理 | pydantic-settings (.env + config.toml) |
 
 ## 4. 開発方針
