@@ -11,7 +11,7 @@
 | **ベクトル検索** | ChromaDB による類似度検索 |
 | **ハイブリッド検索** | ベクトル検索 + BM25 のスコア統合 |
 | **全文取得** | ソースドキュメントの全文取得（変換済みテキスト/オリジナル） |
-| **MCP サーバー** | FastMCP による stdio/HTTP インターフェース |
+| **MCP サーバー** | FastMCP による stdio/HTTP インターフェース（CLI 薄層アダプター） |
 | **評価 CLI** | 検索精度の評価パイプライン |
 | **URL 安全性チェック** | Google Safe Browsing API による URL 検証 |
 | **クロールプレビュー** | クロール対象ページのタイトル・URL 一覧を事前確認 |
@@ -41,7 +41,7 @@
 | MCP SDK | FastMCP |
 | HTTP クライアント | httpx |
 | 制約付き HTTP クライアント | py-common-lib (ConstrainedClient) |
-| ベクトル DB | ChromaDB |
+| ベクトル DB | ChromaDB（client/server 構成、HttpClient 接続） |
 | キーワード検索 | BM25s |
 | Embedding | OpenAI SDK / LM Studio (OpenAI 互換 API) |
 | HTML 解析 | BeautifulSoup4 |
@@ -53,6 +53,7 @@
 | Web クローラー（大規模サイト） | Scrapy |
 | multipart フォーム解析 | python-multipart |
 | YAML パーサー | PyYAML |
+| プロセス間排他制御 | ファイルベースロック（fcntl/msvcrt） |
 
 ## セットアップ
 
@@ -92,6 +93,16 @@ API キーは py-common-lib の `get_secret` で OS セキュアストレージ�
 新しい設定値を追加する際は、上記の判断基準に従って適切な層に配置すること。詳細は [設定管理仕様](docs/specs/rag-knowledge.md#設定管理) を参照。
 
 ## 起動
+
+### ChromaDB サーバー
+
+MCP サーバー起動時に ChromaDB サーバーが自動起動される（`CHROMADB_AUTO_START=true`、デフォルト）。CLI 単体で使用する場合は手動起動が必要:
+
+```bash
+chroma run --path <CHROMADB_PERSIST_DIR>
+```
+
+### MCP サーバー / CLI
 
 ```bash
 # MCP サーバー (stdio モード、デフォルト)

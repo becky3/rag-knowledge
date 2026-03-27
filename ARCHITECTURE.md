@@ -22,7 +22,7 @@
 |---|---|
 | `src/rag/embedding/` | Embedding プロバイダー抽象化（ローカル / OpenAI）とファクトリ |
 | `src/rag/ingesters/` | インジェスタープラグイン（BaseIngester 抽象基底・IngestedContent 共通モデル・WebIngester・ZennIngester・DocumentIngester・BlueskyIngester） |
-| `src/rag/infrastructure/` | インフラ基盤（ChromaDB サーバーのライフサイクル管理） |
+| `src/rag/infrastructure/` | インフラ基盤（ChromaDB サーバーのライフサイクル管理・ファイルベースロック） |
 | `src/rag/pipeline/` | パイプライン制御（git 操作・差分検知・ステージ間連携・4モード実行） |
 | `src/rag/pipeline/factory.py` | PipelineController のファクトリ関数（server/cli 共通） |
 | `src/rag/pipeline/ingesters/` | 新アーキテクチャ用インジェスター（source_store へのファイル配置 + .meta 生成） |
@@ -32,8 +32,8 @@
 
 | ファイル | 責務 |
 |---|---|
-| `src/rag/server.py` | MCP サーバー（FastMCP）エントリーポイント・ツール定義 |
-| `src/rag/cli.py` | CLI エントリーポイント（評価・DB 初期化） |
+| `src/rag/server.py` | MCP 薄層アダプター（書き込み系は CLI サブプロセス委譲、検索系はインプロセス） |
+| `src/rag/cli.py` | CLI エントリーポイント（取り込み・検索・評価・DB 初期化、JSON 出力モード対応） |
 | `src/rag/config.py` | pydantic-settings による環境変数・設定管理 |
 | `src/rag/rag_knowledge.py` | ナレッジサービス（取り込み・検索・削除のオーケストレーション） |
 | `src/rag/markdown.py` | RAG 用 Markdown コンバーター（リンク・画像 URL 除去） |
