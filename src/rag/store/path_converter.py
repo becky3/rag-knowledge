@@ -72,6 +72,12 @@ def url_to_path(url: str) -> str:
     # コンバーターが ".html" 拡張子を付与した際に "path/.html" となる
     path = parsed.path.strip("/")
 
+    # ルート URL（パスが空）の場合は "index" を設定
+    # そのまま空だとホスト名がファイル名になり、
+    # ".html" 付与で "host.html" となってサブページと不整合になる
+    if not path:
+        path = "index"
+
     # クエリパラメータ（? を全角に置換して結合）
     query = parsed.query
     if query:

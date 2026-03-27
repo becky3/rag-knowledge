@@ -61,7 +61,13 @@ MCP ツール `rag_site_ingest` と CLI コマンド `site-ingest` の 2 つの�
 ### ページ数上限
 
 - `site_ingest_max_pages`（config.toml）でクロール対象ページ数を制限する（デフォルト: 10,000）
-- Scrapy の `CLOSESPIDER_PAGECOUNT` 設定で制御する
+- Spider 内で 200 OK レスポンスのみをカウントし、上限に達したら `close_spider` で自前クローズする
+- 404 等の非 200 レスポンスはカウントに含めない（Scrapy の `CLOSESPIDER_PAGECOUNT` は全レスポンスをカウントするため使用しない）
+
+### クロール順序
+
+- BFS（幅優先探索）でクロールする。同一 depth のページを優先的に取得するため、`max_pages` に達した際にトップページ付近のページが網羅される
+- Scrapy の `DEPTH_PRIORITY = 1` + FIFO キュー設定で制御する
 
 ### リクエスト間隔
 
@@ -215,6 +221,7 @@ flowchart TD
 | `allowed_domains` | ドメイン制約（初回 URL から自動導出） |
 | `url_pattern` | URL フィルタ（正規表現、任意） |
 | `output_dir` | HTML ファイルの保存先ディレクトリ |
+| `max_pages` | ページ数上限（200 OK カウント）。外部インターフェースでは許容範囲 1〜50,000 でクランプされる。Spider 内部では 0 を無制限として扱うが、CLI/MCP からは入力されない |
 
 Spider の振る舞い:
 
@@ -226,6 +233,7 @@ Spider の振る舞い:
 - `start_requests` をオーバーライドし `dont_filter=False` でリクエストを発行する。これにより start_url のフィンガープリントが重複フィルタに記録され、リンク辿りでの再取得を防止する
 - FEEDS 機能で JSONL にメタデータ（url, title, status, depth, collected_at）を出力する
 - 非テキストレスポンス（Content-Type がテキスト系でない場合）はスキップする
+- 200 OK レスポンスのみをページ数としてカウントし、`max_pages` に達したら `close_spider` で自前クローズする
 
 ### Runner
 
@@ -248,7 +256,9 @@ Scrapy に渡す設定:
 | `ROBOTSTXT_OBEY` | `True`（固定） |
 | `DOWNLOAD_DELAY` | `site_ingest_delay_sec`（config.toml） |
 | `DOWNLOAD_TIMEOUT` | `site_ingest_download_timeout`（config.toml） |
-| `CLOSESPIDER_PAGECOUNT` | `max_pages` パラメータまたは `site_ingest_max_pages`（config.toml） |
+| `DEPTH_PRIORITY` | `1`（固定、BFS） |
+| `SCHEDULER_DISK_QUEUE` | `scrapy.squeues.PickleFifoDiskQueue`（固定、BFS） |
+| `SCHEDULER_MEMORY_QUEUE` | `scrapy.squeues.FifoMemoryQueue`（固定、BFS） |
 | `CLOSESPIDER_TIMEOUT` | `site_ingest_timeout_sec`（config.toml） |
 | `CLOSESPIDER_ERRORCOUNT` | `site_ingest_error_count`（config.toml） |
 | `JOBDIR` | クロールディレクトリ内の `jobdir/`（`{domain}/{crawl_key}/jobdir/`） |

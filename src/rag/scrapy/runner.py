@@ -254,7 +254,10 @@ settings = {{
     }},
     'DOWNLOAD_DELAY': params['delay_sec'],
     'DOWNLOAD_TIMEOUT': params['download_timeout'],
-    'CLOSESPIDER_PAGECOUNT': params['max_pages'],
+    # BFS: 同一 depth のページを優先的に取得する
+    'DEPTH_PRIORITY': 1,
+    'SCHEDULER_DISK_QUEUE': 'scrapy.squeues.PickleFifoDiskQueue',
+    'SCHEDULER_MEMORY_QUEUE': 'scrapy.squeues.FifoMemoryQueue',
     'LOG_LEVEL': 'INFO',
 }}
 if params.get('timeout_sec'):
@@ -270,6 +273,7 @@ process.crawl(
     allowed_domains=params['allowed_domains'],
     url_pattern=params['url_pattern'],
     output_dir=params['output_dir'],
+    max_pages=params['max_pages'],
 )
 process.start()
 """

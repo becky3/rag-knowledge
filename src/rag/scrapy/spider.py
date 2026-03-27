@@ -53,6 +53,7 @@ class SiteSpider(scrapy.Spider):  # type: ignore[misc]
         allowed_domains: str = "",
         url_pattern: str = "",
         output_dir: str = "",
+        max_pages: int = 0,
         **kwargs: Any,
     ) -> None:
         super().__init__(**kwargs)
@@ -85,6 +86,9 @@ class SiteSpider(scrapy.Spider):  # type: ignore[misc]
         self._output_dir = Path(output_dir)
         self._output_dir.mkdir(parents=True, exist_ok=True)
 
+        # ページ数上限（0 = 無制限）
+        self._max_pages = int(max_pages)
+
         # 統計
         self._page_count = 0
         self._error_count = 0
@@ -113,7 +117,10 @@ class SiteSpider(scrapy.Spider):  # type: ignore[misc]
             )
             return
 
-        self._page_count += 1
+        # 200 OK のみカウント（404 等を除外して正確なページ数制限を実現）
+        if response.status == 200:
+            self._page_count += 1
+
         self.logger.info(
             "[%d] Crawled: %s (status=%d, size=%d)",
             self._page_count,
@@ -122,11 +129,18 @@ class SiteSpider(scrapy.Spider):  # type: ignore[misc]
             len(response.body),
         )
 
+        # 200 OK ページ数が上限に達したら Spider をクローズ
+        # リンク追跡より前に判定し、上限到達後は新規リクエストをスケジュールしない
+        max_reached = self._max_pages and self._page_count >= self._max_pages
+
         # HTML ファイルを保存
         filepath = self._save_html(response)
         if filepath is None:
             # 保存失敗時はメタデータを yield しない（JSONL に不整合な行を書かない）
-            yield from self._follow_links(response)
+            if not max_reached:
+                yield from self._follow_links(response)
+            if max_reached:
+                self.crawler.engine.close_spider(self, "max_pages_reached")
             return
 
         # JSONL 用メタデータを yield（FEEDS 機能で自動出力）
@@ -140,8 +154,12 @@ class SiteSpider(scrapy.Spider):  # type: ignore[misc]
             "filepath": str(filepath.relative_to(self._output_dir.resolve())),
         }
 
-        # リンクを辿る
-        yield from self._follow_links(response)
+        # 上限未到達時のみリンクを辿る
+        if not max_reached:
+            yield from self._follow_links(response)
+
+        if max_reached:
+            self.crawler.engine.close_spider(self, "max_pages_reached")
 
     def _is_text_response(self, content_type: str) -> bool:
         """Content-Type がテキスト系かどうか判定する."""

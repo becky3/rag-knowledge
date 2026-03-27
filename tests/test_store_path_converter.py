@@ -47,12 +47,14 @@ class TestUrlToPath:
             url_to_path("ftp://example.com/file")
 
     def test_root_url(self) -> None:
+        """ルート URL は {host}/index に配置されること."""
         result = url_to_path("https://example.com/")
-        assert result == "web/https/example.com"
+        assert result == "web/https/example.com/index"
 
     def test_host_only(self) -> None:
+        """ホストのみの URL は {host}/index に配置されること."""
         result = url_to_path("https://example.com")
-        assert result == "web/https/example.com"
+        assert result == "web/https/example.com/index"
 
     def test_trailing_slash(self) -> None:
         """末尾 / が除去されること（ディレクトリ扱い回避）."""
@@ -129,3 +131,9 @@ class TestRoundTrip:
         path = url_to_path(url)
         restored = path_to_url(path)
         assert restored == "https://example.com/page"
+
+    def test_roundtrip_root_url_gets_index(self) -> None:
+        """ルート URL は往復で /index が付加される（既知の制限）."""
+        path = url_to_path("https://example.com/")
+        restored = path_to_url(path)
+        assert restored == "https://example.com/index"
