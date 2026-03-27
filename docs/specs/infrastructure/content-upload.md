@@ -6,7 +6,7 @@
 
 スコープ:
 
-- MCP ツール経由のコンテンツデコード・バリデーション（既存）
+- MCP ツール経由のバリデーション（encoding 許容値チェック・content 空チェック）
 - アップロードファイル名のサニタイズ（パストラバーサル防止）
 - Upload HTTP API によるファイル直接アップロード（`multipart/form-data`）
 - 全インジェスト操作の排他制御
@@ -58,9 +58,14 @@ MCP は JSON ベースのテキストプロトコルであるため、ツール�
 ### インジェスト排他制御の制約
 
 - **適用対象**: 全インジェスト操作に適用する。Upload HTTP API（`/upload/document`、`/upload/journal`）、MCP ツール（`rag_add_document`、`rag_add_journal`）、CLI 直接実行の全てが対象
-- **ロック方式**: OS ファイルロックによるプロセス間排他制御。Unix では `fcntl.flock`、Windows では `msvcrt.locking` を使用する。MCP サーバー（CLI サブプロセス経由）と CLI 直接実行の間でも排他が保たれる
+- **ロック方式**: OS ファイルロックによるプロセス間排他制御。Unix では `fcntl.flock`、Windows では `msvcrt.locking` を使用する。
+  ロック取得処理の実施主体は CLI とし、MCP サーバー（`server.py`）からのインジェストも CLI サブプロセスを起動して同一のロック取得処理を利用する。
+  `server.py` 自身はロックファイルを直接操作しない
 - **ロックファイル**: source_store ディレクトリ直下に配置する。インジェストロックと rebuild ロックでそれぞれ別のロックファイルを使用する
-- **ノンブロッキング**: ロック取得を試み（`LOCK_NB` / `LK_NBLCK`）、取得できない場合は待機せず即座にエラーを返却する。Upload HTTP API では HTTP 409、MCP ツールではエラーメッセージ、CLI では標準エラー出力 + exit code 1 を返す
+- **ノンブロッキング**: CLI はロック取得を試み（`LOCK_NB` / `LK_NBLCK`）、取得できない場合は待機せず即座にエラーを返却する。
+  CLI はロック競合時に JSON Lines の error メッセージ（`type: "error"`）にロック競合である旨を含め、exit code 1 で終了する。
+  `server.py` は CLI サブプロセスの error メッセージからロック競合を判定し、Upload HTTP API では HTTP 409、MCP ツールではエラーメッセージとして返却する。
+  CLI 直接実行では標準エラー出力 + exit code 1 を返す
 - **ステールロック対策**: OS ファイルロックはプロセス終了時（SEGFAULT 含む異常終了を含む）に OS が自動解放するため、明示的なステールロック対策は不要。OS クラッシュ・電源断の場合もロックはカーネルメモリ上のみに存在し、再起動後にクリーンな状態になる
 - **Advisory lock の制約**: OS ファイルロックは advisory lock（協調ロック）であり、ロック取得のコードを経由しないアクセスは防げない。本システムでは全書き込み操作が CLI 経由（MCP サブプロセス + CLI 直接実行）のため問題ない
 - **rebuild との独立性**: インジェストロックと rebuild ロックはそれぞれ別のロックファイルを使用し、独立して動作する。rebuild 実行中のインジェスト、およびインジェスト中の rebuild は、それぞれのロックで個別に制御される
@@ -220,11 +225,14 @@ flowchart TB
 
     UD --> AUTH
     UJ --> AUTH
-    AUTH -->|一時ファイル| SAN
-    T1 -->|stdin| SAN
-    T2 -->|stdin| SAN
+    AUTH -->|filename| SAN
+    AUTH -->|content: temp file| CLI
+    T1 -->|filename| SAN
+    T1 -->|content: stdin| CLI
+    T2 -->|filename| SAN
+    T2 -->|content: stdin| CLI
 
-    SAN --> CLI
+    SAN -->|sanitized filename| CLI
     CLI --> LI
     CLI --> JI
     LI --> PIPE
