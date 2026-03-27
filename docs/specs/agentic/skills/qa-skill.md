@@ -25,7 +25,7 @@ MCP ツール・CLI コマンド・HTTP API の機能を実際に実行し、正
 ## 制約
 
 - **worktree 環境での実行**: 本番ストレージに影響を与えないよう、worktree 環境で実行する。ストレージパスは worktree 内の絶対パスを使用する
-- **MCP サーバーの排他**: MCP ツール検証時は MCP サーバーを enabled にする。CLI 検証時は disabled にする。同時アクセスは禁止
+- **MCP サーバーの分離**: MCP ツール検証時は MCP サーバーを enabled にする。CLI 検証時は disabled を推奨する（HttpClient + ファイルベースロックにより同時アクセスは技術的に可能だが、検証環境の単純化のため分離する）
 - **YouTube の実行制限**: YouTube グループ（D）を選択した場合、実行直前にユーザー確認を必ず挟む。IP ブロックリスクがあるため
 - **外部 API への最小アクセス**: 外部 API を使用するグループでは、取り込み件数を最小限に制限する（具体値は検証リソース定義に従う）
 - **エラー時の継続動作**: 各ステップでエラーが発生した場合、NG として記録し次のステップに進む。グループ全体を中断しない
@@ -107,17 +107,19 @@ QA 検証グループ:
 
 1. ベースブランチ（develop）を最新に更新する
 2. worktree を作成する（配置: リポジトリの親ディレクトリ、命名: `<リポジトリ名>-wt-<Issue番号>`）
-3. メインリポジトリから `.env` をコピーし、ストレージパスを worktree 内の絶対パスに変更する
+3. メインリポジトリから `.env` をコピーし、ストレージパスを worktree 内の絶対パスに変更する。`CHROMADB_SERVER_PORT=8001` を追加する（メインリポジトリの MCP サーバーとのポート競合回避）
 4. LM Studio の接続先を確認し、必要に応じて `localhost` に変更する
 5. `.tmp` ディレクトリを作成する
 6. メインリポジトリから `.qa/` ディレクトリをコピーする（`.qa/` は `.gitignore` 対象のため worktree に含まれない）
+7. CLI フェーズを含む場合、ChromaDB サーバーを手動起動する: `chroma run --path <persist_dir> --port <CHROMADB_SERVER_PORT>`。「MCP のみ」選択時は MCP サーバーが自動起動するためスキップする
 
 以降の全コマンドは worktree ディレクトリで実行する。
 
 ### ステップ 4: 環境確認
 
 - 現在のブランチ・ディレクトリを確認する
-- MCP サーバーの状態を確認する（CLI 検証時は disabled であることを確認）
+- MCP サーバーの状態を確認する（CLI 検証時は disabled 推奨）
+- ChromaDB サーバー疎通確認（CLI フェーズを含む場合のみ）: `curl http://localhost:<CHROMADB_SERVER_PORT>/api/v1/heartbeat` で応答を確認する。「MCP のみ」選択時はスキップする
 - LM Studio の接続確認（Embedding API が必要なグループの場合）
 - `.env` のストレージパスが worktree 内の絶対パスを指していることを確認する
 
@@ -133,6 +135,11 @@ QA 検証グループ:
   1. **CLI フェーズ**: MCP disabled を確認し、全グループを CLI で実行する
   2. **切り替え**: ユーザーに `/mcp` で MCP サーバーを enabled に切り替えてもらう
   3. **MCP フェーズ**: MCP enabled を確認し、全グループを MCP で実行する
+
+MCP フェーズでの追加確認（書き込み系ツール実行時）:
+
+- MCP ツールの実行結果が正常に返されること（CLI サブプロセス経由の JSON パースが成功していることの間接確認）
+- エラー発生時にエラーメッセージが適切に返されること
 
 YouTube（D）選択時は、グループ実行直前に以下を表示してユーザー確認を取る:
 
@@ -286,10 +293,11 @@ CLI 対応コマンド:
 手順:
 
 1. **POST /upload/document（正常系）** — ファイルをアップロード。レスポンスの `status: ok` と `source_id` を確認。共通検証フローを実行
-2. **POST /upload/document（同名エラー）** — 同じファイルを再度アップロード（`upload_mode=fail`）。HTTP 409 が返ること
+2. **POST /upload/document（同名エラー）** — 同じファイルを再度アップロード（`upload_mode=fail`）。HTTP 409 が返ること（重複検出エラー。ロック競合の 409 とは異なる）
 3. **POST /upload/document（上書き）** — `upload_mode=replace` で上書き。HTTP 200 が返ること
 4. **POST /upload/journal（正常系）** — ジャーナルをアップロード。レスポンスの `status: ok` と `source_id` を確認。共通検証フローを実行
 5. **POST /upload/journal（必須フィールド欠落）** — title なしでアップロード。HTTP 400 が返ること
+6. **ロック競合検証** — `curl -X POST ... &` でバックグラウンド送信した直後に同一コマンドをフォアグラウンドで実行し、いずれか一方が HTTP 409 Conflict（ロック競合）を返すことを確認する。エラーレスポンスにロック競合を示すメッセージが含まれることを確認する
 
 ### G) Eval
 
@@ -349,5 +357,6 @@ CLI 対応コマンド:
 - 品質ゲート（`~/.claude/rules/quality-gate.md`）— QA フェーズの位置づけ
 - 仕様駆動開発（`~/.claude/rules/spec-driven.md`）— QA フェーズの原則
 - [RAG Knowledge 全体仕様](../../overview.md) — 機能一覧
+- [RAG ナレッジ](../../rag-knowledge.md) — ChromaDB client/server 構成、MCP 薄層アダプターパターン
 - [content-upload](../../infrastructure/content-upload.md) — Upload HTTP API 仕様
 - [content-listing](../../infrastructure/content-listing.md) — コンテンツ一覧取得仕様

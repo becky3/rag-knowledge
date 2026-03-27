@@ -50,17 +50,20 @@ QA 検証グループ:
 2. worktree を作成する: `git worktree add -b qa/qa-skill-<Issue番号> <worktree-path> develop`
    - 配置: リポジトリの親ディレクトリ、命名: `<リポジトリ名>-wt-<Issue番号>`
 3. メインリポジトリから `.env` をコピーする
-4. `.env` のストレージパスを worktree 内の**絶対パス**に変更する（相対パスだとメインリポジトリのストレージを参照してしまう）
+4. `.env` のストレージパスを worktree 内の**絶対パス**に変更する（相対パスだとメインリポジトリのストレージを参照してしまう）。`CHROMADB_SERVER_PORT=8001` を追加する（メインリポジトリの MCP サーバーとのポート競合回避）
 5. LM Studio の接続先を確認し、必要に応じて `localhost` に変更する
 6. `.tmp` ディレクトリを作成する
 7. メインリポジトリから `.qa/` ディレクトリをコピーする（`.qa/` は `.gitignore` 対象のため worktree に含まれない）
+8. CLI フェーズを含む場合、ChromaDB サーバーを手動起動する: `chroma run --path <persist_dir> --port <CHROMADB_SERVER_PORT>`。「MCP のみ」選択時は MCP サーバーが自動起動するためスキップする
 
 以降の全コマンドは worktree ディレクトリで実行する。
 
 ### 4. 環境確認
 
 - 現在のブランチ・作業ディレクトリを表示
-- MCP サーバーの状態確認（CLI 検証時は disabled、MCP 検証時は enabled であることを確認）
+- MCP サーバーの状態確認（CLI 検証時は disabled 推奨、MCP 検証時は enabled であることを確認）
+- ChromaDB サーバー疎通確認（CLI フェーズを含む場合のみ）: `curl http://localhost:<CHROMADB_SERVER_PORT>/api/v1/heartbeat` で応答を確認。「MCP のみ」選択時はスキップ
+- LM Studio の接続確認（Embedding API が必要なグループの場合）
 - `.env` のストレージパスが worktree 内の絶対パスを指していることを確認
 - 問題があればユーザーに報告し、解決してから続行
 
@@ -91,6 +94,13 @@ YouTube 検証を実行します。
 YouTube API へのアクセスにより IP ブロックのリスクがあります。
 実行しますか？ (y/n)
 ```
+
+**MCP フェーズでの追加確認:**
+
+MCP フェーズで書き込み系ツール（取り込み・削除・再構築）を実行する際、以下を追加で確認する:
+
+- MCP ツールの実行結果が正常に返されること（CLI サブプロセス経由の JSON パースが成功していることの間接確認）
+- エラー発生時にエラーメッセージが適切に返されること
 
 **取り込み後の共通検証フロー:**
 
@@ -199,10 +209,11 @@ NG を検出した場合、Issue 起票を提案する。
 HTTP モードで MCP サーバーを起動して実行:
 
 1. `POST /upload/document` で `README.md` をアップロード（正常系）+ 共通検証
-2. `POST /upload/document` で同ファイルを再アップロード（同名エラー、409）
+2. `POST /upload/document` で同ファイルを再アップロード（同名エラー、409 — 重複検出エラー。ロック競合の 409 とは異なる）
 3. `POST /upload/document` で `upload_mode=replace` で上書き（200）
 4. `POST /upload/journal` で `.qa/journal_upload_test.md` をアップロード（`title: "QA スキルの仕様書・スキル定義作成"` `repository: rag-knowledge`）+ 共通検証
 5. `POST /upload/journal` で title なしアップロード（必須フィールド欠落、400）
+6. **ロック競合検証**: `curl -X POST ... &` でバックグラウンド送信した直後に同一コマンドをフォアグラウンドで実行し、いずれか一方が HTTP 409 Conflict（ロック競合）を返すことを確認。エラーレスポンスにロック競合を示すメッセージが含まれることを確認
 
 ### G) Eval（CLI 固定）
 
@@ -234,3 +245,4 @@ A〜G の取り込みデータを使ってパイプライン基盤を検証す�
 - テストデータの作成時、実在の著作物・キャラクター情報を使用しない（`~/.claude/rules/invariants.md`）
 - 各グループの実行中にエラーが発生した場合、そのステップを NG として記録し、次のステップに進む。グループ全体を中断しない
 - MCP ツールの検証では、MCP サーバーが enabled であることを確認してから実行する。disabled の場合はユーザーに `/mcp` での状態変更を依頼する
+- **MCP と CLI の共存**: HttpClient + ファイルベースロックにより MCP と CLI の同時アクセスは技術的に可能だが、QA では検証環境の単純化のため CLI 検証時は MCP disabled を推奨する
