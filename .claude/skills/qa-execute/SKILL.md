@@ -1,6 +1,6 @@
 ---
 name: qa-execute
-description: QA 検証ステップの実行・確認制御（事前表示 → 許可 → 実行 → 検証）
+description: QA 検証ステップの実行・確認制御（事前表示 → 許可 → 実行 → 検証 → 進行確認）
 user-invocable: false
 allowed-tools: Bash, Read, Grep, Glob, AskUserQuestion
 ---
