@@ -568,3 +568,15 @@ class TestDecodeFormValue:
         cp932_bytes = original.encode("cp932")
         latin1_garbled = cp932_bytes.decode("latin-1")
         assert _decode_form_value(latin1_garbled) == original
+
+    def test_latin1_text_not_misidentified_as_cp932(self) -> None:
+        """正当な Latin-1 テキストが cp932 に誤変換されない."""
+        # \xa1 は Latin-1 では ¡ だが cp932 では ｡（半角句点）
+        # 日本語文字を含まないため cp932 デコード結果は採用されない
+        latin1_text = "\u00a1Hola!"  # "¡Hola!"
+        assert _decode_form_value(latin1_text) == latin1_text
+
+    def test_latin1_accented_text_unchanged(self) -> None:
+        """アクセント付き Latin-1 テキストがそのまま返される."""
+        latin1_text = "caf\u00e9 r\u00e9sum\u00e9"  # "café résumé"
+        assert _decode_form_value(latin1_text) == latin1_text

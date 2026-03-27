@@ -35,6 +35,7 @@ import io
 import json
 import logging
 import os
+import re
 import sys
 from pathlib import Path
 from typing import Any
@@ -1760,6 +1761,10 @@ def _upload_success(message: str, source_id: str) -> JSONResponse:
     )
 
 
+_CJK_PATTERN = re.compile(r"[\u3040-\u309F\u30A0-\u30FF\u4E00-\u9FFF]")
+"""ひらがな・カタカナ・CJK 漢字の検出パターン."""
+
+
 def _decode_form_value(value: str) -> str:
     """Starlette の Latin-1 フォールバックで壊れたフォーム値を UTF-8/cp932 に復元する.
 
@@ -1770,17 +1775,27 @@ def _decode_form_value(value: str) -> str:
     主な発生パターン:
     - Windows curl（cp932 コンソール）から日本語を送信した場合
     - UTF-8 バイト列が Latin-1 にフォールバックした場合
+
+    cp932 誤判定の防止:
+    - cp932 デコード後に日本語文字（ひらがな・カタカナ・CJK 漢字）が含まれない場合、
+      正当な Latin-1 入力（例: "¡Hola!"）と判断し元の値を返す。
     """
     try:
         raw_bytes = value.encode("latin-1")
     except UnicodeEncodeError:
         return value
     # UTF-8 を優先（cp932 の一部バイト列が偶然 UTF-8 として解釈されるのを防ぐ）
-    for codec in ("utf-8", "cp932"):
-        try:
-            return raw_bytes.decode(codec)
-        except (UnicodeDecodeError, ValueError):
-            continue
+    try:
+        return raw_bytes.decode("utf-8")
+    except (UnicodeDecodeError, ValueError):
+        pass
+    # cp932: デコード成功しても日本語文字が含まれなければ誤判定とみなす
+    try:
+        decoded = raw_bytes.decode("cp932")
+        if _CJK_PATTERN.search(decoded):
+            return decoded
+    except (UnicodeDecodeError, ValueError):
+        pass
     return value
 
 
