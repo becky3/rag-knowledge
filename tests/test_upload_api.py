@@ -18,6 +18,7 @@ import pytest
 
 from rag.server import (
     CLISubprocessError,
+    _decode_form_value,
     _reset_pipeline_controller,
     _reset_rag_service,
     mcp,
@@ -244,6 +245,84 @@ class TestUploadJournalIntegration:
         assert body["status"] == "ok"
         assert "source_id" in body
 
+    @pytest.mark.asyncio
+    async def test_japanese_title_passed_to_cli(self, client: httpx.AsyncClient) -> None:
+        """日本語タイトルが CLI サブプロセスに正しく渡される."""
+        mock_cli_result = {"entry_id": "20260327-test"}
+        captured_args: list[list[str]] = []
+
+        async def capture_cli(cmd: str, args: list[str], **kwargs: object) -> dict:
+            captured_args.append(args)
+            return mock_cli_result
+
+        japanese_title = "QA \u30c6\u30b9\u30c8\u30bb\u30c3\u30b7\u30e7\u30f3\u8a18\u9332"  # "QA テストセッション記録"
+
+        with patch("rag.server._run_cli_subprocess", side_effect=capture_cli):
+            resp = await client.post(
+                "/upload/journal",
+                files={"file": ("session.md", b"# Test", "text/plain")},
+                data={
+                    "title": japanese_title,
+                    "repository": "rag-knowledge",
+                },
+            )
+
+        assert resp.status_code == 200
+        assert len(captured_args) == 1
+        args = captured_args[0]
+        title_idx = args.index("--title")
+        assert args[title_idx + 1] == japanese_title
+
+    @pytest.mark.asyncio
+    async def test_cp932_encoded_japanese_title_restored(
+        self, app: object
+    ) -> None:
+        """Windows curl の cp932 エンコードで送信された日本語タイトルが復元される."""
+        mock_cli_result = {"entry_id": "20260327-cp932"}
+        captured_args: list[list[str]] = []
+
+        async def capture_cli(cmd: str, args: list[str], **kwargs: object) -> dict:
+            captured_args.append(args)
+            return mock_cli_result
+
+        japanese_title = "QA \u30c6\u30b9\u30c8\u30bb\u30c3\u30b7\u30e7\u30f3\u8a18\u9332"
+        # cp932 エンコードされたバイト列で raw multipart body を構築
+        title_cp932 = japanese_title.encode("cp932")
+        boundary = "----Cp932TestBoundary"
+        file_content = b"# Test journal"
+        raw_body = (
+            b"--" + boundary.encode() + b"\r\n"
+            b'Content-Disposition: form-data; name="title"\r\n\r\n'
+            + title_cp932 + b"\r\n"
+            b"--" + boundary.encode() + b"\r\n"
+            b'Content-Disposition: form-data; name="repository"\r\n\r\n'
+            b"test-repo\r\n"
+            b"--" + boundary.encode() + b"\r\n"
+            b'Content-Disposition: form-data; name="file"; filename="test.md"\r\n'
+            b"Content-Type: text/markdown\r\n\r\n"
+            + file_content + b"\r\n"
+            b"--" + boundary.encode() + b"--\r\n"
+        )
+
+        transport = httpx.ASGITransport(app=app)
+        async with httpx.AsyncClient(
+            transport=transport, base_url="http://test"
+        ) as raw_client:
+            with patch("rag.server._run_cli_subprocess", side_effect=capture_cli):
+                resp = await raw_client.post(
+                    "/upload/journal",
+                    content=raw_body,
+                    headers={
+                        "Content-Type": f"multipart/form-data; boundary={boundary}",
+                    },
+                )
+
+        assert resp.status_code == 200
+        assert len(captured_args) == 1
+        args = captured_args[0]
+        title_idx = args.index("--title")
+        assert args[title_idx + 1] == japanese_title
+
 
 # --- インジェスト排他制御テスト ---
 
@@ -441,3 +520,63 @@ class TestUploadMaxFileSizeConfig:
 
         with pytest.raises(ValidationError):
             RAGSettings(**{**TEST_SETTINGS_DEFAULTS, "rag_upload_max_file_size_mb": 501})
+
+
+# --- _decode_form_value テスト ---
+
+
+class TestDecodeFormValue:
+    """Starlette Latin-1 フォールバック文字列の復元テスト."""
+
+    def test_ascii_string_unchanged(self) -> None:
+        """ASCII 文字列はそのまま返される."""
+        assert _decode_form_value("hello") == "hello"
+
+    def test_utf8_string_unchanged(self) -> None:
+        """正しい UTF-8 文字列はそのまま返される."""
+        assert _decode_form_value("日本語テキスト") == "日本語テキスト"
+
+    def test_cp932_latin1_fallback_restored(self) -> None:
+        """cp932 → Latin-1 フォールバック文字列が cp932 として復元される."""
+        # Starlette が cp932 バイト列を Latin-1 にフォールバックした文字列を模擬
+        original = "QA スキルの仕様書・スキル定義作成"
+        cp932_bytes = original.encode("cp932")
+        latin1_garbled = cp932_bytes.decode("latin-1")
+        assert _decode_form_value(latin1_garbled) == original
+
+    def test_utf8_latin1_fallback_restored(self) -> None:
+        """UTF-8 バイト列が Latin-1 フォールバックされた場合に正しく復元される."""
+        original = "日本語テキスト"
+        utf8_bytes = original.encode("utf-8")
+        latin1_garbled = utf8_bytes.decode("latin-1")
+        assert _decode_form_value(latin1_garbled) == original
+
+    def test_empty_string(self) -> None:
+        """空文字列はそのまま返される."""
+        assert _decode_form_value("") == ""
+
+    def test_mixed_ascii_and_non_ascii(self) -> None:
+        """ASCII と非 ASCII が混在する UTF-8 Latin-1 フォールバック文字列が復元される."""
+        original = "Title: テスト"
+        utf8_bytes = original.encode("utf-8")
+        latin1_garbled = utf8_bytes.decode("latin-1")
+        assert _decode_form_value(latin1_garbled) == original
+
+    def test_cp932_mixed_ascii_restored(self) -> None:
+        """ASCII と日本語が混在する cp932 Latin-1 フォールバックが復元される."""
+        original = "QA テストセッション記録"
+        cp932_bytes = original.encode("cp932")
+        latin1_garbled = cp932_bytes.decode("latin-1")
+        assert _decode_form_value(latin1_garbled) == original
+
+    def test_latin1_text_not_misidentified_as_cp932(self) -> None:
+        """正当な Latin-1 テキストが cp932 に誤変換されない."""
+        # \xa1 は Latin-1 では ¡ だが cp932 では ｡（半角句点）
+        # 日本語文字を含まないため cp932 デコード結果は採用されない
+        latin1_text = "\u00a1Hola!"  # "¡Hola!"
+        assert _decode_form_value(latin1_text) == latin1_text
+
+    def test_latin1_accented_text_unchanged(self) -> None:
+        """アクセント付き Latin-1 テキストがそのまま返される."""
+        latin1_text = "caf\u00e9 r\u00e9sum\u00e9"  # "café résumé"
+        assert _decode_form_value(latin1_text) == latin1_text
