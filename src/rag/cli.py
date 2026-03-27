@@ -366,6 +366,11 @@ def main() -> None:
         default=None,
         help="対象媒体フィルタ（incremental では指定不可）",
     )
+    rebuild_parser.add_argument(
+        "--commit-message",
+        default=None,
+        help="再構築前に source_store を git commit するメッセージ",
+    )
     _add_output_option(rebuild_parser)
     # stats サブコマンド
     subparsers.add_parser("stats", help="ナレッジベースの統計情報を表示")
@@ -468,7 +473,11 @@ def main() -> None:
 
     # add-document: 単一ドキュメント取り込み
     adddoc_parser = subparsers.add_parser("add-document", help="ドキュメントファイルをナレッジベースに取り込む")
-    adddoc_parser.add_argument("file_path", help="取り込み対象ファイルのパス")
+    adddoc_input_group = adddoc_parser.add_mutually_exclusive_group(required=True)
+    adddoc_input_group.add_argument("--file", dest="file_path", help="取り込み対象ファイルのパス")
+    adddoc_input_group.add_argument("--stdin", action="store_true", default=False, help="stdin からコンテンツを読み取る（--file と排他）")
+    adddoc_parser.add_argument("--filename", default=None, help="stdin 入力時のファイル名（--stdin 使用時に必須）")
+    adddoc_parser.add_argument("--encoding", choices=["text", "base64"], default="text", help="stdin 入力のエンコーディング（デフォルト: text）")
     adddoc_parser.add_argument("--upload-mode", choices=["fail", "replace"], default="fail", help="同名ファイル存在時の動作")
     _add_output_option(adddoc_parser)
 
@@ -516,7 +525,9 @@ def main() -> None:
     # add-journal: 単一ジャーナルエントリの登録
     aj_parser = subparsers.add_parser("add-journal", help="ジャーナルエントリをナレッジベースに登録")
     aj_parser.add_argument("--title", "-t", required=True, help="エントリタイトル")
-    aj_parser.add_argument("--file", "-f", required=True, help="本文 Markdown ファイルのパス。CLI がファイルを読み込んでコンテンツをインジェスターに渡す")
+    aj_input_group = aj_parser.add_mutually_exclusive_group(required=True)
+    aj_input_group.add_argument("--file", "-f", help="本文 Markdown ファイルのパス。CLI がファイルを読み込んでコンテンツをインジェスターに渡す")
+    aj_input_group.add_argument("--stdin", action="store_true", default=False, help="stdin から UTF-8 テキストを読み取る（--file と排他）")
     aj_parser.add_argument("--repository", "-r", required=True, help="リポジトリ名")
     aj_parser.add_argument("--entry-id", "-e", default=None, help="エントリ識別子（省略時は自動生成）")
     _add_output_option(aj_parser)
@@ -1223,57 +1234,82 @@ def run_rebuild(args: argparse.Namespace) -> None:
 
     controller = build_pipeline_controller(settings)
 
-    logger.info("再構築を開始します（モード: %s）", mode)
-    if source_type:
-        logger.info("対象媒体: %s", source_type)
+    # rebuild ロック取得
+    from .infrastructure.file_lock import LockAcquisitionError, rebuild_lock
 
-    start = time.monotonic()
+    lock = rebuild_lock(Path(controller.source_store.root_dir))
+    try:
+        lock.acquire()
+    except LockAcquisitionError:
+        msg = "別の再構築が実行中です（ロック競合）"
+        if json_out:
+            _output_error(msg)
+        print(f"エラー: {msg}", file=sys.stderr)
+        raise SystemExit(1)
 
-    progress_cb = _output_progress if json_out else None
+    try:
+        logger.info("再構築を開始します（モード: %s）", mode)
+        if source_type:
+            logger.info("対象媒体: %s", source_type)
 
-    if mode == "full":
-        summary = controller.run_full_rebuild(
-            source_type=source_type,
-            progress_callback=progress_cb,
+        start = time.monotonic()
+
+        progress_cb = _output_progress if json_out else None
+
+        # --commit-message 指定時は再構築前に source_store を git commit
+        commit_message: str | None = getattr(args, "commit_message", None)
+        if commit_message:
+            sha = controller.commit(commit_message)
+            if sha:
+                logger.info("source_store コミット: %s", sha)
+            else:
+                logger.info("source_store に変更なし（コミットなし）")
+
+        if mode == "full":
+            summary = controller.run_full_rebuild(
+                source_type=source_type,
+                progress_callback=progress_cb,
+            )
+        elif mode == "convert":
+            summary = controller.run_convert_only(
+                source_type=source_type,
+                progress_callback=progress_cb,
+            )
+        elif mode == "index":
+            summary = controller.run_index_only(
+                source_type=source_type,
+                progress_callback=progress_cb,
+            )
+        else:
+            summary = controller.run_incremental(
+                progress_callback=progress_cb,
+            )
+
+        elapsed = time.monotonic() - start
+
+        if json_out:
+            _output_result({
+                "mode": summary.mode.value,
+                "total_files": summary.total_files,
+                "processed": summary.processed,
+                "skipped": summary.skipped,
+                "errors": summary.errors,
+                "elapsed": round(elapsed, 1),
+            })
+            return
+
+        logger.info(
+            "再構築完了: %d 処理 / %d スキップ / %d エラー / %.1f 秒",
+            summary.processed,
+            summary.skipped,
+            len(summary.errors),
+            elapsed,
         )
-    elif mode == "convert":
-        summary = controller.run_convert_only(
-            source_type=source_type,
-            progress_callback=progress_cb,
-        )
-    elif mode == "index":
-        summary = controller.run_index_only(
-            source_type=source_type,
-            progress_callback=progress_cb,
-        )
-    else:
-        summary = controller.run_incremental(
-            progress_callback=progress_cb,
-        )
-
-    elapsed = time.monotonic() - start
-
-    if json_out:
-        _output_result({
-            "mode": summary.mode.value,
-            "total_files": summary.total_files,
-            "processed": summary.processed,
-            "skipped": summary.skipped,
-            "errors": summary.errors,
-            "elapsed": round(elapsed, 1),
-        })
-        return
-
-    logger.info(
-        "再構築完了: %d 処理 / %d スキップ / %d エラー / %.1f 秒",
-        summary.processed,
-        summary.skipped,
-        len(summary.errors),
-        elapsed,
-    )
-    if summary.errors:
-        for err_file in summary.errors:
-            logger.error("  エラーファイル: %s", err_file)
+        if summary.errors:
+            for err_file in summary.errors:
+                logger.error("  エラーファイル: %s", err_file)
+    finally:
+        lock.release()
 
 
 def run_stats(args: argparse.Namespace) -> None:
@@ -1559,45 +1595,68 @@ async def run_add_journal(args: argparse.Namespace) -> None:
     """単一ジャーナルエントリを登録する.
 
     Args:
-        args: コマンドライン引数（--title, --file, --repository, --entry-id）
+        args: コマンドライン引数（--title, --file/--stdin, --repository, --entry-id）
     """
+    from .infrastructure.file_lock import LockAcquisitionError, ingest_lock
     from .pipeline.ingesters.journal import JournalIngester
 
     json_out = _is_json_output(args)
 
     controller, _settings = _build_cli_pipeline_controller()
 
-    ingester = JournalIngester(controller.source_store)
+    # コンテンツの取得: --stdin または --file
+    if getattr(args, "stdin", False):
+        body = sys.stdin.read()
+        if not body:
+            if json_out:
+                _output_error("stdin からの入力が空です")
+            print("エラー: stdin からの入力が空です", file=sys.stderr)
+            raise SystemExit(1)
+    else:
+        file_path = Path(args.file)
+        if not file_path.is_file():
+            if json_out:
+                _output_error(f"ファイルが見つかりません: {file_path}")
+            print(f"エラー: ファイルが見つかりません: {file_path}", file=sys.stderr)
+            raise SystemExit(1)
+        body = file_path.read_text(encoding="utf-8")
 
-    # --file で指定したファイルを読み込む
-    file_path = Path(args.file)
-    if not file_path.is_file():
+    # インジェストロックを取得
+    lock = ingest_lock(Path(controller.source_store.root_dir))
+    try:
+        lock.acquire()
+    except LockAcquisitionError:
+        msg = "別のインジェストが実行中です（ロック競合）"
         if json_out:
-            _output_error(f"ファイルが見つかりません: {file_path}")
-        print(f"エラー: ファイルが見つかりません: {file_path}", file=sys.stderr)
-        raise SystemExit(1)
-    body = file_path.read_text(encoding="utf-8")
-
-    ingest_result = ingester.add_entry(
-        title=args.title,
-        body=body,
-        repository=args.repository,
-        entry_id=args.entry_id,
-    )
-
-    if ingest_result.errors > 0:
-        if json_out:
-            _output_error(ingest_result.error_details[0])
-        print(f"エラー: {ingest_result.error_details[0]}", file=sys.stderr)
+            _output_error(msg)
+        print(f"エラー: {msg}", file=sys.stderr)
         raise SystemExit(1)
 
-    pipeline_summary = controller.ingest_and_index(
-        f"ingest(journal): add {args.title}"
-    )
-    _print_ingest_result(
-        ingest_result, pipeline_summary, context=f"journal/{args.repository}",
-        json_output=json_out,
-    )
+    try:
+        ingester = JournalIngester(controller.source_store)
+
+        ingest_result = ingester.add_entry(
+            title=args.title,
+            body=body,
+            repository=args.repository,
+            entry_id=args.entry_id,
+        )
+
+        if ingest_result.errors > 0:
+            if json_out:
+                _output_error(ingest_result.error_details[0])
+            print(f"エラー: {ingest_result.error_details[0]}", file=sys.stderr)
+            raise SystemExit(1)
+
+        pipeline_summary = controller.ingest_and_index(
+            f"ingest(journal): add {args.title}"
+        )
+        _print_ingest_result(
+            ingest_result, pipeline_summary, context=f"journal/{args.repository}",
+            json_output=json_out,
+        )
+    finally:
+        lock.release()
 
 
 def run_migrate_journal(args: argparse.Namespace) -> None:
@@ -2103,7 +2162,9 @@ async def run_crawl_zenn(args: argparse.Namespace) -> None:
 
 async def run_add_document(args: argparse.Namespace) -> None:
     """単一ドキュメント取り込み."""
+    from .infrastructure.file_lock import LockAcquisitionError, ingest_lock
     from .pipeline.ingesters.local import LocalIngester
+    from .upload import decode_upload_content
 
     json_out = _is_json_output(args)
 
@@ -2115,56 +2176,119 @@ async def run_add_document(args: argparse.Namespace) -> None:
         if ext.strip()
     ]
 
-    # CLI でのバリデーション: パス → バイト列取得
-    file_path_str = args.file_path
-    if not file_path_str or not file_path_str.strip():
-        if json_out:
-            _output_error("file_path が空です")
-        print("エラー: file_path が空です", file=sys.stderr)
-        raise SystemExit(1)
-    resolved = Path(file_path_str.strip()).resolve()
-    if not resolved.exists():
-        if json_out:
-            _output_error(f"ファイルが見つかりません: {resolved}")
-        print(f"エラー: ファイルが見つかりません: {resolved}", file=sys.stderr)
-        raise SystemExit(1)
-    if resolved.is_dir():
-        if json_out:
-            _output_error(f"パスはファイルではなくディレクトリです: {resolved}")
-        print(f"エラー: パスはファイルではなくディレクトリです: {resolved}", file=sys.stderr)
-        raise SystemExit(1)
-    ext = resolved.suffix.lower()
-    if ext not in supported_extensions:
-        msg = f"対応していないファイル形式です: {ext!r}（対応: {', '.join(supported_extensions)}）"
+    # コンテンツの取得: --stdin または --file
+    if getattr(args, "stdin", False):
+        # --stdin モード: --filename が必須
+        filename = args.filename
+        if not filename:
+            msg = "--stdin 使用時は --filename が必須です"
+            if json_out:
+                _output_error(msg)
+            print(f"エラー: {msg}", file=sys.stderr)
+            raise SystemExit(1)
+
+        raw_input = sys.stdin.read()
+        if not raw_input:
+            msg = "stdin からの入力が空です"
+            if json_out:
+                _output_error(msg)
+            print(f"エラー: {msg}", file=sys.stderr)
+            raise SystemExit(1)
+
+        # encoding に基づいてデコード
+        encoding = getattr(args, "encoding", "text")
+        try:
+            data = decode_upload_content(raw_input, encoding)
+        except ValueError as e:
+            if json_out:
+                _output_error(str(e))
+            print(f"エラー: {e}", file=sys.stderr)
+            raise SystemExit(1)
+
+        # 拡張子チェック
+        ext = Path(filename).suffix.lower()
+        if ext not in supported_extensions:
+            msg = f"対応していないファイル形式です: {ext!r}（対応: {', '.join(supported_extensions)}）"
+            if json_out:
+                _output_error(msg)
+            print(f"エラー: {msg}", file=sys.stderr)
+            raise SystemExit(1)
+        display_name = filename
+    else:
+        # --file モード（従来動作）
+        file_path_str = args.file_path
+        if not file_path_str or not file_path_str.strip():
+            if json_out:
+                _output_error("file_path が空です")
+            print("エラー: file_path が空です", file=sys.stderr)
+            raise SystemExit(1)
+        resolved = Path(file_path_str.strip()).resolve()
+        if not resolved.exists():
+            if json_out:
+                _output_error(f"ファイルが見つかりません: {resolved}")
+            print(f"エラー: ファイルが見つかりません: {resolved}", file=sys.stderr)
+            raise SystemExit(1)
+        if resolved.is_dir():
+            if json_out:
+                _output_error(f"パスはファイルではなくディレクトリです: {resolved}")
+            print(f"エラー: パスはファイルではなくディレクトリです: {resolved}", file=sys.stderr)
+            raise SystemExit(1)
+        data = resolved.read_bytes()
+        # --filename が指定されていればそちらを優先（Upload API が一時ファイル経由で呼ぶケース）
+        filename = args.filename if args.filename else resolved.name
+        ext = Path(filename).suffix.lower()
+        if ext not in supported_extensions:
+            msg = f"対応していないファイル形式です: {ext!r}（対応: {', '.join(supported_extensions)}）"
+            if json_out:
+                _output_error(msg)
+            print(f"エラー: {msg}", file=sys.stderr)
+            raise SystemExit(1)
+        display_name = file_path_str
+
+    # インジェストロックを取得
+    lock = ingest_lock(Path(controller.source_store.root_dir))
+    try:
+        lock.acquire()
+    except LockAcquisitionError:
+        msg = "別のインジェストが実行中です（ロック競合）"
         if json_out:
             _output_error(msg)
         print(f"エラー: {msg}", file=sys.stderr)
         raise SystemExit(1)
-    data = resolved.read_bytes()
 
-    local_ingester = LocalIngester(
-        controller.source_store,
-        supported_extensions=supported_extensions,
-    )
+    try:
+        local_ingester = LocalIngester(
+            controller.source_store,
+            supported_extensions=supported_extensions,
+        )
 
-    ingest_result = local_ingester.add_document(
-        data, resolved.name, upload_mode=args.upload_mode,
-    )
+        try:
+            ingest_result = local_ingester.add_document(
+                data, filename, upload_mode=args.upload_mode,
+            )
+        except FileExistsError as e:
+            msg = f"同名ファイルが既に存在します: {filename} ({e})"
+            if json_out:
+                _output_error(msg)
+            print(f"エラー: {msg}", file=sys.stderr)
+            raise SystemExit(1)
 
-    if ingest_result.placed == 0 and ingest_result.errors == 0:
-        if json_out:
-            _output_result(_ingest_result_to_dict(ingest_result, None))
+        if ingest_result.placed == 0 and ingest_result.errors == 0:
+            if json_out:
+                _output_result(_ingest_result_to_dict(ingest_result, None))
+                return
+            print(f"取り込み対象がありませんでした: {display_name}")
             return
-        print(f"取り込み対象がありませんでした: {file_path_str}")
-        return
-    if ingest_result.errors > 0:
-        if json_out:
-            _output_error(ingest_result.error_details[0])
-        print(f"エラー: {ingest_result.error_details[0]}", file=sys.stderr)
-        raise SystemExit(1)
+        if ingest_result.errors > 0:
+            if json_out:
+                _output_error(ingest_result.error_details[0])
+            print(f"エラー: {ingest_result.error_details[0]}", file=sys.stderr)
+            raise SystemExit(1)
 
-    pipeline_summary = controller.ingest_and_index(f"ingest(local): add {resolved.name}")
-    _print_ingest_result(ingest_result, pipeline_summary, context=file_path_str, json_output=json_out)
+        pipeline_summary = controller.ingest_and_index(f"ingest(local): add {filename}")
+        _print_ingest_result(ingest_result, pipeline_summary, context=display_name, json_output=json_out)
+    finally:
+        lock.release()
 
 
 async def run_crawl_documents(args: argparse.Namespace) -> None:

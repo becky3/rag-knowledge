@@ -15,51 +15,21 @@ import pytest
 
 from rag.pipeline.models import PipelineMode, PipelineSummary
 from rag.server import (
+    CLISubprocessError,
     _collect_converted_store_stats,
     _collect_pipeline_stats,
     _collect_source_store_stats,
     _format_rebuild_summary,
     _format_size,
-    _rebuild_lock,
     _reset_rag_service,
 )
 from rag.store.metadata_db import MetadataDB
-
-
-def _make_mock_process(
-    stdout_data: bytes, stderr_data: bytes, returncode: int,
-) -> AsyncMock:
-    """readline ベースの _run_worker_subprocess 用モックプロセスを生成する."""
-    mock_process = AsyncMock()
-
-    # stdout: readline で行単位返却 → b"" で EOF
-    lines: list[bytes] = []
-    if stdout_data:
-        lines = [line + b"\n" for line in stdout_data.split(b"\n") if line]
-    lines.append(b"")  # EOF
-
-    mock_stdout = AsyncMock()
-    mock_stdout.readline = AsyncMock(side_effect=lines)
-    mock_process.stdout = mock_stdout
-
-    # stderr: read で一括返却
-    mock_stderr = AsyncMock()
-    mock_stderr.read = AsyncMock(return_value=stderr_data)
-    mock_process.stderr = mock_stderr
-
-    mock_process.returncode = returncode
-    mock_process.wait = AsyncMock()
-
-    return mock_process
 
 
 @pytest.fixture(autouse=True)
 def _reset_rag_global_state() -> None:
     """各テスト前にRAGサービスのグローバル状態をリセットする."""
     _reset_rag_service()
-    # rebuild_lock がテスト間で残っている場合に解放
-    if _rebuild_lock.locked():
-        _rebuild_lock.release()
 
 
 # --- _format_size テスト ---
@@ -266,123 +236,24 @@ class TestCollectPipelineStats:
 
 
 class TestRagRebuild:
-    """rag_rebuild MCP ツールのテスト."""
+    """rag_rebuild MCP ツールのテスト（_run_cli_subprocess 経由）."""
 
     @pytest.mark.asyncio
-    async def test_invalid_mode(self) -> None:
+    async def test_full_rebuild_success(self) -> None:
+        """CLI サブプロセス経由の full rebuild が正常結果を返すこと."""
         from rag.server import rag_rebuild
 
-        result = await rag_rebuild(mode="invalid")
-        assert "エラー" in result
-        assert "無効なモード" in result
+        mock_cli_result: dict[str, object] = {
+            "type": "result",
+            "mode": "full_rebuild",
+            "total_files": 5,
+            "processed": 5,
+            "skipped": 0,
+            "errors": [],
+            "elapsed": 1.2,
+        }
 
-    @pytest.mark.asyncio
-    async def test_invalid_source_type(self) -> None:
-        from rag.server import rag_rebuild
-
-        result = await rag_rebuild(mode="full", source_type="unknown")
-        assert "エラー" in result
-        assert "無効な source_type" in result
-
-    @pytest.mark.asyncio
-    async def test_incremental_with_source_type(self) -> None:
-        from rag.server import rag_rebuild
-
-        result = await rag_rebuild(mode="incremental", source_type="web")
-        assert "エラー" in result
-        assert "incremental" in result
-
-    @pytest.mark.asyncio
-    async def test_source_store_not_configured(self) -> None:
-        from rag.server import rag_rebuild
-
-        mock_settings = MagicMock()
-        mock_settings.source_store_dir = ""
-        mock_settings.converted_store_dir = "./converted"
-
-        with patch("rag.server.get_settings", return_value=mock_settings):
-            result = await rag_rebuild(mode="full")
-        assert "SOURCE_STORE_DIR" in result
-
-    @pytest.mark.asyncio
-    async def test_converted_store_not_configured(self) -> None:
-        from rag.server import rag_rebuild
-
-        mock_settings = MagicMock()
-        mock_settings.source_store_dir = "./source"
-        mock_settings.converted_store_dir = ""
-
-        with patch("rag.server.get_settings", return_value=mock_settings):
-            result = await rag_rebuild(mode="full")
-        assert "CONVERTED_STORE_DIR" in result
-
-    @pytest.mark.asyncio
-    async def test_source_store_dir_not_exists(
-        self, tmp_path: Path,
-    ) -> None:
-        from rag.server import rag_rebuild
-
-        mock_settings = MagicMock()
-        mock_settings.source_store_dir = str(tmp_path / "nonexistent")
-        mock_settings.converted_store_dir = str(tmp_path / "converted")
-
-        with patch("rag.server.get_settings", return_value=mock_settings):
-            result = await rag_rebuild(mode="full")
-        assert "source_store ディレクトリが存在しません" in result
-
-    @pytest.mark.asyncio
-    async def test_exclusive_lock(self, tmp_path: Path) -> None:
-        from rag.server import rag_rebuild
-
-        source_dir = tmp_path / "source"
-        source_dir.mkdir()
-
-        mock_settings = MagicMock()
-        mock_settings.source_store_dir = str(source_dir)
-        mock_settings.converted_store_dir = str(tmp_path / "converted")
-
-        # ロックを先に取得
-        _rebuild_lock.acquire()
-        try:
-            with patch("rag.server.get_settings", return_value=mock_settings):
-                result = await rag_rebuild(mode="full")
-            assert "別の再構築が実行中" in result
-        finally:
-            _rebuild_lock.release()
-
-    @pytest.fixture()
-    def _source_dir(self, tmp_path: Path) -> Path:
-        """テスト用 source_store ディレクトリを作成する."""
-        d = tmp_path / "source"
-        d.mkdir()
-        return d
-
-    @pytest.mark.asyncio
-    async def test_full_rebuild_success(
-        self, tmp_path: Path, _source_dir: Path,
-    ) -> None:
-        """サブプロセス経由の full rebuild が正常結果を返すこと."""
-        from rag.server import rag_rebuild
-
-        mock_settings = MagicMock()
-        mock_settings.source_store_dir = str(_source_dir)
-        mock_settings.converted_store_dir = str(tmp_path / "converted")
-
-        mock_result = (
-            "再構築完了 (全再構築)\n"
-            "  処理件数: 5\n"
-            "  スキップ: 0\n"
-            "  エラー: 0\n"
-            "  所要時間: 1.0 秒"
-        )
-
-        with (
-            patch("rag.server.get_settings", return_value=mock_settings),
-            patch(
-                "rag.server._run_rebuild_subprocess",
-                return_value=mock_result,
-            ),
-        ):
+        with patch("rag.server._run_cli_subprocess", new_callable=AsyncMock, return_value=mock_cli_result):
             result = await rag_rebuild(mode="full")
 
         assert "再構築完了" in result
@@ -390,360 +261,100 @@ class TestRagRebuild:
         assert "処理件数: 5" in result
 
     @pytest.mark.asyncio
-    async def test_rebuild_with_source_type(
-        self, tmp_path: Path, _source_dir: Path,
-    ) -> None:
-        """source_type 指定の rebuild が正常に動作すること."""
+    async def test_rebuild_with_source_type(self) -> None:
+        """source_type 指定の rebuild が正しい引数で CLI を呼ぶこと."""
         from rag.server import rag_rebuild
 
-        mock_settings = MagicMock()
-        mock_settings.source_store_dir = str(_source_dir)
-        mock_settings.converted_store_dir = str(tmp_path / "converted")
+        mock_cli_result: dict[str, object] = {
+            "type": "result",
+            "mode": "convert_only",
+            "total_files": 3,
+            "processed": 3,
+            "skipped": 0,
+            "errors": [],
+            "elapsed": 0.5,
+        }
 
-        mock_result = (
-            "再構築完了 (コンバートのみ再実行)\n"
-            "  処理件数: 3\n"
-            "  スキップ: 0\n"
-            "  エラー: 0\n"
-            "  所要時間: 0.5 秒"
-        )
-
-        with (
-            patch("rag.server.get_settings", return_value=mock_settings),
-            patch(
-                "rag.server._run_rebuild_subprocess",
-                return_value=mock_result,
-            ) as mock_subprocess,
-        ):
+        with patch(
+            "rag.server._run_cli_subprocess",
+            new_callable=AsyncMock,
+            return_value=mock_cli_result,
+        ) as mock_subprocess:
             result = await rag_rebuild(mode="convert", source_type="web")
 
         assert "再構築完了" in result
-        mock_subprocess.assert_called_once_with("convert", "web", ctx=None)
+        mock_subprocess.assert_called_once_with(
+            "rebuild", ["--mode", "convert", "--source-type", "web"], ctx=None,
+        )
 
     @pytest.mark.asyncio
-    async def test_incremental_mode(
-        self, tmp_path: Path, _source_dir: Path,
-    ) -> None:
+    async def test_incremental_mode(self) -> None:
         """incremental モードが正常に動作すること."""
         from rag.server import rag_rebuild
 
-        mock_settings = MagicMock()
-        mock_settings.source_store_dir = str(_source_dir)
-        mock_settings.converted_store_dir = str(tmp_path / "converted")
+        mock_cli_result: dict[str, object] = {
+            "type": "result",
+            "mode": "incremental",
+            "total_files": 2,
+            "processed": 2,
+            "skipped": 0,
+            "errors": [],
+            "elapsed": 0.3,
+        }
 
-        mock_result = (
-            "再構築完了 (差分更新)\n"
-            "  処理件数: 2\n"
-            "  スキップ: 0\n"
-            "  エラー: 0\n"
-            "  所要時間: 0.3 秒"
-        )
-
-        with (
-            patch("rag.server.get_settings", return_value=mock_settings),
-            patch(
-                "rag.server._run_rebuild_subprocess",
-                return_value=mock_result,
-            ) as mock_subprocess,
-        ):
+        with patch(
+            "rag.server._run_cli_subprocess",
+            new_callable=AsyncMock,
+            return_value=mock_cli_result,
+        ) as mock_subprocess:
             result = await rag_rebuild(mode="incremental")
 
         assert "差分更新" in result
-        mock_subprocess.assert_called_once_with("incremental", None, ctx=None)
-
-    @pytest.mark.asyncio
-    async def test_index_only_mode(
-        self, tmp_path: Path, _source_dir: Path,
-    ) -> None:
-        """index モードが source_type 付きで正常に動作すること."""
-        from rag.server import rag_rebuild
-
-        mock_settings = MagicMock()
-        mock_settings.source_store_dir = str(_source_dir)
-        mock_settings.converted_store_dir = str(tmp_path / "converted")
-
-        mock_result = (
-            "再構築完了 (インデックスのみ再構築)\n"
-            "  処理件数: 4\n"
-            "  スキップ: 0\n"
-            "  エラー: 0\n"
-            "  所要時間: 2.0 秒"
+        mock_subprocess.assert_called_once_with(
+            "rebuild", ["--mode", "incremental"], ctx=None,
         )
 
-        with (
-            patch("rag.server.get_settings", return_value=mock_settings),
-            patch(
-                "rag.server._run_rebuild_subprocess",
-                return_value=mock_result,
-            ) as mock_subprocess,
-        ):
-            result = await rag_rebuild(mode="index", source_type="local")
-
-        assert "インデックスのみ再構築" in result
-        mock_subprocess.assert_called_once_with("index", "local", ctx=None)
-
     @pytest.mark.asyncio
-    async def test_exception_releases_lock(
-        self, tmp_path: Path, _source_dir: Path,
-    ) -> None:
-        """再構築中に例外が発生してもロックが解放されること."""
+    async def test_lock_conflict_returns_error(self) -> None:
+        """ロック競合時にエラーメッセージを返すこと."""
         from rag.server import rag_rebuild
 
-        mock_settings = MagicMock()
-        mock_settings.source_store_dir = str(_source_dir)
-        mock_settings.converted_store_dir = str(tmp_path / "converted")
+        with patch(
+            "rag.server._run_cli_subprocess",
+            new_callable=AsyncMock,
+            side_effect=CLISubprocessError("ロック競合", lock_conflict=True),
+        ):
+            result = await rag_rebuild(mode="full")
 
-        with (
-            patch("rag.server.get_settings", return_value=mock_settings),
-            patch(
-                "rag.server._run_rebuild_subprocess",
-                side_effect=RuntimeError("subprocess failed"),
-            ),
+        assert "別の再構築が実行中" in result
+
+    @pytest.mark.asyncio
+    async def test_cli_error_returns_error(self) -> None:
+        """CLI サブプロセスエラー時にエラーメッセージを返すこと."""
+        from rag.server import rag_rebuild
+
+        with patch(
+            "rag.server._run_cli_subprocess",
+            new_callable=AsyncMock,
+            side_effect=CLISubprocessError("subprocess failed"),
         ):
             result = await rag_rebuild(mode="full")
 
         assert "エラー" in result
-        assert not _rebuild_lock.locked()
 
     @pytest.mark.asyncio
-    async def test_rebuild_resets_rag_service(
-        self, tmp_path: Path, _source_dir: Path,
-    ) -> None:
-        """再構築成功後に RAG サービスがリセットされること."""
+    async def test_unexpected_exception_returns_error(self) -> None:
+        """予期しない例外時にエラーメッセージを返すこと."""
         from rag.server import rag_rebuild
 
-        mock_settings = MagicMock()
-        mock_settings.source_store_dir = str(_source_dir)
-        mock_settings.converted_store_dir = str(tmp_path / "converted")
-
-        mock_result = (
-            "再構築完了 (全再構築)\n"
-            "  処理件数: 1\n"
-            "  スキップ: 0\n"
-            "  エラー: 0\n"
-            "  所要時間: 0.5 秒"
-        )
-
-        with (
-            patch("rag.server.get_settings", return_value=mock_settings),
-            patch(
-                "rag.server._run_rebuild_subprocess",
-                return_value=mock_result,
-            ),
-            patch("rag.server._reset_rag_service") as mock_reset,
+        with patch(
+            "rag.server._run_cli_subprocess",
+            new_callable=AsyncMock,
+            side_effect=RuntimeError("unexpected"),
         ):
             result = await rag_rebuild(mode="full")
 
-        assert "再構築完了" in result
-        mock_reset.assert_called_once()
-
-
-# --- _run_rebuild_subprocess ユニットテスト ---
-
-
-class TestRunRebuildSubprocess:
-    """_run_rebuild_subprocess のパース/分岐ロジックのテスト."""
-
-    @pytest.mark.asyncio
-    async def test_normal_json_result(self) -> None:
-        """正常な JSON 結果がフォーマットされること."""
-        from rag.server import _run_rebuild_subprocess
-
-        mock_process = _make_mock_process(
-            b'{"type":"result","mode":"full_rebuild","total_files":5,"processed":5,'
-            b'"skipped":0,"errors":[],"elapsed":1.2}',
-            b"", 0,
-        )
-
-        with patch("asyncio.create_subprocess_exec", return_value=mock_process):
-            result = await _run_rebuild_subprocess("full", None)
-
-        assert "再構築完了" in result
-        assert "全再構築" in result
-        assert "処理件数: 5" in result
-
-    @pytest.mark.asyncio
-    @pytest.mark.asyncio
-    async def test_invalid_json_result(self) -> None:
-        """非 JSON 行のみの場合、結果なしとして処理されること."""
-        from rag.server import _run_rebuild_subprocess
-
-        mock_process = _make_mock_process(b"not json", b"", 0)
-
-        with patch("asyncio.create_subprocess_exec", return_value=mock_process):
-            result = await _run_rebuild_subprocess("full", None)
-
-        assert "結果なし" in result
-
-    @pytest.mark.asyncio
-    async def test_nonzero_exit_with_stderr(self) -> None:
-        """異常終了時に stderr が返されること."""
-        from rag.server import _run_rebuild_subprocess
-
-        mock_process = _make_mock_process(b"", b"RuntimeError: DB locked\n", 1)
-
-        with patch("asyncio.create_subprocess_exec", return_value=mock_process):
-            result = await _run_rebuild_subprocess("full", None)
-
-        assert "異常終了" in result
-        assert "DB locked" in result
-
-    @pytest.mark.asyncio
-    async def test_segfault_exit_code(self) -> None:
-        """SEGFAULT exit code でクラッシュメッセージが返されること."""
-        from rag.server import _run_rebuild_subprocess
-
-        mock_process = _make_mock_process(b"", b"", -11)
-
-        with patch("asyncio.create_subprocess_exec", return_value=mock_process):
-            result = await _run_rebuild_subprocess("full", None)
-
-        assert "クラッシュ" in result
-        assert "SEGFAULT" in result
-
-    @pytest.mark.asyncio
-    async def test_worker_error_json_used(self) -> None:
-        """worker のエラー JSON が異常終了時に活用されること."""
-        from rag.server import _run_rebuild_subprocess
-
-        mock_process = _make_mock_process(
-            b'{"type":"error","error":true,"message":"source_store not found"}',
-            b"Traceback ...\n", 1,
-        )
-
-        with patch("asyncio.create_subprocess_exec", return_value=mock_process):
-            result = await _run_rebuild_subprocess("full", None)
-
-        assert "source_store not found" in result
-
-
-# --- _run_ingest_and_index_subprocess ユニットテスト ---
-
-
-class TestRunIngestAndIndexSubprocess:
-    """_run_ingest_and_index_subprocess のパース/分岐ロジックのテスト."""
-
-    @pytest.mark.asyncio
-    async def test_normal_json_result(self) -> None:
-        """正常な JSON 結果が PipelineSummary として返されること."""
-        from rag.server import _run_ingest_and_index_subprocess
-
-        mock_process = _make_mock_process(
-            b'{"type":"result","mode":"incremental","total_files":3,"processed":3,'
-            b'"skipped":0,"errors":[],"elapsed":0.5}',
-            b"", 0,
-        )
-
-        with patch("asyncio.create_subprocess_exec", return_value=mock_process):
-            result = await _run_ingest_and_index_subprocess("test commit")
-
-        assert result.processed == 3
-        assert result.mode == PipelineMode.INCREMENTAL
-
-    @pytest.mark.asyncio
-    async def test_segfault_raises(self) -> None:
-        """SEGFAULT exit code で RuntimeError が送出されること."""
-        from rag.server import _run_ingest_and_index_subprocess
-
-        mock_process = _make_mock_process(b"", b"", -11)
-
-        with patch("asyncio.create_subprocess_exec", return_value=mock_process):
-            with pytest.raises(RuntimeError, match="SEGFAULT"):
-                await _run_ingest_and_index_subprocess("test commit")
-
-    @pytest.mark.asyncio
-    async def test_nonzero_exit_raises(self) -> None:
-        """異常終了時に RuntimeError が送出されること."""
-        from rag.server import _run_ingest_and_index_subprocess
-
-        mock_process = _make_mock_process(b"", b"some error\n", 1)
-
-        with patch("asyncio.create_subprocess_exec", return_value=mock_process):
-            with pytest.raises(RuntimeError, match="異常終了"):
-                await _run_ingest_and_index_subprocess("test commit")
-
-    @pytest.mark.asyncio
-    async def test_worker_error_json_raises(self) -> None:
-        """worker のエラー JSON メッセージが RuntimeError に含まれること."""
-        from rag.server import _run_ingest_and_index_subprocess
-
-        mock_process = _make_mock_process(
-            b'{"type":"error","error":true,"message":"DB connection failed"}',
-            b"", 1,
-        )
-
-        with patch("asyncio.create_subprocess_exec", return_value=mock_process):
-            with pytest.raises(RuntimeError, match="DB connection failed"):
-                await _run_ingest_and_index_subprocess("test commit")
-
-    @pytest.mark.asyncio
-    async def test_empty_stdout_raises(self) -> None:
-        """stdout が空の場合に RuntimeError が送出されること."""
-        from rag.server import _run_ingest_and_index_subprocess
-
-        mock_process = _make_mock_process(b"", b"", 0)
-
-        with patch("asyncio.create_subprocess_exec", return_value=mock_process):
-            with pytest.raises(RuntimeError, match="出力が空"):
-                await _run_ingest_and_index_subprocess("test commit")
-
-
-# --- _run_delete_subprocess ユニットテスト ---
-
-
-class TestRunDeleteSubprocess:
-    """_run_delete_subprocess のパース/分岐ロジックのテスト."""
-
-    @pytest.mark.asyncio
-    async def test_deleted_result(self) -> None:
-        """削除成功時に deleted=True と PipelineSummary が返されること."""
-        from rag.server import _run_delete_subprocess
-
-        mock_process = _make_mock_process(
-            b'{"type":"result","deleted":true,"pipeline":{"type":"result","mode":"incremental",'
-            b'"total_files":1,"processed":1,"skipped":0,"errors":[],"elapsed":0.3}}',
-            b"", 0,
-        )
-
-        with patch("asyncio.create_subprocess_exec", return_value=mock_process):
-            result = await _run_delete_subprocess("https://example.com/page")
-
-        assert result["deleted"] is True
-        assert result["pipeline"].processed == 1
-
-    @pytest.mark.asyncio
-    async def test_not_found_result(self) -> None:
-        """該当なし時に not_found=True が返されること."""
-        from rag.server import _run_delete_subprocess
-
-        mock_process = _make_mock_process(b'{"type":"result","not_found":true}', b"", 0)
-
-        with patch("asyncio.create_subprocess_exec", return_value=mock_process):
-            result = await _run_delete_subprocess("https://example.com/missing")
-
-        assert result["not_found"] is True
-
-    @pytest.mark.asyncio
-    async def test_segfault_raises(self) -> None:
-        """SEGFAULT exit code で RuntimeError が送出されること."""
-        from rag.server import _run_delete_subprocess
-
-        mock_process = _make_mock_process(b"", b"", -11)
-
-        with patch("asyncio.create_subprocess_exec", return_value=mock_process):
-            with pytest.raises(RuntimeError, match="SEGFAULT"):
-                await _run_delete_subprocess("https://example.com/page")
-
-    @pytest.mark.asyncio
-    async def test_nonzero_exit_raises(self) -> None:
-        """異常終了時に RuntimeError が送出されること."""
-        from rag.server import _run_delete_subprocess
-
-        mock_process = _make_mock_process(b"", b"error trace\n", 1)
-
-        with patch("asyncio.create_subprocess_exec", return_value=mock_process):
-            with pytest.raises(RuntimeError, match="異常終了"):
-                await _run_delete_subprocess("https://example.com/page")
+        assert "エラー" in result
 
 
 # --- rag_stats MCP ツールテスト ---

@@ -16,9 +16,8 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import httpx
 import pytest
 
-from rag.pipeline.ingesters._common import IngestResult
 from rag.server import (
-    _ingest_lock,
+    CLISubprocessError,
     _reset_pipeline_controller,
     _reset_rag_service,
     mcp,
@@ -40,8 +39,6 @@ def _reset_global_state() -> None:
     """各テスト前にグローバル状態をリセットする."""
     _reset_rag_service()
     _reset_pipeline_controller()
-    if _ingest_lock.locked():
-        _ingest_lock.release()
 
 
 @pytest.fixture(autouse=True)
@@ -63,28 +60,6 @@ async def client(app):
     transport = httpx.ASGITransport(app=app)
     async with httpx.AsyncClient(transport=transport, base_url="http://test") as c:
         yield c
-
-
-def _mock_pipeline_controller() -> MagicMock:
-    """PipelineController のモックを生成する."""
-    controller = MagicMock()
-    controller.source_store = MagicMock()
-    return controller
-
-
-def _successful_ingest_result() -> IngestResult:
-    """成功した IngestResult を返す."""
-    result = IngestResult()
-    result.placed = 1
-    return result
-
-
-def _error_ingest_result(msg: str) -> IngestResult:
-    """エラー IngestResult を返す."""
-    result = IngestResult()
-    result.errors = 1
-    result.error_details.append(msg)
-    return result
 
 
 # --- /upload/document バリデーションテスト ---
@@ -208,17 +183,7 @@ class TestUploadDocumentIntegration:
     @pytest.mark.asyncio
     async def test_successful_upload(self, client: httpx.AsyncClient) -> None:
         """正常なファイルアップロードが 200 を返す."""
-        mock_controller = _mock_pipeline_controller()
-        mock_ingester = MagicMock()
-        mock_ingester.add_document.return_value = _successful_ingest_result()
-
-        with (
-            patch("rag.server._get_pipeline_controller", new_callable=AsyncMock, return_value=mock_controller),
-            patch("rag.server.PipelineLocalIngester", return_value=mock_ingester),
-            patch("rag.server._run_ingest_and_index_subprocess", new_callable=AsyncMock),
-            patch("rag.server._reset_pipeline_controller"),
-            patch("rag.server._reset_rag_service"),
-        ):
+        with patch("rag.server._run_cli_subprocess", new_callable=AsyncMock, return_value={}):
             resp = await client.post(
                 "/upload/document",
                 files={"file": ("notes.md", b"# Test content", "text/plain")},
@@ -232,15 +197,12 @@ class TestUploadDocumentIntegration:
     @pytest.mark.asyncio
     async def test_duplicate_file_returns_409(self, client: httpx.AsyncClient) -> None:
         """upload_mode=fail で同名ファイルが存在する場合 409 を返す."""
-        mock_controller = _mock_pipeline_controller()
-        mock_ingester = MagicMock()
-        mock_ingester.add_document.side_effect = FileExistsError(
-            "同名ファイルが既に存在します: local/.upload/2026/01/01/test.md"
-        )
-
-        with (
-            patch("rag.server._get_pipeline_controller", new_callable=AsyncMock, return_value=mock_controller),
-            patch("rag.server.PipelineLocalIngester", return_value=mock_ingester),
+        with patch(
+            "rag.server._run_cli_subprocess",
+            new_callable=AsyncMock,
+            side_effect=CLISubprocessError(
+                "同名ファイルが既に存在します: local/.upload/2026/01/01/test.md",
+            ),
         ):
             resp = await client.post(
                 "/upload/document",
@@ -261,17 +223,12 @@ class TestUploadJournalIntegration:
     @pytest.mark.asyncio
     async def test_successful_upload(self, client: httpx.AsyncClient) -> None:
         """正常なジャーナルアップロードが 200 を返す."""
-        mock_controller = _mock_pipeline_controller()
-        mock_ingester = MagicMock()
-        mock_ingester.add_entry.return_value = _successful_ingest_result()
-        mock_ingester.last_entry_id = "20260326-120000-test"
+        mock_cli_result = {"entry_id": "20260326-120000-test"}
 
-        with (
-            patch("rag.server._get_pipeline_controller", new_callable=AsyncMock, return_value=mock_controller),
-            patch("rag.server.PipelineJournalIngester", return_value=mock_ingester),
-            patch("rag.server._run_ingest_and_index_subprocess", new_callable=AsyncMock),
-            patch("rag.server._reset_pipeline_controller"),
-            patch("rag.server._reset_rag_service"),
+        with patch(
+            "rag.server._run_cli_subprocess",
+            new_callable=AsyncMock,
+            return_value=mock_cli_result,
         ):
             resp = await client.post(
                 "/upload/journal",
@@ -291,71 +248,49 @@ class TestUploadJournalIntegration:
 # --- インジェスト排他制御テスト ---
 
 
-class TestIngestLock:
-    """インジェストロックのノンブロッキング動作テスト."""
+class TestIngestLockConflict:
+    """CLI ファイルロック競合時の 409 レスポンステスト."""
 
     @pytest.mark.asyncio
-    async def test_concurrent_upload_returns_409(self, client: httpx.AsyncClient) -> None:
-        """ロック取得済みの状態でアップロードすると 409 を返す."""
-        await _ingest_lock.acquire()
-        try:
+    async def test_document_lock_conflict_returns_409(self, client: httpx.AsyncClient) -> None:
+        """ドキュメントアップロード時にロック競合で 409 を返す."""
+        with patch(
+            "rag.server._run_cli_subprocess",
+            new_callable=AsyncMock,
+            side_effect=CLISubprocessError("ロック競合", lock_conflict=True),
+        ):
             resp = await client.post(
                 "/upload/document",
                 files={"file": ("test.md", b"content", "text/plain")},
             )
-        finally:
-            _ingest_lock.release()
 
         assert resp.status_code == 409
         assert "インジェスト" in resp.json()["message"]
 
     @pytest.mark.asyncio
-    async def test_concurrent_journal_upload_returns_409(self, client: httpx.AsyncClient) -> None:
-        """ロック取得済みの状態でジャーナルアップロードすると 409 を返す."""
-        await _ingest_lock.acquire()
-        try:
+    async def test_journal_lock_conflict_returns_409(self, client: httpx.AsyncClient) -> None:
+        """ジャーナルアップロード時にロック競合で 409 を返す."""
+        with patch(
+            "rag.server._run_cli_subprocess",
+            new_callable=AsyncMock,
+            side_effect=CLISubprocessError("ロック競合", lock_conflict=True),
+        ):
             resp = await client.post(
                 "/upload/journal",
                 files={"file": ("test.md", b"content", "text/plain")},
                 data={"title": "Test", "repository": "test-repo"},
             )
-        finally:
-            _ingest_lock.release()
 
         assert resp.status_code == 409
         assert "インジェスト" in resp.json()["message"]
 
     @pytest.mark.asyncio
-    async def test_lock_released_after_successful_upload(self, client: httpx.AsyncClient) -> None:
-        """アップロード成功後にロックが解放されていること."""
-        mock_controller = _mock_pipeline_controller()
-        mock_ingester = MagicMock()
-        mock_ingester.add_document.return_value = _successful_ingest_result()
-
-        with (
-            patch("rag.server._get_pipeline_controller", new_callable=AsyncMock, return_value=mock_controller),
-            patch("rag.server.PipelineLocalIngester", return_value=mock_ingester),
-            patch("rag.server._run_ingest_and_index_subprocess", new_callable=AsyncMock),
-            patch("rag.server._reset_pipeline_controller"),
-            patch("rag.server._reset_rag_service"),
-        ):
-            await client.post(
-                "/upload/document",
-                files={"file": ("test.md", b"content", "text/plain")},
-            )
-
-        assert not _ingest_lock.locked()
-
-    @pytest.mark.asyncio
-    async def test_lock_released_after_failed_upload(self, client: httpx.AsyncClient) -> None:
-        """アップロード失敗後もロックが解放されていること."""
-        mock_controller = _mock_pipeline_controller()
-        mock_ingester = MagicMock()
-        mock_ingester.add_document.side_effect = RuntimeError("unexpected")
-
-        with (
-            patch("rag.server._get_pipeline_controller", new_callable=AsyncMock, return_value=mock_controller),
-            patch("rag.server.PipelineLocalIngester", return_value=mock_ingester),
+    async def test_document_cli_error_returns_500(self, client: httpx.AsyncClient) -> None:
+        """ドキュメントアップロード時に CLI エラーで 500 を返す."""
+        with patch(
+            "rag.server._run_cli_subprocess",
+            new_callable=AsyncMock,
+            side_effect=CLISubprocessError("unexpected error"),
         ):
             resp = await client.post(
                 "/upload/document",
@@ -363,42 +298,14 @@ class TestIngestLock:
             )
 
         assert resp.status_code == 500
-        assert not _ingest_lock.locked()
-
 
     @pytest.mark.asyncio
-    async def test_journal_lock_released_after_successful_upload(self, client: httpx.AsyncClient) -> None:
-        """ジャーナルアップロード成功後にロックが解放されていること."""
-        mock_controller = _mock_pipeline_controller()
-        mock_ingester = MagicMock()
-        mock_ingester.add_entry.return_value = _successful_ingest_result()
-        mock_ingester.last_entry_id = "20260326-120000-test"
-
-        with (
-            patch("rag.server._get_pipeline_controller", new_callable=AsyncMock, return_value=mock_controller),
-            patch("rag.server.PipelineJournalIngester", return_value=mock_ingester),
-            patch("rag.server._run_ingest_and_index_subprocess", new_callable=AsyncMock),
-            patch("rag.server._reset_pipeline_controller"),
-            patch("rag.server._reset_rag_service"),
-        ):
-            await client.post(
-                "/upload/journal",
-                files={"file": ("test.md", b"content", "text/plain")},
-                data={"title": "Test", "repository": "test-repo"},
-            )
-
-        assert not _ingest_lock.locked()
-
-    @pytest.mark.asyncio
-    async def test_journal_lock_released_after_failed_upload(self, client: httpx.AsyncClient) -> None:
-        """ジャーナルアップロード失敗後もロックが解放されていること."""
-        mock_controller = _mock_pipeline_controller()
-        mock_ingester = MagicMock()
-        mock_ingester.add_entry.side_effect = RuntimeError("unexpected")
-
-        with (
-            patch("rag.server._get_pipeline_controller", new_callable=AsyncMock, return_value=mock_controller),
-            patch("rag.server.PipelineJournalIngester", return_value=mock_ingester),
+    async def test_journal_cli_error_returns_500(self, client: httpx.AsyncClient) -> None:
+        """ジャーナルアップロード時に CLI エラーで 500 を返す."""
+        with patch(
+            "rag.server._run_cli_subprocess",
+            new_callable=AsyncMock,
+            side_effect=CLISubprocessError("unexpected error"),
         ):
             resp = await client.post(
                 "/upload/journal",
@@ -407,30 +314,30 @@ class TestIngestLock:
             )
 
         assert resp.status_code == 500
-        assert not _ingest_lock.locked()
 
 
 # --- MCP ツールのインジェストロックテスト ---
 
 
 class TestMCPToolIngestLock:
-    """既存 MCP ツール（rag_add_document / rag_add_journal）のインジェストロックテスト."""
+    """既存 MCP ツール（rag_add_document / rag_add_journal）のロック競合テスト."""
 
     @pytest.mark.asyncio
     async def test_rag_add_document_lock_conflict(self) -> None:
         """rag_add_document がロック競合時にエラーメッセージを返す."""
         from rag.server import rag_add_document
 
-        await _ingest_lock.acquire()
-        try:
+        with patch(
+            "rag.server._run_cli_subprocess",
+            new_callable=AsyncMock,
+            side_effect=CLISubprocessError("ロック競合", lock_conflict=True),
+        ):
             result = await rag_add_document(
                 content="test",
                 filename="test.md",
                 encoding="text",
                 upload_mode="fail",
             )
-        finally:
-            _ingest_lock.release()
 
         assert "別のインジェスト" in result
 
@@ -439,43 +346,19 @@ class TestMCPToolIngestLock:
         """rag_add_journal がロック競合時にエラーメッセージを返す."""
         from rag.server import rag_add_journal
 
-        await _ingest_lock.acquire()
-        try:
+        with patch(
+            "rag.server._run_cli_subprocess",
+            new_callable=AsyncMock,
+            side_effect=CLISubprocessError("ロック競合", lock_conflict=True),
+        ):
             result = await rag_add_journal(
                 title="Test",
                 content="body",
                 filename="test.md",
                 repository="test-repo",
             )
-        finally:
-            _ingest_lock.release()
 
         assert "別のインジェスト" in result
-
-    @pytest.mark.asyncio
-    async def test_rag_add_document_releases_lock_on_success(self) -> None:
-        """rag_add_document が成功後にロックを解放する."""
-        from rag.server import rag_add_document
-
-        mock_controller = _mock_pipeline_controller()
-        mock_ingester = MagicMock()
-        mock_ingester.add_document.return_value = _successful_ingest_result()
-
-        with (
-            patch("rag.server._get_pipeline_controller", new_callable=AsyncMock, return_value=mock_controller),
-            patch("rag.server.PipelineLocalIngester", return_value=mock_ingester),
-            patch("rag.server._run_ingest_and_index_subprocess", new_callable=AsyncMock),
-            patch("rag.server._reset_pipeline_controller"),
-            patch("rag.server._reset_rag_service"),
-        ):
-            await rag_add_document(
-                content="test content",
-                filename="test.md",
-                encoding="text",
-                upload_mode="fail",
-            )
-
-        assert not _ingest_lock.locked()
 
 
 # --- レスポンス形式テスト ---
@@ -496,13 +379,10 @@ class TestResponseFormat:
     @pytest.mark.asyncio
     async def test_error_response_no_internal_info(self, client: httpx.AsyncClient) -> None:
         """エラーレスポンスにスタックトレースや内部パスが含まれない."""
-        mock_controller = _mock_pipeline_controller()
-        mock_ingester = MagicMock()
-        mock_ingester.add_document.side_effect = RuntimeError("internal error detail")
-
-        with (
-            patch("rag.server._get_pipeline_controller", new_callable=AsyncMock, return_value=mock_controller),
-            patch("rag.server.PipelineLocalIngester", return_value=mock_ingester),
+        with patch(
+            "rag.server._run_cli_subprocess",
+            new_callable=AsyncMock,
+            side_effect=RuntimeError("internal error detail"),
         ):
             resp = await client.post(
                 "/upload/document",

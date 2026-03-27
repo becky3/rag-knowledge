@@ -182,7 +182,6 @@ CLI は `--output json` 指定時にこの callback 内で進捗 JSON を stdout
 |-------------|------|
 | `src/rag/cli.py` | CLI コマンド。`--output json` 指定時に JSON Lines 形式で進捗・結果を出力。MCP 薄層アダプターからサブプロセスとして呼び出される際のエントリポイント |
 | `src/rag/server.py` | MCP ツール（薄層アダプター）。パラメータ検証を行い CLI をサブプロセスで起動。stdout を行単位でストリーミングし、進捗を MCP 通知として転送 |
-| `src/rag/pipeline/worker.py` | パイプライン処理の薄いエントリポイント。CLI から呼び出される内部モジュール |
 
 ### rag_stats 出力項目
 

@@ -206,7 +206,6 @@ class TestMcpSiteIngestFlow:
         import json
 
         from rag.pipeline.ingesters._common import IngestResult
-        from rag.pipeline.models import PipelineMode, PipelineSummary
         from rag.scrapy.bridge import BridgeResult
         from rag.scrapy.runner import CrawlResult, ScrapyRunner
 
@@ -229,16 +228,18 @@ class TestMcpSiteIngestFlow:
             parse_errors=0,
         )
 
-        mock_pipeline_summary = PipelineSummary(
-            mode=PipelineMode.INCREMENTAL,
-            total_files=3,
-            processed=3,
-            skipped=0,
-            errors=[],
-        )
-
         mock_controller = MagicMock()
         mock_controller.source_store = MagicMock()
+
+        mock_cli_result: dict[str, object] = {
+            "type": "result",
+            "mode": "incremental",
+            "total_files": 3,
+            "processed": 3,
+            "skipped": 0,
+            "errors": [],
+            "elapsed": 0.5,
+        }
 
         mod = import_module("rag.server")
         with (
@@ -246,9 +247,7 @@ class TestMcpSiteIngestFlow:
             patch.object(ScrapyRunner, "run", new_callable=AsyncMock, return_value=mock_crawl_result),
             patch.object(mod, "_get_pipeline_controller", new_callable=AsyncMock, return_value=mock_controller),
             patch("rag.scrapy.bridge.import_to_source_store", return_value=mock_bridge_result) as mock_bridge,
-            patch.object(mod, "_run_ingest_and_index_subprocess", new_callable=AsyncMock, return_value=mock_pipeline_summary),
-            patch.object(mod, "_reset_pipeline_controller"),
-            patch.object(mod, "_reset_rag_service"),
+            patch.object(mod, "_run_cli_subprocess", new_callable=AsyncMock, return_value=mock_cli_result),
         ):
             result = await mod.rag_site_ingest(
                 url="https://example.com",
@@ -299,7 +298,7 @@ class TestMcpSiteIngestFlow:
             patch.object(ScrapyRunner, "run", new_callable=AsyncMock, return_value=mock_crawl_result),
             patch.object(mod, "_get_pipeline_controller", new_callable=AsyncMock, return_value=mock_controller),
             patch("rag.scrapy.bridge.import_to_source_store", return_value=mock_bridge_result),
-            patch.object(mod, "_run_ingest_and_index_subprocess", new_callable=AsyncMock) as mock_subprocess,
+            patch.object(mod, "_run_cli_subprocess", new_callable=AsyncMock) as mock_subprocess,
         ):
             result = await mod.rag_site_ingest(
                 url="https://example.com",
@@ -318,7 +317,6 @@ class TestMcpSiteIngestFlow:
         import json
 
         from rag.pipeline.ingesters._common import IngestResult
-        from rag.pipeline.models import PipelineMode, PipelineSummary
         from rag.scrapy.bridge import BridgeResult
         from rag.scrapy.runner import CrawlResult, ScrapyRunner
 
@@ -341,16 +339,18 @@ class TestMcpSiteIngestFlow:
             parse_errors=0,
         )
 
-        mock_pipeline_summary = PipelineSummary(
-            mode=PipelineMode.INCREMENTAL,
-            total_files=2,
-            processed=2,
-            skipped=0,
-            errors=[],
-        )
-
         mock_controller = MagicMock()
         mock_controller.source_store = MagicMock()
+
+        mock_cli_result: dict[str, object] = {
+            "type": "result",
+            "mode": "incremental",
+            "total_files": 2,
+            "processed": 2,
+            "skipped": 0,
+            "errors": [],
+            "elapsed": 0.3,
+        }
 
         mod = import_module("rag.server")
         with (
@@ -358,9 +358,7 @@ class TestMcpSiteIngestFlow:
             patch.object(ScrapyRunner, "run", new_callable=AsyncMock, return_value=mock_crawl_result),
             patch.object(mod, "_get_pipeline_controller", new_callable=AsyncMock, return_value=mock_controller),
             patch("rag.scrapy.bridge.import_to_source_store", return_value=mock_bridge_result),
-            patch.object(mod, "_run_ingest_and_index_subprocess", new_callable=AsyncMock, return_value=mock_pipeline_summary),
-            patch.object(mod, "_reset_pipeline_controller"),
-            patch.object(mod, "_reset_rag_service"),
+            patch.object(mod, "_run_cli_subprocess", new_callable=AsyncMock, return_value=mock_cli_result),
         ):
             result = await mod.rag_site_ingest(
                 url="https://example.com",

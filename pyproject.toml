@@ -61,7 +61,6 @@ follow_imports = "skip"
 module = ["youtube_transcript_api", "youtube_transcript_api.*", "yt_dlp", "yt_dlp.*", "faster_whisper", "faster_whisper.*"]
 ignore_missing_imports = true
 follow_imports = "skip"
-
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
 addopts = "-n auto"

@@ -831,78 +831,345 @@ class TestRagStatsOutput:
 
 
 class TestRagCrawlZennTool:
-    """rag_crawl_zenn ツールのテスト（#168）."""
+    """rag_crawl_zenn ツールのテスト（#168, CLI サブプロセス移行後）."""
 
     @pytest.mark.asyncio
-    async def test_constrained_client_receives_settings(self) -> None:
-        """ConstrainedClient に設定値が正しく渡されること."""
+    async def test_crawl_zenn_delegates_to_cli_subprocess(self) -> None:
+        """rag_crawl_zenn が _run_cli_subprocess に正しい引数を渡すこと."""
         mod = import_module("rag.server")
-        mock_controller = AsyncMock()
-        mock_controller.source_store = MagicMock()
-        mock_controller.ingest_and_index = MagicMock(
-            return_value=MagicMock(processed=0, errors=[]),
+
+        mock_result = {
+            "placed": 5, "skipped": 2, "overwritten": 0, "errors": 0,
+            "error_details": [],
+        }
+        with patch.object(
+            mod, "_run_cli_subprocess", new_callable=AsyncMock, return_value=mock_result,
+        ) as mock_cli:
+            result = await mod.rag_crawl_zenn("testuser")
+
+        mock_cli.assert_called_once_with(
+            "crawl-zenn", ["testuser"], ctx=None,
         )
+        assert "5件配置" in result
 
-        mock_settings = MagicMock()
-        mock_settings.rag_zenn_max_articles = 50
-        mock_settings.rag_zenn_request_timeout = 15
-        mock_settings.rag_zenn_request_interval = 0.3
+    @pytest.mark.asyncio
+    async def test_crawl_zenn_passes_options(self) -> None:
+        """content_type, max_articles, force がCLI引数に変換されること."""
+        mod = import_module("rag.server")
 
-        mock_ingester = AsyncMock()
-        mock_ingester.crawl_zenn = AsyncMock(
-            return_value=MagicMock(placed=0, skipped=0, errors=0, error_details=[], summary=MagicMock(return_value="完了: 0件配置")),
-        )
+        mock_result = {
+            "placed": 0, "skipped": 0, "overwritten": 0, "errors": 0,
+            "error_details": [],
+        }
+        with patch.object(
+            mod, "_run_cli_subprocess", new_callable=AsyncMock, return_value=mock_result,
+        ) as mock_cli:
+            await mod.rag_crawl_zenn(
+                "testuser", max_articles=10, content_type="articles", force=True,
+            )
 
-        mock_client_instance = AsyncMock()
-        mock_client_cls = MagicMock()
-        mock_client_cls.return_value.__aenter__ = AsyncMock(
-            return_value=mock_client_instance
-        )
-        mock_client_cls.return_value.__aexit__ = AsyncMock(return_value=False)
+        call_args = mock_cli.call_args
+        cli_args = call_args[0][1]
+        assert "--content-type" in cli_args
+        assert "articles" in cli_args
+        assert "--max-articles" in cli_args
+        assert "10" in cli_args
+        assert "--force" in cli_args
 
-        with (
-            patch.object(mod, "_get_pipeline_controller", return_value=mock_controller),
-            patch.object(mod, "get_settings", return_value=mock_settings),
-            patch.object(mod, "PipelineZennIngester", return_value=mock_ingester),
-            patch.object(mod, "ConstrainedClient", mock_client_cls),
-            patch.object(mod, "_reset_rag_service"),
+    @pytest.mark.asyncio
+    async def test_crawl_zenn_lock_conflict(self) -> None:
+        """ロック競合時に専用エラーメッセージを返すこと."""
+        mod = import_module("rag.server")
+
+        with patch.object(
+            mod, "_run_cli_subprocess", new_callable=AsyncMock,
+            side_effect=mod.CLISubprocessError("ロック取得失敗", lock_conflict=True),
         ):
-            await mod.rag_crawl_zenn("testuser")
+            result = await mod.rag_crawl_zenn("testuser")
 
-        mock_client_cls.assert_called_once_with(
-            request_timeout=15,
-            request_interval=0.3,
-        )
+        assert "別のインジェストが実行中" in result
 
     @pytest.mark.asyncio
-    async def test_empty_username_returns_error(self) -> None:
-        """空のユーザー名でエラーメッセージを返すこと."""
+    async def test_crawl_zenn_cli_error(self) -> None:
+        """CLI エラー時にエラーメッセージを返すこと."""
         mod = import_module("rag.server")
-        mock_service = AsyncMock()
-        mock_settings = MagicMock()
-        mock_settings.rag_zenn_max_articles = 50
 
-        with (
-            patch.object(mod, "_get_rag_service", return_value=mock_service),
-            patch.object(mod, "get_settings", return_value=mock_settings),
+        with patch.object(
+            mod, "_run_cli_subprocess", new_callable=AsyncMock,
+            side_effect=mod.CLISubprocessError("username が空です"),
         ):
             result = await mod.rag_crawl_zenn("")
 
         assert "エラー" in result
-        assert "username" in result
+        assert "Zenn" in result
+
+
+# --- CLI サブプロセス基盤テスト（#409） ---
+
+
+class TestIsLockConflictError:
+    """_is_lock_conflict_error のテスト."""
+
+    def test_detects_lock_conflict_english(self) -> None:
+        """'lock conflict' を含むメッセージでTrue."""
+        mod = import_module("rag.server")
+        assert mod._is_lock_conflict_error("lock conflict detected") is True
+
+    def test_detects_already_locked(self) -> None:
+        """'already locked' を含むメッセージでTrue."""
+        mod = import_module("rag.server")
+        assert mod._is_lock_conflict_error("file is already locked") is True
+
+    def test_detects_japanese_lock_conflict(self) -> None:
+        """'ロック競合' を含むメッセージでTrue."""
+        mod = import_module("rag.server")
+        assert mod._is_lock_conflict_error("別のインジェストが実行中です（ロック競合）") is True
+
+    def test_case_insensitive(self) -> None:
+        """大文字小文字を区別しないこと."""
+        mod = import_module("rag.server")
+        assert mod._is_lock_conflict_error("LOCK CONFLICT detected") is True
+
+    def test_no_false_positive_on_lock_alone(self) -> None:
+        """'lock' 単独では誤判定しないこと."""
+        mod = import_module("rag.server")
+        assert mod._is_lock_conflict_error("unlock failed") is False
+        assert mod._is_lock_conflict_error("file lock acquisition failed") is False
+
+    def test_no_match(self) -> None:
+        """ロック関連キーワードを含まないメッセージでFalse."""
+        mod = import_module("rag.server")
+        assert mod._is_lock_conflict_error("general error occurred") is False
+
+
+class TestCLISubprocessError:
+    """CLISubprocessError のテスト."""
+
+    def test_default_lock_conflict_false(self) -> None:
+        """lock_conflict のデフォルトが False."""
+        mod = import_module("rag.server")
+        err = mod.CLISubprocessError("test error")
+        assert err.lock_conflict is False
+        assert str(err) == "test error"
+
+    def test_lock_conflict_true(self) -> None:
+        """lock_conflict=True が設定されること."""
+        mod = import_module("rag.server")
+        err = mod.CLISubprocessError("lock failed", lock_conflict=True)
+        assert err.lock_conflict is True
+
+
+class TestFormatCliIngestResult:
+    """_format_cli_ingest_result のテスト."""
+
+    def test_basic_format(self) -> None:
+        """基本的な結果フォーマット."""
+        mod = import_module("rag.server")
+        result = {
+            "placed": 3, "skipped": 1, "overwritten": 0,
+            "errors": 0, "error_details": [],
+        }
+        text = mod._format_cli_ingest_result(result)
+        assert "3件配置" in text
+
+    def test_with_context(self) -> None:
+        """context パラメータが出力に含まれること."""
+        mod = import_module("rag.server")
+        result = {
+            "placed": 1, "skipped": 0, "overwritten": 0,
+            "errors": 0, "error_details": [],
+        }
+        text = mod._format_cli_ingest_result(result, context="https://example.com")
+        assert "https://example.com" in text
+
+    def test_with_errors(self) -> None:
+        """エラー詳細が出力に含まれること."""
+        mod = import_module("rag.server")
+        result = {
+            "placed": 0, "skipped": 0, "overwritten": 0,
+            "errors": 2, "error_details": ["fail1", "fail2"],
+        }
+        text = mod._format_cli_ingest_result(result)
+        assert "エラー: 2件" in text
+        assert "fail1" in text
+        assert "fail2" in text
+
+    def test_with_pipeline_summary(self) -> None:
+        """pipeline データが含まれる場合にフォーマットされること."""
+        mod = import_module("rag.server")
+        result = {
+            "placed": 1, "skipped": 0, "overwritten": 0,
+            "errors": 0, "error_details": [],
+            "pipeline": {
+                "mode": "incremental",
+                "total_files": 1, "processed": 1, "skipped": 0, "errors": [],
+            },
+        }
+        text = mod._format_cli_ingest_result(result)
+        assert "1件配置" in text
+
+
+# --- 移行済みツールのテスト（#409） ---
+
+
+class TestRagAddTool:
+    """rag_add ツールのテスト（CLI サブプロセス移行後）."""
 
     @pytest.mark.asyncio
-    async def test_invalid_max_articles_returns_error(self) -> None:
-        """不正な max_articles でエラーメッセージを返すこと."""
+    async def test_success(self) -> None:
+        """正常系: CLI サブプロセスの結果がフォーマットされて返ること."""
         mod = import_module("rag.server")
-        mock_service = AsyncMock()
-        mock_settings = MagicMock()
-        mock_settings.rag_zenn_max_articles = 50
+        mock_result = {
+            "placed": 1, "skipped": 0, "overwritten": 0,
+            "errors": 0, "error_details": [],
+        }
+        with patch.object(
+            mod, "_run_cli_subprocess", new_callable=AsyncMock, return_value=mock_result,
+        ) as mock_cli:
+            result = await mod.rag_add("https://example.com/page")
 
-        with (
-            patch.object(mod, "_get_rag_service", return_value=mock_service),
-            patch.object(mod, "get_settings", return_value=mock_settings),
+        mock_cli.assert_called_once_with("add", ["https://example.com/page"], ctx=None)
+        assert "1件配置" in result
+
+    @pytest.mark.asyncio
+    async def test_lock_conflict(self) -> None:
+        """ロック競合時に専用メッセージを返すこと."""
+        mod = import_module("rag.server")
+        with patch.object(
+            mod, "_run_cli_subprocess", new_callable=AsyncMock,
+            side_effect=mod.CLISubprocessError("lock conflict", lock_conflict=True),
         ):
-            result = await mod.rag_crawl_zenn("testuser", max_articles=-1)
+            result = await mod.rag_add("https://example.com/page")
+
+        assert "別のインジェストが実行中" in result
+
+    @pytest.mark.asyncio
+    async def test_cli_error(self) -> None:
+        """CLISubprocessError 時にエラーメッセージを返すこと."""
+        mod = import_module("rag.server")
+        with patch.object(
+            mod, "_run_cli_subprocess", new_callable=AsyncMock,
+            side_effect=mod.CLISubprocessError("connection timeout"),
+        ):
+            result = await mod.rag_add("https://example.com/page")
+
+        assert "エラー" in result
+        assert "https://example.com/page" in result
+
+    @pytest.mark.asyncio
+    async def test_unexpected_error(self) -> None:
+        """予期しない例外時にエラーメッセージを返すこと."""
+        mod = import_module("rag.server")
+        with patch.object(
+            mod, "_run_cli_subprocess", new_callable=AsyncMock,
+            side_effect=RuntimeError("unexpected"),
+        ):
+            result = await mod.rag_add("https://example.com/page")
+
+        assert "エラー" in result
+
+
+class TestRagDeleteTool:
+    """rag_delete ツールのテスト（CLI サブプロセス移行後）."""
+
+    @pytest.mark.asyncio
+    async def test_success(self) -> None:
+        """正常系: 削除成功メッセージが返ること."""
+        mod = import_module("rag.server")
+        mock_result = {"deleted": True, "pipeline": None}
+        with patch.object(
+            mod, "_run_cli_subprocess", new_callable=AsyncMock, return_value=mock_result,
+        ) as mock_cli:
+            result = await mod.rag_delete("https://example.com/page")
+
+        mock_cli.assert_called_once_with("delete", ["https://example.com/page"], ctx=None)
+        assert "削除しました" in result
+
+    @pytest.mark.asyncio
+    async def test_not_found(self) -> None:
+        """ソースが見つからない場合のメッセージが返ること."""
+        mod = import_module("rag.server")
+        mock_result = {"not_found": True}
+        with patch.object(
+            mod, "_run_cli_subprocess", new_callable=AsyncMock, return_value=mock_result,
+        ):
+            result = await mod.rag_delete("https://example.com/missing")
+
+        assert "見つかりませんでした" in result
+
+    @pytest.mark.asyncio
+    async def test_lock_conflict(self) -> None:
+        """ロック競合時に専用メッセージを返すこと."""
+        mod = import_module("rag.server")
+        with patch.object(
+            mod, "_run_cli_subprocess", new_callable=AsyncMock,
+            side_effect=mod.CLISubprocessError("排他制御エラー", lock_conflict=True),
+        ):
+            result = await mod.rag_delete("https://example.com/page")
+
+        assert "別の操作が実行中" in result
+
+
+class TestRagRebuildTool:
+    """rag_rebuild ツールのテスト（CLI サブプロセス移行後）."""
+
+    @pytest.mark.asyncio
+    async def test_success(self) -> None:
+        """正常系: 再構築結果がフォーマットされて返ること."""
+        mod = import_module("rag.server")
+        mock_result = {
+            "mode": "incremental",
+            "total_files": 10, "processed": 8, "skipped": 2, "errors": [],
+            "elapsed": 5.5,
+        }
+        with patch.object(
+            mod, "_run_cli_subprocess", new_callable=AsyncMock, return_value=mock_result,
+        ) as mock_cli:
+            result = await mod.rag_rebuild("incremental")
+
+        mock_cli.assert_called_once_with(
+            "rebuild", ["--mode", "incremental"], ctx=None,
+        )
+        assert "差分更新" in result
+
+    @pytest.mark.asyncio
+    async def test_with_source_type(self) -> None:
+        """source_type 指定時にCLI引数に含まれること."""
+        mod = import_module("rag.server")
+        mock_result = {
+            "mode": "full",
+            "total_files": 5, "processed": 5, "skipped": 0, "errors": [],
+            "elapsed": 10.0,
+        }
+        with patch.object(
+            mod, "_run_cli_subprocess", new_callable=AsyncMock, return_value=mock_result,
+        ) as mock_cli:
+            await mod.rag_rebuild("full", source_type="web")
+
+        call_args = mock_cli.call_args[0][1]
+        assert "--source-type" in call_args
+        assert "web" in call_args
+
+    @pytest.mark.asyncio
+    async def test_lock_conflict(self) -> None:
+        """ロック競合時に専用メッセージを返すこと."""
+        mod = import_module("rag.server")
+        with patch.object(
+            mod, "_run_cli_subprocess", new_callable=AsyncMock,
+            side_effect=mod.CLISubprocessError("lock conflict", lock_conflict=True),
+        ):
+            result = await mod.rag_rebuild("full")
+
+        assert "別の再構築が実行中" in result
+
+    @pytest.mark.asyncio
+    async def test_cli_error(self) -> None:
+        """CLISubprocessError 時にエラーメッセージを返すこと."""
+        mod = import_module("rag.server")
+        with patch.object(
+            mod, "_run_cli_subprocess", new_callable=AsyncMock,
+            side_effect=mod.CLISubprocessError("rebuild failed"),
+        ):
+            result = await mod.rag_rebuild("full")
 
         assert "エラー" in result

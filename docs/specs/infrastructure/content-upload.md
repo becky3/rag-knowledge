@@ -298,6 +298,7 @@ MCP ツールはクライアントからコンテンツを文字列で受け取�
 | `src/rag/cli.py` | CLI コマンド。`--stdin` オプションによる stdin 入力、`--output json` による JSON Lines 出力をサポート |
 | `src/rag/pipeline/ingesters/local.py` | Local インジェスター（ドキュメント取り込み） |
 | `src/rag/pipeline/ingesters/journal.py` | Journal インジェスター（ジャーナル取り込み） |
+| `src/rag/infrastructure/file_lock.py` | OS ファイルロックによるプロセス間排他制御（インジェストロック・rebuild ロック） |
 | `src/rag/config.py` | `rag_upload_max_file_size_mb` 設定の定義 |
 | `config.toml` | ファイルサイズ上限のデフォルト値 |
 
