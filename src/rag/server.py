@@ -1346,9 +1346,9 @@ async def rag_rebuild(
 
 # --- ロック競合判定キーワード ---
 _LOCK_CONFLICT_KEYWORDS: frozenset[str] = frozenset({
-    "lock",
-    "ロック",
-    "排他",
+    "ロック競合",
+    "lock conflict",
+    "already locked",
 })
 
 

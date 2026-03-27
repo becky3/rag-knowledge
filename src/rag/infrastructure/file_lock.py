@@ -87,15 +87,18 @@ class FileLock:
 
     def _lock_unix(self) -> None:
         """Unix 系 OS でのロック取得."""
+        import errno
         import fcntl
 
         assert self._fd is not None
         try:
             fcntl.flock(self._fd, fcntl.LOCK_EX | fcntl.LOCK_NB)  # type: ignore[attr-defined]
-        except OSError:
-            raise LockAcquisitionError(
-                f"ロックを取得できません（別のプロセスが実行中）: {self._lock_path}"
-            )
+        except OSError as e:
+            if e.errno in (errno.EAGAIN, errno.EWOULDBLOCK):
+                raise LockAcquisitionError(
+                    f"ロックを取得できません（別のプロセスが実行中）: {self._lock_path}"
+                ) from e
+            raise  # 権限エラー等はそのまま伝播
 
     def _unlock_unix(self) -> None:
         """Unix 系 OS でのロック解放."""
@@ -106,15 +109,18 @@ class FileLock:
 
     def _lock_windows(self) -> None:
         """Windows でのロック取得."""
+        import errno
         import msvcrt
 
         assert self._fd is not None
         try:
             msvcrt.locking(self._fd, msvcrt.LK_NBLCK, 1)
-        except OSError:
-            raise LockAcquisitionError(
-                f"ロックを取得できません（別のプロセスが実行中）: {self._lock_path}"
-            )
+        except OSError as e:
+            if e.errno in (errno.EACCES, errno.EDEADLOCK):
+                raise LockAcquisitionError(
+                    f"ロックを取得できません（別のプロセスが実行中）: {self._lock_path}"
+                ) from e
+            raise
 
     def _unlock_windows(self) -> None:
         """Windows でのロック解放."""

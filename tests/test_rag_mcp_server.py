@@ -910,25 +910,31 @@ class TestRagCrawlZennTool:
 class TestIsLockConflictError:
     """_is_lock_conflict_error のテスト."""
 
-    def test_detects_lock_keyword(self) -> None:
-        """'lock' を含むメッセージでTrue."""
+    def test_detects_lock_conflict_english(self) -> None:
+        """'lock conflict' を含むメッセージでTrue."""
         mod = import_module("rag.server")
-        assert mod._is_lock_conflict_error("file lock acquisition failed") is True
+        assert mod._is_lock_conflict_error("lock conflict detected") is True
 
-    def test_detects_japanese_lock(self) -> None:
-        """'ロック' を含むメッセージでTrue."""
+    def test_detects_already_locked(self) -> None:
+        """'already locked' を含むメッセージでTrue."""
         mod = import_module("rag.server")
-        assert mod._is_lock_conflict_error("ロック取得に失敗しました") is True
+        assert mod._is_lock_conflict_error("file is already locked") is True
 
-    def test_detects_exclusive_keyword(self) -> None:
-        """'排他' を含むメッセージでTrue."""
+    def test_detects_japanese_lock_conflict(self) -> None:
+        """'ロック競合' を含むメッセージでTrue."""
         mod = import_module("rag.server")
-        assert mod._is_lock_conflict_error("排他制御エラー") is True
+        assert mod._is_lock_conflict_error("別のインジェストが実行中です（ロック競合）") is True
 
     def test_case_insensitive(self) -> None:
         """大文字小文字を区別しないこと."""
         mod = import_module("rag.server")
-        assert mod._is_lock_conflict_error("LOCK conflict detected") is True
+        assert mod._is_lock_conflict_error("LOCK CONFLICT detected") is True
+
+    def test_no_false_positive_on_lock_alone(self) -> None:
+        """'lock' 単独では誤判定しないこと."""
+        mod = import_module("rag.server")
+        assert mod._is_lock_conflict_error("unlock failed") is False
+        assert mod._is_lock_conflict_error("file lock acquisition failed") is False
 
     def test_no_match(self) -> None:
         """ロック関連キーワードを含まないメッセージでFalse."""

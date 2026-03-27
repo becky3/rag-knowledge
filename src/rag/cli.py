@@ -1234,66 +1234,82 @@ def run_rebuild(args: argparse.Namespace) -> None:
 
     controller = build_pipeline_controller(settings)
 
-    logger.info("再構築を開始します（モード: %s）", mode)
-    if source_type:
-        logger.info("対象媒体: %s", source_type)
+    # rebuild ロック取得
+    from .infrastructure.file_lock import LockAcquisitionError, rebuild_lock
 
-    start = time.monotonic()
+    lock = rebuild_lock(Path(controller.source_store.root_dir))
+    try:
+        lock.acquire()
+    except LockAcquisitionError:
+        msg = "別の再構築が実行中です（ロック競合）"
+        if json_out:
+            _output_error(msg)
+        print(f"エラー: {msg}", file=sys.stderr)
+        raise SystemExit(1)
 
-    progress_cb = _output_progress if json_out else None
+    try:
+        logger.info("再構築を開始します（モード: %s）", mode)
+        if source_type:
+            logger.info("対象媒体: %s", source_type)
 
-    # --commit-message 指定時は再構築前に source_store を git commit
-    commit_message: str | None = getattr(args, "commit_message", None)
-    if commit_message:
-        sha = controller.commit(commit_message)
-        if sha:
-            logger.info("source_store コミット: %s", sha)
+        start = time.monotonic()
+
+        progress_cb = _output_progress if json_out else None
+
+        # --commit-message 指定時は再構築前に source_store を git commit
+        commit_message: str | None = getattr(args, "commit_message", None)
+        if commit_message:
+            sha = controller.commit(commit_message)
+            if sha:
+                logger.info("source_store コミット: %s", sha)
+            else:
+                logger.info("source_store に変更なし（コミットなし）")
+
+        if mode == "full":
+            summary = controller.run_full_rebuild(
+                source_type=source_type,
+                progress_callback=progress_cb,
+            )
+        elif mode == "convert":
+            summary = controller.run_convert_only(
+                source_type=source_type,
+                progress_callback=progress_cb,
+            )
+        elif mode == "index":
+            summary = controller.run_index_only(
+                source_type=source_type,
+                progress_callback=progress_cb,
+            )
         else:
-            logger.info("source_store に変更なし（コミットなし）")
+            summary = controller.run_incremental(
+                progress_callback=progress_cb,
+            )
 
-    if mode == "full":
-        summary = controller.run_full_rebuild(
-            source_type=source_type,
-            progress_callback=progress_cb,
-        )
-    elif mode == "convert":
-        summary = controller.run_convert_only(
-            source_type=source_type,
-            progress_callback=progress_cb,
-        )
-    elif mode == "index":
-        summary = controller.run_index_only(
-            source_type=source_type,
-            progress_callback=progress_cb,
-        )
-    else:
-        summary = controller.run_incremental(
-            progress_callback=progress_cb,
-        )
+        elapsed = time.monotonic() - start
 
-    elapsed = time.monotonic() - start
+        if json_out:
+            _output_result({
+                "mode": summary.mode.value,
+                "total_files": summary.total_files,
+                "processed": summary.processed,
+                "skipped": summary.skipped,
+                "errors": summary.errors,
+                "elapsed": round(elapsed, 1),
+            })
+            return
 
-    if json_out:
-        _output_result({
-            "mode": summary.mode.value,
-            "total_files": summary.total_files,
-            "processed": summary.processed,
-            "skipped": summary.skipped,
-            "errors": summary.errors,
-            "elapsed": round(elapsed, 1),
-        })
-        return
-
-    logger.info(
-        "再構築完了: %d 処理 / %d スキップ / %d エラー / %.1f 秒",
-        summary.processed,
-        summary.skipped,
-        len(summary.errors),
-        elapsed,
-    )
-    if summary.errors:
-        for err_file in summary.errors:
-            logger.error("  エラーファイル: %s", err_file)
+        logger.info(
+            "再構築完了: %d 処理 / %d スキップ / %d エラー / %.1f 秒",
+            summary.processed,
+            summary.skipped,
+            len(summary.errors),
+            elapsed,
+        )
+        if summary.errors:
+            for err_file in summary.errors:
+                logger.error("  エラーファイル: %s", err_file)
+    finally:
+        lock.release()
 
 
 def run_stats(args: argparse.Namespace) -> None:
