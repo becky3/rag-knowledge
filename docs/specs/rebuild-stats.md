@@ -32,7 +32,7 @@
 - **パイプライン制御への委譲**: 再構築の実行ロジックはパイプライン制御に委譲する。本コンポーネントは MCP/CLI インターフェースの提供とパラメータの検証のみを担当する
 - **再構築中の排他制御**: 再構築処理は同時に1つのみ実行可能とする。実行中に別の再構築要求を受けた場合はエラーを返す
 - **全再構築のコスト認知**: 全再構築およびインデックスのみ再構築は Embedding API を呼び出すため、データ量に比例したコストが発生する。MCP ツール・CLI の説明文にこの旨を明記し、利用者が意図せず大量の API 呼び出しを行わないようにする
-- **MCP サーバーのクラッシュ耐性**: MCP 経由のパイプライン処理（再構築・取り込み後のインデックス構築・削除）は `pipeline/worker.py` をサブプロセスとして実行する。C 拡張（BM25s 等）の SEGFAULT が発生しても MCP サーバープロセスは生存し、エラーメッセージをクライアントに返却する。CLI は独立プロセスのため対策不要
+- **MCP サーバーのクラッシュ耐性**: MCP 経由のパイプライン処理（再構築・取り込み後のインデックス構築・削除）は CLI を別プロセスとして実行する（MCP 薄層アダプターパターン）。C 拡張（BM25s 等）の SEGFAULT が発生しても MCP サーバープロセスは生存し、エラーメッセージをクライアントに返却する。CLI 直接実行は独立プロセスのため対策不要
 
 本コンポーネント自体は外部 API 通信を行わないが、再構築実行時にパイプラインを通じて Embedding API 等の外部通信が発生する。外部 API の安全制約は各ステージの仕様に従うため、想定プロファイル・安全制約セクションは省略する。
 
@@ -101,7 +101,7 @@ flowchart TD
     VALIDATE["パラメータ検証"]
     LOCK["排他ロック取得"]
     LOCK_FAIL["エラー: 別の再構築が実行中"]
-    WORKER["pipeline worker（サブプロセス）"]
+    CLI_SUB["CLI サブプロセス"]
     DELEGATE["パイプライン制御に委譲"]
     CRASH["クラッシュ検出（exit code）"]
     RESULT["処理結果サマリを返却"]
@@ -111,20 +111,20 @@ flowchart TD
     VALIDATE -->|不正| ERROR["エラー返却"]
     VALIDATE -->|正常| LOCK
     LOCK -->|取得失敗| LOCK_FAIL
-    LOCK -->|取得成功 MCP| WORKER
+    LOCK -->|取得成功 MCP| CLI_SUB
     LOCK -->|取得成功 CLI| DELEGATE
-    WORKER --> DELEGATE
+    CLI_SUB --> DELEGATE
     DELEGATE -->|正常終了| RESULT
     DELEGATE -->|処理エラー| ERROR_PROC["エラー返却（処理エラー）"]
-    WORKER -->|クラッシュ| CRASH
+    CLI_SUB -->|クラッシュ| CRASH
     CRASH --> ERROR_CRASH["エラー返却（サーバー生存）"]
 ```
 
-MCP 経由の場合、パイプライン処理（再構築・取り込み後のインデックス構築・削除）は `pipeline/worker.py` をサブプロセスとして実行する。C 拡張の SEGFAULT が発生してもサーバープロセスは生存し、exit code からエラーメッセージを返却する。CLI は独立プロセスのためサブプロセス化は不要。
+MCP 経由の場合、パイプライン処理（再構築・取り込み後のインデックス構築・削除）は CLI を別プロセスとして実行する（MCP 薄層アダプターパターン、詳細は [rag-knowledge.md](rag-knowledge.md) を参照）。C 拡張の SEGFAULT が発生してもサーバープロセスは生存し、exit code からエラーメッセージを返却する。CLI 直接実行は独立プロセスのためサブプロセス化は不要。
 
-### サブプロセス進捗通知
+### CLI サブプロセス進捗通知
 
-MCP ツール経由のパイプライン処理中、サブプロセスの進捗をリアルタイムで MCP クライアントに通知する。
+MCP ツール経由のパイプライン処理中、CLI サブプロセスの進捗をリアルタイムで MCP クライアントに通知する。
 
 #### 通知方式
 
@@ -137,29 +137,29 @@ MCP ツール経由のパイプライン処理中、サブプロセスの進捗�
 
 FastMCP の `Context` オブジェクト経由で送信する。ツール関数に `ctx: Context` パラメータを追加する。
 
-#### Worker stdout プロトコル
+#### CLI stdout プロトコル
 
-worker.py は処理中に JSON Lines 形式で stdout に出力する。各行は `type` フィールドで識別する。
+CLI は `--output json` 指定時に JSON Lines 形式で stdout に出力する。各行は `type` フィールドで識別する。
 
 | `type` 値 | 出力タイミング | フィールド |
 |-----------|-------------|-----------|
 | `progress` | ファイル処理完了ごと | `processed`（int）、`total`（int）、`current`（str: 処理済みファイルパス） |
-| `result` | 処理完了時（最終行） | 既存の結果 JSON と同一（`mode`, `total_files`, `processed`, `skipped`, `errors`, `elapsed`） |
-| `error` | エラー時（最終行） | `message`（str） |
+| `result` | 処理完了時（最終行） | コマンド固有のフィールド（`mode`, `total_files`, `processed`, `skipped`, `errors`, `elapsed` 等） |
+| `error` | エラー時（最終行） | `error`（bool, 常に `true`）、`message`（str） |
 
-親プロセス（server.py）は stdout を行単位で読み取り、`progress` 行を MCP 通知に変換し、`result` / `error` 行で処理結果を確定する。
+MCP サーバー（server.py）は stdout を行単位で読み取り、`progress` 行を MCP 通知に変換し、`result` / `error` 行で処理結果を確定する。
 
 #### サーバー側の処理
 
-`_run_worker_subprocess` を行単位ストリーミングに変更する:
+`_run_cli_subprocess` で CLI コマンドを実行し、stdout を行単位でストリーミングする:
 
-1. `asyncio.create_subprocess_exec` で subprocess を起動（従来通り）
-2. stdout を行単位で非同期に読み取る（`communicate()` → `readline()` ループ）
+1. `asyncio.create_subprocess_exec` で CLI サブプロセスを起動
+2. stdout を行単位で非同期に読み取る（`readline()` ループ）
 3. 各行を JSON パースし:
    - `type: "progress"` → `ctx.info()` でログ通知 + `ctx.report_progress()` で数値通知
    - `type: "result"` → 結果として返却
    - `type: "error"` → エラーとして処理
-4. stderr は従来通りプロセス終了後に読み取る
+4. stderr はプロセス終了後に読み取る
 
 #### PipelineController の変更
 
@@ -176,13 +176,13 @@ callback シグネチャ: `(processed: int, total: int, current: str) -> None`
 
 `ingest_and_index` および `run_incremental` も `progress_callback` パラメータを受け取り、内部的に `_process_changes` に中継する。
 
-worker.py はこの callback 内で進捗 JSON を stdout に出力する。CLI は現時点では callback を使用しない（将来対応予定）。callback 未指定時は従来通り無出力。
+CLI は `--output json` 指定時にこの callback 内で進捗 JSON を stdout に出力する。callback 未指定時は従来通り無出力。
 
 | ファイル | 役割 |
 |-------------|------|
-| `src/rag/pipeline/worker.py` | MCP 用サブプロセスエントリポイント。`rebuild` / `ingest-and-index` / `delete` のサブコマンドを受け取りパイプライン処理を実行。処理中は進捗 JSON（type: progress）、完了時は結果 JSON（type: result）を stdout に JSON Lines 形式で出力 |
-| `src/rag/server.py` | MCP ツール。パラメータ検証・排他制御を行い worker をサブプロセスで起動。stdout を行単位でストリーミングし、進捗を MCP 通知として転送 |
-| `src/rag/cli.py` | CLI コマンド。パイプライン制御を直接呼び出す（サブプロセス化なし） |
+| `src/rag/cli.py` | CLI コマンド。`--output json` 指定時に JSON Lines 形式で進捗・結果を出力。MCP 薄層アダプターからサブプロセスとして呼び出される際のエントリポイント |
+| `src/rag/server.py` | MCP ツール（薄層アダプター）。パラメータ検証を行い CLI をサブプロセスで起動。stdout を行単位でストリーミングし、進捗を MCP 通知として転送 |
+| `src/rag/pipeline/worker.py` | パイプライン処理の薄いエントリポイント。CLI から呼び出される内部モジュール |
 
 ### rag_stats 出力項目
 

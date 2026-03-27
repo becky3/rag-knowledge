@@ -6,7 +6,7 @@
 
 スコープ:
 
-- MCP ツール経由のコンテンツデコード・バリデーション（既存）
+- MCP ツール経由のバリデーション（encoding 許容値チェック・content 空チェック）
 - アップロードファイル名のサニタイズ（パストラバーサル防止）
 - Upload HTTP API によるファイル直接アップロード（`multipart/form-data`）
 - 全インジェスト操作の排他制御
@@ -57,10 +57,18 @@ MCP は JSON ベースのテキストプロトコルであるため、ツール�
 
 ### インジェスト排他制御の制約
 
-- **適用対象**: 全インジェスト操作に適用する。Upload HTTP API（`/upload/document`、`/upload/journal`）と MCP ツール（`rag_add_document`、`rag_add_journal`）の両方が対象
-- **ロック方式**: `asyncio.Lock` による排他制御。同一プロセス内の全インジェスト操作で 1 つのロックを共有する
-- **ノンブロッキング**: ロック取得を試み、取得できない場合は待機せず即座にエラーを返却する。Upload HTTP API では HTTP 409、MCP ツールではエラーメッセージを返す
-- **rebuild との独立性**: インジェストロックは `rag_rebuild` の既存ロック（`_rebuild_lock`）とは独立。既存の `_rebuild_lock` はスレッドロック（同期ロック）であり、新規のインジェストロックは非同期ロックである。rebuild 実行中のインジェスト、およびインジェスト中の rebuild は、それぞれのロックで個別に制御される
+- **適用対象**: 全インジェスト操作に適用する。Upload HTTP API（`/upload/document`、`/upload/journal`）、MCP ツール（`rag_add_document`、`rag_add_journal`）、CLI 直接実行の全てが対象
+- **ロック方式**: OS ファイルロックによるプロセス間排他制御。Unix では `fcntl.flock`、Windows では `msvcrt.locking` を使用する。
+  ロック取得処理の実施主体は CLI とし、MCP サーバー（`server.py`）からのインジェストも CLI サブプロセスを起動して同一のロック取得処理を利用する。
+  `server.py` 自身はロックファイルを直接操作しない
+- **ロックファイル**: source_store ディレクトリ直下に配置する。インジェストロックと rebuild ロックでそれぞれ別のロックファイルを使用する
+- **ノンブロッキング**: CLI はロック取得を試み（`LOCK_NB` / `LK_NBLCK`）、取得できない場合は待機せず即座にエラーを返却する。
+  CLI はロック競合時に JSON Lines の error メッセージ（`type: "error"`）にロック競合である旨を含め、exit code 1 で終了する。
+  `server.py` は CLI サブプロセスの error メッセージからロック競合を判定し、Upload HTTP API では HTTP 409、MCP ツールではエラーメッセージとして返却する。
+  CLI 直接実行では標準エラー出力 + exit code 1 を返す
+- **ステールロック対策**: OS ファイルロックはプロセス終了時（SEGFAULT 含む異常終了を含む）に OS が自動解放するため、明示的なステールロック対策は不要。OS クラッシュ・電源断の場合もロックはカーネルメモリ上のみに存在し、再起動後にクリーンな状態になる
+- **Advisory lock の制約**: OS ファイルロックは advisory lock（協調ロック）であり、ロック取得のコードを経由しないアクセスは防げない。本システムでは全書き込み操作が CLI 経由（MCP サブプロセス + CLI 直接実行）のため問題ない
+- **rebuild との独立性**: インジェストロックと rebuild ロックはそれぞれ別のロックファイルを使用し、独立して動作する。rebuild 実行中のインジェスト、およびインジェスト中の rebuild は、それぞれのロックで個別に制御される
 
 本レイヤーは外部 API 通信を行わないため、想定プロファイル・安全制約テーブルは省略する。
 
@@ -70,16 +78,13 @@ MCP は JSON ベースのテキストプロトコルであるため、ツール�
 
 #### コンテンツデコード
 
-`rag_add_document` が使用する。MCP ツールから受け取った `content` と `encoding` をバイト列に変換する。
+MCP 薄層アダプター化により、コンテンツデコード（`content` + `encoding` → バイト列変換）は CLI 側の `--stdin` + `--encoding` オプションに移行する。MCP ツール（`rag_add_document`）は `content` を CLI サブプロセスの stdin にそのまま渡し、CLI が `--encoding` フラグに基づいてデコードする。
 
-| 引数 | 型 | 説明 |
-|-----|----|------|
-| `content` | 文字列 | MCP ツールが受け取ったコンテンツ文字列 |
-| `encoding` | 文字列 | `"text"` または `"base64"` |
+MCP 側に残るバリデーション:
 
-返り値: デコード済みバイト列
-
-エラー: 不正な `encoding` 値・不正な base64 文字列・デコード後が 0 バイトの場合にバリデーションエラーを送出する
+- `encoding` の許容値チェック（`"text"` または `"base64"` のみ）
+- `content` の空チェック（空文字列の場合はバリデーションエラー）
+- `filename` のサニタイズ（後述）
 
 #### ファイル名サニタイズ
 
@@ -95,7 +100,7 @@ MCP は JSON ベースのテキストプロトコルであるため、ツール�
 
 ### Upload HTTP API
 
-MCP サーバー（HTTP モード）に `custom_route()` で併設する HTTP アップロードエンドポイント。ファイルを `multipart/form-data` で直接受信し、既存インジェスターロジックを呼び出してパイプライン実行まで完結する。
+MCP サーバー（HTTP モード）に `custom_route()` で併設する HTTP アップロードエンドポイント。ファイルを `multipart/form-data` で直接受信し、一時ファイルに書き出した上で CLI サブプロセスに委譲してインジェスト処理を実行する。
 
 #### 操作一覧
 
@@ -125,11 +130,11 @@ MCP サーバー（HTTP モード）に `custom_route()` で併設する HTTP �
 処理フロー:
 
 1. API キー認証を検証する
-2. インジェストロックの取得を試みる（取得失敗時は HTTP 409）
-3. ファイル名をサニタイズし、拡張子を検証する
-4. ファイルコンテンツをバイト列として読み取る（読み取り中にファイルサイズ上限を超過した場合は即座に HTTP 413 を返す）
-5. Local インジェスターの取り込み処理を呼び出す（`upload_mode` を引き渡す）
-6. パイプラインを実行し、インジェストロックを解放する
+2. ファイル名をサニタイズし、拡張子を検証する
+3. ファイルコンテンツをバイト列として読み取る（読み取り中にファイルサイズ上限を超過した場合は即座に HTTP 413 を返す）
+4. 一時ファイルにコンテンツを書き出す
+5. CLI サブプロセスを実行する（`add-document --file <一時ファイルパス> --upload-mode <mode> --output json`）
+6. サブプロセス完了後、一時ファイルを削除する
 
 #### POST /upload/journal
 
@@ -155,11 +160,11 @@ MCP サーバー（HTTP モード）に `custom_route()` で併設する HTTP �
 処理フロー:
 
 1. API キー認証を検証する
-2. インジェストロックの取得を試みる（取得失敗時は HTTP 409）
-3. ファイル名をサニタイズし、拡張子を検証する
-4. ファイルコンテンツを UTF-8 テキストとして読み取る（読み取り中にファイルサイズ上限を超過した場合は即座に HTTP 413 を返す）
-5. Journal インジェスターの取り込み処理を呼び出す（`title`、`repository`、`entry_id` を引き渡す）
-6. パイプラインを実行し、インジェストロックを解放する
+2. ファイル名をサニタイズし、拡張子を検証する
+3. ファイルコンテンツを UTF-8 テキストとして読み取る（読み取り中にファイルサイズ上限を超過した場合は即座に HTTP 413 を返す）
+4. 一時ファイルにコンテンツを書き出す
+5. CLI サブプロセスを実行する（`add-journal --file <一時ファイルパス> --title <title> --repository <repo> --output json`）
+6. サブプロセス完了後、一時ファイルを削除する
 
 #### 共通レスポンス形式
 
@@ -207,93 +212,90 @@ flowchart TB
     end
 
     AUTH["API キー認証"]
-    LOCK["インジェストロック"]
+    SAN["ファイル名サニタイズ"]
 
-    subgraph Upload["コンテンツアップロード層"]
-        DEC["コンテンツデコード"]
-        SAN["ファイル名サニタイズ"]
+    subgraph CLISub["CLI サブプロセス"]
+        CLI["CLI コマンド"]
+        subgraph Ingesters["インジェスター"]
+            LI["Local インジェスター"]
+            JI["Journal インジェスター"]
+        end
+        PIPE["パイプライン実行"]
     end
-
-    subgraph Ingesters["インジェスター"]
-        LI["Local インジェスター"]
-        JI["Journal インジェスター"]
-    end
-
-    PIPE["パイプライン実行"]
 
     UD --> AUTH
     UJ --> AUTH
-    AUTH --> LOCK
-    T1 --> LOCK
-    T2 --> LOCK
+    AUTH -->|filename| SAN
+    AUTH -->|content: temp file| CLI
+    T1 -->|filename| SAN
+    T1 -->|content: stdin| CLI
+    T2 -->|filename| SAN
+    T2 -->|content: stdin| CLI
 
-    LOCK -->|MCP: rag_add_document| DEC
-    LOCK -->|Upload / MCP| SAN
-    DEC -->|data: bytes| LI
-    SAN -->|filename: str| LI
-    SAN -->|filename: str| JI
-
-    LOCK -->|Upload: /upload/document| LI
-    LOCK -->|Upload: /upload/journal| JI
-    LOCK -->|MCP: rag_add_journal| JI
-
+    SAN -->|sanitized filename| CLI
+    CLI --> LI
+    CLI --> JI
     LI --> PIPE
     JI --> PIPE
 ```
 
 ### Upload HTTP API における呼び出し手順
 
+Upload HTTP API はリクエストボディからファイルを受信し、一時ファイルに書き出した上で CLI サブプロセスに渡す。
+
 #### /upload/document
 
 1. API キーを検証する
-2. インジェストロックを取得する（取得失敗時は HTTP 409）
-3. ファイル名をサニタイズし、拡張子が対応リストに含まれるか確認する
-4. ファイルコンテンツをバイト列として読み取る（サイズ上限超過時は HTTP 413。コンテンツデコードは不要）
-5. Local インジェスターの取り込み処理を呼び出す（`upload_mode` を引き渡す）
-6. パイプラインを実行し、インジェストロックを解放する
+2. ファイル名をサニタイズし、拡張子が対応リストに含まれるか確認する
+3. ファイルコンテンツをバイト列として読み取る（サイズ上限超過時は HTTP 413）
+4. 一時ファイルにコンテンツを書き出す
+5. CLI サブプロセスを実行する: `add-document --file <一時ファイルパス> --upload-mode <mode> --output json`
+6. サブプロセス完了後、一時ファイルを削除する
 
 #### /upload/journal
 
 1. API キーを検証する
-2. インジェストロックを取得する（取得失敗時は HTTP 409）
-3. ファイル名をサニタイズし、拡張子が `.md` であることを確認する
-4. ファイルコンテンツを UTF-8 テキストとして読み取る（サイズ上限超過時は HTTP 413）
-5. Journal インジェスターの取り込み処理を呼び出す
-6. パイプラインを実行し、インジェストロックを解放する
+2. ファイル名をサニタイズし、拡張子が `.md` であることを確認する
+3. ファイルコンテンツを UTF-8 テキストとして読み取る（サイズ上限超過時は HTTP 413）
+4. 一時ファイルにコンテンツを書き出す
+5. CLI サブプロセスを実行する: `add-journal --file <一時ファイルパス> --title <title> --repository <repo> --output json`
+6. サブプロセス完了後、一時ファイルを削除する
 
 ### MCP ツールにおける呼び出し手順
 
+MCP ツールはクライアントからコンテンツを文字列で受け取り、CLI サブプロセスの stdin に渡す。
+
 #### rag_add_document
 
-1. インジェストロックを取得する（取得失敗時はエラーメッセージを返す）
-2. ファイル名をサニタイズし、拡張子が対応リストに含まれるか確認する
-3. コンテンツをデコードしてバイト列を取得する
-4. Local インジェスターの取り込み処理を呼び出す（`upload_mode` を引き渡す）
-5. パイプラインを実行し、インジェストロックを解放する
+1. ファイル名をサニタイズし、拡張子が対応リストに含まれるか確認する
+2. CLI サブプロセスを実行する: `add-document --stdin --filename <filename> --encoding <encoding> --upload-mode <mode> --output json`
+3. `content` を subprocess の stdin に書き込み、stdin をクローズする
+4. サブプロセスの JSON Lines 出力をパースし、結果を返す
 
 #### rag_add_journal
 
-1. インジェストロックを取得する（取得失敗時はエラーメッセージを返す）
-2. ファイル名をサニタイズし、拡張子が `.md` であることを確認する
-3. `content` をそのまま本文テキストとして Journal インジェスターの取り込み処理を呼び出す（デコード不要）
-4. パイプラインを実行し、インジェストロックを解放する
+1. ファイル名をサニタイズし、拡張子が `.md` であることを確認する
+2. CLI サブプロセスを実行する: `add-journal --stdin --title <title> --repository <repo> --output json`
+3. `content` を subprocess の stdin に書き込み、stdin をクローズする
+4. サブプロセスの JSON Lines 出力をパースし、結果を返す
 
 ### 経路別比較
 
-| 経路 | コンテンツの取得方法 | コンテンツアップロード層の使用 |
-|------|---------------------|-------------------------------|
-| Upload HTTP API（/upload/document） | `multipart/form-data` でバイト列を直接受信 | ファイル名サニタイズのみ |
-| Upload HTTP API（/upload/journal） | `multipart/form-data` でテキストを直接受信 | ファイル名サニタイズのみ |
-| MCP 経由（rag_add_document） | コンテンツをデコードしてバイト列を取得 | デコード + ファイル名サニタイズ |
-| MCP 経由（rag_add_journal） | `content` 文字列をそのまま使用（デコード不要） | ファイル名サニタイズのみ |
-| CLI 経由（add-document / add-journal） | ファイルを直接読み込み | 使用しない |
+| 経路 | コンテンツの取得方法 | CLI への渡し方 | コンテンツアップロード層の使用 |
+|------|---------------------|---------------|-------------------------------|
+| Upload HTTP API（/upload/document） | `multipart/form-data` でバイト列を直接受信 | 一時ファイル → `--file` | ファイル名サニタイズのみ |
+| Upload HTTP API（/upload/journal） | `multipart/form-data` でテキストを直接受信 | 一時ファイル → `--file` | ファイル名サニタイズのみ |
+| MCP 経由（rag_add_document） | MCP ツール引数の `content` 文字列 | stdin → `--stdin` | デコード不要（CLI が `--encoding` に基づきデコード） |
+| MCP 経由（rag_add_journal） | MCP ツール引数の `content` 文字列 | stdin → `--stdin` | ファイル名サニタイズのみ |
+| CLI 直接実行（add-document / add-journal） | ファイルを直接読み込み | `--file` | 使用しない |
 
 ### 関連ファイル
 
 | ファイル | 役割 |
 |---------|------|
-| `src/rag/server.py` | MCP ツール定義 + Upload HTTP API エンドポイント定義 |
-| `src/rag/upload.py` | コンテンツデコード・ファイル名サニタイズ |
+| `src/rag/server.py` | MCP ツール定義（薄層アダプター）+ Upload HTTP API エンドポイント定義。CLI サブプロセスの起動・進捗中継を担当 |
+| `src/rag/upload.py` | ファイル名サニタイズ（MCP ツール・Upload API 共通）。コンテンツデコードは CLI 側に移行 |
+| `src/rag/cli.py` | CLI コマンド。`--stdin` オプションによる stdin 入力、`--output json` による JSON Lines 出力をサポート |
 | `src/rag/pipeline/ingesters/local.py` | Local インジェスター（ドキュメント取り込み） |
 | `src/rag/pipeline/ingesters/journal.py` | Journal インジェスター（ジャーナル取り込み） |
 | `src/rag/config.py` | `rag_upload_max_file_size_mb` 設定の定義 |
@@ -335,9 +337,11 @@ flowchart TB
 
 | ケース | 振る舞い |
 |--------|---------|
-| MCP ツールと Upload API が同時にインジェストを試みる | 先にロックを取得した方が実行され、後発はエラーを返す |
+| MCP サブプロセスと CLI 直接実行が同時にインジェストを試みる | 先にファイルロックを取得した方が実行され、後発はエラーを返す |
+| MCP ツールと Upload API が同時にインジェストを試みる | 先にファイルロックを取得した方が実行され、後発はエラーを返す |
+| インジェスト処理中にプロセスが異常終了（SEGFAULT 等） | OS がファイルロックを自動解放する。次の操作でロック取得が可能 |
 | インジェスト処理中に例外が発生 | ロックは確実に解放する（finally ブロック等） |
-| rebuild 中にインジェストを実行 | インジェストロックと rebuild ロックは独立しているため、両方が同時に実行される可能性がある。パイプラインレベルでの整合性はパイプライン制御側の責務 |
+| rebuild 中にインジェストを実行 | インジェストロックと rebuild ロックは別のロックファイルを使用し独立しているため、両方が同時に実行される可能性がある。パイプラインレベルでの整合性はパイプライン制御側の責務 |
 
 ## 関連ドキュメント
 
