@@ -221,7 +221,7 @@ flowchart TD
 | `allowed_domains` | ドメイン制約（初回 URL から自動導出） |
 | `url_pattern` | URL フィルタ（正規表現、任意） |
 | `output_dir` | HTML ファイルの保存先ディレクトリ |
-| `max_pages` | ページ数上限（200 OK カウント、0 = 無制限） |
+| `max_pages` | ページ数上限（200 OK カウント）。外部インターフェースでは許容範囲 1〜50,000 でクランプされる。Spider 内部では 0 を無制限として扱うが、CLI/MCP からは入力されない |
 
 Spider の振る舞い:
 

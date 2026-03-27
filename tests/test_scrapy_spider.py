@@ -196,6 +196,140 @@ class TestSpiderInit:
         assert spider._max_pages == 20
 
 
+# --- parse() の max_pages クローズテスト ---
+
+
+class TestParseMaxPages:
+    """parse() の max_pages 到達時の close_spider テスト."""
+
+    @staticmethod
+    def _make_spider(tmp_path: Path, max_pages: int) -> SiteSpider:
+        """テスト用 Spider インスタンスを作成する."""
+        from unittest.mock import MagicMock
+
+        spider = SiteSpider.__new__(SiteSpider)
+        spider.name = "site_spider"
+        spider._url_pattern = None
+        spider._output_dir = tmp_path
+        spider._max_pages = max_pages
+        spider._page_count = 0
+        spider._error_count = 0
+        # crawler.engine.close_spider のモック
+        spider.crawler = MagicMock()
+        # logger は Scrapy の property のためモック不要（crawler モックにより動作する）
+        return spider
+
+    @staticmethod
+    def _make_response(url: str, status: int = 200) -> "MagicMock":
+        """テスト用モック Response を作成する."""
+        from unittest.mock import MagicMock
+
+        mock_headers = MagicMock()
+        mock_headers.get.return_value = b"text/html; charset=utf-8"
+        mock_response = MagicMock()
+        mock_response.url = url
+        mock_response.status = status
+        mock_response.body = b"<html><title>Test</title></html>"
+        mock_response.headers = mock_headers
+        mock_response.meta = {"depth": 0}
+        mock_response.css.return_value.get.return_value = "Test"
+        mock_response.css.return_value.getall.return_value = []
+        return mock_response
+
+    def test_close_spider_called_on_max_pages(self, tmp_path: Path) -> None:
+        """200 OK が max_pages に達したら close_spider が呼ばれること."""
+        from unittest.mock import patch
+
+        spider = self._make_spider(tmp_path, max_pages=2)
+        resolved_file = (tmp_path / "page.html").resolve()
+        resolved_file.parent.mkdir(parents=True, exist_ok=True)
+        resolved_file.write_text("<html></html>", encoding="utf-8")
+
+        resp1 = self._make_response("https://example.com/page1")
+        resp2 = self._make_response("https://example.com/page2")
+
+        with patch.object(spider, "_save_html", return_value=resolved_file):
+            list(spider.parse(resp1))
+            list(spider.parse(resp2))
+
+        spider.crawler.engine.close_spider.assert_called_once_with(
+            spider, "max_pages_reached",
+        )
+
+    def test_close_spider_not_called_below_max(self, tmp_path: Path) -> None:
+        """200 OK が max_pages 未満なら close_spider は呼ばれないこと."""
+        from unittest.mock import patch
+
+        spider = self._make_spider(tmp_path, max_pages=3)
+        resolved_file = (tmp_path / "page.html").resolve()
+        resolved_file.parent.mkdir(parents=True, exist_ok=True)
+        resolved_file.write_text("<html></html>", encoding="utf-8")
+
+        resp = self._make_response("https://example.com/page1")
+        with patch.object(spider, "_save_html", return_value=resolved_file):
+            list(spider.parse(resp))
+
+        spider.crawler.engine.close_spider.assert_not_called()
+
+    def test_404_not_counted_for_max_pages(self, tmp_path: Path) -> None:
+        """404 レスポンスは max_pages のカウントに含まれないこと."""
+        from unittest.mock import patch
+
+        spider = self._make_spider(tmp_path, max_pages=1)
+        resolved_file = (tmp_path / "page.html").resolve()
+        resolved_file.parent.mkdir(parents=True, exist_ok=True)
+        resolved_file.write_text("<html></html>", encoding="utf-8")
+
+        # 404 → close_spider は呼ばれない
+        resp_404 = self._make_response("https://example.com/missing", status=404)
+        with patch.object(spider, "_save_html", return_value=resolved_file):
+            list(spider.parse(resp_404))
+
+        spider.crawler.engine.close_spider.assert_not_called()
+        assert spider._page_count == 0
+
+        # 200 → close_spider が呼ばれる
+        resp_200 = self._make_response("https://example.com/page1")
+        with patch.object(spider, "_save_html", return_value=resolved_file):
+            list(spider.parse(resp_200))
+
+        spider.crawler.engine.close_spider.assert_called_once()
+
+    def test_no_follow_links_after_max_pages(self, tmp_path: Path) -> None:
+        """max_pages 到達後はリンク追跡しないこと."""
+        from unittest.mock import MagicMock, patch
+
+        spider = self._make_spider(tmp_path, max_pages=1)
+        resolved_file = (tmp_path / "page.html").resolve()
+        resolved_file.parent.mkdir(parents=True, exist_ok=True)
+        resolved_file.write_text("<html></html>", encoding="utf-8")
+
+        resp = self._make_response("https://example.com/page1")
+        mock_follow = MagicMock(return_value=iter([]))
+
+        with (
+            patch.object(spider, "_save_html", return_value=resolved_file),
+            patch.object(spider, "_follow_links", mock_follow),
+        ):
+            list(spider.parse(resp))
+
+        mock_follow.assert_not_called()
+
+    def test_close_spider_on_save_html_failure(self, tmp_path: Path) -> None:
+        """_save_html 失敗時でも max_pages 到達なら close_spider が呼ばれること."""
+        from unittest.mock import patch
+
+        spider = self._make_spider(tmp_path, max_pages=1)
+
+        resp = self._make_response("https://example.com/page1")
+        with patch.object(spider, "_save_html", return_value=None):
+            list(spider.parse(resp))
+
+        spider.crawler.engine.close_spider.assert_called_once_with(
+            spider, "max_pages_reached",
+        )
+
+
 # --- parse() の filepath 回帰テスト ---
 
 

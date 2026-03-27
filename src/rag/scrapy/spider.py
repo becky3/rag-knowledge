@@ -129,11 +129,18 @@ class SiteSpider(scrapy.Spider):  # type: ignore[misc]
             len(response.body),
         )
 
+        # 200 OK ページ数が上限に達したら Spider をクローズ
+        # リンク追跡より前に判定し、上限到達後は新規リクエストをスケジュールしない
+        max_reached = self._max_pages and self._page_count >= self._max_pages
+
         # HTML ファイルを保存
         filepath = self._save_html(response)
         if filepath is None:
             # 保存失敗時はメタデータを yield しない（JSONL に不整合な行を書かない）
-            yield from self._follow_links(response)
+            if not max_reached:
+                yield from self._follow_links(response)
+            if max_reached:
+                self.crawler.engine.close_spider(self, "max_pages_reached")
             return
 
         # JSONL 用メタデータを yield（FEEDS 機能で自動出力）
@@ -147,11 +154,11 @@ class SiteSpider(scrapy.Spider):  # type: ignore[misc]
             "filepath": str(filepath.relative_to(self._output_dir.resolve())),
         }
 
-        # リンクを辿る
-        yield from self._follow_links(response)
+        # 上限未到達時のみリンクを辿る
+        if not max_reached:
+            yield from self._follow_links(response)
 
-        # 200 OK ページ数が上限に達したら Spider をクローズ
-        if self._max_pages and self._page_count >= self._max_pages:
+        if max_reached:
             self.crawler.engine.close_spider(self, "max_pages_reached")
 
     def _is_text_response(self, content_type: str) -> bool:
