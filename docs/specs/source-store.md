@@ -77,7 +77,7 @@ metadata.db、converted_store、検索インデックスは全て source_store �
 | ファイル配置 | source_type、ファイルデータ、メタデータ | 配置先パス | source_type に応じたディレクトリにファイルを配置し、.meta を生成する（local 以外） |
 | .meta 読み取り | ファイルパス | メタデータ辞書 | 指定ファイルの .meta サイドカーを YAML として読み取る |
 | .meta 書き込み | ファイルパス、メタデータ辞書 | なし | 指定ファイルの .meta サイドカーを YAML として書き込む |
-| ファイル一覧 | source_type（任意） | ファイルパスのリスト | source_store 内のファイルを列挙する。source_type 指定時はそのディレクトリのみ。`.meta`、`metadata.db`、`.git/`、`.gitignore` は除外する |
+| ファイル一覧 | source_type（任意） | ファイルパスのリスト | source_store 内のファイルを列挙する。source_type 指定時はそのディレクトリのみ。`.meta`、`metadata.db`、`.git/`、`.gitignore`、ロックファイル（`.ingest.lock`、`.rebuild.lock`）は除外する |
 | ファイル削除 | source_id | なし | source_id に対応するファイルと .meta サイドカーをディスクから削除する。metadata.db の更新は行わない（パイプライン制御が git diff 経由で処理する）。呼び出し後にパイプライン制御の取り込み実行（[pipeline-controller.md](pipeline-controller.md) 参照）を実行することで、git commit → パイプラインによる論理削除・インデックス削除が行われる |
 | 論理削除 | source_id | なし | metadata.db のステータスを `deleted` に変更する。パイプライン制御の内部処理で使用 |
 | 論理削除解除 | source_id | なし | metadata.db のステータスを `active` に戻す |

@@ -14,6 +14,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
+from rag.infrastructure.file_lock import INGEST_LOCK_FILENAME, REBUILD_LOCK_FILENAME
 from rag.store.meta import meta_path_for, read_meta, write_meta
 from rag.store.metadata_db import MetadataDB
 from rag.store.models import (
@@ -270,7 +271,7 @@ class SourceStore:
     ) -> list[Path]:
         """source_store 内のファイルを列挙する.
 
-        .meta ファイル、metadata.db、.git 配下は除外する。
+        .meta ファイル、metadata.db、.git 配下、ロックファイルは除外する。
 
         Args:
             source_type: 指定時はそのディレクトリのみ
@@ -296,12 +297,14 @@ class SourceStore:
                 full = Path(dirpath) / fname
                 rel = full.relative_to(self._root)
                 rel_str = rel.as_posix()
-                # 除外: .meta, metadata.db 関連, .gitignore
+                # 除外: .meta, metadata.db 関連, .gitignore, .lock
                 if rel_str.endswith(".meta"):
                     continue
                 if rel_str == "metadata.db" or rel_str.startswith("metadata.db"):
                     continue
                 if fname == ".gitignore":
+                    continue
+                if fname in (INGEST_LOCK_FILENAME, REBUILD_LOCK_FILENAME):
                     continue
                 result.append(rel)
 

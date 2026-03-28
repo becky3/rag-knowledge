@@ -216,7 +216,7 @@ CLI / MCP 対応:
 | # | コマンド（CLI） | 期待結果 | 検証種別 |
 |---|----------------|---------|---------|
 | 1 | `add https://github.com/becky3/rag-knowledge` | Web ページ 1 件取り込み成功 | `ingest` |
-| 2 | `site-ingest https://books.toscrape.com --max-pages 20` | Scrapy 一括取り込み成功 | `ingest` |
+| 2 | `site-ingest https://www.stat.go.jp/ --max-pages 20` | Scrapy 一括取り込み成功 | `ingest` |
 
 CLI / MCP 対応: `rag_add` / `rag_site_ingest`
 
