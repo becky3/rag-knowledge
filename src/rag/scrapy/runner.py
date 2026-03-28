@@ -51,18 +51,22 @@ class CrawlResult:
         仕様: docs/specs/site-ingest.md「正常完了後のクリーンアップ」
         削除失敗時は警告ログを出力し、例外を送出しない。
         """
-        if not self.crawl_dir:
+        crawl_dir = self.crawl_dir
+        if not crawl_dir or not crawl_dir.exists():
             return
         try:
-            shutil.rmtree(self.crawl_dir)
+            shutil.rmtree(crawl_dir)
             # 親ディレクトリ（ドメイン）が空なら削除
-            parent = self.crawl_dir.parent
+            parent = crawl_dir.parent
             if parent.exists() and not any(parent.iterdir()):
                 parent.rmdir()
+        except FileNotFoundError:
+            # 競合状態などで既に削除されていた場合は正常扱い
+            return
         except OSError:
             logger.warning(
                 "クロールディレクトリの削除に失敗しました: %s",
-                self.crawl_dir,
+                crawl_dir,
                 exc_info=True,
             )
 

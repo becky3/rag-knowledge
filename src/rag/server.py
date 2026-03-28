@@ -969,7 +969,7 @@ async def rag_site_ingest(
 
         # 正常完了後のクリーンアップ（仕様: docs/specs/site-ingest.md）
         if crawl_result.success:
-            crawl_result.cleanup()
+            await asyncio.to_thread(crawl_result.cleanup)
 
         # 操作全体の所要時間（クロール + Bridge + パイプライン）
         elapsed = time_mod.monotonic() - start_time
