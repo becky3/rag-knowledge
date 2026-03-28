@@ -779,7 +779,41 @@ class TestCreateHttp:
 
         mock_client.get_or_create_collection.assert_called_once_with(
             name="knowledge",
-            metadata={"hnsw:space": "cosine"},
+            metadata={
+                "hnsw:space": "cosine",
+                "hnsw:M": 48,
+                "hnsw:construction_ef": 400,
+                "hnsw:search_ef": 300,
+            },
+        )
+
+    def test_create_http_custom_hnsw_params(
+        self,
+        mock_embedding: MockEmbeddingProvider,
+    ) -> None:
+        """HNSW パラメータを明示指定した場合に metadata に反映されること."""
+        from unittest.mock import patch, MagicMock
+
+        mock_client = MagicMock()
+        mock_client.heartbeat.return_value = True
+        mock_client.get_or_create_collection.return_value = MagicMock()
+
+        with patch("chromadb.HttpClient", return_value=mock_client):
+            VectorStore.create_http(
+                embedding_provider=mock_embedding,
+                hnsw_m=32,
+                hnsw_construction_ef=200,
+                hnsw_search_ef=150,
+            )
+
+        mock_client.get_or_create_collection.assert_called_once_with(
+            name="knowledge",
+            metadata={
+                "hnsw:space": "cosine",
+                "hnsw:M": 32,
+                "hnsw:construction_ef": 200,
+                "hnsw:search_ef": 150,
+            },
         )
 
     def test_create_http_close_is_noop(

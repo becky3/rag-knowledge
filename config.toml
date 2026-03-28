@@ -95,6 +95,13 @@ rag_aozora_max_works = 200
 rag_aozora_request_interval = 1.0
 rag_aozora_request_timeout = 30
 
+# HNSW パラメータ（ChromaDB ベクトルインデックス）
+# M / construction_ef はコレクション作成時のみ適用。既存コレクションへの反映には rebuild --mode full が必要
+# search_ef は collection.modify() で既存コレクションにも適用可能
+hnsw_m = 48
+hnsw_construction_ef = 400
+hnsw_search_ef = 300
+
 # サイト一括取り込み（Scrapy subprocess）
 site_ingest_delay_sec = 0.1
 site_ingest_max_pages = 10000

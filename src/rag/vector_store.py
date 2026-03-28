@@ -45,11 +45,20 @@ class VectorStore:
     仕様: docs/specs/rag-knowledge.md
     """
 
+    # HNSW パラメータのデフォルト値
+    _DEFAULT_HNSW_M = 48
+    _DEFAULT_HNSW_CONSTRUCTION_EF = 400
+    _DEFAULT_HNSW_SEARCH_EF = 300
+
     def __init__(
         self,
         embedding_provider: EmbeddingProvider,
         persist_directory: str = "./chroma_db",
         collection_name: str = "knowledge",
+        *,
+        hnsw_m: int | None = None,
+        hnsw_construction_ef: int | None = None,
+        hnsw_search_ef: int | None = None,
     ) -> None:
         """VectorStoreを初期化する.
 
@@ -57,10 +66,16 @@ class VectorStore:
             embedding_provider: Embedding生成プロバイダー
             persist_directory: ChromaDBの永続化ディレクトリ
             collection_name: コレクション名
+            hnsw_m: HNSW グラフの最大接続数
+            hnsw_construction_ef: HNSW 構築時の探索候補数
+            hnsw_search_ef: HNSW 検索時の探索候補数
         """
         self._embedding = embedding_provider
         self._persist_directory = persist_directory
         self._collection_name = collection_name
+        self._hnsw_metadata = self._build_hnsw_metadata(
+            hnsw_m, hnsw_construction_ef, hnsw_search_ef,
+        )
         # テレメトリを無効化
         chroma_settings = ChromaSettings(anonymized_telemetry=False)
         self._client = chromadb.PersistentClient(
@@ -68,8 +83,23 @@ class VectorStore:
         )
         self._collection = self._client.get_or_create_collection(
             name=collection_name,
-            metadata={"hnsw:space": "cosine"},
+            metadata=self._hnsw_metadata,
         )
+
+    @classmethod
+    def _build_hnsw_metadata(
+        cls,
+        hnsw_m: int | None,
+        hnsw_construction_ef: int | None,
+        hnsw_search_ef: int | None,
+    ) -> dict[str, str | int]:
+        """HNSW パラメータからコレクション metadata を構築する."""
+        return {
+            "hnsw:space": "cosine",
+            "hnsw:M": hnsw_m if hnsw_m is not None else cls._DEFAULT_HNSW_M,
+            "hnsw:construction_ef": hnsw_construction_ef if hnsw_construction_ef is not None else cls._DEFAULT_HNSW_CONSTRUCTION_EF,
+            "hnsw:search_ef": hnsw_search_ef if hnsw_search_ef is not None else cls._DEFAULT_HNSW_SEARCH_EF,
+        }
 
     @classmethod
     def create_http(
@@ -78,6 +108,10 @@ class VectorStore:
         host: str = "localhost",
         port: int = 8000,
         collection_name: str = "knowledge",
+        *,
+        hnsw_m: int | None = None,
+        hnsw_construction_ef: int | None = None,
+        hnsw_search_ef: int | None = None,
     ) -> "VectorStore":
         """ChromaDB サーバーに HttpClient で接続する VectorStore を作成する.
 
@@ -86,6 +120,9 @@ class VectorStore:
             host: ChromaDB サーバーのホスト
             port: ChromaDB サーバーのポート
             collection_name: コレクション名
+            hnsw_m: HNSW グラフの最大接続数
+            hnsw_construction_ef: HNSW 構築時の探索候補数
+            hnsw_search_ef: HNSW 検索時の探索候補数
 
         Returns:
             HttpClient ベースの VectorStore インスタンス
@@ -94,6 +131,9 @@ class VectorStore:
         instance._embedding = embedding_provider
         instance._persist_directory = ""
         instance._collection_name = collection_name
+        instance._hnsw_metadata = cls._build_hnsw_metadata(
+            hnsw_m, hnsw_construction_ef, hnsw_search_ef,
+        )
         chroma_settings = ChromaSettings(anonymized_telemetry=False)
         instance._client = chromadb.HttpClient(
             host=host, port=port, settings=chroma_settings,
@@ -108,7 +148,7 @@ class VectorStore:
             raise ConnectionError(msg) from exc
         instance._collection = instance._client.get_or_create_collection(
             name=collection_name,
-            metadata={"hnsw:space": "cosine"},
+            metadata=instance._hnsw_metadata,
         )
         return instance
 
@@ -117,12 +157,19 @@ class VectorStore:
         cls,
         embedding_provider: EmbeddingProvider,
         collection_name: str = "knowledge",
+        *,
+        hnsw_m: int | None = None,
+        hnsw_construction_ef: int | None = None,
+        hnsw_search_ef: int | None = None,
     ) -> "VectorStore":
         """テスト用のインメモリVectorStoreを作成する.
 
         Args:
             embedding_provider: Embedding生成プロバイダー
             collection_name: コレクション名
+            hnsw_m: HNSW グラフの最大接続数
+            hnsw_construction_ef: HNSW 構築時の探索候補数
+            hnsw_search_ef: HNSW 検索時の探索候補数
 
         Returns:
             インメモリのVectorStoreインスタンス
@@ -131,12 +178,15 @@ class VectorStore:
         instance._embedding = embedding_provider
         instance._persist_directory = ""
         instance._collection_name = collection_name
+        instance._hnsw_metadata = cls._build_hnsw_metadata(
+            hnsw_m, hnsw_construction_ef, hnsw_search_ef,
+        )
         # テレメトリを無効化
         chroma_settings = ChromaSettings(anonymized_telemetry=False)
         instance._client = chromadb.EphemeralClient(settings=chroma_settings)
         instance._collection = instance._client.get_or_create_collection(
             name=collection_name,
-            metadata={"hnsw:space": "cosine"},
+            metadata=instance._hnsw_metadata,
         )
         return instance
 
@@ -561,7 +611,7 @@ class VectorStore:
             self._client.delete_collection(collection_name)
             self._collection = self._client.get_or_create_collection(
                 name=collection_name,
-                metadata={"hnsw:space": "cosine"},
+                metadata=self._hnsw_metadata,
             )
 
         await asyncio.to_thread(_clear_sync)

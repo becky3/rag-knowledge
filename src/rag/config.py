@@ -221,6 +221,11 @@ class RAGSettings(BaseModel):
     rag_bluesky_request_interval: float = Field(ge=0.1, le=60.0)
     rag_bluesky_include_reposts: bool
 
+    # HNSW パラメータ（ChromaDB ベクトルインデックス）
+    hnsw_m: int = Field(ge=2, le=100)
+    hnsw_construction_ef: int = Field(ge=10, le=2000)
+    hnsw_search_ef: int = Field(ge=10, le=2000)
+
     # サイト一括取り込み（Scrapy subprocess）
     site_ingest_delay_sec: float = Field(ge=0.05, le=60.0)
     site_ingest_max_pages: int = Field(ge=1, le=50000)

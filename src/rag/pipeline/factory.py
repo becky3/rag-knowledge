@@ -64,6 +64,9 @@ def build_pipeline_controller(
             embedding_provider=embedding_provider,
             host=settings.chromadb_server_host,
             port=settings.chromadb_server_port,
+            hnsw_m=settings.hnsw_m,
+            hnsw_construction_ef=settings.hnsw_construction_ef,
+            hnsw_search_ef=settings.hnsw_search_ef,
         )
         bm25_index = BM25Index(
             k1=settings.rag_bm25_k1,

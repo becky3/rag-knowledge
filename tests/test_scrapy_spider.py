@@ -220,7 +220,7 @@ class TestParseMaxPages:
         return spider
 
     @staticmethod
-    def _make_response(url: str, status: int = 200) -> "MagicMock":
+    def _make_response(url: str, status: int = 200) -> object:
         """テスト用モック Response を作成する."""
         from unittest.mock import MagicMock
 
