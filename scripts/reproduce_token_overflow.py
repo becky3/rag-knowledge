@@ -123,7 +123,7 @@ def main() -> None:
         ("Markdown table row", "| framework | Hugging Face | Python | Apache 2.0 |"),
     ]
 
-    print(f"\nToken/char ratios:")
+    print("\nToken/char ratios:")
     for label, text in test_texts:
         n_tokens = count_tokens(tok, text)
         ratio = n_tokens / len(text) if text else 0

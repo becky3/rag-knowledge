@@ -613,6 +613,9 @@ async def create_rag_service(
     vector_store = VectorStore(
         embedding_provider=embedding_provider,
         persist_directory=persist_dir,
+        hnsw_m=settings.hnsw_m,
+        hnsw_construction_ef=settings.hnsw_construction_ef,
+        hnsw_search_ef=settings.hnsw_search_ef,
     )
 
     # WebCrawlerはダミー（評価時は使用しない）
@@ -1409,6 +1412,9 @@ def run_stats(args: argparse.Namespace) -> None:
                 embedding_provider=embedding_provider,
                 host=settings.chromadb_server_host,
                 port=settings.chromadb_server_port,
+                hnsw_m=settings.hnsw_m,
+                hnsw_construction_ef=settings.hnsw_construction_ef,
+                hnsw_search_ef=settings.hnsw_search_ef,
             )
         index_stats = vector_store.get_stats()
         total_chunks = int(str(index_stats.get("total_chunks", 0)))
@@ -1494,6 +1500,9 @@ def run_search(args: argparse.Namespace) -> None:
             embedding_provider=embedding_provider,
             host=settings.chromadb_server_host,
             port=settings.chromadb_server_port,
+            hnsw_m=settings.hnsw_m,
+            hnsw_construction_ef=settings.hnsw_construction_ef,
+            hnsw_search_ef=settings.hnsw_search_ef,
         )
         bm25_index = BM25Index(
             k1=settings.rag_bm25_k1,
@@ -1759,6 +1768,9 @@ def _build_cli_pipeline_controller() -> tuple[
             embedding_provider=embedding_provider,
             host=settings.chromadb_server_host,
             port=settings.chromadb_server_port,
+            hnsw_m=settings.hnsw_m,
+            hnsw_construction_ef=settings.hnsw_construction_ef,
+            hnsw_search_ef=settings.hnsw_search_ef,
         )
         bm25_index = BM25Index(
             k1=settings.rag_bm25_k1,

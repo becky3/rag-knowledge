@@ -80,6 +80,10 @@ TEST_SETTINGS_DEFAULTS: dict[str, object] = {
     "rag_aozora_max_works": 200,
     "rag_aozora_request_interval": 1.0,
     "rag_aozora_request_timeout": 30,
+    # HNSW パラメータ
+    "hnsw_m": 48,
+    "hnsw_construction_ef": 400,
+    "hnsw_search_ef": 300,
     # サイト一括取り込み（Scrapy subprocess）
     "site_ingest_temp_dir": ".tmp/site_ingest",
     "site_ingest_delay_sec": 0.1,

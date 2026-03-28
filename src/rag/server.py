@@ -150,6 +150,9 @@ def _build_rag_service() -> RAGKnowledgeService:
             embedding_provider=embedding_provider,
             host=settings.chromadb_server_host,
             port=settings.chromadb_server_port,
+            hnsw_m=settings.hnsw_m,
+            hnsw_construction_ef=settings.hnsw_construction_ef,
+            hnsw_search_ef=settings.hnsw_search_ef,
         )
         web_crawler = WebCrawler(
             max_pages=settings.rag_max_crawl_pages,
