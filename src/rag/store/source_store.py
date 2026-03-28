@@ -271,7 +271,7 @@ class SourceStore:
     ) -> list[Path]:
         """source_store 内のファイルを列挙する.
 
-        .meta ファイル、metadata.db、.git 配下、ロックファイルは除外する。
+        .meta ファイル、metadata.db、.git 配下、.gitignore、ロックファイルは除外する。
 
         Args:
             source_type: 指定時はそのディレクトリのみ
