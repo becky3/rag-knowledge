@@ -85,6 +85,7 @@ class VectorStore:
             name=collection_name,
             metadata=self._hnsw_metadata,
         )
+        self._apply_search_ef()
 
     @classmethod
     def _build_hnsw_metadata(
@@ -100,6 +101,23 @@ class VectorStore:
             "hnsw:construction_ef": hnsw_construction_ef if hnsw_construction_ef is not None else cls._DEFAULT_HNSW_CONSTRUCTION_EF,
             "hnsw:search_ef": hnsw_search_ef if hnsw_search_ef is not None else cls._DEFAULT_HNSW_SEARCH_EF,
         }
+
+    def _apply_search_ef(self) -> None:
+        """既存コレクションに hnsw:search_ef を適用する.
+
+        get_or_create_collection の metadata は新規作成時のみ反映される。
+        search_ef は可変パラメータのため、既存コレクションにも modify() で適用する。
+        """
+        desired_ef = self._hnsw_metadata.get("hnsw:search_ef")
+        if desired_ef is None:
+            return
+        current_metadata = dict(self._collection.metadata or {})
+        if current_metadata.get("hnsw:search_ef") != desired_ef:
+            current_metadata["hnsw:search_ef"] = desired_ef
+            self._collection.modify(metadata=current_metadata)
+            logger.info(
+                "Updated hnsw:search_ef to %d on existing collection", desired_ef,
+            )
 
     @classmethod
     def create_http(
@@ -150,6 +168,7 @@ class VectorStore:
             name=collection_name,
             metadata=instance._hnsw_metadata,
         )
+        instance._apply_search_ef()
         return instance
 
     @classmethod
@@ -188,6 +207,7 @@ class VectorStore:
             name=collection_name,
             metadata=instance._hnsw_metadata,
         )
+        instance._apply_search_ef()
         return instance
 
     async def add_documents(self, chunks: list[DocumentChunk]) -> int:

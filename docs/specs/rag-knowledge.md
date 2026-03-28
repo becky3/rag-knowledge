@@ -65,7 +65,7 @@ MCP サーバーとして独立動作し、16 個のツールを提供する。
 | HNSW パラメータ | `hnsw_m`, `hnsw_construction_ef`, `hnsw_search_ef` |
 | サイト一括取り込み | `site_ingest_delay_sec`, `site_ingest_max_pages`, `site_ingest_download_timeout`, `site_ingest_timeout_sec`, `site_ingest_error_count` |
 
-- `hnsw_m` と `hnsw_construction_ef` はコレクション作成時のみ適用される（不変）。既存コレクションへの反映には `rebuild --mode full`（コレクション削除 → 再作成）が必要。`hnsw_search_ef` は `collection.modify()` で既存コレクションにも適用可能
+- `hnsw_m` と `hnsw_construction_ef` はコレクション作成時のみ適用される（不変）。既存コレクションへの反映には `rebuild --mode full`（コレクション削除 → 再作成）が必要。`hnsw_search_ef` は起動時に `collection.modify()` で既存コレクションにも自動適用される
 - Embedding モデルを変更した場合、既存データとの類似度計算が不正確になるため、コレクション再構築が必要
 - ローカル Embedding モデルにはコンテキスト長の制限（512 トークン）がある。チャンキング時にこの制限を超えないよう文字数ベースで制御する。詳細は [indexer.md](indexer.md) の「トークン安全上限」を参照
 - 呼び出し元が MCP クライアントとして本サーバーに接続することで RAG 機能を利用できる
