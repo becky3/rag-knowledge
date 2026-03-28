@@ -150,7 +150,7 @@ NG を検出した場合、Issue 起票を提案する。
 | A) Local | add-journal | `.qa/journal_add_test.md`（`--title "コンテンツ一覧取得機能の実装"` `--repository rag-knowledge`） |
 | A) Local | migrate-journal | `.qa/journals/`（古いジャーナル 10 件、`--repository rag-knowledge`） |
 | B) Web | add（単一ページ） | `https://github.com/becky3/rag-knowledge` |
-| B) Web | site-ingest（Scrapy） | `https://books.toscrape.com`（`--max-pages 20`） |
+| B) Web | site-ingest（Scrapy） | `https://www.stat.go.jp/`（`--max-pages 20`） |
 | C) SNS | Zenn ユーザー | `rhythmcan` |
 | C) SNS | BlueSky ハンドル | `rhythmcan.bsky.social` |
 | D) YouTube | 動画 URL | `https://www.youtube.com/watch?v=GuFBDpzH3ck` |
@@ -198,7 +198,7 @@ MCP 対応コマンド:
 | # | コマンド（CLI） | 期待結果 | 検証種別 |
 |---|----------------|---------|---------|
 | 1 | `add https://github.com/becky3/rag-knowledge` | Web ページ 1 件取り込み成功 | `ingest` |
-| 2 | `site-ingest https://books.toscrape.com --max-pages 20` | Scrapy 一括取り込み成功 | `ingest` |
+| 2 | `site-ingest https://www.stat.go.jp/ --max-pages 20` | Scrapy 一括取り込み成功 | `ingest` |
 
 MCP 対応: `rag_add` / `rag_site_ingest`
 

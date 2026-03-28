@@ -273,6 +273,18 @@ class TestListFiles:
         assert not any(p.startswith(".git") for p in paths)
         assert "local/a.md" in paths
 
+    def test_excludes_lock_files(self, store: SourceStore) -> None:
+        """ロックファイルはリストに含まれない."""
+        (store.root_dir / ".ingest.lock").write_bytes(b"")
+        (store.root_dir / ".rebuild.lock").write_bytes(b"")
+        store.place_file(source_type="local", data=b"a", rel_path="local/a.md")
+
+        files = store.list_files()
+        paths = [f.as_posix() for f in files]
+        assert ".ingest.lock" not in paths
+        assert ".rebuild.lock" not in paths
+        assert "local/a.md" in paths
+
 
 class TestSoftDelete:
     """論理削除テスト."""
