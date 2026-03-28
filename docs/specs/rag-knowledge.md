@@ -62,7 +62,7 @@ MCP サーバーとして独立動作し、16 個のツールを提供する。
 | BlueSky インジェスター | `rag_bluesky_appview_url`, `rag_bluesky_max_posts`, `rag_bluesky_request_timeout`, `rag_bluesky_request_interval`, `rag_bluesky_include_reposts` |
 | ドキュメントインジェスター | `rag_document_supported_extensions` |
 | PDF バックエンド | `rag_pdf_backend`, `rag_pdf_mineru_mfd_conf_thres`, `rag_pdf_quality_ufffd_threshold`, `rag_pdf_quality_greek_threshold`, `rag_pdf_quality_cjk_min_threshold`, `rag_pdf_quality_min_chars_per_page`, `rag_pdf_quality_sample_pages` |
-| HNSW パラメータ | `hnsw_m`（デフォルト: 48）, `hnsw_construction_ef`（デフォルト: 400）, `hnsw_search_ef`（デフォルト: 300） |
+| HNSW パラメータ | `hnsw_m`, `hnsw_construction_ef`, `hnsw_search_ef` |
 | サイト一括取り込み | `site_ingest_delay_sec`, `site_ingest_max_pages`, `site_ingest_download_timeout`, `site_ingest_timeout_sec`, `site_ingest_error_count` |
 
 - `hnsw_m` と `hnsw_construction_ef` はコレクション作成時のみ適用される（不変）。既存コレクションへの反映には `rebuild --mode full`（コレクション削除 → 再作成）が必要。`hnsw_search_ef` は `collection.modify()` で既存コレクションにも適用可能
@@ -116,6 +116,9 @@ MCP サーバーとして独立動作し、16 個のツールを提供する。
 | クロール対象ページ数上限 | 設定値 | 許容範囲 1〜500、デフォルト 50 | 範囲内で変更可 |
 | クロール遅延 | 設定値 | 許容範囲 0.1〜60 秒、デフォルト 1.0 秒 | 範囲内で変更可 |
 | リクエストタイムアウト | 設定値 | 許容範囲 1〜120 秒、デフォルト 30 秒 | 範囲内で変更可 |
+| HNSW M（グラフ接続数） | 設定値 | 許容範囲 2〜100、デフォルト 48 | 範囲内で変更可 |
+| HNSW construction_ef（構築時探索幅） | 設定値 | 許容範囲 10〜2000、デフォルト 400 | 範囲内で変更可 |
+| HNSW search_ef（検索時探索幅） | 設定値 | 許容範囲 10〜2000、デフォルト 300 | 範囲内で変更可 |
 | 生 HTTP クライアント利用禁止 | CI チェック | `src/` 全体を grep で走査（httpx / aiohttp / requests / urllib.request）。`# safety:allowed` 行を除外。ConstrainedClient は py-common-lib パッケージで提供（`src/` 外のため検出対象外） | 許可例外の追加は `# safety:allowed` コメントで可 |
 
 ## インターフェース
