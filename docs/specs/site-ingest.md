@@ -354,6 +354,18 @@ JSONL の各行から .meta サイドカーファイルへの変換:
 
 `SITE_INGEST_TEMP_DIR` のデフォルト値は `.tmp/site_ingest`。`crawl_key` の詳細は「JOBDIR の分離」セクションを参照。
 
+### 正常完了後のクリーンアップ
+
+Scrapy 正常完了 + bridge 完了後、クロールディレクトリ（`{domain}/{crawl_key}/`）全体を削除する。bridge 完了後は全データが source_store に配置済みであり、一時ファイルは不要。大規模サイトのクロールを繰り返すとディスクを圧迫するため、自動削除する。`download_only` の場合も bridge は完了しているため同様に削除する。
+
+クリーンアップの実行条件:
+
+| 条件 | クリーンアップ |
+|------|-------------|
+| Scrapy 正常完了 + bridge 完了 | 実行する（`download_only` の有無を問わない。bridge 完了時点で source_store に配置済み） |
+| Scrapy 異常終了（exit_code != 0） | 実行しない（JOBDIR によるレジュームを維持） |
+| クリーンアップ自体が失敗（Windows ファイルロック等） | 警告ログを出力し、処理全体は成功扱いとする |
+
 ### 処理フロー
 
 ```mermaid
@@ -384,6 +396,7 @@ sequenceDiagram
         CMD->>PC: git commit（source_store のみ）
         Note over CMD: パイプライン処理（converter + indexer）をスキップ
     end
+    CMD->>CMD: クロールディレクトリ削除（Scrapy 正常完了時）
     CMD->>USER: 結果サマリー
 ```
 
@@ -430,6 +443,7 @@ Scrapy は独立した Python パッケージとして `pyproject.toml` に依�
 | SSRF Middleware での DNS 解決失敗 | DNS 解決に失敗した場合、そのリクエストを `IgnoreRequest` で拒否する。ネットワーク障害等による一時的な DNS エラーは Scrapy のリトライ対象外となる |
 | `download_only` 指定時にパイプライン処理が必要な場合 | MCP: `rag_rebuild`（mode: full, source_type: web）、CLI: `uv run python -m rag.cli rebuild --mode full --source-type web` で後からパイプライン処理を実行する。incremental モードでも可（source_store への配置が git commit されていれば差分検知される） |
 | 同一ドメインへの異なるパラメータでの複数回クロール | クロールキー（`start_url` + effective `url_pattern` のハッシュ）により JOBDIR が分離されるため、前回クロールの URL キューが残留しない |
+| 正常完了後のクリーンアップ失敗（Windows ファイルロック等） | 警告ログを出力し、処理全体は成功扱いとする。一時ディレクトリは手動削除が必要 |
 
 ## 関連ドキュメント
 

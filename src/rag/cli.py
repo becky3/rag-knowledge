@@ -2417,6 +2417,10 @@ async def run_site_ingest(args: argparse.Namespace) -> None:
         # download_only でもコミットは実行する（パイプライン処理のみスキップ）
         controller.commit(f"ingest(web): site-ingest {url} (download_only)")
 
+    # 正常完了後のクリーンアップ（仕様: docs/specs/site-ingest.md）
+    if crawl_result.success:
+        crawl_result.cleanup()
+
     # 操作全体の所要時間（クロール + Bridge + パイプライン）
     elapsed = time_mod.monotonic() - start_time
 

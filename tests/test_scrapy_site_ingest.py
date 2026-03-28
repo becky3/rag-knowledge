@@ -312,6 +312,156 @@ class TestMcpSiteIngestFlow:
             mock_subprocess.assert_not_called()
 
     @pytest.mark.asyncio
+    async def test_cleanup_on_success(self, tmp_path: Path) -> None:
+        """正常完了時にクロールディレクトリが削除されること."""
+        import json
+
+        from rag.pipeline.ingesters._common import IngestResult
+        from rag.scrapy.bridge import BridgeResult
+        from rag.scrapy.runner import CrawlResult, ScrapyRunner
+
+        crawl_dir = tmp_path / "crawl"
+        crawl_dir.mkdir()
+        (crawl_dir / "dummy.txt").write_text("data", encoding="utf-8")
+
+        jsonl_path = tmp_path / "metadata.jsonl"
+        jsonl_path.write_text(
+            json.dumps({"url": "https://example.com/page", "title": "Test", "status": 200, "depth": 0, "collected_at": "2025-01-01T00:00:00Z", "filepath": "page.html"}) + "\n",
+            encoding="utf-8",
+        )
+
+        mock_crawl_result = CrawlResult(
+            exit_code=0,
+            output_dir=tmp_path,
+            jsonl_path=jsonl_path,
+            success=True,
+            crawl_dir=crawl_dir,
+        )
+
+        mock_bridge_result = BridgeResult(
+            ingest=IngestResult(placed=1, skipped=0, errors=0),
+            total_lines=1,
+            parse_errors=0,
+        )
+
+        mock_controller = MagicMock()
+        mock_controller.source_store = MagicMock()
+
+        mock_cli_result: dict[str, object] = {
+            "type": "result", "mode": "incremental",
+            "total_files": 1, "processed": 1, "skipped": 0, "errors": [], "elapsed": 0.1,
+        }
+
+        mod = import_module("rag.server")
+        with (
+            patch.object(mod, "get_settings", return_value=_make_mock_settings()),
+            patch.object(ScrapyRunner, "run", new_callable=AsyncMock, return_value=mock_crawl_result),
+            patch.object(mod, "_get_pipeline_controller", new_callable=AsyncMock, return_value=mock_controller),
+            patch("rag.scrapy.bridge.import_to_source_store", return_value=mock_bridge_result),
+            patch.object(mod, "_run_cli_subprocess", new_callable=AsyncMock, return_value=mock_cli_result),
+        ):
+            await mod.rag_site_ingest(url="https://example.com", url_pattern="", max_pages=10, force=False)
+            assert not crawl_dir.exists()
+
+    @pytest.mark.asyncio
+    async def test_no_cleanup_on_scrapy_failure(self, tmp_path: Path) -> None:
+        """Scrapy 異常終了時にクロールディレクトリが残ること."""
+        import json
+
+        from rag.pipeline.ingesters._common import IngestResult
+        from rag.scrapy.bridge import BridgeResult
+        from rag.scrapy.runner import CrawlResult, ScrapyRunner
+
+        crawl_dir = tmp_path / "crawl"
+        crawl_dir.mkdir()
+        (crawl_dir / "dummy.txt").write_text("data", encoding="utf-8")
+
+        jsonl_path = tmp_path / "metadata.jsonl"
+        jsonl_path.write_text(
+            json.dumps({"url": "https://example.com/page", "title": "Test", "status": 200, "depth": 0, "collected_at": "2025-01-01T00:00:00Z", "filepath": "page.html"}) + "\n",
+            encoding="utf-8",
+        )
+
+        mock_crawl_result = CrawlResult(
+            exit_code=1,
+            output_dir=tmp_path,
+            jsonl_path=jsonl_path,
+            success=False,
+            crawl_dir=crawl_dir,
+        )
+
+        mock_bridge_result = BridgeResult(
+            ingest=IngestResult(placed=1, skipped=0, errors=0),
+            total_lines=1,
+            parse_errors=0,
+        )
+
+        mock_controller = MagicMock()
+        mock_controller.source_store = MagicMock()
+
+        mock_cli_result: dict[str, object] = {
+            "type": "result", "mode": "incremental",
+            "total_files": 1, "processed": 1, "skipped": 0, "errors": [], "elapsed": 0.1,
+        }
+
+        mod = import_module("rag.server")
+        with (
+            patch.object(mod, "get_settings", return_value=_make_mock_settings()),
+            patch.object(ScrapyRunner, "run", new_callable=AsyncMock, return_value=mock_crawl_result),
+            patch.object(mod, "_get_pipeline_controller", new_callable=AsyncMock, return_value=mock_controller),
+            patch("rag.scrapy.bridge.import_to_source_store", return_value=mock_bridge_result),
+            patch.object(mod, "_run_cli_subprocess", new_callable=AsyncMock, return_value=mock_cli_result),
+        ):
+            await mod.rag_site_ingest(url="https://example.com", url_pattern="", max_pages=10, force=False)
+            assert crawl_dir.exists()
+
+    @pytest.mark.asyncio
+    async def test_cleanup_on_download_only(self, tmp_path: Path) -> None:
+        """download_only 時もクロールディレクトリが削除されること."""
+        import json
+
+        from rag.pipeline.ingesters._common import IngestResult
+        from rag.scrapy.bridge import BridgeResult
+        from rag.scrapy.runner import CrawlResult, ScrapyRunner
+
+        crawl_dir = tmp_path / "crawl"
+        crawl_dir.mkdir()
+        (crawl_dir / "dummy.txt").write_text("data", encoding="utf-8")
+
+        jsonl_path = tmp_path / "metadata.jsonl"
+        jsonl_path.write_text(
+            json.dumps({"url": "https://example.com/page", "title": "Test", "status": 200, "depth": 0, "collected_at": "2025-01-01T00:00:00Z", "filepath": "page.html"}) + "\n",
+            encoding="utf-8",
+        )
+
+        mock_crawl_result = CrawlResult(
+            exit_code=0,
+            output_dir=tmp_path,
+            jsonl_path=jsonl_path,
+            success=True,
+            crawl_dir=crawl_dir,
+        )
+
+        mock_bridge_result = BridgeResult(
+            ingest=IngestResult(placed=1, skipped=0, errors=0),
+            total_lines=1,
+            parse_errors=0,
+        )
+
+        mock_controller = MagicMock()
+        mock_controller.source_store = MagicMock()
+
+        mod = import_module("rag.server")
+        with (
+            patch.object(mod, "get_settings", return_value=_make_mock_settings()),
+            patch.object(ScrapyRunner, "run", new_callable=AsyncMock, return_value=mock_crawl_result),
+            patch.object(mod, "_get_pipeline_controller", new_callable=AsyncMock, return_value=mock_controller),
+            patch("rag.scrapy.bridge.import_to_source_store", return_value=mock_bridge_result),
+        ):
+            await mod.rag_site_ingest(url="https://example.com", url_pattern="", max_pages=10, force=False, download_only=True)
+            assert not crawl_dir.exists()
+
+    @pytest.mark.asyncio
     async def test_partial_result_with_scrapy_failure(self, tmp_path: Path) -> None:
         """Scrapy が非0終了コードでも部分結果が返ること."""
         import json
@@ -589,6 +739,107 @@ class TestCliSiteIngestFlow:
             assert "2件スキップ" in captured.out
             assert "1件エラー" in captured.out
             assert "パイプライン: 5件処理" in captured.out
+
+    @pytest.mark.asyncio
+    async def test_cleanup_on_success(self, tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+        """正常完了時にクロールディレクトリが削除されること."""
+        import json
+
+        from rag.pipeline.ingesters._common import IngestResult
+        from rag.scrapy.bridge import BridgeResult
+        from rag.scrapy.runner import CrawlResult, ScrapyRunner
+
+        crawl_dir = tmp_path / "crawl"
+        crawl_dir.mkdir()
+        (crawl_dir / "dummy.txt").write_text("data", encoding="utf-8")
+
+        jsonl_path = tmp_path / "metadata.jsonl"
+        jsonl_path.write_text(
+            json.dumps({"url": "https://example.com/p", "title": "T", "status": 200, "depth": 0, "collected_at": "2025-01-01T00:00:00Z", "filepath": "p.html"}) + "\n",
+            encoding="utf-8",
+        )
+
+        mock_crawl_result = CrawlResult(
+            exit_code=0,
+            output_dir=tmp_path,
+            jsonl_path=jsonl_path,
+            success=True,
+            crawl_dir=crawl_dir,
+        )
+
+        mock_bridge_result = BridgeResult(
+            ingest=IngestResult(placed=1, skipped=0, errors=0),
+            total_lines=1,
+            parse_errors=0,
+        )
+
+        mock_pipeline_summary = MagicMock()
+        mock_pipeline_summary.processed = 1
+        mock_pipeline_summary.errors = []
+
+        mock_controller = MagicMock()
+        mock_controller.source_store = MagicMock()
+        mock_controller.ingest_and_index.return_value = mock_pipeline_summary
+
+        args = argparse.Namespace(url="https://example.com", url_pattern="", max_pages=10, force=False, download_only=False)
+
+        with (
+            patch.object(ScrapyRunner, "run", new_callable=AsyncMock, return_value=mock_crawl_result),
+            patch("rag.cli._build_cli_pipeline_controller", return_value=(mock_controller, _make_cli_mock_settings())),
+            patch("rag.scrapy.bridge.import_to_source_store", return_value=mock_bridge_result),
+        ):
+            from rag.cli import run_site_ingest
+
+            await run_site_ingest(args)
+            assert not crawl_dir.exists()
+
+    @pytest.mark.asyncio
+    async def test_cleanup_on_download_only(self, tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+        """download_only 時もクロールディレクトリが削除されること."""
+        import json
+
+        from rag.pipeline.ingesters._common import IngestResult
+        from rag.scrapy.bridge import BridgeResult
+        from rag.scrapy.runner import CrawlResult, ScrapyRunner
+
+        crawl_dir = tmp_path / "crawl"
+        crawl_dir.mkdir()
+        (crawl_dir / "dummy.txt").write_text("data", encoding="utf-8")
+
+        jsonl_path = tmp_path / "metadata.jsonl"
+        jsonl_path.write_text(
+            json.dumps({"url": "https://example.com/p", "title": "T", "status": 200, "depth": 0, "collected_at": "2025-01-01T00:00:00Z", "filepath": "p.html"}) + "\n",
+            encoding="utf-8",
+        )
+
+        mock_crawl_result = CrawlResult(
+            exit_code=0,
+            output_dir=tmp_path,
+            jsonl_path=jsonl_path,
+            success=True,
+            crawl_dir=crawl_dir,
+        )
+
+        mock_bridge_result = BridgeResult(
+            ingest=IngestResult(placed=1, skipped=0, errors=0),
+            total_lines=1,
+            parse_errors=0,
+        )
+
+        mock_controller = MagicMock()
+        mock_controller.source_store = MagicMock()
+
+        args = argparse.Namespace(url="https://example.com", url_pattern="", max_pages=10, force=False, download_only=True)
+
+        with (
+            patch.object(ScrapyRunner, "run", new_callable=AsyncMock, return_value=mock_crawl_result),
+            patch("rag.cli._build_cli_pipeline_controller", return_value=(mock_controller, _make_cli_mock_settings())),
+            patch("rag.scrapy.bridge.import_to_source_store", return_value=mock_bridge_result),
+        ):
+            from rag.cli import run_site_ingest
+
+            await run_site_ingest(args)
+            assert not crawl_dir.exists()
 
     @pytest.mark.asyncio
     async def test_no_pipeline_when_zero_placed(self, tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:

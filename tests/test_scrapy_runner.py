@@ -97,6 +97,7 @@ class TestCrawlResult:
         assert result.success is True
         assert result.exit_code == 0
         assert result.stderr_tail == ""
+        assert result.crawl_dir is None
 
     def test_failure_result(self, tmp_path: Path) -> None:
         """異常終了の CrawlResult."""
@@ -110,6 +111,56 @@ class TestCrawlResult:
         assert result.success is False
         assert result.exit_code == 1
         assert result.stderr_tail == "Error occurred"
+
+    def test_crawl_dir_field(self, tmp_path: Path) -> None:
+        """crawl_dir フィールドが設定できること."""
+        crawl_dir = tmp_path / "domain" / "key123"
+        result = CrawlResult(
+            exit_code=0,
+            output_dir=crawl_dir / "html",
+            jsonl_path=crawl_dir / "metadata.jsonl",
+            success=True,
+            crawl_dir=crawl_dir,
+        )
+        assert result.crawl_dir == crawl_dir
+
+    def test_cleanup_deletes_crawl_dir(self, tmp_path: Path) -> None:
+        """cleanup() がクロールディレクトリを削除すること."""
+        domain_dir = tmp_path / "domain"
+        crawl_dir = domain_dir / "key123"
+        crawl_dir.mkdir(parents=True)
+        (crawl_dir / "dummy.txt").write_text("data", encoding="utf-8")
+
+        result = CrawlResult(
+            exit_code=0, output_dir=crawl_dir / "html",
+            jsonl_path=crawl_dir / "metadata.jsonl",
+            success=True, crawl_dir=crawl_dir,
+        )
+        result.cleanup()
+        assert not crawl_dir.exists()
+        # 空の親ディレクトリも削除される
+        assert not domain_dir.exists()
+
+    def test_cleanup_noop_when_crawl_dir_none(self) -> None:
+        """crawl_dir が None の場合 cleanup() は何もしないこと."""
+        result = CrawlResult(
+            exit_code=0, output_dir=Path("/tmp/html"),
+            jsonl_path=Path("/tmp/metadata.jsonl"),
+            success=True, crawl_dir=None,
+        )
+        result.cleanup()  # 例外が発生しないこと
+
+    def test_cleanup_warns_on_oserror(self, tmp_path: Path) -> None:
+        """削除失敗時に警告ログを出力し例外を送出しないこと."""
+        crawl_dir = tmp_path / "domain" / "key123"
+        # crawl_dir を作成しない（rmtree が失敗する）
+        result = CrawlResult(
+            exit_code=0, output_dir=crawl_dir / "html",
+            jsonl_path=crawl_dir / "metadata.jsonl",
+            success=True, crawl_dir=crawl_dir,
+        )
+        # 例外が発生しないこと
+        result.cleanup()
 
 
 # --- _build_spider_script テスト ---
