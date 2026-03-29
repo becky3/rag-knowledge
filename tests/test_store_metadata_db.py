@@ -329,6 +329,78 @@ class TestPipelineHistory:
         """checkpoint が例外なく実行できる."""
         db.checkpoint()
 
+    def test_add_pipeline_history_with_mode(self, db: MetadataDB) -> None:
+        """mode パラメータ付きで履歴を追加できる."""
+        db.add_pipeline_history(
+            from_commit_id=NULL_COMMIT_HASH,
+            to_commit_id="abc",
+            processed_at="2026-01-01T00:00:00Z",
+            mode="index",
+        )
+        history = db.get_pipeline_history()
+        assert len(history) == 1
+        assert history[0].mode == "index"
+
+    def test_add_pipeline_history_default_mode(self, db: MetadataDB) -> None:
+        """mode 未指定時は incremental がデフォルト."""
+        db.add_pipeline_history(
+            from_commit_id=NULL_COMMIT_HASH,
+            to_commit_id="abc",
+            processed_at="2026-01-01T00:00:00Z",
+        )
+        history = db.get_pipeline_history()
+        assert history[0].mode == "incremental"
+
+    def test_needs_index_rebuild_empty_history(self, db: MetadataDB) -> None:
+        """履歴なしの場合 True を返す."""
+        assert db.needs_index_rebuild() is True
+
+    def test_needs_index_rebuild_after_index(self, db: MetadataDB) -> None:
+        """最後が index で以降レコードなしの場合 False を返す."""
+        db.add_pipeline_history(
+            from_commit_id=NULL_COMMIT_HASH,
+            to_commit_id="c1",
+            processed_at="2026-01-01T00:00:00Z",
+            mode="index",
+        )
+        assert db.needs_index_rebuild() is False
+
+    def test_needs_index_rebuild_after_full(self, db: MetadataDB) -> None:
+        """最後が full で以降レコードなしの場合 False を返す."""
+        db.add_pipeline_history(
+            from_commit_id=NULL_COMMIT_HASH,
+            to_commit_id="c1",
+            processed_at="2026-01-01T00:00:00Z",
+            mode="full",
+        )
+        assert db.needs_index_rebuild() is False
+
+    def test_needs_index_rebuild_incremental_after_index(self, db: MetadataDB) -> None:
+        """index 後に incremental がある場合 True を返す."""
+        db.add_pipeline_history(
+            from_commit_id=NULL_COMMIT_HASH,
+            to_commit_id="c1",
+            processed_at="2026-01-01T00:00:00Z",
+            mode="index",
+        )
+        db.add_pipeline_history(
+            from_commit_id="c1",
+            to_commit_id="c2",
+            processed_at="2026-01-02T00:00:00Z",
+            mode="incremental",
+        )
+        assert db.needs_index_rebuild() is True
+
+    def test_needs_index_rebuild_only_incremental(self, db: MetadataDB) -> None:
+        """index/full がなく incremental のみの場合 True を返す."""
+        db.add_pipeline_history(
+            from_commit_id=NULL_COMMIT_HASH,
+            to_commit_id="c1",
+            processed_at="2026-01-01T00:00:00Z",
+            mode="incremental",
+        )
+        assert db.needs_index_rebuild() is True
+
 
 class TestDeleteAllSources:
     """delete_all_sources のテスト."""

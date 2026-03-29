@@ -1328,6 +1328,8 @@ def run_rebuild(args: argparse.Namespace) -> None:
         if json_out:
             _output_error(msg)
         print(f"エラー: {msg}", file=sys.stderr)
+        if if_needed:
+            _show_error_dialog(msg)
         raise SystemExit(1)
 
     has_error = False

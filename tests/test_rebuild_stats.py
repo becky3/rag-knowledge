@@ -13,6 +13,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
+from rag.cli import _format_elapsed
 from rag.pipeline.models import PipelineMode, PipelineSummary
 from rag.server import (
     CLISubprocessError,
@@ -677,3 +678,21 @@ async def test_rag_server_exposes_tools() -> None:
         "rag_list_recent",
     }
     assert tool_names == expected, f"Expected {expected}, got {tool_names}"
+
+
+# --- _format_elapsed テスト ---
+
+
+class TestFormatElapsed:
+    """所要時間の時分秒表記テスト."""
+
+    def test_seconds_only(self) -> None:
+        assert _format_elapsed(3.2) == "3.2 秒"
+        assert _format_elapsed(59.9) == "59.9 秒"
+
+    def test_minutes_and_seconds(self) -> None:
+        assert _format_elapsed(60.0) == "1 分 0.0 秒"
+        assert _format_elapsed(135.5) == "2 分 15.5 秒"
+
+    def test_hours_minutes_seconds(self) -> None:
+        assert _format_elapsed(3930.0) == "1 時間 5 分 30.0 秒"
