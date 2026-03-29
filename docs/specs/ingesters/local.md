@@ -69,7 +69,7 @@ Local インジェスターは、ローカルファイルシステム上のテ�
 | ツール | 入力 | 振る舞い |
 |--------|------|---------|
 | `rag_add_document` | `content`、`filename`、`encoding`（任意）、`upload_mode`（任意） | ファイルコンテンツを受け取り、source_store の `local/` に配置する。`upload_mode=fail`（デフォルト）では当日の配置先に同名ファイルが存在する場合エラーを返す。`upload_mode=replace` では上書きする |
-| `rag_crawl_documents` | `dir_path`、`pattern`（任意） | 指定ディレクトリ内のドキュメントファイルを glob パターンで検索し、一括で source_store の `local/.upload/{date}/` 配下にコピーする。同日・同パスの再取り込み時は上書きする |
+| `rag_crawl_documents` | `dir_path`、`pattern`（任意）、`upload_mode`（任意） | 指定ディレクトリ内のドキュメントファイルを glob パターンで検索し、一括で source_store の `local/.upload/{date}/` 配下にコピーする。`upload_mode=fail`（デフォルト）では同一配置先が既に存在するファイルは warning を出してスキップ（`skipped` に加算）し、`upload_mode=replace` の場合のみ同日・同パスの再取り込み時に上書きする |
 
 #### rag_add_document パラメータ
 
@@ -88,6 +88,7 @@ Local インジェスターは、ローカルファイルシステム上のテ�
 |-----------|-----|------|------|
 | `dir_path` | 文字列 | はい | 取り込み対象ディレクトリのパス（絶対パスまたは相対パス） |
 | `pattern` | 文字列 | いいえ | glob パターン。デフォルト: `**/*`（再帰的に全対応ファイルを検索） |
+| `upload_mode` | 文字列 | いいえ | 同一配置先が存在する場合の動作。`fail`（デフォルト）: スキップして warning ログ出力、`replace`: 上書き |
 
 パターンのバリデーション: `pattern` に `..` が含まれる場合、または絶対パス（`Path(pattern).is_absolute()` で判定。`/` 始まりおよび Windows ドライブレター形式の両方を検出）の場合はバリデーションエラーとして拒否する。加えて、glob マッチ結果の各ファイルを `Path.resolve()` で正規化した後、`dir_path` の配下であることを検証し、配下でないファイルは除外する。
 
@@ -132,7 +133,7 @@ source_store 内の相対パスを source_id として使用する。
 - `/home/user/project-docs/design/arch.md` → `source_store/local/.upload/YYYY/MM/DD/project-docs/design/arch.md`
 - source_id: `local/.upload/YYYY/MM/DD/project-docs/readme.md`、`local/.upload/YYYY/MM/DD/project-docs/design/arch.md`
 
-`.upload/{date}/` プレフィックスにより、手動配置ファイルや異なるディレクトリからの取り込みとのパス衝突を回避する。同一ディレクトリの再取り込み時は、同日であれば上書き、異日であれば別 source_id となる。
+`.upload/{date}/` プレフィックスにより、手動配置ファイルとのパス衝突を回避しつつ、日付が異なる取り込みは別 source_id となる。同一ディレクトリの再取り込み時は、同日であれば上書き、異日であれば別 source_id となる。また、同一日付かつ同じ末尾コンポーネント名（`dir_basename`）を持つ異なるディレクトリを取り込んだ場合は、配置先パスが衝突し、後から取り込んだ内容で上書きされる可能性がある。
 
 #### 手動配置との共存
 
