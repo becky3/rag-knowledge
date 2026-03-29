@@ -69,7 +69,7 @@ Local インジェスターは、ローカルファイルシステム上のテ�
 | ツール | 入力 | 振る舞い |
 |--------|------|---------|
 | `rag_add_document` | `content`、`filename`、`encoding`（任意）、`upload_mode`（任意） | ファイルコンテンツを受け取り、source_store の `local/` に配置する。`upload_mode=fail`（デフォルト）では当日の配置先に同名ファイルが存在する場合エラーを返す。`upload_mode=replace` では上書きする |
-| `rag_crawl_documents` | `dir_path`、`pattern`（任意） | 指定ディレクトリ内のドキュメントファイルを glob パターンで検索し、一括で source_store の `local/` にコピーする。同一パスの再取り込み時は上書きする |
+| `rag_crawl_documents` | `dir_path`、`pattern`（任意） | 指定ディレクトリ内のドキュメントファイルを glob パターンで検索し、一括で source_store の `local/.upload/{date}/` 配下にコピーする。同日・同パスの再取り込み時は上書きする |
 
 #### rag_add_document パラメータ
 
@@ -108,7 +108,7 @@ Local インジェスターは、ローカルファイルシステム上のテ�
 
 source_store 内の相対パスを source_id として使用する。
 
-- 例: `local/resume.pdf`、`local/project-docs/readme.md`
+- 例: `local/.upload/2026/03/29/resume.pdf`、`local/.upload/2026/03/29/project-docs/readme.md`
 - source_id は配置先のパスから自動的に決定される
 
 ### ファイル配置規則
@@ -125,16 +125,18 @@ source_store 内の相対パスを source_id として使用する。
 
 #### ディレクトリ一括（`rag_crawl_documents`）
 
-`dir_path` の末尾コンポーネント名をサブディレクトリとし、ディレクトリ内の相対パス構造を保持して `local/{dir_basename}/{relative_path}` に配置する。
+`rag_add_document` と同じ `.upload/{date}/` 名前空間を使用し、`dir_path` の末尾コンポーネント名をサブディレクトリとして、ディレクトリ内の相対パス構造を保持して `local/.upload/YYYY/MM/DD/{dir_basename}/{relative_path}` に配置する。
 
 - 入力: `dir_path=/home/user/project-docs/`、`pattern=**/*.md`
-- `/home/user/project-docs/readme.md` → `source_store/local/project-docs/readme.md`
-- `/home/user/project-docs/design/arch.md` → `source_store/local/project-docs/design/arch.md`
-- source_id: `local/project-docs/readme.md`、`local/project-docs/design/arch.md`
+- `/home/user/project-docs/readme.md` → `source_store/local/.upload/YYYY/MM/DD/project-docs/readme.md`
+- `/home/user/project-docs/design/arch.md` → `source_store/local/.upload/YYYY/MM/DD/project-docs/design/arch.md`
+- source_id: `local/.upload/YYYY/MM/DD/project-docs/readme.md`、`local/.upload/YYYY/MM/DD/project-docs/design/arch.md`
+
+`.upload/{date}/` プレフィックスにより、手動配置ファイルや異なるディレクトリからの取り込みとのパス衝突を回避する。同一ディレクトリの再取り込み時は、同日であれば上書き、異日であれば別 source_id となる。
 
 #### 手動配置との共存
 
-ユーザーが `source_store/local/` 配下に手動でファイルやフォルダを配置することも可能。手動配置ファイルはパイプライン制御の差分更新で自動的に検出・処理される。MCP ツール経由の配置と手動配置は同じディレクトリ構造を共有する。
+ユーザーが `source_store/local/` 配下に手動でファイルやフォルダを配置することも可能。手動配置ファイルはパイプライン制御の差分更新で自動的に検出・処理される。MCP ツール経由の配置（`local/.upload/` 配下）と手動配置（`local/` 直下の任意パス）は名前空間が分離されているため、パス衝突は発生しない。
 
 ### 重複検出
 
@@ -234,7 +236,7 @@ flowchart TD
     SORT["パスの辞書順でソート"]
     CHECK_LIMIT{"ファイル数上限（100件）超過?"}
     CLAMP["先頭100件にクランプ + 警告ログ"]
-    LOOP["各ファイルを順次 source_store/local/ にコピー"]
+    LOOP["各ファイルを順次 source_store/local/.upload/YYYY/MM/DD/ にコピー"]
     NOTIFY["パイプライン制御に完了通知"]
     RESULT["結果サマリーを返却"]
 
@@ -287,7 +289,7 @@ flowchart TD
 7. 対応拡張子でフィルタする
 8. パスの辞書順でソートする
 9. ファイル数がハードリミット（100 件）を超える場合、先頭 100 件にクランプし警告ログを出力する
-10. 各ファイルを `source_store/local/{dir_basename}/{relative_path}` にコピーする
+10. 各ファイルを `source_store/local/.upload/YYYY/MM/DD/{dir_basename}/{relative_path}` にコピーする
 11. 個別ファイルのコピーエラーは該当ファイルをスキップし、他のファイルの処理を続行する
 12. 全ファイルのコピー完了後、パイプライン制御に取り込み完了を通知する
 13. 結果サマリーを返す（処理ファイル数、スキップ数、エラー数）
