@@ -537,6 +537,19 @@ def main() -> None:
     mj_parser.add_argument("--dir", "-d", required=True, help="ジャーナルディレクトリパス")
     mj_parser.add_argument("--repository", "-r", required=True, help="リポジトリ名")
 
+    # generate-api-key: Upload HTTP API 用の API キー生成
+    genkey_parser = subparsers.add_parser(
+        "generate-api-key", help="Upload HTTP API 用の API キーを生成",
+    )
+    genkey_parser.add_argument(
+        "--save", "-s", action="store_true", default=False,
+        help="生成したキーを keyring に保存する",
+    )
+    genkey_parser.add_argument(
+        "--force", "-f", action="store_true", default=False,
+        help="--save 時に既存キーがある場合、確認なしで上書きする",
+    )
+
     args = parser.parse_args()
 
     # コマンドディスパッチ（sync / async 統一）
@@ -567,6 +580,7 @@ def main() -> None:
         "delete": run_delete,
         "search-aozora": run_search_aozora,
         "migrate-journal": run_migrate_journal,
+        "generate-api-key": run_generate_api_key,
     }
 
     if args.command in _ASYNC_COMMANDS:
@@ -1703,6 +1717,51 @@ def run_migrate_journal(args: argparse.Namespace) -> None:
             )
     finally:
         store.close()
+
+
+def run_generate_api_key(args: argparse.Namespace) -> None:
+    """Upload HTTP API 用の API キーを生成する.
+
+    仕様: docs/specs/infrastructure/upload-auth.md
+    """
+    import secrets
+
+    import keyring
+
+    from .config import UPLOAD_API_KEY_NAME, UPLOAD_API_KEY_SERVICE
+
+    api_key = secrets.token_urlsafe(32)
+
+    if not args.save:
+        print(f"Generated API key: {api_key}")
+        print()
+        print("Usage:")
+        print("  Set the X-API-Key header in your HTTP requests.")
+        print("  To save this key to keyring, re-run with --save option.")
+        return
+
+    # --save: keyring に保存
+    try:
+        existing = keyring.get_password(UPLOAD_API_KEY_SERVICE, UPLOAD_API_KEY_NAME)
+    except Exception as exc:
+        print(f"エラー: keyring へのアクセスに失敗しました: {exc}", file=sys.stderr)
+        raise SystemExit(1)
+
+    if existing is not None and not args.force:
+        print("既存の API キーが keyring に登録されています。")
+        answer = input("上書きしますか？ [y/N]: ").strip().lower()
+        if answer not in ("y", "yes"):
+            print("keyring への保存はキャンセルされました。既存のキーが引き続き有効です。")
+            return
+
+    try:
+        keyring.set_password(UPLOAD_API_KEY_SERVICE, UPLOAD_API_KEY_NAME, api_key)
+    except Exception as exc:
+        print(f"エラー: keyring への保存に失敗しました: {exc}", file=sys.stderr)
+        raise SystemExit(1)
+
+    print(f"Generated API key: {api_key}")
+    print(f"keyring に保存しました (service={UPLOAD_API_KEY_SERVICE}, key={UPLOAD_API_KEY_NAME})")
 
 
 def _format_cli_size(size_bytes: int) -> str:

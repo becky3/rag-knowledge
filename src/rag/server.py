@@ -55,7 +55,7 @@ from .rag_knowledge import format_file_size, format_raw_search_results
 
 with contextlib.redirect_stdout(io.StringIO()):
     from .bm25_index import BM25Index
-    from .config import get_settings
+    from .config import UPLOAD_API_KEY_NAME, UPLOAD_API_KEY_SERVICE, get_settings
     from .embedding.factory import get_embedding_provider
     from .rag_knowledge import (
         RAGKnowledgeService,
@@ -1741,15 +1741,35 @@ async def rag_stats() -> str:
 # --- Upload HTTP API ---
 
 
-async def _check_api_key(request: Request) -> str | None:
-    """API キー認証のプレースホルダー.
+async def _check_api_key(request: Request) -> Response | None:
+    """Upload HTTP API リクエストの API キー認証.
 
-    TODO:#402 認証仕様完成後に実装を差し替える。
-    現時点では常に認証成功として None を返す。
+    仕様: docs/specs/infrastructure/upload-auth.md
 
     Returns:
-        None: 認証成功、str: エラーメッセージ（認証失敗）
+        None: 認証成功、Response: エラーレスポンス（認証失敗 or 内部エラー）
     """
+    import hmac
+
+    from py_common_lib.secrets import SecretNotFoundError, SecretStoreError, get_secret
+
+    header_value = request.headers.get("X-API-Key")
+    if header_value is None:
+        logger.warning("API key header missing")
+        return _upload_error(401, "Authentication required")
+
+    try:
+        stored_key = get_secret(
+            UPLOAD_API_KEY_NAME, service=UPLOAD_API_KEY_SERVICE,
+        )
+    except (SecretNotFoundError, SecretStoreError):
+        logger.exception("Failed to retrieve API key from keyring")
+        return _upload_error(500, "Internal server error")
+
+    if not hmac.compare_digest(header_value, stored_key):
+        logger.warning("Invalid API key")
+        return _upload_error(401, "Authentication required")
+
     return None
 
 
@@ -1865,7 +1885,7 @@ async def upload_document(request: Request) -> Response:
     # 認証チェック
     auth_error = await _check_api_key(request)
     if auth_error is not None:
-        return _upload_error(401, auth_error)
+        return auth_error
 
     sanitized = ""
     try:
@@ -1947,7 +1967,7 @@ async def upload_journal(request: Request) -> Response:
     # 認証チェック
     auth_error = await _check_api_key(request)
     if auth_error is not None:
-        return _upload_error(401, auth_error)
+        return auth_error
 
     title = ""
     repository = ""
@@ -2031,9 +2051,94 @@ async def upload_journal(request: Request) -> Response:
         return _upload_error(500, "インジェスト処理中にエラーが発生しました")
 
 
+def _validate_bind_address(host: str) -> str | None:
+    """HTTP モードのバインドアドレスを検証する.
+
+    仕様: docs/specs/infrastructure/upload-auth.md
+
+    Returns:
+        None: 検証成功、str: エラーメッセージ
+    """
+    import ipaddress
+
+    if host == "0.0.0.0":
+        return (
+            "Binding to 0.0.0.0 is not allowed. "
+            "Use a specific private IP address (e.g., 192.168.x.x) "
+            "for LAN access, or 127.0.0.1 for local access."
+        )
+
+    if host in ("127.0.0.1", "localhost"):
+        return None
+
+    # IP アドレスとして解析して RFC 1918 プライベートアドレスか判定
+    try:
+        addr = ipaddress.ip_address(host)
+    except ValueError:
+        # ホスト名は DNS 解決を行わないため、安全性を判定できない。
+        # パブリックアドレスに解決される可能性があるため、HTTPS 未対応の現状では拒否する。
+        return (
+            f"Binding to hostname {host} may resolve to a public address and "
+            "requires HTTPS. HTTPS support is not yet available (see #449). "
+            "Use 127.0.0.1, localhost, or a private IP address instead."
+        )
+
+    if addr.is_private:
+        return None
+
+    # パブリックアドレス: HTTPS が必要（#449 未実装のため常に拒否）
+    return (
+        f"Binding to public address {host} requires HTTPS. "
+        "HTTPS support is not yet available (see #449). "
+        "Use 127.0.0.1 or a private IP address instead."
+    )
+
+
+def _check_api_key_registered() -> str | None:
+    """keyring に API キーが登録されているか確認する.
+
+    仕様: docs/specs/infrastructure/upload-auth.md
+
+    Returns:
+        None: 登録済み、str: エラーメッセージ
+    """
+    from py_common_lib.secrets import SecretNotFoundError, SecretStoreError, get_secret
+
+    try:
+        key = get_secret(UPLOAD_API_KEY_NAME, service=UPLOAD_API_KEY_SERVICE)
+    except SecretNotFoundError:
+        return (
+            "API key is not registered in keyring. "
+            "Run 'uv run python -m rag.cli generate-api-key --save' first."
+        )
+    except SecretStoreError as exc:
+        return f"Failed to access keyring: {exc}"
+
+    if not key or not key.strip():
+        return (
+            "API key in keyring is empty. "
+            "Run 'uv run python -m rag.cli generate-api-key --save --force' to regenerate."
+        )
+
+    return None
+
+
 def _configure_and_run() -> None:
     """トランスポート設定に基づいて MCP サーバーを起動する."""
     settings = get_settings()
+    transport = settings.rag_transport
+
+    # HTTP モードの事前検証（外部依存の起動前に設定の妥当性を確認する）
+    if transport == "http":
+        bind_error = _validate_bind_address(settings.rag_http_host)
+        if bind_error is not None:
+            logger.error(bind_error)
+            raise SystemExit(1)
+
+        key_error = _check_api_key_registered()
+        if key_error is not None:
+            logger.error(key_error)
+            raise SystemExit(1)
 
     # ChromaDB サーバーの起動確保（グレースフルデグレード: 失敗しても MCP は稼働継続）
     import atexit
@@ -2048,8 +2153,6 @@ def _configure_and_run() -> None:
     )
     chromadb_manager.ensure_server_running()
     atexit.register(chromadb_manager.shutdown)
-
-    transport = settings.rag_transport
 
     if transport == "http":
         mcp.settings.host = settings.rag_http_host
