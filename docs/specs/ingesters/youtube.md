@@ -60,6 +60,16 @@ youtube-transcript-api と yt-dlp はそれぞれ独自の HTTP クライアン�
 - **タイムアウト**: yt-dlp の `socket_timeout` オプションで制御する
 - **サーキットブレーカー**: インジェスター側で連続失敗をカウントし、5 回連続失敗で操作を中断する
 
+### IP ブロックリスク
+
+youtube-transcript-api は非公式 API を使用しており、短時間に多数のリクエストを送ると YouTube に IP をブロックされる場合がある。
+
+- IP ブロックは youtube-transcript-api のみに影響し、yt-dlp（メタデータ取得・音声ダウンロード）は継続動作する
+- ブロックは一時的で、通常は数十分〜数時間で解除される
+- プレイリスト一括取り込み時は `--max-videos` で段階的に取り込む（1 回あたり 10〜20 動画推奨）
+- `rag_youtube_request_interval`（デフォルト: 5.0 秒）を短くしすぎない
+- IP ブロックが発生した場合は時間を置いて再実行する
+
 ### 外部ツール依存
 
 - **FFmpeg**: yt-dlp の音声変換（`FFmpegExtractAudio`）に必要。Whisper フォールバック時に音声を WAV 形式に変換する際に使用する。未インストールの場合、音声文字起こしが失敗する
