@@ -189,9 +189,11 @@ class TestValidateBindAddress:
         assert result is not None
         assert "HTTPS" in result
 
-    def test_hostname_is_allowed(self) -> None:
-        """ホスト名（IP でない文字列）は許可される."""
-        assert _validate_bind_address("myhost.local") is None
+    def test_hostname_is_rejected_without_https(self) -> None:
+        """ホスト名（IP でない文字列）は HTTPS なしで拒否される."""
+        result = _validate_bind_address("myhost.local")
+        assert result is not None
+        assert "HTTPS" in result
 
 
 # --- API キー登録チェックテスト ---
@@ -218,6 +220,24 @@ class TestCheckApiKeyRegistered:
             result = _check_api_key_registered()
             assert result is not None
             assert "generate-api-key" in result
+
+    def test_empty_key_returns_error(self) -> None:
+        """空文字キーならエラーメッセージを返す."""
+        with patch(
+            "py_common_lib.secrets.get_secret", return_value="",
+        ):
+            result = _check_api_key_registered()
+            assert result is not None
+            assert "empty" in result
+
+    def test_whitespace_key_returns_error(self) -> None:
+        """空白のみキーならエラーメッセージを返す."""
+        with patch(
+            "py_common_lib.secrets.get_secret", return_value="   ",
+        ):
+            result = _check_api_key_registered()
+            assert result is not None
+            assert "empty" in result
 
     def test_keyring_error_returns_error(self) -> None:
         """keyring エラーならエラーメッセージを返す."""
@@ -305,7 +325,7 @@ class TestGenerateApiKeyCli:
             run_generate_api_key(args)
 
         captured = capsys.readouterr()
-        assert "Generated API key:" in captured.out
+        assert "Generated API key:" not in captured.out
         assert "キャンセル" in captured.out
         mock_set.assert_not_called()
 

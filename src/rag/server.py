@@ -2075,8 +2075,13 @@ def _validate_bind_address(host: str) -> str | None:
     try:
         addr = ipaddress.ip_address(host)
     except ValueError:
-        # ホスト名の場合は許可（DNS 解決はしない）
-        return None
+        # ホスト名は DNS 解決を行わないため、安全性を判定できない。
+        # パブリックアドレスに解決される可能性があるため、HTTPS 未対応の現状では拒否する。
+        return (
+            f"Binding to hostname {host} may resolve to a public address and "
+            "requires HTTPS. HTTPS support is not yet available (see #449). "
+            "Use 127.0.0.1, localhost, or a private IP address instead."
+        )
 
     if addr.is_private:
         return None
@@ -2100,7 +2105,7 @@ def _check_api_key_registered() -> str | None:
     from py_common_lib.secrets import SecretNotFoundError, SecretStoreError, get_secret
 
     try:
-        get_secret(UPLOAD_API_KEY_NAME, service=UPLOAD_API_KEY_SERVICE)
+        key = get_secret(UPLOAD_API_KEY_NAME, service=UPLOAD_API_KEY_SERVICE)
     except SecretNotFoundError:
         return (
             "API key is not registered in keyring. "
@@ -2109,12 +2114,31 @@ def _check_api_key_registered() -> str | None:
     except SecretStoreError as exc:
         return f"Failed to access keyring: {exc}"
 
+    if not key or not key.strip():
+        return (
+            "API key in keyring is empty. "
+            "Run 'uv run python -m rag.cli generate-api-key --save --force' to regenerate."
+        )
+
     return None
 
 
 def _configure_and_run() -> None:
     """トランスポート設定に基づいて MCP サーバーを起動する."""
     settings = get_settings()
+    transport = settings.rag_transport
+
+    # HTTP モードの事前検証（外部依存の起動前に設定の妥当性を確認する）
+    if transport == "http":
+        bind_error = _validate_bind_address(settings.rag_http_host)
+        if bind_error is not None:
+            logger.error(bind_error)
+            raise SystemExit(1)
+
+        key_error = _check_api_key_registered()
+        if key_error is not None:
+            logger.error(key_error)
+            raise SystemExit(1)
 
     # ChromaDB サーバーの起動確保（グレースフルデグレード: 失敗しても MCP は稼働継続）
     import atexit
@@ -2130,21 +2154,7 @@ def _configure_and_run() -> None:
     chromadb_manager.ensure_server_running()
     atexit.register(chromadb_manager.shutdown)
 
-    transport = settings.rag_transport
-
     if transport == "http":
-        # バインドアドレス検証
-        bind_error = _validate_bind_address(settings.rag_http_host)
-        if bind_error is not None:
-            logger.error(bind_error)
-            raise SystemExit(1)
-
-        # API キー登録チェック
-        key_error = _check_api_key_registered()
-        if key_error is not None:
-            logger.error(key_error)
-            raise SystemExit(1)
-
         mcp.settings.host = settings.rag_http_host
         mcp.settings.port = settings.rag_http_port
         if not settings.rag_dns_rebinding_protection:

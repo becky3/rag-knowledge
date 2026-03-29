@@ -1751,8 +1751,7 @@ def run_generate_api_key(args: argparse.Namespace) -> None:
         print("既存の API キーが keyring に登録されています。")
         answer = input("上書きしますか？ [y/N]: ").strip().lower()
         if answer not in ("y", "yes"):
-            print(f"Generated API key: {api_key}")
-            print("keyring への保存はキャンセルされました。")
+            print("keyring への保存はキャンセルされました。既存のキーが引き続き有効です。")
             return
 
     try:
