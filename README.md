@@ -210,6 +210,7 @@ git-flow ベースのブランチ戦略を採用。詳細は `~/.claude/docs/spe
 - [サイト一括取り込み（Scrapy）](docs/specs/site-ingest.md)
 - [コンテンツ一覧取得](docs/specs/infrastructure/content-listing.md)
 - [コンテンツアップロード](docs/specs/infrastructure/content-upload.md)
+- [Upload HTTP API 認証](docs/specs/infrastructure/upload-auth.md)
 
 ### インジェスター仕様
 
