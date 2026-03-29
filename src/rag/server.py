@@ -150,13 +150,16 @@ def _build_rag_service() -> RAGKnowledgeService:
             embedding_provider=embedding_provider,
             host=settings.chromadb_server_host,
             port=settings.chromadb_server_port,
+            collection_name=settings.chromadb_collection_name,
             hnsw_m=settings.hnsw_m,
             hnsw_construction_ef=settings.hnsw_construction_ef,
             hnsw_search_ef=settings.hnsw_search_ef,
         )
         web_crawler = WebCrawler(
+            timeout=settings.rag_crawl_request_timeout,
             max_pages=settings.rag_max_crawl_pages,
             crawl_delay=settings.rag_crawl_delay_sec,
+            max_concurrent=settings.rag_crawl_max_concurrent,
             respect_robots_txt=settings.rag_respect_robots_txt,
             robots_txt_cache_ttl=settings.rag_robots_txt_cache_ttl,
         )
@@ -1046,7 +1049,11 @@ async def rag_search_aozora(
         検索結果リスト（作品 ID、タイトル、著者名、著作権フラグ）
     """
     controller = await _get_pipeline_controller()
-    aozora_ingester = PipelineAozoraIngester(controller.source_store)
+    settings = get_settings()
+    aozora_ingester = PipelineAozoraIngester(
+        controller.source_store,
+        max_works=settings.rag_aozora_max_works,
+    )
 
     try:
         results = aozora_ingester.search(

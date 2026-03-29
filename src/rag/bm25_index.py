@@ -73,15 +73,15 @@ class BM25Index:
 
     def __init__(
         self,
-        k1: float = 1.5,
-        b: float = 0.75,
-        persist_dir: str | None = None,
+        k1: float,
+        b: float,
+        persist_dir: str | None,
     ) -> None:
         """BM25Indexを初期化する.
 
         Args:
-            k1: 用語頻度の飽和パラメータ（デフォルト: 1.5）
-            b: 文書長の正規化パラメータ（デフォルト: 0.75）
+            k1: 用語頻度の飽和パラメータ
+            b: 文書長の正規化パラメータ
             persist_dir: 永続化ディレクトリ（Noneの場合はインメモリのみ）
         """
         self._k1 = k1

@@ -41,7 +41,7 @@ class ZennIngester:
         self,
         source_store: SourceStore,
         *,
-        max_articles: int = 50,
+        max_articles: int,
     ) -> None:
         self._store = source_store
         self._max_articles = max_articles

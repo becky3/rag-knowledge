@@ -32,12 +32,6 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 UPLOAD_API_KEY_SERVICE = "rag-knowledge"
 UPLOAD_API_KEY_NAME = "UPLOAD_API_KEY"
 
-# LM Studio のデフォルトベースURL（LMStudioEmbedding コンストラクタ用）
-DEFAULT_LMSTUDIO_BASE_URL = "http://localhost:1234"
-
-# デフォルトEmbeddingモデル名（LMStudioEmbedding コンストラクタ用）
-DEFAULT_EMBEDDING_MODEL_LOCAL = "nomic-embed-text"
-
 # プロジェクトルートのパス
 _PROJECT_ROOT = Path(__file__).parent.parent.parent
 _ENV_FILE = _PROJECT_ROOT / ".env"
@@ -155,9 +149,13 @@ class RAGSettings(BaseModel):
         default=None, ge=0.0, le=1.0
     )
 
+    # ChromaDB コレクション名
+    chromadb_collection_name: str
+
     # クロール（範囲外の値は WebCrawler / ConstrainedClient が警告付きでクランプする）
     rag_max_crawl_pages: int = Field(ge=1)
     rag_crawl_delay_sec: float = Field(ge=0)
+    rag_crawl_max_concurrent: int = Field(ge=1)
     rag_crawl_default_depth: int = Field(ge=1, le=10)
     rag_crawl_max_errors: int = Field(ge=5, le=10)
 

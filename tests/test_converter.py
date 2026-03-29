@@ -15,6 +15,7 @@ from unittest.mock import patch
 import pytest
 from bs4 import BeautifulSoup
 
+from factories import make_converter_args
 from rag.converter.converter import (
     ConversionSkippedError,
     Converter,
@@ -980,7 +981,7 @@ class TestConverterConvert:
         source_dir, converted_dir = _setup_source(
             tmp_path, "web/example/page.html", html,
         )
-        converter = Converter()
+        converter = Converter(**make_converter_args())
         result = converter.convert(
             "web/example/page.html", source_dir, converted_dir,
         )
@@ -997,7 +998,7 @@ class TestConverterConvert:
         source_dir, converted_dir = _setup_source(
             tmp_path, "web/example/page.htm", html,
         )
-        converter = Converter()
+        converter = Converter(**make_converter_args())
         result = converter.convert(
             "web/example/page.htm", source_dir, converted_dir,
         )
@@ -1012,7 +1013,7 @@ class TestConverterConvert:
         source_dir, converted_dir = _setup_source(
             tmp_path, "local/notes/memo.md", "# Memo\nContent here.",
         )
-        converter = Converter()
+        converter = Converter(**make_converter_args())
         result = converter.convert(
             "local/notes/memo.md", source_dir, converted_dir,
         )
@@ -1023,7 +1024,7 @@ class TestConverterConvert:
         source_dir, converted_dir = _setup_source(
             tmp_path, "local/note.txt", "Plain text content",
         )
-        converter = Converter()
+        converter = Converter(**make_converter_args())
         result = converter.convert("local/note.txt", source_dir, converted_dir)
         assert result.exists()
         assert result.read_text(encoding="utf-8") == "Plain text content"
@@ -1032,7 +1033,7 @@ class TestConverterConvert:
         source_dir, converted_dir = _setup_source(
             tmp_path, "local/guide.adoc", "= AsciiDoc Title",
         )
-        converter = Converter()
+        converter = Converter(**make_converter_args())
         result = converter.convert("local/guide.adoc", source_dir, converted_dir)
         assert result.exists()
         assert result.read_text(encoding="utf-8") == "= AsciiDoc Title"
@@ -1046,7 +1047,7 @@ class TestConverterConvert:
         source_dir, converted_dir = _setup_source(
             tmp_path, "bluesky/did/2026/03/rkey.json", post_data,
         )
-        converter = Converter()
+        converter = Converter(**make_converter_args())
         result = converter.convert(
             "bluesky/did/2026/03/rkey.json", source_dir, converted_dir,
         )
@@ -1065,7 +1066,7 @@ class TestConverterConvert:
         source_dir, converted_dir = _setup_source(
             tmp_path, "zenn/user/scraps/slug.json", scrap_data,
         )
-        converter = Converter()
+        converter = Converter(**make_converter_args())
         result = converter.convert(
             "zenn/user/scraps/slug.json", source_dir, converted_dir,
         )
@@ -1079,7 +1080,7 @@ class TestConverterConvert:
         source_dir, converted_dir = _setup_source(
             tmp_path, "web/doc/report.pdf", b"%PDF-1.4 dummy",
         )
-        converter = Converter()
+        converter = Converter(**make_converter_args())
         with patch(
             "rag.converter.converter.extract_pdf",
             return_value="# PDF Content\n\nExtracted text.",
@@ -1097,7 +1098,7 @@ class TestConverterConvert:
         source_dir, converted_dir = _setup_source(
             tmp_path, "web/page.html", html,
         )
-        converter = Converter()
+        converter = Converter(**make_converter_args())
         result = converter.convert("web/page.html", source_dir, converted_dir)
         text = result.read_text(encoding="utf-8")
         # 連続空行が圧縮されていること
@@ -1108,7 +1109,7 @@ class TestConverterConvert:
         source_dir, converted_dir = _setup_source(
             tmp_path, "web/deep/nested/page.html", html,
         )
-        converter = Converter()
+        converter = Converter(**make_converter_args())
         result = converter.convert(
             "web/deep/nested/page.html", source_dir, converted_dir,
         )
@@ -1125,7 +1126,7 @@ class TestConverterConvert:
         source_dir, converted_dir = _setup_source(
             tmp_path, "zenn/alice/articles/slug.json", article_data,
         )
-        converter = Converter()
+        converter = Converter(**make_converter_args())
         result = converter.convert(
             "zenn/alice/articles/slug.json", source_dir, converted_dir,
         )
@@ -1155,7 +1156,7 @@ class TestConverterConvert:
         meta_path = source_dir / "zenn" / "alice" / "articles" / "slug.json.meta"
         meta_path.write_text(meta_content, encoding="utf-8")
 
-        converter = Converter()
+        converter = Converter(**make_converter_args())
         result = converter.convert(
             "zenn/alice/articles/slug.json", source_dir, converted_dir,
         )
@@ -1172,7 +1173,7 @@ class TestConverterConvert:
         source_dir, converted_dir = _setup_source(
             tmp_path, "zenn/alice/articles/empty.json", article_data,
         )
-        converter = Converter()
+        converter = Converter(**make_converter_args())
         with pytest.raises(ConversionSkippedError, match="Empty conversion"):
             converter.convert(
                 "zenn/alice/articles/empty.json", source_dir, converted_dir,
@@ -1193,7 +1194,7 @@ class TestZennArticleTitlePrepend:
         source_dir, converted_dir = _setup_source(
             tmp_path, "web/https/example.com/page.html", html,
         )
-        converter = Converter()
+        converter = Converter(**make_converter_args())
         result = converter.convert(
             "web/https/example.com/page.html", source_dir, converted_dir,
         )
@@ -1208,7 +1209,7 @@ class TestZennArticleTitlePrepend:
         source_dir, converted_dir = _setup_source(
             tmp_path, "zenn/alice/scraps/slug.json", scrap_data,
         )
-        converter = Converter()
+        converter = Converter(**make_converter_args())
         result = converter.convert(
             "zenn/alice/scraps/slug.json", source_dir, converted_dir,
         )
@@ -1231,13 +1232,13 @@ class TestConverterDelete:
         converted_file.parent.mkdir(parents=True)
         converted_file.write_text("content", encoding="utf-8")
 
-        converter = Converter()
+        converter = Converter(**make_converter_args())
         converter.delete("web/page.html", converted_dir)
         assert not converted_file.exists()
 
     def test_delete_nonexistent(self, tmp_path: Path) -> None:
         converted_dir = tmp_path / "converted"
-        converter = Converter()
+        converter = Converter(**make_converter_args())
         # Should not raise
         converter.delete("web/page.html", converted_dir)
 
@@ -1257,7 +1258,7 @@ class TestConverterClear:
         (converted_dir / "local" / "doc.md").parent.mkdir(parents=True)
         (converted_dir / "local" / "doc.md").write_text("y", encoding="utf-8")
 
-        converter = Converter()
+        converter = Converter(**make_converter_args())
         converter.clear(converted_dir)
         assert not converted_dir.exists()
 
@@ -1268,13 +1269,13 @@ class TestConverterClear:
         (converted_dir / "local" / "doc.md").parent.mkdir(parents=True)
         (converted_dir / "local" / "doc.md").write_text("y", encoding="utf-8")
 
-        converter = Converter()
+        converter = Converter(**make_converter_args())
         converter.clear(converted_dir, source_type="web")
         assert not (converted_dir / "web").exists()
         assert (converted_dir / "local" / "doc.md").exists()
 
     def test_clear_nonexistent_dir(self, tmp_path: Path) -> None:
-        converter = Converter()
+        converter = Converter(**make_converter_args())
         # Should not raise
         converter.clear(tmp_path / "nonexistent")
 
@@ -1291,7 +1292,7 @@ class TestConverterEdgeCases:
         source_dir = tmp_path / "source_store"
         source_dir.mkdir()
         converted_dir = tmp_path / "converted_store"
-        converter = Converter()
+        converter = Converter(**make_converter_args())
         with pytest.raises(ConversionSkippedError, match="Source not found"):
             converter.convert("web/missing.html", source_dir, converted_dir)
 
@@ -1299,7 +1300,7 @@ class TestConverterEdgeCases:
         source_dir, converted_dir = _setup_source(
             tmp_path, "bluesky/did/post.json", json.dumps([1, 2, 3]),
         )
-        converter = Converter()
+        converter = Converter(**make_converter_args())
         with pytest.raises(ConversionSkippedError, match="Empty conversion"):
             converter.convert("bluesky/did/post.json", source_dir, converted_dir)
 
@@ -1307,7 +1308,7 @@ class TestConverterEdgeCases:
         source_dir, converted_dir = _setup_source(
             tmp_path, "web/empty.html", "",
         )
-        converter = Converter()
+        converter = Converter(**make_converter_args())
         with pytest.raises(ConversionSkippedError, match="0-byte"):
             converter.convert("web/empty.html", source_dir, converted_dir)
 
@@ -1315,7 +1316,7 @@ class TestConverterEdgeCases:
         source_dir, converted_dir = _setup_source(
             tmp_path, "web/file.xyz", "content",
         )
-        converter = Converter()
+        converter = Converter(**make_converter_args())
         with pytest.raises(ConversionSkippedError, match="Unsupported extension"):
             converter.convert("web/file.xyz", source_dir, converted_dir)
 
@@ -1323,7 +1324,7 @@ class TestConverterEdgeCases:
         source_dir, converted_dir = _setup_source(
             tmp_path, "web/page.html.meta", "meta content",
         )
-        converter = Converter()
+        converter = Converter(**make_converter_args())
         with pytest.raises(ConversionSkippedError, match="Meta file"):
             converter.convert("web/page.html.meta", source_dir, converted_dir)
 
@@ -1331,7 +1332,7 @@ class TestConverterEdgeCases:
         source_dir, converted_dir = _setup_source(
             tmp_path, "metadata.db", b"sqlite3",
         )
-        converter = Converter()
+        converter = Converter(**make_converter_args())
         with pytest.raises(ConversionSkippedError, match="Excluded file"):
             converter.convert("metadata.db", source_dir, converted_dir)
 
@@ -1340,7 +1341,7 @@ class TestConverterEdgeCases:
         source_dir, converted_dir = _setup_source(
             tmp_path, "web/empty-content.html", html,
         )
-        converter = Converter()
+        converter = Converter(**make_converter_args())
         with pytest.raises(ConversionSkippedError, match="Empty conversion"):
             converter.convert("web/empty-content.html", source_dir, converted_dir)
 
@@ -1348,7 +1349,7 @@ class TestConverterEdgeCases:
         source_dir, converted_dir = _setup_source(
             tmp_path, "web/empty.pdf", b"%PDF-1.4",
         )
-        converter = Converter()
+        converter = Converter(**make_converter_args())
         with patch(
             "rag.converter.converter.extract_pdf", return_value=None,
         ):
@@ -1360,7 +1361,7 @@ class TestConverterEdgeCases:
         source_dir, converted_dir = _setup_source(
             tmp_path, "local/data.json", data,
         )
-        converter = Converter()
+        converter = Converter(**make_converter_args())
         with pytest.raises(ConversionSkippedError, match="Empty conversion"):
             converter.convert("local/data.json", source_dir, converted_dir)
 
@@ -1376,7 +1377,7 @@ class TestConverterEdgeCases:
         converted_file.parent.mkdir(parents=True)
         converted_file.write_text("old content", encoding="utf-8")
 
-        converter = Converter(regen_option="force")
+        converter = Converter(**make_converter_args(regen_option="force"))
         with pytest.raises(ConversionSkippedError):
             converter.convert(
                 "zenn/user/scraps/slug.json", source_dir, converted_dir,
@@ -1402,7 +1403,7 @@ class TestRegenOptions:
         converted_file.parent.mkdir(parents=True)
         converted_file.write_text("old content", encoding="utf-8")
 
-        converter = Converter(regen_option="skip")
+        converter = Converter(**make_converter_args(regen_option="skip"))
         result = converter.convert("local/doc.md", source_dir, converted_dir)
         # Should return existing, not overwrite
         assert result.read_text(encoding="utf-8") == "old content"
@@ -1420,7 +1421,7 @@ class TestRegenOptions:
         old_time = time.time() - 100
         os.utime(source_file, (old_time, old_time))
 
-        converter = Converter(regen_option="if_modified")
+        converter = Converter(**make_converter_args(regen_option="if_modified"))
         result = converter.convert("local/doc.md", source_dir, converted_dir)
         assert result.read_text(encoding="utf-8") == "converted content"
 
@@ -1436,7 +1437,7 @@ class TestRegenOptions:
         old_time = time.time() - 100
         os.utime(converted_file, (old_time, old_time))
 
-        converter = Converter(regen_option="if_modified")
+        converter = Converter(**make_converter_args(regen_option="if_modified"))
         result = converter.convert("local/doc.md", source_dir, converted_dir)
         assert result.read_text(encoding="utf-8") == "updated content"
 
@@ -1448,7 +1449,7 @@ class TestRegenOptions:
         converted_file.parent.mkdir(parents=True)
         converted_file.write_text("old content", encoding="utf-8")
 
-        converter = Converter(regen_option="force")
+        converter = Converter(**make_converter_args(regen_option="force"))
         result = converter.convert("local/doc.md", source_dir, converted_dir)
         assert result.read_text(encoding="utf-8") == "new content"
 
@@ -1470,7 +1471,7 @@ class TestConvertBatch:
             f.parent.mkdir(parents=True, exist_ok=True)
             f.write_text(f"content of {name}", encoding="utf-8")
 
-        converter = Converter()
+        converter = Converter(**make_converter_args())
         result = converter.convert_batch(
             ["local/a.md", "local/b.md", "local/c.txt"],
             source_dir,
@@ -1494,7 +1495,7 @@ class TestConvertBatch:
         empty.parent.mkdir(parents=True, exist_ok=True)
         empty.write_text("", encoding="utf-8")
 
-        converter = Converter()
+        converter = Converter(**make_converter_args())
         result = converter.convert_batch(
             ["local/doc.md", "web/empty.html"],
             source_dir,
@@ -1511,7 +1512,7 @@ class TestConvertBatch:
         converted_file.parent.mkdir(parents=True)
         converted_file.write_text("old content", encoding="utf-8")
 
-        converter = Converter(regen_option="skip")
+        converter = Converter(**make_converter_args(regen_option="skip"))
         result = converter.convert_batch(
             ["local/doc.md"],
             source_dir,

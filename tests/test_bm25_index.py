@@ -8,7 +8,9 @@ from pathlib import Path
 
 import pytest
 
-from rag.bm25_index import BM25Index, METADATA_FILENAME, tokenize_japanese
+from rag.bm25_index import METADATA_FILENAME, tokenize_japanese
+
+from factories import make_bm25_index
 
 
 class TestTokenizeJapanese:
@@ -48,7 +50,7 @@ class TestBM25Index:
 
     def test_add_and_search_documents(self) -> None:
         """ドキュメントの追加と検索ができる."""
-        index = BM25Index()
+        index = make_bm25_index()
 
         # ドキュメントを追加
         docs = [
@@ -68,7 +70,7 @@ class TestBM25Index:
 
     def test_delete_by_source(self) -> None:
         """ソースURL指定でドキュメントを削除できる."""
-        index = BM25Index()
+        index = make_bm25_index()
 
         docs = [
             ("doc1", "テスト1", "source1", "web"),
@@ -86,13 +88,13 @@ class TestBM25Index:
 
     def test_search_empty_index_returns_empty_list(self) -> None:
         """AC6: 空のインデックスへの検索は空リストを返す."""
-        index = BM25Index()
+        index = make_bm25_index()
         results = index.search("テスト")
         assert results == []
 
     def test_search_with_no_matches_returns_empty_list(self) -> None:
         """AC6: マッチするドキュメントがない場合は空リストを返す."""
-        index = BM25Index()
+        index = make_bm25_index()
         index.add_documents([("doc1", "魔王", "source1", "web")])
 
         # 全く関係ないクエリ
@@ -106,7 +108,7 @@ class TestBM25Index:
 
     def test_update_existing_document(self) -> None:
         """AC6: 既存ドキュメントの更新."""
-        index = BM25Index()
+        index = make_bm25_index()
 
         # 3つ以上のドキュメントを追加（BM25のIDF計算にはN>=3が必要）
         index.add_documents([
@@ -132,7 +134,7 @@ class TestBM25Index:
 
     def test_search_with_source_type_filter(self) -> None:
         """source_type フィルタで指定種別のみ返す."""
-        index = BM25Index()
+        index = make_bm25_index()
         docs = [
             ("doc1", "冒険の旅に出る勇者の物語", "source1", "web"),
             ("doc2", "冒険と魔法の技術記事", "source2", "zenn"),
@@ -161,7 +163,7 @@ class TestBM25Index:
     def test_bm25_parameters(self) -> None:
         """BM25パラメータのカスタマイズ."""
         # カスタムパラメータでインスタンス化
-        index = BM25Index(k1=2.0, b=0.5)
+        index = make_bm25_index(k1=2.0, b=0.5)
 
         # パラメータが設定されている
         assert index._k1 == 2.0
@@ -191,7 +193,7 @@ class TestBM25IndexPersistence:
     def test_save_and_load(self, persist_dir: str) -> None:
         """AC79: save後に新インスタンスでloadし、データ・検索が復元される."""
         # 1. インデックスを作成してドキュメントを追加
-        index = BM25Index(persist_dir=persist_dir)
+        index = make_bm25_index(persist_dir=persist_dir)
         index.add_documents(self._sample_docs())
         assert index.get_document_count() == 4
 
@@ -200,7 +202,7 @@ class TestBM25IndexPersistence:
         assert len(results_before) > 0
 
         # 2. 新しいインスタンスで復元
-        index2 = BM25Index(persist_dir=persist_dir)
+        index2 = make_bm25_index(persist_dir=persist_dir)
         assert index2.get_document_count() == 4
 
         # 検索結果が同じ
@@ -214,7 +216,7 @@ class TestBM25IndexPersistence:
 
     def test_none_dir_means_in_memory(self) -> None:
         """AC80: persist_dir=Noneで従来のインメモリ動作."""
-        index = BM25Index(persist_dir=None)
+        index = make_bm25_index(persist_dir=None)
         index.add_documents(self._sample_docs())
         assert index.get_document_count() == 4
 
@@ -223,7 +225,7 @@ class TestBM25IndexPersistence:
 
     def test_delete_triggers_save(self, persist_dir: str) -> None:
         """AC79: delete後に永続化され、再ロードで反映."""
-        index = BM25Index(persist_dir=persist_dir)
+        index = make_bm25_index(persist_dir=persist_dir)
         index.add_documents(self._sample_docs())
         assert index.get_document_count() == 4
 
@@ -232,7 +234,7 @@ class TestBM25IndexPersistence:
         assert deleted == 1
 
         # 新しいインスタンスで復元
-        index2 = BM25Index(persist_dir=persist_dir)
+        index2 = make_bm25_index(persist_dir=persist_dir)
         assert index2.get_document_count() == 3
         assert index2.get_source_url("doc1") is None
 
@@ -246,7 +248,7 @@ class TestBM25IndexPersistence:
         )
 
         # エラーなく起動、空インデックス
-        index = BM25Index(persist_dir=persist_dir)
+        index = make_bm25_index(persist_dir=persist_dir)
         assert index.get_document_count() == 0
 
     def test_version_mismatch_starts_empty(self, persist_dir: str) -> None:
@@ -264,23 +266,23 @@ class TestBM25IndexPersistence:
         )
 
         # バージョン不一致で空インデックス
-        index = BM25Index(persist_dir=persist_dir)
+        index = make_bm25_index(persist_dir=persist_dir)
         assert index.get_document_count() == 0
 
     def test_empty_index_no_error(self, persist_dir: str) -> None:
         """AC79: 空インデックスのsave/loadがエラーなし."""
         # 空のインデックスを作成（ドキュメント追加なし）
-        index = BM25Index(persist_dir=persist_dir)
+        index = make_bm25_index(persist_dir=persist_dir)
         assert index.get_document_count() == 0
 
         # 空のまま新インスタンスを作成（エラーなし）
-        index2 = BM25Index(persist_dir=persist_dir)
+        index2 = make_bm25_index(persist_dir=persist_dir)
         assert index2.get_document_count() == 0
 
     def test_corrupt_bm25s_model_starts_empty(self, persist_dir: str) -> None:
         """AC81: 正常なメタデータだがbm25sモデルが壊れている場合."""
         # 一度正常に保存
-        index = BM25Index(persist_dir=persist_dir)
+        index = make_bm25_index(persist_dir=persist_dir)
         index.add_documents(self._sample_docs())
         assert index.get_document_count() == 4
 
@@ -290,12 +292,12 @@ class TestBM25IndexPersistence:
             f.write_text("corrupted", encoding="utf-8")
 
         # 空インデックスで起動
-        index2 = BM25Index(persist_dir=persist_dir)
+        index2 = make_bm25_index(persist_dir=persist_dir)
         assert index2.get_document_count() == 0
 
     def test_delete_all_removes_persist_dir(self, persist_dir: str) -> None:
         """AC79: 全ドキュメント削除後に永続化ディレクトリが削除される."""
-        index = BM25Index(persist_dir=persist_dir)
+        index = make_bm25_index(persist_dir=persist_dir)
         index.add_documents(self._sample_docs())
         assert Path(persist_dir).exists()
 
@@ -306,5 +308,5 @@ class TestBM25IndexPersistence:
         assert not Path(persist_dir).exists()
 
         # 空状態で再ロードしてもエラーなし
-        index2 = BM25Index(persist_dir=persist_dir)
+        index2 = make_bm25_index(persist_dir=persist_dir)
         assert index2.get_document_count() == 0

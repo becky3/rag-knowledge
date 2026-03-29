@@ -10,8 +10,9 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 from py_common_lib.secrets import SecretNotFoundError
 
+from factories import make_lmstudio_embedding_args, make_openai_embedding_args
 from settings_defaults import TEST_SETTINGS_DEFAULTS
-from rag.config import DEFAULT_LMSTUDIO_BASE_URL, RAGSettings as Settings
+from rag.config import RAGSettings as Settings
 from rag.embedding.base import EmbeddingProvider
 from rag.embedding.factory import get_embedding_provider
 from rag.embedding.lmstudio_embedding import LMStudioEmbedding
@@ -42,7 +43,7 @@ def test_openai_is_subclass() -> None:
 async def test_lmstudio_embedding_converts_text() -> None:
     """AC2: LMStudioEmbedding が LM Studio 経由でテキストをベクトルに変換できること."""
     provider = LMStudioEmbedding(
-        base_url=DEFAULT_LMSTUDIO_BASE_URL,
+        **make_lmstudio_embedding_args(),
     )
 
     # AsyncOpenAI.embeddings.create をモック
@@ -68,7 +69,7 @@ async def test_lmstudio_embedding_converts_text() -> None:
 @pytest.mark.asyncio
 async def test_lmstudio_embedding_is_available_true() -> None:
     """AC2: LMStudioEmbedding の is_available() が接続成功時に True を返すこと."""
-    provider = LMStudioEmbedding()
+    provider = LMStudioEmbedding(**make_lmstudio_embedding_args())
     provider._client.models.list = AsyncMock(return_value=MagicMock())  # type: ignore[method-assign]
 
     assert await provider.is_available() is True
@@ -77,7 +78,7 @@ async def test_lmstudio_embedding_is_available_true() -> None:
 @pytest.mark.asyncio
 async def test_lmstudio_embedding_is_available_false() -> None:
     """AC2: LMStudioEmbedding の is_available() が接続失敗時に False を返すこと."""
-    provider = LMStudioEmbedding()
+    provider = LMStudioEmbedding(**make_lmstudio_embedding_args())
     provider._client.models.list = AsyncMock(side_effect=Exception("connection refused"))  # type: ignore[method-assign]
 
     assert await provider.is_available() is False
@@ -86,7 +87,7 @@ async def test_lmstudio_embedding_is_available_false() -> None:
 @pytest.mark.asyncio
 async def test_openai_embedding_converts_text() -> None:
     """AC3: OpenAIEmbedding が OpenAI Embeddings API でテキストをベクトルに変換できること."""
-    provider = OpenAIEmbedding(api_key="sk-test", model="text-embedding-3-small")
+    provider = OpenAIEmbedding(**make_openai_embedding_args())
 
     mock_item = MagicMock()
     mock_item.embedding = [0.7, 0.8, 0.9]
@@ -108,10 +109,10 @@ async def test_openai_embedding_converts_text() -> None:
 @pytest.mark.asyncio
 async def test_openai_embedding_is_available() -> None:
     """AC3: OpenAIEmbedding の is_available() が APIキー有無で判定すること."""
-    provider_with_key = OpenAIEmbedding(api_key="sk-test")
+    provider_with_key = OpenAIEmbedding(**make_openai_embedding_args(api_key="sk-test"))
     assert await provider_with_key.is_available() is True
 
-    provider_without_key = OpenAIEmbedding(api_key="")
+    provider_without_key = OpenAIEmbedding(**make_openai_embedding_args(api_key=""))
     assert await provider_without_key.is_available() is False
 
 
@@ -188,19 +189,21 @@ def test_embedding_settings_configurable() -> None:
 
 
 def test_lmstudio_embedding_default_params() -> None:
-    """LMStudioEmbedding のデフォルトパラメータが設定されていること."""
-    provider = LMStudioEmbedding()
+    """LMStudioEmbedding のファクトリデフォルトパラメータが設定されていること."""
+    provider = LMStudioEmbedding(**make_lmstudio_embedding_args())
     assert provider._client.base_url.host == "localhost"
     # base_url にホストのみ指定しても /v1 がコード側で付加される
     assert provider._client.base_url.path == "/v1/"
-    assert provider._model  # デフォルトモデルが設定されていること
+    assert provider._model  # モデルが設定されていること
 
 
 def test_lmstudio_embedding_custom_params() -> None:
     """LMStudioEmbedding のカスタムパラメータが反映されること."""
     provider = LMStudioEmbedding(
-        base_url="http://192.168.1.100:5000",
-        model="custom-embed",
+        **make_lmstudio_embedding_args(
+            base_url="http://192.168.1.100:5000",
+            model="custom-embed",
+        ),
     )
     assert provider._client.base_url.host == "192.168.1.100"
     assert provider._client.base_url.path == "/v1/"
@@ -209,7 +212,7 @@ def test_lmstudio_embedding_custom_params() -> None:
 
 def test_lmstudio_embedding_base_url_with_v1_suffix_no_duplication() -> None:
     """base_url に /v1 が既に含まれている場合、/v1/v1 にならないこと."""
-    provider = LMStudioEmbedding(base_url="http://localhost:1234/v1")
+    provider = LMStudioEmbedding(**make_lmstudio_embedding_args(base_url="http://localhost:1234/v1"))
     assert provider._client.base_url.path == "/v1/"
 
 
@@ -219,7 +222,7 @@ def test_lmstudio_embedding_base_url_with_v1_suffix_no_duplication() -> None:
 @pytest.mark.asyncio
 async def test_embed_documents_default_delegates_to_embed() -> None:
     """embed_documents() がデフォルトで embed() に委譲すること."""
-    provider = LMStudioEmbedding(prefix_enabled=False)
+    provider = LMStudioEmbedding(**make_lmstudio_embedding_args(prefix_enabled=False))
 
     mock_item_1 = MagicMock()
     mock_item_1.embedding = [0.1, 0.2, 0.3]
@@ -238,7 +241,7 @@ async def test_embed_documents_default_delegates_to_embed() -> None:
 @pytest.mark.asyncio
 async def test_embed_query_default_delegates_to_embed() -> None:
     """embed_query() がデフォルトで embed() に委譲し単一ベクトルを返すこと."""
-    provider = LMStudioEmbedding(prefix_enabled=False)
+    provider = LMStudioEmbedding(**make_lmstudio_embedding_args(prefix_enabled=False))
 
     mock_item = MagicMock()
     mock_item.embedding = [0.4, 0.5, 0.6]
@@ -257,7 +260,7 @@ async def test_embed_query_default_delegates_to_embed() -> None:
 @pytest.mark.asyncio
 async def test_prefix_enabled_adds_document_prefix() -> None:
     """prefix_enabled=True で embed_documents() にドキュメントプレフィックスが付加されること."""
-    provider = LMStudioEmbedding(prefix_enabled=True)
+    provider = LMStudioEmbedding(**make_lmstudio_embedding_args(prefix_enabled=True))
 
     mock_item = MagicMock()
     mock_item.embedding = [0.1, 0.2, 0.3]
@@ -275,7 +278,7 @@ async def test_prefix_enabled_adds_document_prefix() -> None:
 @pytest.mark.asyncio
 async def test_prefix_enabled_adds_query_prefix() -> None:
     """prefix_enabled=True で embed_query() にクエリプレフィックスが付加されること."""
-    provider = LMStudioEmbedding(prefix_enabled=True)
+    provider = LMStudioEmbedding(**make_lmstudio_embedding_args(prefix_enabled=True))
 
     mock_item = MagicMock()
     mock_item.embedding = [0.7, 0.8, 0.9]
@@ -293,7 +296,7 @@ async def test_prefix_enabled_adds_query_prefix() -> None:
 @pytest.mark.asyncio
 async def test_prefix_disabled_no_prefix_on_documents() -> None:
     """prefix_enabled=False で embed_documents() にプレフィックスが付かないこと."""
-    provider = LMStudioEmbedding(prefix_enabled=False)
+    provider = LMStudioEmbedding(**make_lmstudio_embedding_args(prefix_enabled=False))
 
     mock_item = MagicMock()
     mock_item.embedding = [0.1, 0.2, 0.3]
@@ -311,7 +314,7 @@ async def test_prefix_disabled_no_prefix_on_documents() -> None:
 @pytest.mark.asyncio
 async def test_openai_embed_documents_delegates_to_embed() -> None:
     """OpenAIEmbedding の embed_documents() がデフォルト実装（embed委譲）で動作すること."""
-    provider = OpenAIEmbedding(api_key="sk-test")
+    provider = OpenAIEmbedding(**make_openai_embedding_args())
 
     mock_item = MagicMock()
     mock_item.embedding = [1.0, 2.0, 3.0]
@@ -326,7 +329,7 @@ async def test_openai_embed_documents_delegates_to_embed() -> None:
 @pytest.mark.asyncio
 async def test_openai_embed_query_delegates_to_embed() -> None:
     """OpenAIEmbedding の embed_query() がデフォルト実装（embed委譲）で動作すること."""
-    provider = OpenAIEmbedding(api_key="sk-test")
+    provider = OpenAIEmbedding(**make_openai_embedding_args())
 
     mock_item = MagicMock()
     mock_item.embedding = [1.0, 2.0, 3.0]

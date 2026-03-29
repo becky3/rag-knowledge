@@ -120,12 +120,12 @@ class SafeBrowsingClient:
     def __init__(
         self,
         api_key: str,
-        timeout: float = 10.0,
-        cache_ttl: float | None = None,
-        client_id: str = "rag-knowledge",
-        client_version: str = "1.0.0",
-        max_cache_size: int | None = None,
-        constrained_client_kwargs: dict[str, Any] | None = None,
+        timeout: float,
+        cache_ttl: float | None,
+        client_id: str,
+        client_version: str,
+        max_cache_size: int | None,
+        constrained_client_kwargs: dict[str, Any] | None,
     ) -> None:
         """SafeBrowsingClient を初期化する.
 
@@ -454,6 +454,9 @@ def create_safe_browsing_client(settings: RAGSettings) -> SafeBrowsingClient | N
         api_key=api_key,
         timeout=settings.rag_url_safety_timeout,
         cache_ttl=cache_ttl,
+        client_id="rag-knowledge",
+        client_version="1.0.0",
+        max_cache_size=None,
         constrained_client_kwargs={
             "request_timeout": settings.rag_url_safety_timeout,
             "max_requests": 10,

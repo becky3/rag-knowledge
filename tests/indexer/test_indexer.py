@@ -10,6 +10,7 @@ from pathlib import Path
 
 import pytest
 
+from factories import make_bm25_index, make_indexer_args, make_vector_store_ephemeral
 from rag.bm25_index import BM25Index
 from rag.embedding.base import EmbeddingProvider
 from rag.indexer.chunk_id import generate_chunk_id
@@ -63,13 +64,13 @@ def mock_embedding() -> MockEmbeddingProvider:
 def vector_store(mock_embedding: MockEmbeddingProvider) -> VectorStore:
     """各テストで独立したインメモリ VectorStore."""
     collection_name = f"test_{uuid.uuid4().hex[:8]}"
-    return VectorStore.create_ephemeral(mock_embedding, collection_name)
+    return make_vector_store_ephemeral(mock_embedding, collection_name=collection_name)
 
 
 @pytest.fixture
 def bm25_index() -> BM25Index:
     """インメモリ BM25 インデックス."""
-    return BM25Index(k1=1.5, b=0.75)
+    return make_bm25_index()
 
 
 @pytest.fixture
@@ -91,8 +92,7 @@ def indexer(
         vector_store=vector_store,
         bm25_index=bm25_index,
         metadata_db=metadata_db,
-        chunk_size=200,
-        chunk_overlap=30,
+        **make_indexer_args(),
     )
 
 
@@ -644,11 +644,12 @@ class TestEmbeddingAvailability:
         """add 時に Embedding プロバイダーが接続不可ならエラーになること."""
         provider = UnavailableEmbeddingProvider()
         collection_name = f"test_{uuid.uuid4().hex[:8]}"
-        vs = VectorStore.create_ephemeral(provider, collection_name)
+        vs = make_vector_store_ephemeral(provider, collection_name=collection_name)
         idx = Indexer(
             vector_store=vs,
             bm25_index=bm25_index,
             metadata_db=metadata_db,
+            **make_indexer_args(),
         )
         path = _write_text_file(tmp_path, "doc.txt", "Some content.")
         meta = _make_metadata(source_id="src-unavail")
@@ -662,11 +663,12 @@ class TestEmbeddingAvailability:
         """update 時に Embedding プロバイダーが接続不可ならエラーになること."""
         provider = UnavailableEmbeddingProvider()
         collection_name = f"test_{uuid.uuid4().hex[:8]}"
-        vs = VectorStore.create_ephemeral(provider, collection_name)
+        vs = make_vector_store_ephemeral(provider, collection_name=collection_name)
         idx = Indexer(
             vector_store=vs,
             bm25_index=bm25_index,
             metadata_db=metadata_db,
+            **make_indexer_args(),
         )
         path = _write_text_file(tmp_path, "doc.txt", "Some content.")
         meta = _make_metadata(source_id="src-unavail-upd")

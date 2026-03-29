@@ -12,6 +12,8 @@ import pytest
 from rag.bm25_index import BM25Index
 from rag.filter_parser import parse_filters
 
+from factories import make_bm25_index
+
 
 class TestParseFilters:
     """parse_filters のテスト."""
@@ -67,7 +69,7 @@ class TestBM25MetadataMap:
 
     def test_add_documents_with_metadata(self) -> None:
         """add_documents に metadata_list を渡すとメタデータが保持される."""
-        index = BM25Index()
+        index = make_bm25_index()
         docs = [
             ("doc1", "テスト文書1", "source1", "journal"),
             ("doc2", "テスト文書2", "source2", "journal"),
@@ -83,7 +85,7 @@ class TestBM25MetadataMap:
 
     def test_add_documents_without_metadata(self) -> None:
         """metadata_list なしでも従来通り動作する."""
-        index = BM25Index()
+        index = make_bm25_index()
         docs = [
             ("doc1", "テスト文書1", "source1", "web"),
         ]
@@ -93,7 +95,7 @@ class TestBM25MetadataMap:
 
     def test_update_document_metadata(self) -> None:
         """既存ドキュメントを更新するとメタデータも更新される."""
-        index = BM25Index()
+        index = make_bm25_index()
         docs = [("doc1", "テスト文書1", "source1", "journal")]
         meta = [{"custom:repository": "repo-a"}]
         index.add_documents(docs, metadata_list=meta)
@@ -107,7 +109,7 @@ class TestBM25MetadataMap:
 
     def test_delete_by_source_cleans_metadata(self) -> None:
         """delete_by_source でメタデータも削除される."""
-        index = BM25Index()
+        index = make_bm25_index()
         docs = [
             ("doc1", "文書1", "source1", "journal"),
             ("doc2", "文書2", "source2", "journal"),
@@ -124,7 +126,7 @@ class TestBM25MetadataMap:
 
     def test_delete_stale_docs_cleans_metadata(self) -> None:
         """delete_stale_docs でメタデータも削除される."""
-        index = BM25Index()
+        index = make_bm25_index()
         docs = [
             ("doc1", "文書1", "source1", "journal"),
             ("doc2", "文書2", "source1", "journal"),
@@ -142,7 +144,7 @@ class TestBM25MetadataMap:
 
     def test_clear_cleans_metadata(self) -> None:
         """clear でメタデータも全削除される."""
-        index = BM25Index()
+        index = make_bm25_index()
         docs = [("doc1", "文書1", "source1", "journal")]
         meta = [{"custom:repository": "repo-a"}]
         index.add_documents(docs, metadata_list=meta)
@@ -157,7 +159,7 @@ class TestBM25SearchWithFilters:
     @pytest.fixture()
     def index_with_metadata(self) -> BM25Index:
         """メタデータ付きドキュメントを持つ BM25Index."""
-        index = BM25Index()
+        index = make_bm25_index()
         docs = [
             ("doc1", "パイプライン移行の作業記録", "source1", "journal"),
             ("doc2", "検索精度の改善に関するメモ", "source2", "journal"),
@@ -207,7 +209,7 @@ class TestBM25SearchWithFilters:
 
     def test_no_metadata_doc_excluded_by_filter(self) -> None:
         """メタデータを持たないドキュメントはフィルタで除外される."""
-        index = BM25Index()
+        index = make_bm25_index()
         docs = [
             ("doc1", "テスト文書", "source1", "web"),
         ]
@@ -301,7 +303,7 @@ class TestBM25MetadataPersistence:
 
     def test_metadata_map_persisted_and_restored(self, persist_dir: str) -> None:
         """_doc_metadata_map が永続化・復元される."""
-        index = BM25Index(persist_dir=persist_dir)
+        index = make_bm25_index(persist_dir=persist_dir)
         docs = [
             ("doc1", "テスト文書", "source1", "journal"),
         ]
@@ -309,12 +311,12 @@ class TestBM25MetadataPersistence:
         index.add_documents(docs, metadata_list=meta)
 
         # 新インスタンスで復元
-        index2 = BM25Index(persist_dir=persist_dir)
+        index2 = make_bm25_index(persist_dir=persist_dir)
         assert index2._doc_metadata_map["doc1"]["custom:repository"] == "rag-knowledge"
 
     def test_filter_works_after_persistence(self, persist_dir: str) -> None:
         """永続化→復元後もフィルタ検索が動作する."""
-        index = BM25Index(persist_dir=persist_dir)
+        index = make_bm25_index(persist_dir=persist_dir)
         docs = [
             ("doc1", "パイプライン移行の作業記録", "source1", "journal"),
             ("doc2", "検索精度の改善メモ", "source2", "journal"),
@@ -326,7 +328,7 @@ class TestBM25MetadataPersistence:
         index.add_documents(docs, metadata_list=meta)
 
         # 永続化→復元
-        index2 = BM25Index(persist_dir=persist_dir)
+        index2 = make_bm25_index(persist_dir=persist_dir)
         results = index2.search(
             "パイプライン", n_results=10,
             filters={"custom:repository": "rag-knowledge"},

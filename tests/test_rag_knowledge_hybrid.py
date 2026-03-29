@@ -14,6 +14,8 @@ from rag.vector_store import RetrievalResult, VectorStore
 from rag.rag_knowledge import RAGKnowledgeService, RAGRetrievalResult
 from rag.web_crawler import CrawledPage, WebCrawler
 
+from factories import make_rag_knowledge_service
+
 
 @pytest.fixture
 def mock_embedding_provider() -> MagicMock:
@@ -63,13 +65,9 @@ def rag_service_vector_only(
     mock_web_crawler: MagicMock,
 ) -> RAGKnowledgeService:
     """ベクトル検索のみのRAGKnowledgeServiceインスタンスを作成する."""
-    return RAGKnowledgeService(
+    return make_rag_knowledge_service(
         vector_store=mock_vector_store,
         web_crawler=mock_web_crawler,
-        chunk_size=200,
-        chunk_overlap=30,
-        similarity_threshold=None,
-        hybrid_search_enabled=False,
     )
 
 
@@ -80,12 +78,9 @@ def rag_service_hybrid(
     mock_bm25_index: MagicMock,
 ) -> RAGKnowledgeService:
     """ハイブリッド検索有効のRAGKnowledgeServiceインスタンスを作成する."""
-    return RAGKnowledgeService(
+    return make_rag_knowledge_service(
         vector_store=mock_vector_store,
         web_crawler=mock_web_crawler,
-        chunk_size=200,
-        chunk_overlap=30,
-        similarity_threshold=None,
         bm25_index=mock_bm25_index,
         hybrid_search_enabled=True,
         vector_weight=0.5,
@@ -126,14 +121,10 @@ class TestHybridSearchDisabled:
     ) -> None:
         """AC9: hybrid_enabled=falseの場合、BM25インデックスが検索に使用されないこと."""
         # Arrange: BM25インデックスを渡すがハイブリッド検索は無効
-        service = RAGKnowledgeService(
+        service = make_rag_knowledge_service(
             vector_store=mock_vector_store,
             web_crawler=mock_web_crawler,
-            chunk_size=200,
-            chunk_overlap=30,
-            similarity_threshold=None,
             bm25_index=mock_bm25_index,
-            hybrid_search_enabled=False,
         )
 
         mock_vector_store.search.return_value = []
@@ -244,11 +235,9 @@ class TestTableDataSearch:
         BM25検索でキーワードマッチにより検索できる。
         """
         # similarity_threshold=0.5 のサービスを作成
-        service = RAGKnowledgeService(
+        service = make_rag_knowledge_service(
             vector_store=mock_vector_store,
             web_crawler=mock_web_crawler,
-            chunk_size=200,
-            chunk_overlap=30,
             similarity_threshold=0.5,
             bm25_index=mock_bm25_index,
             hybrid_search_enabled=True,
@@ -395,12 +384,9 @@ class TestHybridSearchEngineInitialization:
         mock_bm25_index: MagicMock,
     ) -> None:
         """AC9: hybrid_search_enabled=Trueの場合、HybridSearchEngineが初期化されること."""
-        service = RAGKnowledgeService(
+        service = make_rag_knowledge_service(
             vector_store=mock_vector_store,
             web_crawler=mock_web_crawler,
-            chunk_size=200,
-            chunk_overlap=30,
-            similarity_threshold=None,
             bm25_index=mock_bm25_index,
             hybrid_search_enabled=True,
             vector_weight=0.5,
@@ -416,14 +402,10 @@ class TestHybridSearchEngineInitialization:
         mock_bm25_index: MagicMock,
     ) -> None:
         """AC9: hybrid_search_enabled=Falseの場合、HybridSearchEngineは初期化されないこと."""
-        service = RAGKnowledgeService(
+        service = make_rag_knowledge_service(
             vector_store=mock_vector_store,
             web_crawler=mock_web_crawler,
-            chunk_size=200,
-            chunk_overlap=30,
-            similarity_threshold=None,
             bm25_index=mock_bm25_index,
-            hybrid_search_enabled=False,
         )
 
         assert service._hybrid_search_engine is None
@@ -435,13 +417,9 @@ class TestHybridSearchEngineInitialization:
         mock_web_crawler: MagicMock,
     ) -> None:
         """AC9: bm25_indexがNoneの場合、hybrid_enabled=Trueでも初期化されないこと."""
-        service = RAGKnowledgeService(
+        service = make_rag_knowledge_service(
             vector_store=mock_vector_store,
             web_crawler=mock_web_crawler,
-            chunk_size=200,
-            chunk_overlap=30,
-            similarity_threshold=None,
-            bm25_index=None,  # BM25インデックスなし
             hybrid_search_enabled=True,
             vector_weight=0.5,
         )

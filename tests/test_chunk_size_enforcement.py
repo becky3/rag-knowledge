@@ -7,8 +7,8 @@
 from __future__ import annotations
 
 from rag.chunker import chunk_text
-from rag.heading_chunker import chunk_by_headings
-from rag.table_chunker import chunk_table_data
+
+from factories import make_heading_chunks, make_table_chunks
 
 
 class TestProseChunkerSizeEnforcement:
@@ -38,7 +38,7 @@ class TestHeadingChunkerSizeEnforcement:
         """空行なしのコードブロックが max_chunk_size 以内に分割されること."""
         code = "\n".join([f"int var_{i} = {i};" for i in range(100)])
         text = f"# Code Section\n\n{code}"
-        chunks = chunk_by_headings(text, max_chunk_size=200, min_chunk_size=50)
+        chunks = make_heading_chunks(text, max_chunk_size=200, min_chunk_size=50)
         assert len(chunks) > 1
         assert all(len(c.content) <= 200 for c in chunks)
 
@@ -48,7 +48,7 @@ class TestHeadingChunkerSizeEnforcement:
             "# L1\n## L2\n### L3\n#### L4\n##### L5\n###### L6\n"
             + "x" * 500
         )
-        chunks = chunk_by_headings(text, max_chunk_size=200, min_chunk_size=50)
+        chunks = make_heading_chunks(text, max_chunk_size=200, min_chunk_size=50)
         assert all(len(c.content) <= 200 for c in chunks)
 
     def test_single_long_paragraph_split(self) -> None:
@@ -56,21 +56,21 @@ class TestHeadingChunkerSizeEnforcement:
         # 空行なし・改行ありの長いテキスト
         long_para = " ".join(["word"] * 200)
         text = f"# Section\n\n{long_para}"
-        chunks = chunk_by_headings(text, max_chunk_size=100, min_chunk_size=20)
+        chunks = make_heading_chunks(text, max_chunk_size=100, min_chunk_size=20)
         assert len(chunks) > 1
         assert all(len(c.content) <= 100 for c in chunks)
 
     def test_prose_fallback_split(self) -> None:
         """見出しなしテキストで段落超過時に分割されること."""
         long_para = "x" * 500
-        chunks = chunk_by_headings(long_para, max_chunk_size=200, min_chunk_size=50)
+        chunks = make_heading_chunks(long_para, max_chunk_size=200, min_chunk_size=50)
         assert len(chunks) > 1
         assert all(len(c.content) <= 200 for c in chunks)
 
     def test_normal_case_unchanged(self) -> None:
         """通常ケースの動作が変わらないこと."""
         text = "# Title\n\nShort paragraph.\n\n## Section\n\nAnother paragraph."
-        chunks = chunk_by_headings(text, max_chunk_size=500, min_chunk_size=50)
+        chunks = make_heading_chunks(text, max_chunk_size=500, min_chunk_size=50)
         assert len(chunks) == 2
         assert chunks[0].heading == "Title"
         assert chunks[1].heading == "Section"
@@ -82,7 +82,7 @@ class TestTableChunkerSizeEnforcement:
     def test_no_limit_backward_compatible(self) -> None:
         """max_chunk_size=0（デフォルト）で従来動作と互換であること."""
         table = "| name | value |\n|---|---|\n| A | 1 |\n| B | 2 |"
-        chunks = chunk_table_data(table)
+        chunks = make_table_chunks(table)
         assert len(chunks) == 2
         assert chunks[0].entity_name == "A"
 
@@ -92,7 +92,7 @@ class TestTableChunkerSizeEnforcement:
         sep = "|" + "|".join(["---"] * 20) + "|"
         row = "| " + " | ".join([f"long_value_{i}" for i in range(20)]) + " |"
         table = f"{headers}\n{sep}\n{row}"
-        chunks = chunk_table_data(table, max_chunk_size=200)
+        chunks = make_table_chunks(table, max_chunk_size=200)
         assert len(chunks) > 1
         assert all(len(c.content) <= 200 for c in chunks)
         # 全チャンクにエンティティ名が保持されている
@@ -109,12 +109,12 @@ class TestTableChunkerSizeEnforcement:
             "| ItemC | Short description for item C |"
         )
         # 周辺行付きだと超過するサイズに設定
-        chunks_with_context = chunk_table_data(table, row_context_size=1)
+        chunks_with_context = make_table_chunks(table, row_context_size=1)
         max_with = max(len(c.content) for c in chunks_with_context)
 
         # max_chunk_size を周辺行なしなら収まるが周辺行ありだと超過する値に
         limit = max_with - 5
-        chunks = chunk_table_data(table, max_chunk_size=limit)
+        chunks = make_table_chunks(table, max_chunk_size=limit)
         # 分割ではなく周辺行除去で対応される
         assert len(chunks) == 3  # 行数と同じ
 
@@ -129,7 +129,7 @@ class TestTableChunkerLongJapaneseValues:
             "|---|---|---|\n"
             "| ベクトル検索 | " + "あ" * 200 + " | " + "い" * 200 + " |"
         )
-        chunks = chunk_table_data(table, max_chunk_size=300)
+        chunks = make_table_chunks(table, max_chunk_size=300)
         assert all(len(c.content) <= 300 for c in chunks)
 
     def test_single_attribute_exceeds_limit(self) -> None:
@@ -139,6 +139,6 @@ class TestTableChunkerLongJapaneseValues:
             "|---|---|\n"
             "| Item | " + "あ" * 500 + " |"
         )
-        chunks = chunk_table_data(table, max_chunk_size=200)
+        chunks = make_table_chunks(table, max_chunk_size=200)
         assert len(chunks) >= 1
         assert all(len(c.content) <= 200 for c in chunks)

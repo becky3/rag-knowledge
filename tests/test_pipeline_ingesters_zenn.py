@@ -21,9 +21,10 @@ import pytest
 
 from rag.pipeline.ingesters.zenn import (
     MAX_ARTICLES_HARD_LIMIT,
-    ZennIngester,
 )
 from rag.store.source_store import SourceStore
+
+from factories import make_zenn_ingester
 
 
 @pytest.fixture()
@@ -143,7 +144,7 @@ class TestInputValidation:
         self, source_store: SourceStore
     ) -> None:
         """空の username でエラーになること."""
-        ingester = ZennIngester(source_store)
+        ingester = make_zenn_ingester(source_store)
         with pytest.raises(ValueError, match="空"):
             await ingester.crawl_zenn("", client=AsyncMock())
 
@@ -151,7 +152,7 @@ class TestInputValidation:
         self, source_store: SourceStore
     ) -> None:
         """無効な content_type でエラーになること."""
-        ingester = ZennIngester(source_store)
+        ingester = make_zenn_ingester(source_store)
         with pytest.raises(ValueError, match="content_type"):
             await ingester.crawl_zenn(
                 "testuser",
@@ -163,7 +164,7 @@ class TestInputValidation:
         self, source_store: SourceStore
     ) -> None:
         """client 未指定でエラーになること."""
-        ingester = ZennIngester(source_store)
+        ingester = make_zenn_ingester(source_store)
         with pytest.raises(ValueError, match="client"):
             await ingester.crawl_zenn("testuser")
 
@@ -171,7 +172,7 @@ class TestInputValidation:
         self, source_store: SourceStore
     ) -> None:
         """max_articles=0 でエラーになること."""
-        ingester = ZennIngester(source_store)
+        ingester = make_zenn_ingester(source_store)
         with pytest.raises(ValueError, match="1 以上"):
             await ingester.crawl_zenn(
                 "testuser",
@@ -183,7 +184,7 @@ class TestInputValidation:
         self, source_store: SourceStore
     ) -> None:
         """max_articles が負数でエラーになること."""
-        ingester = ZennIngester(source_store)
+        ingester = make_zenn_ingester(source_store)
         with pytest.raises(ValueError, match="1 以上"):
             await ingester.crawl_zenn(
                 "testuser",
@@ -195,7 +196,7 @@ class TestInputValidation:
         self, source_store: SourceStore
     ) -> None:
         """max_articles に bool でエラーになること."""
-        ingester = ZennIngester(source_store)
+        ingester = make_zenn_ingester(source_store)
         with pytest.raises(TypeError, match="整数"):
             await ingester.crawl_zenn(
                 "testuser",
@@ -209,7 +210,7 @@ class TestInputValidation:
         """max_articles がハードリミットにクランプされること."""
         # articles=[] でリクエストなし
         client = _make_mock_client([{"articles": [], "next_page": None}])
-        ingester = ZennIngester(source_store)
+        ingester = make_zenn_ingester(source_store)
         result = await ingester.crawl_zenn(
             "testuser",
             max_articles=MAX_ARTICLES_HARD_LIMIT + 50,
@@ -231,7 +232,7 @@ class TestCrawlArticles:
             _make_article_detail_response("test-article"),
         ])
 
-        ingester = ZennIngester(source_store, max_articles=3)
+        ingester = make_zenn_ingester(source_store, max_articles=3)
         result = await ingester.crawl_zenn(
             "testuser",
             content_type="articles",
@@ -260,7 +261,7 @@ class TestCrawlArticles:
             empty_response,
         ])
 
-        ingester = ZennIngester(source_store, max_articles=3)
+        ingester = make_zenn_ingester(source_store, max_articles=3)
         result = await ingester.crawl_zenn(
             "testuser",
             content_type="articles",
@@ -279,7 +280,7 @@ class TestCrawlArticles:
             _make_article_detail_response("test-article"),
         ])
 
-        ingester = ZennIngester(source_store, max_articles=3)
+        ingester = make_zenn_ingester(source_store, max_articles=3)
         await ingester.crawl_zenn(
             "testuser",
             content_type="articles",
@@ -319,7 +320,7 @@ class TestCrawlScraps:
             _make_scrap_detail_response("test-scrap"),
         ])
 
-        ingester = ZennIngester(source_store, max_articles=3)
+        ingester = make_zenn_ingester(source_store, max_articles=3)
         result = await ingester.crawl_zenn(
             "testuser",
             content_type="scraps",
@@ -346,7 +347,7 @@ class TestCrawlScraps:
             _make_scrap_detail_response("test-scrap"),
         ])
 
-        ingester = ZennIngester(source_store, max_articles=3)
+        ingester = make_zenn_ingester(source_store, max_articles=3)
         await ingester.crawl_zenn(
             "testuser",
             content_type="scraps",
@@ -391,7 +392,7 @@ class TestCrawlAll:
             _make_scrap_detail_response("scr1"),
         ])
 
-        ingester = ZennIngester(source_store, max_articles=3)
+        ingester = make_zenn_ingester(source_store, max_articles=3)
         result = await ingester.crawl_zenn(
             "testuser",
             content_type="all",
@@ -406,7 +407,7 @@ class TestCrawlAll:
             {"articles": [], "next_page": None},
         ])
 
-        ingester = ZennIngester(source_store, max_articles=3)
+        ingester = make_zenn_ingester(source_store, max_articles=3)
         result = await ingester.crawl_zenn(
             "testuser",
             content_type="articles",
@@ -433,7 +434,7 @@ class TestSkipMode:
             _make_article_list_response(["existing"]),
         ])
 
-        ingester = ZennIngester(source_store, max_articles=3)
+        ingester = make_zenn_ingester(source_store, max_articles=3)
         result = await ingester.crawl_zenn(
             "testuser",
             content_type="articles",
@@ -455,7 +456,7 @@ class TestSkipMode:
             _make_scrap_list_response(["existing"]),
         ])
 
-        ingester = ZennIngester(source_store, max_articles=3)
+        ingester = make_zenn_ingester(source_store, max_articles=3)
         result = await ingester.crawl_zenn(
             "testuser",
             content_type="scraps",
@@ -477,7 +478,7 @@ class TestSkipMode:
             _make_article_detail_response("existing"),
         ])
 
-        ingester = ZennIngester(source_store, max_articles=3)
+        ingester = make_zenn_ingester(source_store, max_articles=3)
         result = await ingester.crawl_zenn(
             "testuser",
             content_type="articles",
@@ -503,7 +504,7 @@ class TestSkipMode:
             _make_scrap_detail_response("existing"),
         ])
 
-        ingester = ZennIngester(source_store, max_articles=3)
+        ingester = make_zenn_ingester(source_store, max_articles=3)
         result = await ingester.crawl_zenn(
             "testuser",
             content_type="scraps",
@@ -528,7 +529,7 @@ class TestSkipMode:
             _make_article_detail_response("new-article"),
         ])
 
-        ingester = ZennIngester(source_store, max_articles=3)
+        ingester = make_zenn_ingester(source_store, max_articles=3)
         result = await ingester.crawl_zenn(
             "testuser",
             content_type="articles",

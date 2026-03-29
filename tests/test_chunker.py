@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import pytest
 
+from factories import make_chunker_args
 from rag.chunker import chunk_text
 
 
@@ -16,7 +17,7 @@ class TestAC5ChunkTextSplitsBySize:
     def test_short_text_returns_single_chunk(self) -> None:
         """短いテキストは1つのチャンクとして返される."""
         text = "これは短いテキストです。"
-        result = chunk_text(text, chunk_size=500)
+        result = chunk_text(text, **make_chunker_args(chunk_size=500))
         assert result == [text]
 
     def test_long_text_is_split_into_multiple_chunks(self) -> None:
@@ -85,23 +86,23 @@ class TestAC7EmptyAndShortText:
 
     def test_empty_string_returns_empty_list(self) -> None:
         """空文字列は空のリストを返す."""
-        result = chunk_text("")
+        result = chunk_text("", **make_chunker_args())
         assert result == []
 
     def test_whitespace_only_returns_empty_list(self) -> None:
         """空白のみの文字列は空のリストを返す."""
-        result = chunk_text("   \n\t  ")
+        result = chunk_text("   \n\t  ", **make_chunker_args())
         assert result == []
 
     def test_single_character_returns_single_chunk(self) -> None:
         """1文字のテキストは1つのチャンクとして返される."""
-        result = chunk_text("A")
+        result = chunk_text("A", **make_chunker_args())
         assert result == ["A"]
 
     def test_text_exactly_chunk_size_returns_single_chunk(self) -> None:
         """ちょうどchunk_sizeのテキストは1つのチャンクとして返される."""
         text = "A" * 100
-        result = chunk_text(text, chunk_size=100)
+        result = chunk_text(text, **make_chunker_args(chunk_size=100))
         assert result == [text]
 
     def test_text_slightly_over_chunk_size(self) -> None:
@@ -124,7 +125,7 @@ class TestChunkTextEdgeCases:
     def test_multiple_blank_lines(self) -> None:
         """複数の空行がある場合も正しく段落分割される."""
         text = "段落1\n\n\n\n段落2\n\n段落3"
-        result = chunk_text(text, chunk_size=500)
+        result = chunk_text(text, **make_chunker_args(chunk_size=500))
         assert len(result) >= 1
 
     def test_no_sentence_delimiters(self) -> None:
@@ -139,10 +140,10 @@ class TestChunkTextEdgeCases:
         result = chunk_text(text, chunk_size=30, chunk_overlap=5)
         assert len(result) >= 1
 
-    def test_default_parameters(self) -> None:
-        """デフォルトパラメータ（chunk_size=500, chunk_overlap=50）での動作."""
+    def test_factory_default_parameters(self) -> None:
+        """ファクトリデフォルトパラメータ（chunk_size=500, chunk_overlap=50）での動作."""
         text = "テスト" * 200  # 600文字
-        result = chunk_text(text)
+        result = chunk_text(text, **make_chunker_args())
         assert len(result) >= 1
 
     def test_zero_overlap(self) -> None:
@@ -164,12 +165,12 @@ class TestChunkTextValidation:
     def test_chunk_size_zero_raises_value_error(self) -> None:
         """chunk_size=0でValueErrorが発生する."""
         with pytest.raises(ValueError, match="chunk_size must be positive"):
-            chunk_text("テスト", chunk_size=0)
+            chunk_text("テスト", chunk_size=0, chunk_overlap=0)
 
     def test_chunk_size_negative_raises_value_error(self) -> None:
         """chunk_sizeが負数でValueErrorが発生する."""
         with pytest.raises(ValueError, match="chunk_size must be positive"):
-            chunk_text("テスト", chunk_size=-10)
+            chunk_text("テスト", chunk_size=-10, chunk_overlap=0)
 
     def test_chunk_overlap_negative_raises_value_error(self) -> None:
         """chunk_overlapが負数でValueErrorが発生する."""

@@ -64,6 +64,7 @@ def build_pipeline_controller(
             embedding_provider=embedding_provider,
             host=settings.chromadb_server_host,
             port=settings.chromadb_server_port,
+            collection_name=settings.chromadb_collection_name,
             hnsw_m=settings.hnsw_m,
             hnsw_construction_ef=settings.hnsw_construction_ef,
             hnsw_search_ef=settings.hnsw_search_ef,

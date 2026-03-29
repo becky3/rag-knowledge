@@ -633,13 +633,21 @@ async def create_rag_service(
     vector_store = VectorStore(
         embedding_provider=embedding_provider,
         persist_directory=persist_dir,
+        collection_name=settings.chromadb_collection_name,
         hnsw_m=settings.hnsw_m,
         hnsw_construction_ef=settings.hnsw_construction_ef,
         hnsw_search_ef=settings.hnsw_search_ef,
     )
 
     # WebCrawlerはダミー（評価時は使用しない）
-    web_crawler = WebCrawler()
+    web_crawler = WebCrawler(
+        timeout=settings.rag_crawl_request_timeout,
+        max_pages=settings.rag_max_crawl_pages,
+        crawl_delay=settings.rag_crawl_delay_sec,
+        max_concurrent=settings.rag_crawl_max_concurrent,
+        respect_robots_txt=settings.rag_respect_robots_txt,
+        robots_txt_cache_ttl=settings.rag_robots_txt_cache_ttl,
+    )
 
     return RAGKnowledgeService(
         vector_store=vector_store,
@@ -647,10 +655,12 @@ async def create_rag_service(
         chunk_size=chunk_size,
         chunk_overlap=chunk_overlap,
         similarity_threshold=threshold,
+        safe_browsing_client=None,
         bm25_index=bm25_index,
         hybrid_search_enabled=bm25_index is not None,
         vector_weight=vector_weight,
         min_combined_score=min_combined_score,
+        debug_log_enabled=settings.rag_debug_log_enabled,
     )
 
 
@@ -1141,6 +1151,7 @@ async def run_crawl_preview(args: argparse.Namespace) -> None:
         crawl_max_errors=settings.rag_crawl_max_errors,
         respect_robots_txt=settings.rag_respect_robots_txt,
         robots_txt_cache_ttl=settings.rag_robots_txt_cache_ttl,
+        safe_browsing_client=None,
     )
 
     try:
@@ -1517,6 +1528,7 @@ def run_stats(args: argparse.Namespace) -> None:
                 embedding_provider=embedding_provider,
                 host=settings.chromadb_server_host,
                 port=settings.chromadb_server_port,
+                collection_name=settings.chromadb_collection_name,
                 hnsw_m=settings.hnsw_m,
                 hnsw_construction_ef=settings.hnsw_construction_ef,
                 hnsw_search_ef=settings.hnsw_search_ef,
@@ -1605,6 +1617,7 @@ def run_search(args: argparse.Namespace) -> None:
             embedding_provider=embedding_provider,
             host=settings.chromadb_server_host,
             port=settings.chromadb_server_port,
+            collection_name=settings.chromadb_collection_name,
             hnsw_m=settings.hnsw_m,
             hnsw_construction_ef=settings.hnsw_construction_ef,
             hnsw_search_ef=settings.hnsw_search_ef,
@@ -1617,13 +1630,23 @@ def run_search(args: argparse.Namespace) -> None:
 
     service = RAGKnowledgeService(
         vector_store=vector_store,
-        web_crawler=WebCrawler(),
+        web_crawler=WebCrawler(
+            timeout=settings.rag_crawl_request_timeout,
+            max_pages=settings.rag_max_crawl_pages,
+            crawl_delay=settings.rag_crawl_delay_sec,
+            max_concurrent=settings.rag_crawl_max_concurrent,
+            respect_robots_txt=settings.rag_respect_robots_txt,
+            robots_txt_cache_ttl=settings.rag_robots_txt_cache_ttl,
+        ),
         chunk_size=settings.rag_chunk_size,
         chunk_overlap=settings.rag_chunk_overlap,
         similarity_threshold=None,
+        safe_browsing_client=None,
         bm25_index=bm25_index,
         hybrid_search_enabled=True,
         vector_weight=settings.rag_vector_weight,
+        min_combined_score=settings.rag_min_combined_score,
+        debug_log_enabled=settings.rag_debug_log_enabled,
     )
 
     n_results = args.n_results if args.n_results is not None else settings.rag_retrieval_count
@@ -1918,6 +1941,7 @@ def _build_cli_pipeline_controller() -> tuple[
             embedding_provider=embedding_provider,
             host=settings.chromadb_server_host,
             port=settings.chromadb_server_port,
+            collection_name=settings.chromadb_collection_name,
             hnsw_m=settings.hnsw_m,
             hnsw_construction_ef=settings.hnsw_construction_ef,
             hnsw_search_ef=settings.hnsw_search_ef,
@@ -1996,6 +2020,7 @@ async def run_add(args: argparse.Namespace) -> None:
         controller.source_store,
         max_crawl_pages=settings.rag_max_crawl_pages,
         crawl_request_timeout=settings.rag_crawl_request_timeout,
+        crawl_max_errors=settings.rag_crawl_max_errors,
         respect_robots_txt=settings.rag_respect_robots_txt,
         robots_txt_cache_ttl=settings.rag_robots_txt_cache_ttl,
         safe_browsing_client=sb_client,
@@ -2422,6 +2447,8 @@ async def run_add_document(args: argparse.Namespace) -> None:
         local_ingester = LocalIngester(
             controller.source_store,
             supported_extensions=supported_extensions,
+            http_mode_enabled=False,
+            allowed_dirs=None,
         )
 
         try:
@@ -2469,6 +2496,8 @@ async def run_crawl_documents(args: argparse.Namespace) -> None:
     local_ingester = LocalIngester(
         controller.source_store,
         supported_extensions=supported_extensions,
+        http_mode_enabled=False,
+        allowed_dirs=None,
     )
 
     ingest_result = local_ingester.crawl_documents(
@@ -2614,7 +2643,10 @@ async def run_update_aozora_catalog(args: argparse.Namespace) -> None:
 
     controller, settings = _build_cli_pipeline_controller()
 
-    aozora_ingester = AozoraIngester(controller.source_store)
+    aozora_ingester = AozoraIngester(
+        controller.source_store,
+        max_works=settings.rag_aozora_max_works,
+    )
 
     try:
         async with ConstrainedClient(
@@ -2641,9 +2673,12 @@ def run_search_aozora(args: argparse.Namespace) -> None:
     """青空文庫カタログ検索."""
     from .pipeline.ingesters.aozora import AozoraIngester
 
-    controller, _settings = _build_cli_pipeline_controller()
+    controller, settings = _build_cli_pipeline_controller()
 
-    aozora_ingester = AozoraIngester(controller.source_store)
+    aozora_ingester = AozoraIngester(
+        controller.source_store,
+        max_works=settings.rag_aozora_max_works,
+    )
 
     try:
         results = aozora_ingester.search(
@@ -2677,7 +2712,10 @@ async def run_ingest_aozora(args: argparse.Namespace) -> None:
 
     controller, settings = _build_cli_pipeline_controller()
 
-    aozora_ingester = AozoraIngester(controller.source_store)
+    aozora_ingester = AozoraIngester(
+        controller.source_store,
+        max_works=settings.rag_aozora_max_works,
+    )
 
     try:
         async with ConstrainedClient(

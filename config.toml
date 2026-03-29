@@ -18,6 +18,9 @@ rag_worst_token_char_ratio = 0.7
 rag_retrieval_count = 3
 # rag_similarity_threshold = (未設定時は None)
 
+# ChromaDB コレクション名
+chromadb_collection_name = "knowledge"
+
 # ハイブリッド検索（ベクトル検索 + BM25 の併用。運用環境で有効化済み）
 rag_hybrid_search_enabled = true
 rag_vector_weight = 0.90
@@ -28,6 +31,7 @@ rag_bm25_b = 0.50
 # クロール
 rag_max_crawl_pages = 500
 rag_crawl_delay_sec = 0.1
+rag_crawl_max_concurrent = 5
 rag_crawl_default_depth = 1
 rag_crawl_max_errors = 5
 

@@ -16,6 +16,8 @@ from rag.hybrid_search import (
 )
 from rag.vector_store import RetrievalResult
 
+from factories import make_hybrid_search_engine
+
 
 class TestMinMaxNormalize:
     """min_max_normalize関数のテスト."""
@@ -176,7 +178,7 @@ class TestHybridSearchEngine:
         self, mock_vector_store: MagicMock, mock_bm25_index: MagicMock
     ) -> HybridSearchEngine:
         """HybridSearchEngineインスタンス."""
-        return HybridSearchEngine(
+        return make_hybrid_search_engine(
             vector_store=mock_vector_store,
             bm25_index=mock_bm25_index,
             vector_weight=0.5,
@@ -288,7 +290,7 @@ class TestHybridSearchEngine:
         mock_bm25_index.search.return_value = []
 
         # vector_weight=0.8 の場合
-        engine_high = HybridSearchEngine(
+        engine_high = make_hybrid_search_engine(
             vector_store=mock_vector_store,
             bm25_index=mock_bm25_index,
             vector_weight=0.8,
@@ -296,7 +298,7 @@ class TestHybridSearchEngine:
         results_high = await engine_high.search("テスト", n_results=5)
 
         # vector_weight=0.2 の場合
-        engine_low = HybridSearchEngine(
+        engine_low = make_hybrid_search_engine(
             vector_store=mock_vector_store,
             bm25_index=mock_bm25_index,
             vector_weight=0.2,

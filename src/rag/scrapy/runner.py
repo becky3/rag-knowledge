@@ -82,11 +82,11 @@ class ScrapyRunner:
         self,
         *,
         temp_dir: str | Path,
-        delay_sec: float = 0.1,
-        max_pages: int = 10000,
-        download_timeout: int = 30,
-        timeout_sec: float = 0.0,
-        error_count: int = 0,
+        delay_sec: float,
+        max_pages: int,
+        download_timeout: int,
+        timeout_sec: float,
+        error_count: int,
     ) -> None:
         self._temp_dir = Path(temp_dir)
         self._delay_sec = delay_sec

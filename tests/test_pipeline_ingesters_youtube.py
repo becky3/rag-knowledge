@@ -24,11 +24,12 @@ import pytest
 from rag.pipeline.ingesters._common import IngestResult
 from rag.pipeline.ingesters.youtube import (
     MAX_VIDEOS_HARD_LIMIT,
-    YoutubeIngester,
     _validate_max_videos,
     extract_playlist_id,
     extract_video_id,
 )
+
+from factories import make_youtube_ingester
 
 
 # --- URL パーステスト ---
@@ -145,7 +146,7 @@ class TestIngestVideo:
     @pytest.mark.asyncio()
     async def test_successful_subtitle_ingest(self, source_store: Any) -> None:
         """字幕取得成功時に place_file が正しく呼ばれることを検証する."""
-        ingester = YoutubeIngester(source_store, max_duration=14400)
+        ingester = make_youtube_ingester(source_store, max_duration=14400)
 
         metadata = _make_metadata()
         snippets = _make_snippets()
@@ -184,7 +185,7 @@ class TestIngestVideo:
     @pytest.mark.asyncio()
     async def test_duration_exceeded_skipped(self, source_store: Any) -> None:
         """動画長上限超過時にスキップされることを検証する."""
-        ingester = YoutubeIngester(source_store, max_duration=60)
+        ingester = make_youtube_ingester(source_store, max_duration=60)
 
         metadata = _make_metadata(duration=3600)
 
@@ -197,7 +198,7 @@ class TestIngestVideo:
     @pytest.mark.asyncio()
     async def test_metadata_error_handled(self, source_store: Any) -> None:
         """メタデータ取得失敗時のエラーハンドリングを検証する."""
-        ingester = YoutubeIngester(source_store)
+        ingester = make_youtube_ingester(source_store)
 
         with patch.object(
             ingester,
@@ -213,7 +214,7 @@ class TestIngestVideo:
     @pytest.mark.asyncio()
     async def test_missing_channel_id_causes_error(self, source_store: Any) -> None:
         """channel_id が取得できない場合にエラーになることを検証する."""
-        ingester = YoutubeIngester(source_store)
+        ingester = make_youtube_ingester(source_store)
 
         metadata = _make_metadata()
         metadata["channel_id"] = None
@@ -228,7 +229,7 @@ class TestIngestVideo:
     @pytest.mark.asyncio()
     async def test_whisper_model_recorded(self, source_store: Any) -> None:
         """Whisper 使用時に whisper_model が JSON に記録されることを検証する."""
-        ingester = YoutubeIngester(source_store, whisper_model="base")
+        ingester = make_youtube_ingester(source_store, whisper_model="base")
 
         metadata = _make_metadata()
         snippets = _make_snippets()
@@ -253,7 +254,7 @@ class TestIngestVideo:
     @pytest.mark.asyncio()
     async def test_overwritten_count_on_reingest(self, source_store: Any) -> None:
         """同一動画を 2 回取り込んだ時に overwritten がカウントされることを検証する."""
-        ingester = YoutubeIngester(source_store, max_duration=14400)
+        ingester = make_youtube_ingester(source_store, max_duration=14400)
 
         metadata = _make_metadata()
         snippets = _make_snippets()
@@ -289,7 +290,7 @@ class TestIngestVideo:
         _fetch_transcript 内の例外フィルタリング（TranscriptsDisabled/NoTranscriptFound のみ
         Whisper フォールバック）が正しく動作することを検証する。
         """
-        ingester = YoutubeIngester(source_store, max_duration=14400)
+        ingester = make_youtube_ingester(source_store, max_duration=14400)
         metadata = _make_metadata()
 
         from youtube_transcript_api import RequestBlocked
@@ -314,7 +315,7 @@ class TestIngestVideo:
         """TranscriptsDisabled では Whisper フォールバックが発動することを検証する."""
         from youtube_transcript_api import TranscriptsDisabled
 
-        ingester = YoutubeIngester(source_store, max_duration=14400)
+        ingester = make_youtube_ingester(source_store, max_duration=14400)
         metadata = _make_metadata()
         snippets = _make_snippets()
 
@@ -346,7 +347,7 @@ class TestRequestIntervalClamp:
         from unittest.mock import MagicMock
 
         store = MagicMock()
-        ingester = YoutubeIngester(store, request_interval=0.01)
+        ingester = make_youtube_ingester(store, request_interval=0.01)
         assert ingester._request_interval == MIN_REQUEST_INTERVAL
 
     def test_interval_above_minimum_preserved(self) -> None:
@@ -354,7 +355,7 @@ class TestRequestIntervalClamp:
         from unittest.mock import MagicMock
 
         store = MagicMock()
-        ingester = YoutubeIngester(store, request_interval=5.0)
+        ingester = make_youtube_ingester(store, request_interval=5.0)
         assert ingester._request_interval == 5.0
 
 
@@ -362,7 +363,7 @@ class TestCrawlPlaylist:
     @pytest.mark.asyncio()
     async def test_invalid_url_raises(self, source_store: Any) -> None:
         """不正なプレイリスト URL でエラーになることを検証する."""
-        ingester = YoutubeIngester(source_store)
+        ingester = make_youtube_ingester(source_store)
 
         with pytest.raises(ValueError, match="不正な YouTube プレイリスト URL"):
             await ingester.crawl_playlist("https://example.com/playlist?list=test")
@@ -370,7 +371,7 @@ class TestCrawlPlaylist:
     @pytest.mark.asyncio()
     async def test_successful_playlist_crawl(self, source_store: Any) -> None:
         """プレイリスト展開 + 各動画取り込みの正常系を検証する."""
-        ingester = YoutubeIngester(source_store, max_videos=3, request_interval=0.1)
+        ingester = make_youtube_ingester(source_store, max_videos=3, request_interval=0.1)
 
         entries = [
             {"id": "video_id_0001", "url": "video_id_0001"},
@@ -402,7 +403,7 @@ class TestCrawlPlaylist:
     @pytest.mark.asyncio()
     async def test_circuit_breaker_on_consecutive_errors(self, source_store: Any) -> None:
         """5 回連続失敗でサーキットブレーカーが発動することを検証する."""
-        ingester = YoutubeIngester(source_store, max_videos=10, request_interval=0.1)
+        ingester = make_youtube_ingester(source_store, max_videos=10, request_interval=0.1)
 
         entries = [{"id": f"vid_{i:011d}", "url": f"vid_{i:011d}"} for i in range(10)]
         error_result = IngestResult(errors=1, error_details=["test error"])
@@ -432,7 +433,7 @@ class TestCrawlPlaylist:
     @pytest.mark.asyncio()
     async def test_empty_playlist(self, source_store: Any) -> None:
         """空プレイリストで placed=0 の正常終了を検証する."""
-        ingester = YoutubeIngester(source_store)
+        ingester = make_youtube_ingester(source_store)
 
         with patch.object(
             ingester,

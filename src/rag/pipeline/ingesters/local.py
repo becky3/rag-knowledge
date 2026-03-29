@@ -32,7 +32,7 @@ class LocalIngester:
     仕様: docs/specs/ingesters/local.md
     """
 
-    def __init__(self, source_store: SourceStore, *, supported_extensions: list[str] | None = None, http_mode_enabled: bool = False, allowed_dirs: list[str] | None = None) -> None:
+    def __init__(self, source_store: SourceStore, *, supported_extensions: list[str] | None, http_mode_enabled: bool, allowed_dirs: list[str] | None) -> None:
         self._store = source_store
         self._extensions = [ext.lower() for ext in (supported_extensions or DEFAULT_SUPPORTED_EXTENSIONS)]
         self._http_mode_enabled = http_mode_enabled

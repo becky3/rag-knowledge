@@ -3,7 +3,7 @@
 仕様: docs/specs/rag-knowledge.md
 """
 
-from rag.table_chunker import chunk_table_data
+from factories import make_table_chunks
 
 
 class TestChunkTableData:
@@ -11,8 +11,8 @@ class TestChunkTableData:
 
     def test_empty_text_returns_empty_list(self) -> None:
         """空のテキストは空リストを返す."""
-        assert chunk_table_data("") == []
-        assert chunk_table_data("   ") == []
+        assert make_table_chunks("") == []
+        assert make_table_chunks("   ") == []
 
     def test_markdown_table_chunks_by_row(self) -> None:
         """Markdownテーブルを行単位でチャンキングする."""
@@ -22,7 +22,7 @@ class TestChunkTableData:
 | 闇の王 | 500 | 255 |
 | ゴブリン | 8 | 0 |"""
 
-        chunks = chunk_table_data(text)
+        chunks = make_table_chunks(text)
 
         assert len(chunks) == 3
         assert chunks[0].entity_name == "魔王"
@@ -39,7 +39,7 @@ class TestChunkTableData:
         """タブ区切りテーブルを行単位でチャンキングする."""
         text = "名前\tHP\tMP\n魔王\t200\t100\n闇の王\t500\t255"
 
-        chunks = chunk_table_data(text)
+        chunks = make_table_chunks(text)
 
         assert len(chunks) == 2
         assert chunks[0].entity_name == "魔王"
@@ -51,7 +51,7 @@ class TestChunkTableData:
 |------|-----|-----|
 | 魔王 | 200 | 100 |"""
 
-        chunks = chunk_table_data(text)
+        chunks = make_table_chunks(text)
 
         assert len(chunks) == 1
         assert "HP" in chunks[0].header
@@ -63,7 +63,7 @@ class TestChunkTableData:
 |------|-----|-----|
 | 魔王 | 200 | 100 |"""
 
-        chunks = chunk_table_data(text)
+        chunks = make_table_chunks(text)
 
         formatted = chunks[0].content
         assert "魔王" in formatted
@@ -79,7 +79,7 @@ class TestChunkTableData:
 | C | 300 |"""
 
         # row_context_size=1 で前後1行を含める
-        chunks = chunk_table_data(text, row_context_size=1)
+        chunks = make_table_chunks(text, row_context_size=1)
 
         # 中央の行（B）のコンテキストには A と C が含まれる
         assert len(chunks) == 3
@@ -92,7 +92,7 @@ class TestChunkTableData:
 |------|-----|
 | 魔王 | 200 |"""
 
-        chunks = chunk_table_data(text)
+        chunks = make_table_chunks(text)
 
         assert len(chunks) == 1
         assert chunks[0].entity_name == "魔王"

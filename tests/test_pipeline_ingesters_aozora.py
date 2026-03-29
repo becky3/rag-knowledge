@@ -22,8 +22,9 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-from rag.pipeline.ingesters.aozora import AozoraIngester
 from rag.store.source_store import SourceStore
+
+from factories import make_aozora_ingester
 
 
 @pytest.fixture()
@@ -106,7 +107,7 @@ class TestValidation:
         self, source_store: SourceStore
     ) -> None:
         """book_id が空文字列の場合 ValueError."""
-        ingester = AozoraIngester(source_store)
+        ingester = make_aozora_ingester(source_store)
         client = _mock_client()
         with pytest.raises(ValueError, match="book_id が空です"):
             await ingester.add_work("", client=client)
@@ -116,7 +117,7 @@ class TestValidation:
         self, source_store: SourceStore
     ) -> None:
         """client が None の場合 ValueError."""
-        ingester = AozoraIngester(source_store)
+        ingester = make_aozora_ingester(source_store)
         with pytest.raises(ValueError, match="client"):
             await ingester.add_work("001567", client=None)
 
@@ -125,7 +126,7 @@ class TestValidation:
         self, source_store: SourceStore
     ) -> None:
         """person_id が空文字列の場合 ValueError."""
-        ingester = AozoraIngester(source_store)
+        ingester = make_aozora_ingester(source_store)
         client = _mock_client()
         with pytest.raises(ValueError, match="person_id が空です"):
             await ingester.crawl_author("", client=client)
@@ -133,16 +134,16 @@ class TestValidation:
     def test_search_no_criteria(self, source_store: SourceStore) -> None:
         """author も title も未指定の場合 ValueError."""
         _write_catalog(source_store, [_make_record()])
-        ingester = AozoraIngester(source_store)
+        ingester = make_aozora_ingester(source_store)
         with pytest.raises(ValueError, match="author または title"):
-            ingester.search()
+            ingester.search(limit=20)
 
     def test_search_invalid_limit_type(
         self, source_store: SourceStore
     ) -> None:
         """limit が整数でない場合 TypeError."""
         _write_catalog(source_store, [_make_record()])
-        ingester = AozoraIngester(source_store)
+        ingester = make_aozora_ingester(source_store)
         with pytest.raises(TypeError, match="limit は整数"):
             ingester.search(author="test", limit="10")  # type: ignore[arg-type]
 
@@ -151,7 +152,7 @@ class TestValidation:
     ) -> None:
         """limit が 0 以下の場合 ValueError."""
         _write_catalog(source_store, [_make_record()])
-        ingester = AozoraIngester(source_store)
+        ingester = make_aozora_ingester(source_store)
         with pytest.raises(ValueError, match="1 以上"):
             ingester.search(author="test", limit=0)
 
@@ -168,7 +169,7 @@ class TestMaxWorksClamp:
     ) -> None:
         """ハードリミット超過時はクランプされる."""
         _write_catalog(source_store, [_make_record()])
-        ingester = AozoraIngester(source_store, max_works=9999)
+        ingester = make_aozora_ingester(source_store, max_works=9999)
         client = _mock_client()
         # crawl_author は内部で _validate_max_works を呼ぶ
         result = await ingester.crawl_author(
@@ -183,7 +184,7 @@ class TestMaxWorksClamp:
     ) -> None:
         """max_works=0 は ValueError."""
         _write_catalog(source_store, [_make_record()])
-        ingester = AozoraIngester(source_store)
+        ingester = make_aozora_ingester(source_store)
         client = _mock_client()
         with pytest.raises(ValueError, match="1 以上"):
             await ingester.crawl_author(
@@ -196,7 +197,7 @@ class TestMaxWorksClamp:
     ) -> None:
         """max_works が負数は ValueError."""
         _write_catalog(source_store, [_make_record()])
-        ingester = AozoraIngester(source_store)
+        ingester = make_aozora_ingester(source_store)
         client = _mock_client()
         with pytest.raises(ValueError, match="1 以上"):
             await ingester.crawl_author(
@@ -219,7 +220,7 @@ class TestCopyrightCheck:
             source_store,
             [_make_record(copyright_flag="あり")],
         )
-        ingester = AozoraIngester(source_store)
+        ingester = make_aozora_ingester(source_store)
         client = _mock_client()
         with pytest.raises(ValueError, match="著作権あり"):
             await ingester.add_work("001567", client=client)
@@ -233,7 +234,7 @@ class TestCopyrightCheck:
             source_store,
             [_make_record(copyright_flag="あり")],
         )
-        ingester = AozoraIngester(source_store)
+        ingester = make_aozora_ingester(source_store)
         client = _mock_client()
         result = await ingester.crawl_author("000035", client=client)
         assert result.placed == 0
@@ -251,23 +252,23 @@ class TestCatalogNotFound:
         self, source_store: SourceStore
     ) -> None:
         """カタログなしで add_work するとエラー."""
-        ingester = AozoraIngester(source_store)
+        ingester = make_aozora_ingester(source_store)
         client = _mock_client()
         with pytest.raises(ValueError, match="カタログが未ダウンロード"):
             await ingester.add_work("001567", client=client)
 
     def test_search_no_catalog(self, source_store: SourceStore) -> None:
         """カタログなしで search するとエラー."""
-        ingester = AozoraIngester(source_store)
+        ingester = make_aozora_ingester(source_store)
         with pytest.raises(ValueError, match="カタログが未ダウンロード"):
-            ingester.search(author="test")
+            ingester.search(author="test", limit=20)
 
     @pytest.mark.asyncio()
     async def test_crawl_author_no_catalog(
         self, source_store: SourceStore
     ) -> None:
         """カタログなしで crawl_author するとエラー."""
-        ingester = AozoraIngester(source_store)
+        ingester = make_aozora_ingester(source_store)
         client = _mock_client()
         with pytest.raises(ValueError, match="カタログが未ダウンロード"):
             await ingester.crawl_author("000035", client=client)
@@ -297,7 +298,7 @@ class TestDuplicateSkip:
                 "collected_at": "2026-01-01T00:00:00+09:00",
             },
         )
-        ingester = AozoraIngester(source_store)
+        ingester = make_aozora_ingester(source_store)
         client = _mock_client()
         result = await ingester.add_work("001567", client=client)
         assert result.placed == 0
@@ -316,7 +317,7 @@ class TestGithubRawUrl:
         self, source_store: SourceStore
     ) -> None:
         """aozora.gr.jp の URL が GitHub Raw URL に変換される."""
-        ingester = AozoraIngester(source_store)
+        ingester = make_aozora_ingester(source_store)
         url = "https://www.aozora.gr.jp/cards/000035/files/1567_14913.html"
         result = ingester._to_github_raw_url(url)
         assert result == (
@@ -338,7 +339,7 @@ class TestHttpError:
     ) -> None:
         """XHTML DL で 404 の場合はエラーカウント."""
         _write_catalog(source_store, [_make_record()])
-        ingester = AozoraIngester(source_store)
+        ingester = make_aozora_ingester(source_store)
         client = _mock_client(status_code=404)
         result = await ingester.add_work("001567", client=client)
         assert result.placed == 0
@@ -350,7 +351,7 @@ class TestHttpError:
         self, source_store: SourceStore
     ) -> None:
         """カタログ DL で HTTP エラーの場合は ValueError."""
-        ingester = AozoraIngester(source_store)
+        ingester = make_aozora_ingester(source_store)
         client = _mock_client(status_code=500)
         with pytest.raises(ValueError, match="ダウンロードに失敗"):
             await ingester.update_catalog(client=client)
@@ -371,8 +372,8 @@ class TestSearch:
                 _make_record(book_id="002", last_name="Carol", first_name="Dave"),
             ],
         )
-        ingester = AozoraIngester(source_store)
-        results = ingester.search(author="Alice")
+        ingester = make_aozora_ingester(source_store)
+        results = ingester.search(author="Alice", limit=20)
         assert len(results) == 1
         assert results[0]["book_id"] == "001"
 
@@ -385,8 +386,8 @@ class TestSearch:
                 _make_record(book_id="002", title="Another Work"),
             ],
         )
-        ingester = AozoraIngester(source_store)
-        results = ingester.search(title="Sample")
+        ingester = make_aozora_ingester(source_store)
+        results = ingester.search(title="Sample", limit=20)
         assert len(results) == 1
         assert results[0]["book_id"] == "001"
 
@@ -398,8 +399,8 @@ class TestSearch:
             source_store,
             [_make_record(person_id="000999")],
         )
-        ingester = AozoraIngester(source_store)
-        results = ingester.search(author="Alice")
+        ingester = make_aozora_ingester(source_store)
+        results = ingester.search(author="Alice", limit=20)
         assert results[0]["person_id"] == "000999"
 
     def test_search_limit_clamp(self, source_store: SourceStore) -> None:
@@ -409,7 +410,7 @@ class TestSearch:
             for i in range(10)
         ]
         _write_catalog(source_store, records)
-        ingester = AozoraIngester(source_store)
+        ingester = make_aozora_ingester(source_store)
         results = ingester.search(author="Alice", limit=3)
         assert len(results) == 3
 
@@ -426,7 +427,7 @@ class TestIngestWork:
     ) -> None:
         """正常に作品を取得・配置できる."""
         _write_catalog(source_store, [_make_record()])
-        ingester = AozoraIngester(source_store)
+        ingester = make_aozora_ingester(source_store)
         client = _mock_client(content=b"<html><body>content</body></html>")
         result = await ingester.add_work("001567", client=client)
         assert result.placed == 1
@@ -455,7 +456,7 @@ class TestIngestWork:
                 _make_record(book_id="003", person_id="999999"),
             ],
         )
-        ingester = AozoraIngester(source_store)
+        ingester = make_aozora_ingester(source_store)
         client = _mock_client()
         result = await ingester.crawl_author("000035", client=client)
         # person_id=000035 の作品 2 件のみ取り込み

@@ -54,7 +54,8 @@ MCP サーバーとして独立動作し、16 個のツールを提供する。
 | チャンキング | `rag_chunk_size`, `rag_chunk_overlap`, `rag_embedding_context_length`, `rag_worst_token_char_ratio` |
 | 検索 | `rag_retrieval_count`, `rag_similarity_threshold` |
 | ハイブリッド検索 | `rag_hybrid_search_enabled`, `rag_vector_weight`, `rag_bm25_k1`, `rag_bm25_b`, `rag_min_combined_score` |
-| クロール | `rag_max_crawl_pages`, `rag_crawl_delay_sec` |
+| ChromaDB | `chromadb_collection_name` |
+| クロール | `rag_max_crawl_pages`, `rag_crawl_delay_sec`, `rag_crawl_max_concurrent` |
 | robots.txt | `rag_respect_robots_txt`, `rag_robots_txt_cache_ttl` |
 | URL 安全性 | `rag_url_safety_check`, `rag_url_safety_cache_ttl`, `rag_url_safety_timeout` |
 | レスポンス制御 | `rag_max_response_chars`（rag_get_document のトランケーション）, `rag_stats_max_sources` |

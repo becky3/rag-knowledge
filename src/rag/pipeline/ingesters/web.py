@@ -180,12 +180,12 @@ class WebIngester:
         self,
         source_store: SourceStore,
         *,
-        max_crawl_pages: int = 50,
-        crawl_request_timeout: int = 30,
-        crawl_max_errors: int = 5,
-        respect_robots_txt: bool = True,
-        robots_txt_cache_ttl: int = 3600,
-        safe_browsing_client: SafeBrowsingClient | None = None,
+        max_crawl_pages: int,
+        crawl_request_timeout: int,
+        crawl_max_errors: int,
+        respect_robots_txt: bool,
+        robots_txt_cache_ttl: int,
+        safe_browsing_client: SafeBrowsingClient | None,
     ) -> None:
         self._store = source_store
         self._max_crawl_pages = min(max_crawl_pages, MAX_CRAWL_PAGES_HARD_LIMIT)

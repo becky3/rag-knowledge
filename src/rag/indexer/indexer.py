@@ -42,11 +42,11 @@ class Indexer:
         vector_store: VectorStore,
         bm25_index: BM25Index,
         metadata_db: MetadataDB,
-        chunk_size: int = 200,
-        chunk_overlap: int = 30,
-        embedding_prefix_enabled: bool = True,
-        embedding_context_length: int = 512,
-        worst_token_char_ratio: float = 0.7,
+        chunk_size: int,
+        chunk_overlap: int,
+        embedding_prefix_enabled: bool,
+        embedding_context_length: int,
+        worst_token_char_ratio: float,
     ) -> None:
         """Indexer を初期化する.
 
@@ -263,7 +263,7 @@ class Indexer:
 
         if content_type == ContentType.TABLE:
             table_chunks = chunk_table_data(
-                text, max_chunk_size=self._effective_size_table,
+                text, row_context_size=1, max_chunk_size=self._effective_size_table,
             )
             return [
                 (c.content, c.section_path) for c in table_chunks

@@ -183,9 +183,9 @@ class BlueskyIngester:
         self,
         source_store: SourceStore,
         *,
-        appview_url: str = "https://public.api.bsky.app",
-        max_posts: int = 200,
-        include_reposts: bool = True,
+        appview_url: str,
+        max_posts: int,
+        include_reposts: bool,
     ) -> None:
         self._store = source_store
         self._appview_url = appview_url.rstrip("/")

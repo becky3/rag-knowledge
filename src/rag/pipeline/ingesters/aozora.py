@@ -68,7 +68,7 @@ class AozoraIngester:
         self,
         source_store: SourceStore,
         *,
-        max_works: int = 200,
+        max_works: int,
     ) -> None:
         self._store = source_store
         self._max_works = max_works
@@ -155,7 +155,7 @@ class AozoraIngester:
         *,
         author: str | None = None,
         title: str | None = None,
-        limit: int = 20,
+        limit: int,
     ) -> list[dict[str, str]]:
         """ローカルカタログから著者名・作品名で検索する.
 

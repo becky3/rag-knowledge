@@ -21,7 +21,6 @@ import pytest
 
 from rag.pipeline.ingesters.web import (
     MAX_CRAWL_DEPTH_HARD_LIMIT,
-    WebIngester,
     _decode_html_bytes,
     _extract_links,
     _extract_title,
@@ -31,6 +30,8 @@ from rag.pipeline.ingesters.web import (
 )
 from rag.store.source_store import SourceStore
 from rag.utils.url import check_ssrf, validate_url
+
+from factories import make_web_ingester
 
 
 @pytest.fixture()
@@ -239,7 +240,7 @@ class TestAdd:
         client = AsyncMock()
         client.get = AsyncMock(return_value=resp)
 
-        ingester = WebIngester(
+        ingester = make_web_ingester(
             source_store,
             respect_robots_txt=False,
         )
@@ -253,13 +254,13 @@ class TestAdd:
 
     async def test_empty_url_raises(self, source_store: SourceStore) -> None:
         """空の URL でエラーになること."""
-        ingester = WebIngester(source_store)
+        ingester = make_web_ingester(source_store)
         with pytest.raises(ValueError, match="空"):
             await ingester.add("", client=AsyncMock())
 
     async def test_no_client_raises(self, source_store: SourceStore) -> None:
         """client 未指定でエラーになること."""
-        ingester = WebIngester(source_store)
+        ingester = make_web_ingester(source_store)
         with pytest.raises(ValueError, match="client"):
             await ingester.add("https://example.com")
 
@@ -269,7 +270,7 @@ class TestAdd:
         client = AsyncMock()
         client.get = AsyncMock(return_value=resp)
 
-        ingester = WebIngester(
+        ingester = make_web_ingester(
             source_store,
             respect_robots_txt=False,
         )
@@ -290,7 +291,7 @@ class TestAddExtension:
         client = AsyncMock()
         client.get = AsyncMock(return_value=resp)
 
-        ingester = WebIngester(
+        ingester = make_web_ingester(
             source_store,
             respect_robots_txt=False,
         )
@@ -317,7 +318,7 @@ class TestAddExtension:
         client = AsyncMock()
         client.get = AsyncMock(return_value=resp)
 
-        ingester = WebIngester(
+        ingester = make_web_ingester(
             source_store,
             respect_robots_txt=False,
         )
@@ -345,7 +346,7 @@ class TestAddExtension:
         client = AsyncMock()
         client.get = AsyncMock(return_value=resp)
 
-        ingester = WebIngester(
+        ingester = make_web_ingester(
             source_store,
             respect_robots_txt=False,
         )
@@ -387,7 +388,7 @@ class TestCrawlExtension:
         client = AsyncMock()
         client.get = AsyncMock(side_effect=[index_resp, page_resp])
 
-        ingester = WebIngester(
+        ingester = make_web_ingester(
             source_store,
             respect_robots_txt=False,
         )
@@ -424,7 +425,7 @@ class TestCrawl:
         client = AsyncMock()
         client.get = AsyncMock(side_effect=[index_resp, page_resp, page_resp])
 
-        ingester = WebIngester(
+        ingester = make_web_ingester(
             source_store,
             respect_robots_txt=False,
         )
@@ -450,7 +451,7 @@ class TestCrawl:
         client = AsyncMock()
         client.get = AsyncMock(side_effect=[index_resp, page_resp])
 
-        ingester = WebIngester(
+        ingester = make_web_ingester(
             source_store,
             respect_robots_txt=False,
         )
@@ -481,7 +482,7 @@ class TestCrawlPreview:
         client = AsyncMock()
         client.get = AsyncMock(side_effect=[index_resp, page_resp])
 
-        ingester = WebIngester(
+        ingester = make_web_ingester(
             source_store,
             respect_robots_txt=False,
         )
@@ -498,7 +499,7 @@ class TestCrawlPreview:
         self, source_store: SourceStore
     ) -> None:
         """無効な URL で空リストが返ること."""
-        ingester = WebIngester(source_store)
+        ingester = make_web_ingester(source_store)
         result = await ingester.crawl_preview("", client=AsyncMock())
         assert result == []
 
@@ -515,7 +516,7 @@ class TestCrawlPreview:
         client = AsyncMock()
         client.get = AsyncMock(return_value=index_resp)
 
-        ingester = WebIngester(
+        ingester = make_web_ingester(
             source_store,
             respect_robots_txt=False,
         )
@@ -562,7 +563,7 @@ class TestCrawlDepth:
         client = AsyncMock()
         client.get = AsyncMock(side_effect=[index_resp, page_resp])
 
-        ingester = WebIngester(
+        ingester = make_web_ingester(
             source_store,
             respect_robots_txt=False,
         )
@@ -598,7 +599,7 @@ class TestCrawlDepth:
         client = AsyncMock()
         client.get = AsyncMock(side_effect=[index_resp, page1_resp, page2_resp])
 
-        ingester = WebIngester(
+        ingester = make_web_ingester(
             source_store,
             respect_robots_txt=False,
         )
@@ -634,7 +635,7 @@ class TestCrawlDepth:
         client = AsyncMock()
         client.get = AsyncMock(side_effect=[index_resp, page1_resp])
 
-        ingester = WebIngester(
+        ingester = make_web_ingester(
             source_store,
             respect_robots_txt=False,
         )
@@ -666,7 +667,7 @@ class TestCrawlDepth:
         client = AsyncMock()
         client.get = AsyncMock(side_effect=responses)
 
-        ingester = WebIngester(
+        ingester = make_web_ingester(
             source_store,
             respect_robots_txt=False,
         )
@@ -703,7 +704,7 @@ class TestCrawlDepth:
         # index, p1, p2 (max_pages=2 reached before depth 2)
         client.get = AsyncMock(side_effect=[index_resp, page_resp, page_resp])
 
-        ingester = WebIngester(
+        ingester = make_web_ingester(
             source_store,
             max_crawl_pages=2,
             respect_robots_txt=False,
@@ -746,7 +747,7 @@ class TestCrawlMaxErrors:
             side_effect=[index_resp] + [error_resp] * 6
         )
 
-        ingester = WebIngester(
+        ingester = make_web_ingester(
             source_store,
             crawl_max_errors=5,
             respect_robots_txt=False,
@@ -764,7 +765,7 @@ class TestCrawlMaxErrors:
         self, source_store: SourceStore
     ) -> None:
         """crawl_max_errors が下限（5）にクランプされること."""
-        ingester = WebIngester(
+        ingester = make_web_ingester(
             source_store,
             crawl_max_errors=1,  # 1 は下限 5 にクランプ
             respect_robots_txt=False,
@@ -800,7 +801,7 @@ class TestCrawlPreviewDepth:
             side_effect=[index_resp, page1_resp, page2_resp]
         )
 
-        ingester = WebIngester(
+        ingester = make_web_ingester(
             source_store,
             respect_robots_txt=False,
         )
@@ -946,7 +947,7 @@ class TestCrawlContentTypeFilter:
         client = AsyncMock()
         client.get = AsyncMock(side_effect=[index_resp, html_resp, img_resp])
 
-        ingester = WebIngester(
+        ingester = make_web_ingester(
             source_store,
             respect_robots_txt=False,
         )

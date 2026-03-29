@@ -34,8 +34,8 @@ class HeadingChunk:
 
 def chunk_by_headings(
     text: str,
-    max_chunk_size: int = 500,
-    min_chunk_size: int = 50,
+    max_chunk_size: int,
+    min_chunk_size: int,
 ) -> list[HeadingChunk]:
     """見出し単位でテキストを分割する.
 

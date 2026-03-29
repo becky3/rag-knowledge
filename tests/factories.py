@@ -1,0 +1,359 @@
+"""テスト用ファクトリ関数.
+
+本番コードのコンストラクタからデフォルト値を除去したことに伴い、
+テストコードでは関心のある引数だけオーバーライドできるファクトリを使用する。
+"""
+
+from __future__ import annotations
+
+from typing import Any
+from unittest.mock import MagicMock
+
+
+# ---------------------------------------------------------------------------
+# 基盤クラス群
+# ---------------------------------------------------------------------------
+
+
+def make_bm25_index(**overrides: Any) -> Any:
+    """BM25Index のテスト用ファクトリ."""
+    from rag.bm25_index import BM25Index
+
+    defaults: dict[str, Any] = {
+        "k1": 1.5,
+        "b": 0.75,
+        "persist_dir": None,
+    }
+    defaults.update(overrides)
+    return BM25Index(**defaults)
+
+
+def make_hybrid_search_engine(**overrides: Any) -> Any:
+    """HybridSearchEngine のテスト用ファクトリ."""
+    from rag.hybrid_search import HybridSearchEngine
+
+    defaults: dict[str, Any] = {
+        "vector_store": overrides.pop("vector_store", MagicMock()),
+        "bm25_index": overrides.pop("bm25_index", MagicMock()),
+        "vector_weight": 0.5,
+    }
+    defaults.update(overrides)
+    return HybridSearchEngine(**defaults)
+
+
+def make_vector_store_ephemeral(embedding_provider: Any, **overrides: Any) -> Any:
+    """VectorStore.create_ephemeral のテスト用ファクトリ."""
+    from rag.vector_store import VectorStore
+
+    defaults: dict[str, Any] = {
+        "collection_name": "knowledge",
+        "hnsw_m": None,
+        "hnsw_construction_ef": None,
+        "hnsw_search_ef": None,
+    }
+    defaults.update(overrides)
+    collection_name = defaults.pop("collection_name")
+    return VectorStore.create_ephemeral(
+        embedding_provider=embedding_provider,
+        collection_name=collection_name,
+        **defaults,
+    )
+
+
+def make_vector_store(embedding_provider: Any, **overrides: Any) -> Any:
+    """VectorStore.__init__ のテスト用ファクトリ."""
+    from rag.vector_store import VectorStore
+
+    defaults: dict[str, Any] = {
+        "persist_directory": "./chroma_db",
+        "collection_name": "knowledge",
+        "hnsw_m": None,
+        "hnsw_construction_ef": None,
+        "hnsw_search_ef": None,
+    }
+    defaults.update(overrides)
+    return VectorStore(embedding_provider=embedding_provider, **defaults)
+
+
+def make_vector_store_http(embedding_provider: Any, **overrides: Any) -> Any:
+    """VectorStore.create_http のテスト用ファクトリ."""
+    from rag.vector_store import VectorStore
+
+    defaults: dict[str, Any] = {
+        "host": "localhost",
+        "port": 8000,
+        "collection_name": "knowledge",
+        "hnsw_m": None,
+        "hnsw_construction_ef": None,
+        "hnsw_search_ef": None,
+    }
+    defaults.update(overrides)
+    host = defaults.pop("host")
+    port = defaults.pop("port")
+    collection_name = defaults.pop("collection_name")
+    return VectorStore.create_http(
+        embedding_provider=embedding_provider,
+        host=host,
+        port=port,
+        collection_name=collection_name,
+        **defaults,
+    )
+
+
+def make_web_crawler(**overrides: Any) -> Any:
+    """WebCrawler のテスト用ファクトリ."""
+    from rag.web_crawler import WebCrawler
+
+    defaults: dict[str, Any] = {
+        "timeout": 30.0,
+        "max_pages": 50,
+        "crawl_delay": 0.1,
+        "max_concurrent": 5,
+        "respect_robots_txt": False,
+        "robots_txt_cache_ttl": 3600,
+    }
+    defaults.update(overrides)
+    return WebCrawler(**defaults)
+
+
+def make_robots_checker(**overrides: Any) -> Any:
+    """RobotsChecker のテスト用ファクトリ."""
+    from rag.web_crawler import RobotsChecker
+
+    defaults: dict[str, Any] = {
+        "cache_ttl": 3600,
+    }
+    defaults.update(overrides)
+    return RobotsChecker(**defaults)
+
+
+def make_rag_knowledge_service(**overrides: Any) -> Any:
+    """RAGKnowledgeService のテスト用ファクトリ."""
+    from rag.rag_knowledge import RAGKnowledgeService
+
+    defaults: dict[str, Any] = {
+        "vector_store": overrides.pop("vector_store", MagicMock()),
+        "web_crawler": overrides.pop("web_crawler", MagicMock()),
+        "chunk_size": 200,
+        "chunk_overlap": 30,
+        "similarity_threshold": None,
+        "safe_browsing_client": None,
+        "bm25_index": None,
+        "hybrid_search_enabled": False,
+        "vector_weight": 1.0,
+        "min_combined_score": None,
+        "debug_log_enabled": False,
+    }
+    defaults.update(overrides)
+    return RAGKnowledgeService(**defaults)
+
+
+def make_safe_browsing_client(**overrides: Any) -> Any:
+    """SafeBrowsingClient のテスト用ファクトリ."""
+    from rag.safe_browsing import SafeBrowsingClient
+
+    defaults: dict[str, Any] = {
+        "api_key": "test-api-key",
+        "timeout": 10.0,
+        "cache_ttl": None,
+        "client_id": "rag-knowledge",
+        "client_version": "1.0.0",
+        "max_cache_size": None,
+        "constrained_client_kwargs": None,
+    }
+    defaults.update(overrides)
+    return SafeBrowsingClient(**defaults)
+
+
+# ---------------------------------------------------------------------------
+# Embedding
+# ---------------------------------------------------------------------------
+
+
+def make_lmstudio_embedding_args(**overrides: Any) -> dict[str, Any]:
+    """LMStudioEmbedding のデフォルト引数を返す."""
+    defaults: dict[str, Any] = {
+        "base_url": "http://localhost:1234",
+        "model": "nomic-embed-text",
+        "prefix_enabled": False,
+    }
+    defaults.update(overrides)
+    return defaults
+
+
+def make_openai_embedding_args(**overrides: Any) -> dict[str, Any]:
+    """OpenAIEmbedding のデフォルト引数を返す."""
+    defaults: dict[str, Any] = {
+        "api_key": "sk-test",
+        "model": "text-embedding-3-small",
+    }
+    defaults.update(overrides)
+    return defaults
+
+
+def make_chunker_args(**overrides: Any) -> dict[str, Any]:
+    """chunk_text のデフォルト引数を返す."""
+    defaults: dict[str, Any] = {
+        "chunk_size": 500,
+        "chunk_overlap": 50,
+    }
+    defaults.update(overrides)
+    return defaults
+
+
+def make_heading_chunks(text: str, **overrides: Any) -> Any:
+    """chunk_by_headings のテスト用ファクトリ."""
+    from rag.heading_chunker import chunk_by_headings
+
+    defaults: dict[str, Any] = {
+        "max_chunk_size": 500,
+        "min_chunk_size": 50,
+    }
+    defaults.update(overrides)
+    return chunk_by_headings(text, **defaults)
+
+
+def make_table_chunks(text: str, **overrides: Any) -> Any:
+    """chunk_table_data のテスト用ファクトリ."""
+    from rag.table_chunker import chunk_table_data
+
+    defaults: dict[str, Any] = {
+        "row_context_size": 1,
+        "max_chunk_size": 0,
+    }
+    defaults.update(overrides)
+    return chunk_table_data(text, **defaults)
+
+
+def make_chromadb_server_manager_args(**overrides: Any) -> dict[str, Any]:
+    """ChromaDBServerManager のデフォルト引数を返す."""
+    defaults: dict[str, Any] = {
+        "host": "localhost",
+        "port": 8000,
+        "persist_dir": "./test_chroma_db",
+        "auto_start": True,
+    }
+    defaults.update(overrides)
+    return defaults
+
+
+def make_scrapy_runner_args(**overrides: Any) -> dict[str, Any]:
+    """ScrapyRunner のデフォルト引数を返す."""
+    defaults: dict[str, Any] = {
+        "temp_dir": "/tmp/test_scrapy",
+        "delay_sec": 0.1,
+        "max_pages": 10000,
+        "download_timeout": 30,
+        "timeout_sec": 0.0,
+        "error_count": 0,
+    }
+    defaults.update(overrides)
+    return defaults
+
+
+def make_converter_args(**overrides: Any) -> dict[str, Any]:
+    """Converter のデフォルト引数を返す."""
+    from rag.converter.pdf_extractor import PdfBackendConfig
+
+    defaults: dict[str, Any] = {
+        "regen_option": "skip",
+        "pdf_config": PdfBackendConfig(),
+        "youtube_merge_gap_sec": 2.0,
+        "youtube_merge_max_chars": 300,
+    }
+    defaults.update(overrides)
+    return defaults
+
+
+def make_indexer_args(**overrides: Any) -> dict[str, Any]:
+    """Indexer のデフォルト引数を返す（vector_store, bm25_index, metadata_db は呼び出し元で渡す）."""
+    defaults: dict[str, Any] = {
+        "chunk_size": 200,
+        "chunk_overlap": 30,
+        "embedding_prefix_enabled": True,
+        "embedding_context_length": 512,
+        "worst_token_char_ratio": 0.7,
+    }
+    defaults.update(overrides)
+    return defaults
+
+
+def make_bluesky_ingester(source_store: Any, **overrides: Any) -> Any:
+    """BlueskyIngester のテスト用ファクトリ."""
+    from rag.pipeline.ingesters.bluesky import BlueskyIngester
+
+    defaults: dict[str, Any] = {
+        "appview_url": "https://public.api.bsky.app",
+        "max_posts": 200,
+        "include_reposts": True,
+    }
+    defaults.update(overrides)
+    return BlueskyIngester(source_store, **defaults)
+
+
+def make_zenn_ingester(source_store: Any, **overrides: Any) -> Any:
+    """ZennIngester のテスト用ファクトリ."""
+    from rag.pipeline.ingesters.zenn import ZennIngester
+
+    defaults: dict[str, Any] = {
+        "max_articles": 50,
+    }
+    defaults.update(overrides)
+    return ZennIngester(source_store, **defaults)
+
+
+def make_youtube_ingester(source_store: Any, **overrides: Any) -> Any:
+    """YoutubeIngester のテスト用ファクトリ."""
+    from rag.pipeline.ingesters.youtube import YoutubeIngester
+
+    defaults: dict[str, Any] = {
+        "max_videos": 100,
+        "request_interval": 0.1,
+        "request_timeout": 30,
+        "whisper_model": "base",
+        "whisper_device": "cuda",
+        "transcript_languages": None,
+        "max_duration": 14400,
+    }
+    defaults.update(overrides)
+    return YoutubeIngester(source_store, **defaults)
+
+
+def make_web_ingester(source_store: Any, **overrides: Any) -> Any:
+    """WebIngester のテスト用ファクトリ."""
+    from rag.pipeline.ingesters.web import WebIngester
+
+    defaults: dict[str, Any] = {
+        "max_crawl_pages": 50,
+        "crawl_request_timeout": 30,
+        "crawl_max_errors": 5,
+        "respect_robots_txt": True,
+        "robots_txt_cache_ttl": 3600,
+        "safe_browsing_client": None,
+    }
+    defaults.update(overrides)
+    return WebIngester(source_store, **defaults)
+
+
+def make_local_ingester(source_store: Any, **overrides: Any) -> Any:
+    """LocalIngester のテスト用ファクトリ."""
+    from rag.pipeline.ingesters.local import LocalIngester
+
+    defaults: dict[str, Any] = {
+        "supported_extensions": None,
+        "http_mode_enabled": False,
+        "allowed_dirs": None,
+    }
+    defaults.update(overrides)
+    return LocalIngester(source_store, **defaults)
+
+
+def make_aozora_ingester(source_store: Any, **overrides: Any) -> Any:
+    """AozoraIngester のテスト用ファクトリ."""
+    from rag.pipeline.ingesters.aozora import AozoraIngester
+
+    defaults: dict[str, Any] = {
+        "max_works": 200,
+    }
+    defaults.update(overrides)
+    return AozoraIngester(source_store, **defaults)

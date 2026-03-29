@@ -19,7 +19,6 @@ import pytest
 
 from rag.pipeline.ingesters.bluesky import (
     MAX_POSTS_HARD_LIMIT,
-    BlueskyIngester,
     _escape_did,
     _make_title,
     _validate_max_posts,
@@ -27,6 +26,8 @@ from rag.pipeline.ingesters.bluesky import (
     extract_urls_from_item,
 )
 from rag.store.source_store import SourceStore
+
+from factories import make_bluesky_ingester
 
 
 @pytest.fixture()
@@ -171,7 +172,7 @@ class TestCrawlBluesky:
         self, source_store: SourceStore
     ) -> None:
         """空のハンドルでエラーになること."""
-        ingester = BlueskyIngester(source_store)
+        ingester = make_bluesky_ingester(source_store)
         with pytest.raises(ValueError, match="空"):
             await ingester.crawl_bluesky("", client=AsyncMock())
 
@@ -179,7 +180,7 @@ class TestCrawlBluesky:
         self, source_store: SourceStore
     ) -> None:
         """DID 形式のハンドルでエラーになること."""
-        ingester = BlueskyIngester(source_store)
+        ingester = make_bluesky_ingester(source_store)
         with pytest.raises(ValueError, match="DID"):
             await ingester.crawl_bluesky("did:plc:abc", client=AsyncMock())
 
@@ -187,7 +188,7 @@ class TestCrawlBluesky:
         self, source_store: SourceStore
     ) -> None:
         """client 未指定でエラーになること."""
-        ingester = BlueskyIngester(source_store)
+        ingester = make_bluesky_ingester(source_store)
         with pytest.raises(ValueError, match="client"):
             await ingester.crawl_bluesky("alice.bsky.social")
 
@@ -196,7 +197,7 @@ class TestCrawlBluesky:
         item = _make_feed_item()
         client = _make_mock_client([{"feed": [item]}])
 
-        ingester = BlueskyIngester(source_store, max_posts=3)
+        ingester = make_bluesky_ingester(source_store, max_posts=3)
         result, _ = await ingester.crawl_bluesky(
             "alice.bsky.social", client=client
         )
@@ -224,7 +225,7 @@ class TestCrawlBluesky:
             {"feed": [item]},
         ])
 
-        ingester = BlueskyIngester(source_store, max_posts=3)
+        ingester = make_bluesky_ingester(source_store, max_posts=3)
         # 1 回目
         await ingester.crawl_bluesky("alice.bsky.social", client=client)
 
@@ -245,7 +246,7 @@ class TestCrawlBluesky:
             {"feed": [repost_item, normal_item]},
         ])
 
-        ingester = BlueskyIngester(source_store, max_posts=10)
+        ingester = make_bluesky_ingester(source_store, max_posts=10)
         result, _ = await ingester.crawl_bluesky(
             "alice.bsky.social",
             include_reposts=False,
@@ -262,7 +263,7 @@ class TestCrawlBluesky:
             {"feed": [repost_item, normal_item]},
         ])
 
-        ingester = BlueskyIngester(source_store, max_posts=10)
+        ingester = make_bluesky_ingester(source_store, max_posts=10)
         result, _ = await ingester.crawl_bluesky(
             "alice.bsky.social",
             include_reposts=True,
@@ -280,7 +281,7 @@ class TestCrawlBluesky:
         item["post"]["record"]["reply"] = {"parent": {}}
         client = _make_mock_client([{"feed": [item]}])
 
-        ingester = BlueskyIngester(source_store, max_posts=3)
+        ingester = make_bluesky_ingester(source_store, max_posts=3)
         await ingester.crawl_bluesky("alice.bsky.social", client=client)
 
         # .meta ファイルの検証
@@ -310,7 +311,7 @@ class TestCrawlBluesky:
         """空のフィードで正常終了すること."""
         client = _make_mock_client([{"feed": []}])
 
-        ingester = BlueskyIngester(source_store, max_posts=3)
+        ingester = make_bluesky_ingester(source_store, max_posts=3)
         result, _ = await ingester.crawl_bluesky(
             "alice.bsky.social", client=client
         )
@@ -326,7 +327,7 @@ class TestCrawlBluesky:
         ]
         client = _make_mock_client([{"feed": items}])
 
-        ingester = BlueskyIngester(source_store)
+        ingester = make_bluesky_ingester(source_store)
         result, _ = await ingester.crawl_bluesky(
             "alice.bsky.social",
             max_posts=2,
@@ -474,7 +475,7 @@ class TestFollowUrls:
         mock_web.add = AsyncMock(return_value=MagicMock(placed=1, errors=0))
         mock_client = _make_budget_client()
 
-        ingester = BlueskyIngester(source_store)
+        ingester = make_bluesky_ingester(source_store)
         stats = await ingester.follow_urls(
             [item],
             client=mock_client,
@@ -506,7 +507,7 @@ class TestFollowUrls:
             return_value=MagicMock(placed=1, errors=0)
         )
 
-        ingester = BlueskyIngester(source_store)
+        ingester = make_bluesky_ingester(source_store)
         stats = await ingester.follow_urls(
             [item],
             client=None,
@@ -533,7 +534,7 @@ class TestFollowUrls:
             }
         ]
 
-        ingester = BlueskyIngester(source_store)
+        ingester = make_bluesky_ingester(source_store)
         stats = await ingester.follow_urls(
             [item], client=None, web_ingester=None, youtube_ingester=None,
         )
@@ -559,7 +560,7 @@ class TestFollowUrls:
         mock_web = AsyncMock()
         mock_web.add = AsyncMock(side_effect=Exception("connection error"))
 
-        ingester = BlueskyIngester(source_store)
+        ingester = make_bluesky_ingester(source_store)
         stats = await ingester.follow_urls(
             [item],
             client=_make_budget_client(),
@@ -586,7 +587,7 @@ class TestFollowUrls:
         mock_web = AsyncMock()
         mock_web.add = AsyncMock(return_value=MagicMock(placed=1, errors=0))
 
-        ingester = BlueskyIngester(source_store)
+        ingester = make_bluesky_ingester(source_store)
         stats = await ingester.follow_urls(
             [item1, item2],
             client=_make_budget_client(),
@@ -599,7 +600,7 @@ class TestFollowUrls:
 
     async def test_empty_items(self, source_store: SourceStore) -> None:
         """配置済みアイテムが空の場合、何も実行されないこと."""
-        ingester = BlueskyIngester(source_store)
+        ingester = make_bluesky_ingester(source_store)
         stats = await ingester.follow_urls(
             [], client=None, web_ingester=None, youtube_ingester=None,
         )
