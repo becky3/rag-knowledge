@@ -114,13 +114,13 @@ class YoutubeIngester:
         self,
         source_store: SourceStore,
         *,
-        max_videos: int = 100,
-        request_interval: float = 5.0,
-        request_timeout: int = 30,
-        whisper_model: str = "base",
-        whisper_device: str = "cuda",
-        transcript_languages: list[str] | None = None,
-        max_duration: int = 14400,
+        max_videos: int,
+        request_interval: float,
+        request_timeout: int,
+        whisper_model: str,
+        whisper_device: str,
+        transcript_languages: list[str] | None,
+        max_duration: int,
     ) -> None:
         self._store = source_store
         self._max_videos = _validate_max_videos(max_videos)

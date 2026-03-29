@@ -10,8 +10,8 @@ import re
 
 def chunk_text(
     text: str,
-    chunk_size: int = 500,
-    chunk_overlap: int = 50,
+    chunk_size: int,
+    chunk_overlap: int,
 ) -> list[str]:
     """テキストをオーバーラップ付きチャンクに分割する.
 
@@ -22,8 +22,8 @@ def chunk_text(
 
     Args:
         text: 分割対象のテキスト
-        chunk_size: 各チャンクの最大文字数（デフォルト: 500）
-        chunk_overlap: チャンク間のオーバーラップ文字数（デフォルト: 50）
+        chunk_size: 各チャンクの最大文字数
+        chunk_overlap: チャンク間のオーバーラップ文字数
 
     Returns:
         分割されたチャンクのリスト

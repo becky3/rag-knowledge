@@ -24,6 +24,8 @@ from rag.rag_knowledge import (
 )
 from rag.web_crawler import CrawledPage, WebCrawler
 
+from factories import make_rag_knowledge_service
+
 
 @pytest.fixture
 def mock_embedding_provider() -> MagicMock:
@@ -75,12 +77,9 @@ def rag_service(
     mock_web_crawler: MagicMock,
 ) -> RAGKnowledgeService:
     """RAGKnowledgeServiceインスタンスを作成する."""
-    return RAGKnowledgeService(
+    return make_rag_knowledge_service(
         vector_store=mock_vector_store,
         web_crawler=mock_web_crawler,
-        chunk_size=200,
-        chunk_overlap=30,
-        similarity_threshold=None,
     )
 
 
@@ -422,12 +421,9 @@ class TestRAGDebugLog:
         mock_web_crawler: MagicMock,
     ) -> RAGKnowledgeService:
         """デバッグログ有効なRAGKnowledgeServiceを作成する."""
-        return RAGKnowledgeService(
+        return make_rag_knowledge_service(
             vector_store=mock_vector_store,
             web_crawler=mock_web_crawler,
-            chunk_size=200,
-            chunk_overlap=30,
-            similarity_threshold=None,
             debug_log_enabled=True,
         )
 
@@ -438,13 +434,9 @@ class TestRAGDebugLog:
         mock_web_crawler: MagicMock,
     ) -> RAGKnowledgeService:
         """デバッグログ無効なRAGKnowledgeServiceを作成する."""
-        return RAGKnowledgeService(
+        return make_rag_knowledge_service(
             vector_store=mock_vector_store,
             web_crawler=mock_web_crawler,
-            chunk_size=200,
-            chunk_overlap=30,
-            similarity_threshold=None,
-            debug_log_enabled=False,
         )
 
     async def test_retrieve_logs_query(
@@ -770,11 +762,9 @@ class TestSimilarityThreshold:
     ) -> None:
         """retrieve() がコンストラクタで受け取った閾値を search() に渡すこと."""
         # Arrange
-        service = RAGKnowledgeService(
+        service = make_rag_knowledge_service(
             vector_store=mock_vector_store,
             web_crawler=mock_web_crawler,
-            chunk_size=200,
-            chunk_overlap=30,
             similarity_threshold=0.5,
         )
         mock_vector_store.search.return_value = []
@@ -833,12 +823,9 @@ class TestSafeBrowsingIntegration:
         mock_safe_browsing_client: MagicMock,
     ) -> RAGKnowledgeService:
         """Safe Browsing有効なRAGKnowledgeServiceを作成する."""
-        return RAGKnowledgeService(
+        return make_rag_knowledge_service(
             vector_store=mock_vector_store,
             web_crawler=mock_web_crawler,
-            chunk_size=200,
-            chunk_overlap=30,
-            similarity_threshold=None,
             safe_browsing_client=mock_safe_browsing_client,
         )
 
@@ -1105,12 +1092,9 @@ class TestRetrieveRawResults:
             ),
         ]
 
-        service = RAGKnowledgeService(
+        service = make_rag_knowledge_service(
             vector_store=mock_vector_store,
             web_crawler=mock_web_crawler,
-            chunk_size=200,
-            chunk_overlap=30,
-            similarity_threshold=None,
             bm25_index=mock_bm25,
         )
 
@@ -1151,13 +1135,9 @@ class TestRetrieveRawResults:
             ),
         ]
 
-        service = RAGKnowledgeService(
+        service = make_rag_knowledge_service(
             vector_store=mock_vector_store,
             web_crawler=mock_web_crawler,
-            chunk_size=200,
-            chunk_overlap=30,
-            similarity_threshold=None,
-            bm25_index=None,
         )
 
         # Act
@@ -1178,12 +1158,9 @@ class TestRetrieveRawResults:
         mock_bm25.search.return_value = []
         mock_vector_store.search.return_value = []
 
-        service = RAGKnowledgeService(
+        service = make_rag_knowledge_service(
             vector_store=mock_vector_store,
             web_crawler=mock_web_crawler,
-            chunk_size=200,
-            chunk_overlap=30,
-            similarity_threshold=None,
             bm25_index=mock_bm25,
         )
 
@@ -1221,12 +1198,9 @@ class TestRetrieveRawResults:
             ),
         ]
 
-        service = RAGKnowledgeService(
+        service = make_rag_knowledge_service(
             vector_store=mock_vector_store,
             web_crawler=mock_web_crawler,
-            chunk_size=200,
-            chunk_overlap=30,
-            similarity_threshold=None,
             bm25_index=mock_bm25,
         )
 
@@ -1248,11 +1222,9 @@ class TestRetrieveRawResults:
         # Arrange
         mock_vector_store.search.return_value = []
 
-        service = RAGKnowledgeService(
+        service = make_rag_knowledge_service(
             vector_store=mock_vector_store,
             web_crawler=mock_web_crawler,
-            chunk_size=200,
-            chunk_overlap=30,
             similarity_threshold=0.5,  # サービスには閾値を設定
         )
 
@@ -1277,11 +1249,9 @@ class TestRetrieveRawResults:
         mock_bm25 = MagicMock()
         mock_bm25.search.return_value = []
 
-        service = RAGKnowledgeService(
+        service = make_rag_knowledge_service(
             vector_store=mock_vector_store,
             web_crawler=mock_web_crawler,
-            chunk_size=200,
-            chunk_overlap=30,
             similarity_threshold=0.5,
             bm25_index=mock_bm25,
         )

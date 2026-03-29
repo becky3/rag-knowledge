@@ -12,6 +12,8 @@ import pytest
 from rag.embedding.base import EmbeddingProvider
 from rag.vector_store import DocumentChunk, RetrievalResult, VectorStore
 
+from factories import make_vector_store, make_vector_store_ephemeral, make_vector_store_http
+
 
 class MockEmbeddingProvider(EmbeddingProvider):
     """テスト用のモックEmbeddingプロバイダー."""
@@ -44,7 +46,7 @@ def ephemeral_store(mock_embedding: MockEmbeddingProvider) -> VectorStore:
     各テストで独立したコレクションを使用するためにUUIDをコレクション名に含める。
     """
     unique_collection = f"test_collection_{uuid.uuid4().hex[:8]}"
-    return VectorStore.create_ephemeral(mock_embedding, collection_name=unique_collection)
+    return make_vector_store_ephemeral(mock_embedding, collection_name=unique_collection)
 
 
 class TestAC8AddDocuments:
@@ -366,16 +368,16 @@ class TestVectorStoreFactory:
 
     def test_create_ephemeral(self, mock_embedding: MockEmbeddingProvider) -> None:
         """create_ephemeral()でインメモリストアを作成できる."""
-        store = VectorStore.create_ephemeral(mock_embedding, collection_name="test")
+        store = make_vector_store_ephemeral(mock_embedding, collection_name="test")
         assert store._persist_directory == ""
         assert store._collection_name == "test"
 
-    def test_create_ephemeral_default_collection(
+    def test_create_ephemeral_with_collection_name(
         self,
         mock_embedding: MockEmbeddingProvider,
     ) -> None:
-        """create_ephemeral()のデフォルトコレクション名."""
-        store = VectorStore.create_ephemeral(mock_embedding)
+        """create_ephemeral() で指定したコレクション名が設定されること."""
+        store = make_vector_store_ephemeral(mock_embedding, collection_name="knowledge")
         assert store._collection_name == "knowledge"
 
 
@@ -678,7 +680,7 @@ class TestClose:
         from chromadb.api.shared_system_client import SharedSystemClient
 
         persist_dir = str(tmp_path)
-        store = VectorStore(
+        store = make_vector_store(
             embedding_provider=mock_embedding,
             persist_directory=persist_dir,
         )
@@ -716,7 +718,7 @@ class TestCreateHttp:
         mock_client.get_or_create_collection.return_value = mock_collection
 
         with patch("chromadb.HttpClient", return_value=mock_client):
-            store = VectorStore.create_http(
+            store = make_vector_store_http(
                 embedding_provider=mock_embedding,
                 host="example.com",
                 port=9000,
@@ -728,20 +730,20 @@ class TestCreateHttp:
         assert store._client is mock_client
         assert store._collection is mock_collection
 
-    def test_create_http_default_params(
+    def test_create_http_factory_defaults(
         self,
         mock_embedding: MockEmbeddingProvider,
     ) -> None:
-        """create_http() のデフォルト引数が仕様通りであること."""
+        """ファクトリのデフォルト引数が仕様通りであること."""
         from unittest.mock import patch, MagicMock
 
         mock_client = MagicMock()
         mock_client.get_or_create_collection.return_value = MagicMock()
 
         with patch("chromadb.HttpClient", return_value=mock_client) as mock_http:
-            VectorStore.create_http(embedding_provider=mock_embedding)
+            make_vector_store_http(embedding_provider=mock_embedding)
 
-        # デフォルト host=localhost, port=8000
+        # host=localhost, port=8000
         assert mock_http.call_count == 1
         _, kwargs = mock_http.call_args
         assert kwargs["host"] == "localhost"
@@ -758,7 +760,7 @@ class TestCreateHttp:
         mock_client.get_or_create_collection.return_value = MagicMock()
 
         with patch("chromadb.HttpClient", return_value=mock_client) as mock_http:
-            VectorStore.create_http(embedding_provider=mock_embedding)
+            make_vector_store_http(embedding_provider=mock_embedding)
 
         _, kwargs = mock_http.call_args
         settings = kwargs["settings"]
@@ -775,7 +777,7 @@ class TestCreateHttp:
         mock_client.get_or_create_collection.return_value = MagicMock()
 
         with patch("chromadb.HttpClient", return_value=mock_client):
-            VectorStore.create_http(embedding_provider=mock_embedding)
+            make_vector_store_http(embedding_provider=mock_embedding)
 
         mock_client.get_or_create_collection.assert_called_once_with(
             name="knowledge",
@@ -799,7 +801,7 @@ class TestCreateHttp:
         mock_client.get_or_create_collection.return_value = MagicMock()
 
         with patch("chromadb.HttpClient", return_value=mock_client):
-            VectorStore.create_http(
+            make_vector_store_http(
                 embedding_provider=mock_embedding,
                 hnsw_m=32,
                 hnsw_construction_ef=200,
@@ -827,7 +829,7 @@ class TestCreateHttp:
         mock_client.get_or_create_collection.return_value = MagicMock()
 
         with patch("chromadb.HttpClient", return_value=mock_client):
-            store = VectorStore.create_http(embedding_provider=mock_embedding)
+            store = make_vector_store_http(embedding_provider=mock_embedding)
 
         # persist_directory が空文字なので close() は noop
         store.close()  # 例外が出なければOK
@@ -844,7 +846,7 @@ class TestCreateHttp:
 
         with patch("chromadb.HttpClient", return_value=mock_client):
             with pytest.raises(ConnectionError, match="ChromaDB サーバー.*失敗しました"):
-                VectorStore.create_http(
+                make_vector_store_http(
                     embedding_provider=mock_embedding,
                     host="localhost",
                     port=8000,

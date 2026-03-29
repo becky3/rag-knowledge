@@ -23,6 +23,8 @@ from rag.safe_browsing import (
 )
 from py_common_lib.httpx import ConstrainedClient
 
+from factories import make_safe_browsing_client
+
 
 class MockResponse:
     """モックHTTPレスポンス（httpx.Response 互換）."""
@@ -60,14 +62,14 @@ class TestSafeBrowsingClient:
 
     def test_init(self) -> None:
         """クライアントが正しく初期化されること."""
-        client = SafeBrowsingClient(api_key="test-api-key")
+        client = make_safe_browsing_client()
         assert client._api_key == "test-api-key"
         assert client._client_id == "rag-knowledge"
         assert client._client_version == "1.0.0"
 
     def test_init_with_custom_params(self) -> None:
         """カスタムパラメータで初期化できること."""
-        client = SafeBrowsingClient(
+        client = make_safe_browsing_client(
             api_key="test-key",
             timeout=30.0,
             cache_ttl=600,
@@ -80,7 +82,7 @@ class TestSafeBrowsingClient:
 
     def test_build_request_body(self) -> None:
         """リクエストボディが正しく構築されること."""
-        client = SafeBrowsingClient(api_key="test-key")
+        client = make_safe_browsing_client(api_key="test-key")
         urls = ["https://example.com", "https://test.com"]
         body = client._build_request_body(urls)
 
@@ -96,7 +98,7 @@ class TestSafeBrowsingClient:
 
     def test_parse_response_no_matches(self) -> None:
         """脅威がない場合、全URLが安全と判定されること."""
-        client = SafeBrowsingClient(api_key="test-key")
+        client = make_safe_browsing_client(api_key="test-key")
         urls = ["https://safe1.com", "https://safe2.com"]
         response_data: dict[str, object] = {}  # 空のレスポンス = マッチなし
 
@@ -108,7 +110,7 @@ class TestSafeBrowsingClient:
 
     def test_parse_response_with_threats(self) -> None:
         """脅威が検出された場合、該当URLが危険と判定されること."""
-        client = SafeBrowsingClient(api_key="test-key")
+        client = make_safe_browsing_client(api_key="test-key")
         urls = ["https://safe.com", "https://malware.com"]
         response_data = {
             "matches": [
@@ -135,7 +137,7 @@ class TestSafeBrowsingClientAsync:
     @pytest.mark.asyncio
     async def test_check_url_safe(self) -> None:
         """API呼び出しと安全なURLのチェック."""
-        client = SafeBrowsingClient(api_key="test-key")
+        client = make_safe_browsing_client(api_key="test-key")
         mock_response = MockResponse(200, {})  # 空 = 脅威なし
 
         with patch(
@@ -151,7 +153,7 @@ class TestSafeBrowsingClientAsync:
     @pytest.mark.asyncio
     async def test_check_url_unsafe(self) -> None:
         """危険なURLのチェックでis_safe=Falseが返ること."""
-        client = SafeBrowsingClient(api_key="test-key")
+        client = make_safe_browsing_client(api_key="test-key")
         mock_response = MockResponse(
             200,
             {
@@ -178,7 +180,7 @@ class TestSafeBrowsingClientAsync:
     @pytest.mark.asyncio
     async def test_check_urls_batch(self) -> None:
         """複数URLの一括チェック."""
-        client = SafeBrowsingClient(api_key="test-key")
+        client = make_safe_browsing_client(api_key="test-key")
         mock_response = MockResponse(
             200,
             {
@@ -207,14 +209,14 @@ class TestSafeBrowsingClientAsync:
     @pytest.mark.asyncio
     async def test_check_urls_empty_list(self) -> None:
         """空のURLリストに対して空の結果を返すこと."""
-        client = SafeBrowsingClient(api_key="test-key")
+        client = make_safe_browsing_client(api_key="test-key")
         results = await client.check_urls([])
         assert results == {}
 
     @pytest.mark.asyncio
     async def test_is_url_safe_simple_interface(self) -> None:
         """シンプルなインターフェースで安全性を判定できること."""
-        client = SafeBrowsingClient(api_key="test-key")
+        client = make_safe_browsing_client(api_key="test-key")
         mock_response = MockResponse(200, {})
 
         with patch(
@@ -232,7 +234,7 @@ class TestSafeBrowsingCache:
     @pytest.mark.asyncio
     async def test_cache_hit(self) -> None:
         """キャッシュヒット時にAPIが呼ばれないこと."""
-        client = SafeBrowsingClient(api_key="test-key", cache_ttl=300)
+        client = make_safe_browsing_client(api_key="test-key", cache_ttl=300)
 
         # 最初のリクエスト
         mock_response = MockResponse(200, {})
@@ -258,7 +260,7 @@ class TestSafeBrowsingCache:
     @pytest.mark.asyncio
     async def test_cache_expiry(self) -> None:
         """キャッシュ期限切れ時にAPIが再度呼ばれること."""
-        client = SafeBrowsingClient(api_key="test-key", cache_ttl=0.1)  # 100ms TTL
+        client = make_safe_browsing_client(api_key="test-key", cache_ttl=0.1)  # 100ms TTL
 
         mock_response = MockResponse(200, {})
 
@@ -285,7 +287,7 @@ class TestSafeBrowsingCache:
     @pytest.mark.asyncio
     async def test_cleanup_expired_cache(self) -> None:
         """期限切れキャッシュのクリーンアップ."""
-        client = SafeBrowsingClient(api_key="test-key", cache_ttl=0.1)
+        client = make_safe_browsing_client(api_key="test-key", cache_ttl=0.1)
 
         mock_response = MockResponse(200, {})
 
@@ -311,7 +313,7 @@ class TestSafeBrowsingCache:
     @pytest.mark.asyncio
     async def test_clear_cache(self) -> None:
         """キャッシュのクリア."""
-        client = SafeBrowsingClient(api_key="test-key")
+        client = make_safe_browsing_client(api_key="test-key")
         # 直接キャッシュに追加
         client._cache["test-key"] = CacheEntry(
             result=SafeBrowsingResult(url="https://test.com", is_safe=True),
@@ -329,7 +331,7 @@ class TestSafeBrowsingErrorHandling:
     @pytest.mark.asyncio
     async def test_api_error_raises_safety_check_error(self) -> None:
         """API障害時にSafetyCheckErrorが送出されること."""
-        client = SafeBrowsingClient(api_key="test-key")
+        client = make_safe_browsing_client(api_key="test-key")
         mock_response = MockResponse(500, {"error": "Internal Server Error"})
 
         with patch(
@@ -342,7 +344,7 @@ class TestSafeBrowsingErrorHandling:
     @pytest.mark.asyncio
     async def test_network_error_raises_safety_check_error(self) -> None:
         """ネットワークエラー時にSafetyCheckErrorが送出されること."""
-        client = SafeBrowsingClient(api_key="test-key")
+        client = make_safe_browsing_client(api_key="test-key")
 
         with patch(
             "rag.safe_browsing.httpx.AsyncClient",
@@ -354,7 +356,7 @@ class TestSafeBrowsingErrorHandling:
     @pytest.mark.asyncio
     async def test_400_response_raises_config_error(self) -> None:
         """400応答時にSafeBrowsingConfigErrorが送出されること."""
-        client = SafeBrowsingClient(api_key="invalid-key")
+        client = make_safe_browsing_client(api_key="invalid-key")
         mock_response = MockResponse(400, {"error": "API key not valid"})
 
         with patch(
@@ -391,7 +393,7 @@ class TestThreatTypes:
     @pytest.mark.asyncio
     async def test_multiple_threat_types(self) -> None:
         """複数の脅威タイプが検出されること."""
-        client = SafeBrowsingClient(api_key="test-key")
+        client = make_safe_browsing_client(api_key="test-key")
         mock_response = MockResponse(
             200,
             {
@@ -524,7 +526,7 @@ class TestSafeBrowsingWithConstrainedClient:
     @pytest.mark.asyncio
     async def test_call_api_via_constrained_client_uses_header(self) -> None:
         """ConstrainedClient 経由で API キーがヘッダーで送信されること."""
-        client = SafeBrowsingClient(
+        client = make_safe_browsing_client(
             api_key="test-key",
             constrained_client_kwargs={
                 "request_timeout": 5.0,
@@ -566,7 +568,7 @@ class TestSafeBrowsingWithConstrainedClient:
     @pytest.mark.asyncio
     async def test_call_api_via_constrained_client_error_raises(self) -> None:
         """ConstrainedClient 経由でのエラーが SafetyCheckError で処理されること."""
-        client = SafeBrowsingClient(
+        client = make_safe_browsing_client(
             api_key="test-key",
             constrained_client_kwargs={
                 "request_timeout": 5.0,
@@ -595,7 +597,7 @@ class TestHeaderAuthentication:
     @pytest.mark.asyncio
     async def test_httpx_client_uses_header(self) -> None:
         """httpx.AsyncClient が x-goog-api-key ヘッダーで認証すること."""
-        client = SafeBrowsingClient(api_key="my-secret-key")
+        client = make_safe_browsing_client(api_key="my-secret-key")
         mock_response = MockResponse(200, {})
 
         with patch(
@@ -614,7 +616,7 @@ class TestHeaderAuthentication:
     @pytest.mark.asyncio
     async def test_httpx_client_no_api_key_in_params(self) -> None:
         """httpx.AsyncClient が URL パラメータに API キーを含まないこと."""
-        client = SafeBrowsingClient(api_key="my-secret-key")
+        client = make_safe_browsing_client(api_key="my-secret-key")
         mock_response = MockResponse(200, {})
 
         class TrackingMockAsyncClient(MockAsyncClient):

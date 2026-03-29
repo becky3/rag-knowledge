@@ -1033,8 +1033,9 @@ class TestCLIInitTestDb:
     async def test_init_test_db_creates_bm25_index(self, tmp_path: Path) -> None:
         """init-test-dbコマンドでBM25インデックスも永続化されること."""
         from rag.cli import init_test_db
-        from rag.bm25_index import BM25Index
         from argparse import Namespace
+
+        from factories import make_bm25_index
 
         # テスト用フィクスチャ作成
         fixture_path = tmp_path / "fixture.json"
@@ -1073,5 +1074,5 @@ class TestCLIInitTestDb:
         assert bm25_persist_dir.exists(), "BM25 persist directory should exist"
 
         # 永続化されたインデックスをロードして中身を確認
-        loaded_index = BM25Index(persist_dir=str(bm25_persist_dir))
+        loaded_index = make_bm25_index(persist_dir=str(bm25_persist_dir))
         assert loaded_index.get_document_count() > 0, "BM25 index should have documents"

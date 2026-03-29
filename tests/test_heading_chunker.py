@@ -3,7 +3,7 @@
 仕様: docs/specs/rag-knowledge.md
 """
 
-from rag.heading_chunker import chunk_by_headings
+from factories import make_heading_chunks
 
 
 class TestChunkByHeadings:
@@ -11,8 +11,8 @@ class TestChunkByHeadings:
 
     def test_empty_text_returns_empty_list(self) -> None:
         """空のテキストは空リストを返す."""
-        assert chunk_by_headings("") == []
-        assert chunk_by_headings("   ") == []
+        assert make_heading_chunks("") == []
+        assert make_heading_chunks("   ") == []
 
     def test_markdown_headings_detected(self) -> None:
         """Markdown見出しを検出してチャンキングする."""
@@ -22,7 +22,7 @@ class TestChunkByHeadings:
 ## 見出し2
 本文2"""
 
-        chunks = chunk_by_headings(text)
+        chunks = make_heading_chunks(text)
 
         assert len(chunks) == 2
         assert chunks[0].heading == "見出し1"
@@ -41,7 +41,7 @@ class TestChunkByHeadings:
 <h2>見出し2</h2>
 本文2"""
 
-        chunks = chunk_by_headings(text)
+        chunks = make_heading_chunks(text)
 
         assert len(chunks) == 2
         assert chunks[0].heading == "見出し1"
@@ -60,7 +60,7 @@ class TestChunkByHeadings:
 ## 2.1 セクション
 内容"""
 
-        chunks = chunk_by_headings(text)
+        chunks = make_heading_chunks(text)
 
         # コンテンツのない見出し（第1章、第2章）はチャンクに含まれない
         # 結果: 1.1, 1.2, 2.1 の3チャンク
@@ -86,7 +86,7 @@ class TestChunkByHeadings:
 #### レベル4
 内容"""
 
-        chunks = chunk_by_headings(text)
+        chunks = make_heading_chunks(text)
 
         # レベル4の親は「レベル1 > レベル2 > レベル3」
         level4_chunk = [c for c in chunks if c.heading == "レベル4"][0]
@@ -96,7 +96,7 @@ class TestChunkByHeadings:
         """見出しのないテキストは1つのチャンクを返す."""
         text = "これは見出しのない通常のテキストです。\n改行も含まれています。"
 
-        chunks = chunk_by_headings(text)
+        chunks = make_heading_chunks(text)
 
         assert len(chunks) == 1
         assert chunks[0].heading == ""
@@ -112,7 +112,7 @@ class TestChunkByHeadings:
 
 別の段落です。"""
 
-        chunks = chunk_by_headings(text, max_chunk_size=200)
+        chunks = make_heading_chunks(text, max_chunk_size=200)
 
         # 複数のチャンクに分割される
         assert len(chunks) > 1
@@ -127,7 +127,7 @@ class TestChunkByHeadings:
 ## 子見出し
 内容"""
 
-        chunks = chunk_by_headings(text)
+        chunks = make_heading_chunks(text)
 
         # 子見出しのチャンク
         child_chunk = [c for c in chunks if c.heading == "子見出し"][0]
@@ -143,7 +143,7 @@ class TestChunkByHeadings:
 短い。"""
 
         # min_chunk_size=100 で短いテキストを結合
-        chunks = chunk_by_headings(text, min_chunk_size=100)
+        chunks = make_heading_chunks(text, min_chunk_size=100)
 
         # 「短い。」は前のチャンクと結合されるか、独立チャンクになる
         # 結合の条件を満たさない場合は独立チャンクとして存在
@@ -156,7 +156,7 @@ class TestChunkByHeadings:
 ### 1.1.1 正規化
 正規化の内容"""
 
-        chunks = chunk_by_headings(text)
+        chunks = make_heading_chunks(text)
 
         target = [c for c in chunks if c.heading == "1.1.1 正規化"][0]
         assert target.section_path == "第1章 > 1.1 前処理 > 1.1.1 正規化"
@@ -164,7 +164,7 @@ class TestChunkByHeadings:
     def test_section_path_empty_for_no_heading(self) -> None:
         """見出しなしチャンクの section_path は空文字列."""
         text = "見出しのないテキスト"
-        chunks = chunk_by_headings(text)
+        chunks = make_heading_chunks(text)
 
         assert len(chunks) == 1
         assert chunks[0].section_path == ""
@@ -173,7 +173,7 @@ class TestChunkByHeadings:
         """分割チャンクの2つ目以降で heading が空であること."""
         long_content = "あ" * 500
         text = f"# 見出し\n\n{long_content}"
-        chunks = chunk_by_headings(text, max_chunk_size=200, min_chunk_size=50)
+        chunks = make_heading_chunks(text, max_chunk_size=200, min_chunk_size=50)
 
         assert len(chunks) > 1
         assert chunks[0].heading == "見出し"
@@ -184,7 +184,7 @@ class TestChunkByHeadings:
         """分割チャンクに (続き) サフィックスが付与されないこと."""
         long_content = "あ" * 500
         text = f"# 見出し\n\n{long_content}"
-        chunks = chunk_by_headings(text, max_chunk_size=200, min_chunk_size=50)
+        chunks = make_heading_chunks(text, max_chunk_size=200, min_chunk_size=50)
 
         for c in chunks:
             assert "(続き)" not in c.heading

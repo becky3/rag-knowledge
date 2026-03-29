@@ -56,7 +56,7 @@ def min_max_normalize(scores: list[float]) -> list[float]:
 def convex_combination(
     norm_vector_scores: dict[str, float],
     norm_bm25_scores: dict[str, float],
-    vector_weight: float = 0.5,
+    vector_weight: float,
 ) -> dict[str, float]:
     """Convex Combination（凸結合）でスコアを統合する.
 
@@ -110,7 +110,7 @@ class HybridSearchEngine:
         self,
         vector_store: VectorStore,
         bm25_index: BM25Index,
-        vector_weight: float = 0.5,
+        vector_weight: float,
     ) -> None:
         """HybridSearchEngineを初期化する.
 

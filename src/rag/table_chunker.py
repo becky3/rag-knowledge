@@ -30,9 +30,9 @@ class TableChunk:
 
 def chunk_table_data(
     text: str,
+    row_context_size: int,
+    max_chunk_size: int,
     header_row: str | None = None,
-    row_context_size: int = 1,
-    max_chunk_size: int = 0,
 ) -> list[TableChunk]:
     """テーブルデータをチャンキングする.
 
@@ -45,9 +45,9 @@ def chunk_table_data(
 
     Args:
         text: テーブルデータを含むテキスト
-        header_row: 明示的なヘッダー行（Noneの場合は自動検出）
         row_context_size: 前後に含めるコンテキスト行数
         max_chunk_size: content の最大文字数（0 の場合は制限なし）
+        header_row: 明示的なヘッダー行（Noneの場合は自動検出）
 
     Returns:
         TableChunkのリスト

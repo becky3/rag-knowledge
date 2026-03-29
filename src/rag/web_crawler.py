@@ -68,7 +68,7 @@ class RobotsChecker:
     仕様: docs/specs/rag-knowledge.md
     """
 
-    def __init__(self, cache_ttl: int = 3600) -> None:
+    def __init__(self, cache_ttl: int) -> None:
         """RobotsCheckerを初期化する.
 
         Args:
@@ -221,12 +221,12 @@ class WebCrawler:
 
     def __init__(
         self,
-        timeout: float = 30.0,
-        max_pages: int = 50,
-        crawl_delay: float = 1.0,
-        max_concurrent: int = 5,
-        respect_robots_txt: bool = True,
-        robots_txt_cache_ttl: int = 3600,
+        timeout: float,
+        max_pages: int,
+        crawl_delay: float,
+        max_concurrent: int,
+        respect_robots_txt: bool,
+        robots_txt_cache_ttl: int,
     ) -> None:
         """WebCrawlerを初期化する.
 

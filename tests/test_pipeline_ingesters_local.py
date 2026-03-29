@@ -7,11 +7,14 @@ from __future__ import annotations
 
 import datetime
 from pathlib import Path
+from typing import Any
 
 import pytest
 
-from rag.pipeline.ingesters.local import LocalIngester, MAX_FILES_HARD_LIMIT, _UPLOAD_DIR
+from rag.pipeline.ingesters.local import MAX_FILES_HARD_LIMIT, _UPLOAD_DIR
 from rag.store.source_store import SourceStore
+
+from factories import make_local_ingester
 
 
 _FIXED_DATE = datetime.date(2026, 1, 15)
@@ -39,8 +42,8 @@ def source_store(tmp_path: Path) -> SourceStore:
 
 
 @pytest.fixture()
-def ingester(source_store: SourceStore) -> LocalIngester:
-    return LocalIngester(source_store)
+def ingester(source_store: SourceStore) -> Any:
+    return make_local_ingester(source_store)
 
 
 @pytest.fixture()
@@ -192,18 +195,18 @@ class TestCrawlHttpModeRestriction:
     """crawl_documents の HTTP モード制限テスト."""
 
     def test_crawl_http_mode_no_allowed_dirs(self, source_store: SourceStore, sample_dir: Path) -> None:
-        ingester = LocalIngester(source_store, http_mode_enabled=True, allowed_dirs=[])
+        ingester = make_local_ingester(source_store, http_mode_enabled=True, allowed_dirs=[])
         result = ingester.crawl_documents(str(sample_dir))
         assert result.errors == 1
 
     def test_crawl_http_mode_allowed_dir(self, source_store: SourceStore, sample_dir: Path) -> None:
-        ingester = LocalIngester(source_store, http_mode_enabled=True, allowed_dirs=[str(sample_dir)])
+        ingester = make_local_ingester(source_store, http_mode_enabled=True, allowed_dirs=[str(sample_dir)])
         result = ingester.crawl_documents(str(sample_dir))
         assert result.placed > 0
 
     def test_crawl_http_mode_denied_dir(self, source_store: SourceStore, tmp_path: Path, sample_dir: Path) -> None:
         allowed = tmp_path / "allowed_other"
         allowed.mkdir()
-        ingester = LocalIngester(source_store, http_mode_enabled=True, allowed_dirs=[str(allowed)])
+        ingester = make_local_ingester(source_store, http_mode_enabled=True, allowed_dirs=[str(allowed)])
         result = ingester.crawl_documents(str(sample_dir))
         assert result.errors == 1

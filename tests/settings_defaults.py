@@ -34,6 +34,8 @@ TEST_SETTINGS_DEFAULTS: dict[str, object] = {
     "rag_vector_weight": 0.90,
     "rag_bm25_k1": 2.5,
     "rag_bm25_b": 0.50,
+    "chromadb_collection_name": "knowledge",
+    "rag_crawl_max_concurrent": 5,
     "rag_max_crawl_pages": 50,
     "rag_crawl_delay_sec": 1.0,
     "rag_crawl_default_depth": 1,

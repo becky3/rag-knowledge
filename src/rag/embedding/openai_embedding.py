@@ -22,7 +22,7 @@ class OpenAIEmbedding(EmbeddingProvider):
     def __init__(
         self,
         api_key: str,
-        model: str = "text-embedding-3-small",
+        model: str,
     ) -> None:
         self._client = AsyncOpenAI(api_key=api_key)
         self._model = model

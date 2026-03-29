@@ -44,10 +44,10 @@ class ChromaDBServerManager:
 
     def __init__(
         self,
-        host: str = "localhost",
-        port: int = 8000,
-        persist_dir: str = "./chroma_db",
-        auto_start: bool = True,
+        host: str,
+        port: int,
+        persist_dir: str,
+        auto_start: bool,
     ) -> None:
         """ChromaDBServerManager を初期化する.
 

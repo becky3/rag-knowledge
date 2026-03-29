@@ -234,6 +234,7 @@ Safe Browsing API はオプション機能。`rag_url_safety_check=false` で無
 |---------|-----|--------|-----------|---------|------|
 | `rag_max_crawl_pages` | int | `config.toml` | 50 | 1〜500 | 1 回のクロール操作で取得する最大ページ数 |
 | `rag_crawl_delay_sec` | float | `config.toml` | 1.0 | 0.1〜60 | リクエスト間の最低間隔（秒） |
+| `rag_crawl_max_concurrent` | int | `config.toml` | 5 | 1 以上 | 一括クロール時の最大同時リクエスト数 |
 | `rag_respect_robots_txt` | bool | `config.toml` | true | — | robots.txt の Disallow ディレクティブに従うか |
 | `rag_robots_txt_cache_ttl` | int | `config.toml` | 3600 | 0 以上 | robots.txt キャッシュの有効期間（秒） |
 | `rag_url_safety_check` | bool | `config.toml` | true | — | Google Safe Browsing API による URL 安全性チェックを有効にするか |

@@ -58,13 +58,13 @@ def smart_chunk(
     logger.debug("Detected content type: %s", content_type.value)
 
     if content_type == ContentType.TABLE:
-        table_chunks = chunk_table_data(text, max_chunk_size=chunk_size)
+        table_chunks = chunk_table_data(text, row_context_size=1, max_chunk_size=chunk_size)
         if table_chunks:
             return [(c.content, c.section_path) for c in table_chunks]
         logger.debug("Table chunking returned no results, falling back to prose")
 
     if content_type in (ContentType.HEADING, ContentType.MIXED):
-        heading_chunks = chunk_by_headings(text, max_chunk_size=chunk_size)
+        heading_chunks = chunk_by_headings(text, max_chunk_size=chunk_size, min_chunk_size=max(1, chunk_size // 4))
         if heading_chunks:
             return [(c.content, c.section_path) for c in heading_chunks]
         logger.debug("Heading chunking returned no results, falling back to prose")
@@ -233,12 +233,12 @@ class RAGKnowledgeService:
         chunk_size: int,
         chunk_overlap: int,
         similarity_threshold: float | None,
-        safe_browsing_client: SafeBrowsingClient | None = None,
-        bm25_index: BM25Index | None = None,
-        hybrid_search_enabled: bool = False,
-        vector_weight: float = 1.0,
-        min_combined_score: float | None = None,
-        debug_log_enabled: bool = False,
+        safe_browsing_client: SafeBrowsingClient | None,
+        bm25_index: BM25Index | None,
+        hybrid_search_enabled: bool,
+        vector_weight: float,
+        min_combined_score: float | None,
+        debug_log_enabled: bool,
     ) -> None:
         """RAGKnowledgeServiceを初期化する.
 

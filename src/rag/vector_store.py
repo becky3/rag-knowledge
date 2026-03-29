@@ -53,12 +53,12 @@ class VectorStore:
     def __init__(
         self,
         embedding_provider: EmbeddingProvider,
-        persist_directory: str = "./chroma_db",
-        collection_name: str = "knowledge",
+        persist_directory: str,
+        collection_name: str,
         *,
-        hnsw_m: int | None = None,
-        hnsw_construction_ef: int | None = None,
-        hnsw_search_ef: int | None = None,
+        hnsw_m: int | None,
+        hnsw_construction_ef: int | None,
+        hnsw_search_ef: int | None,
     ) -> None:
         """VectorStoreを初期化する.
 
@@ -123,13 +123,13 @@ class VectorStore:
     def create_http(
         cls,
         embedding_provider: EmbeddingProvider,
-        host: str = "localhost",
-        port: int = 8000,
-        collection_name: str = "knowledge",
+        host: str,
+        port: int,
+        collection_name: str,
         *,
-        hnsw_m: int | None = None,
-        hnsw_construction_ef: int | None = None,
-        hnsw_search_ef: int | None = None,
+        hnsw_m: int | None,
+        hnsw_construction_ef: int | None,
+        hnsw_search_ef: int | None,
     ) -> "VectorStore":
         """ChromaDB サーバーに HttpClient で接続する VectorStore を作成する.
 
@@ -175,11 +175,11 @@ class VectorStore:
     def create_ephemeral(
         cls,
         embedding_provider: EmbeddingProvider,
-        collection_name: str = "knowledge",
+        collection_name: str,
         *,
-        hnsw_m: int | None = None,
-        hnsw_construction_ef: int | None = None,
-        hnsw_search_ef: int | None = None,
+        hnsw_m: int | None,
+        hnsw_construction_ef: int | None,
+        hnsw_search_ef: int | None,
     ) -> "VectorStore":
         """テスト用のインメモリVectorStoreを作成する.
 

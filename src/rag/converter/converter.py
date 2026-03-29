@@ -75,21 +75,21 @@ class Converter:
     def __init__(
         self,
         *,
-        regen_option: RegenOption = "skip",
-        pdf_config: PdfBackendConfig | None = None,
-        youtube_merge_gap_sec: float = 2.0,
-        youtube_merge_max_chars: int = 300,
+        regen_option: RegenOption,
+        pdf_config: PdfBackendConfig,
+        youtube_merge_gap_sec: float,
+        youtube_merge_max_chars: int,
     ) -> None:
         """Converter を初期化する.
 
         Args:
-            regen_option: 再生成オプション（デフォルト: skip）
+            regen_option: 再生成オプション
             pdf_config: PDF バックエンド設定
             youtube_merge_gap_sec: YouTube スニペット結合の間隔閾値（秒）
             youtube_merge_max_chars: YouTube スニペット結合の最大文字数
         """
         self._regen_option = regen_option
-        self._pdf_config = pdf_config or PdfBackendConfig()
+        self._pdf_config = pdf_config
         self._youtube_merge_gap_sec = youtube_merge_gap_sec
         self._youtube_merge_max_chars = youtube_merge_max_chars
 
