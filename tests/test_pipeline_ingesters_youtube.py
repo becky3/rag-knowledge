@@ -370,7 +370,7 @@ class TestCrawlPlaylist:
     @pytest.mark.asyncio()
     async def test_successful_playlist_crawl(self, source_store: Any) -> None:
         """プレイリスト展開 + 各動画取り込みの正常系を検証する."""
-        ingester = YoutubeIngester(source_store, max_videos=3)
+        ingester = YoutubeIngester(source_store, max_videos=3, request_interval=0.1)
 
         entries = [
             {"id": "video_id_0001", "url": "video_id_0001"},
@@ -402,7 +402,7 @@ class TestCrawlPlaylist:
     @pytest.mark.asyncio()
     async def test_circuit_breaker_on_consecutive_errors(self, source_store: Any) -> None:
         """5 回連続失敗でサーキットブレーカーが発動することを検証する."""
-        ingester = YoutubeIngester(source_store, max_videos=10)
+        ingester = YoutubeIngester(source_store, max_videos=10, request_interval=0.1)
 
         entries = [{"id": f"vid_{i:011d}", "url": f"vid_{i:011d}"} for i in range(10)]
         error_result = IngestResult(errors=1, error_details=["test error"])
