@@ -317,6 +317,7 @@ CLI / MCP 対応: `rag_update_aozora_catalog` / `rag_search_aozora` / `rag_add_a
    import keyring
    print(keyring.get_password(UPLOAD_API_KEY_SERVICE, UPLOAD_API_KEY_NAME))
    " > /tmp/qa_api_key.txt
+   chmod 600 /tmp/qa_api_key.txt
    ```
 
 4. HTTP サーバーを起動する:
@@ -337,27 +338,29 @@ CLI / MCP 対応: `rag_update_aozora_catalog` / `rag_search_aozora` / `rag_add_a
 
 | # | コマンド（curl） | 期待結果 | 検証種別 |
 |---|----------------|---------|---------|
-| 1 | `curl -X POST http://localhost:8081/upload/document -H "X-API-Key: $(cat /tmp/qa_api_key.txt)" -F "file=@.qa/upload_doc_test.md"` | HTTP 200、`status: ok` と `source_id` が返る | `ingest` |
-| 2 | `curl -X POST http://localhost:8081/upload/document -H "X-API-Key: $(cat /tmp/qa_api_key.txt)" -F "file=@.qa/upload_doc_test.md"` | HTTP 409（重複検出エラー、`upload_mode` デフォルト `fail`） | `none` |
-| 3 | `curl -X POST http://localhost:8081/upload/document -H "X-API-Key: $(cat /tmp/qa_api_key.txt)" -F "file=@.qa/upload_doc_test.md" -F "upload_mode=replace"` | HTTP 200 | `none` |
-| 4 | `curl -X POST http://localhost:8081/upload/journal -H "X-API-Key: $(cat /tmp/qa_api_key.txt)" -F "file=@.qa/journal_upload_test.md" -F "title=QA スキルの仕様書・スキル定義作成" -F "repository=rag-knowledge"` | HTTP 200、`status: ok` と `source_id` が返る | `ingest` |
-| 5 | `curl -X POST http://localhost:8081/upload/journal -H "X-API-Key: $(cat /tmp/qa_api_key.txt)" -F "file=@.qa/journal_upload_test.md" -F "repository=rag-knowledge"` | HTTP 400（必須フィールド `title` 欠落） | `none` |
+| 1 | `curl -X POST http://localhost:<RAG_HTTP_PORT>/upload/document -H "X-API-Key: $(cat /tmp/qa_api_key.txt)" -F "file=@.qa/upload_doc_test.md"` | HTTP 200、`status: ok` と `source_id` が返る | `ingest` |
+| 2 | `curl -X POST http://localhost:<RAG_HTTP_PORT>/upload/document -H "X-API-Key: $(cat /tmp/qa_api_key.txt)" -F "file=@.qa/upload_doc_test.md"` | HTTP 409（重複検出エラー、`upload_mode` デフォルト `fail`） | `none` |
+| 3 | `curl -X POST http://localhost:<RAG_HTTP_PORT>/upload/document -H "X-API-Key: $(cat /tmp/qa_api_key.txt)" -F "file=@.qa/upload_doc_test.md" -F "upload_mode=replace"` | HTTP 200 | `none` |
+| 4 | `curl -X POST http://localhost:<RAG_HTTP_PORT>/upload/journal -H "X-API-Key: $(cat /tmp/qa_api_key.txt)" -F "file=@.qa/journal_upload_test.md" -F "title=QA スキルの仕様書・スキル定義作成" -F "repository=rag-knowledge"` | HTTP 200、`status: ok` と `source_id` が返る | `ingest` |
+| 5 | `curl -X POST http://localhost:<RAG_HTTP_PORT>/upload/journal -H "X-API-Key: $(cat /tmp/qa_api_key.txt)" -F "file=@.qa/journal_upload_test.md" -F "repository=rag-knowledge"` | HTTP 400（必須フィールド `title` 欠落） | `none` |
 | 6 | 下記の並行リクエストコマンドを実行 | いずれか一方が HTTP 409 Conflict（ロック競合） | `none` |
 
 F-6 並行リクエストコマンド（API キーをファイル経由で共有し、バックグラウンドプロセスへの変数伝搬問題を回避する）:
 
 ```bash
-(curl -s -w "\nBG: %{http_code}\n" -X POST http://localhost:8081/upload/document \
+curl -s -w "\nBG: %{http_code}\n" -X POST http://localhost:<RAG_HTTP_PORT>/upload/document \
   -H "X-API-Key: $(cat /tmp/qa_api_key.txt)" -F "file=@.qa/upload_doc_test.md" -F "upload_mode=replace" \
-  > /tmp/upload_bg.txt 2>&1 &) \
-&& curl -s -w "\nFG: %{http_code}\n" -X POST http://localhost:8081/upload/document \
-  -H "X-API-Key: $(cat /tmp/qa_api_key.txt)" -F "file=@.qa/upload_doc_test.md" -F "upload_mode=replace" \
-&& sleep 5 && cat /tmp/upload_bg.txt
+  > /tmp/upload_bg.txt 2>&1 &
+bg_pid=$!
+curl -s -w "\nFG: %{http_code}\n" -X POST http://localhost:<RAG_HTTP_PORT>/upload/document \
+  -H "X-API-Key: $(cat /tmp/qa_api_key.txt)" -F "file=@.qa/upload_doc_test.md" -F "upload_mode=replace"
+wait "$bg_pid"
+cat /tmp/upload_bg.txt
 ```
 
 #### グループ片付け
 
-1. HTTP サーバーを停止する
+1. HTTP サーバーを停止する: `pkill -f "python -m rag.server" 2>/dev/null || true`
 2. `.env` の `RAG_TRANSPORT` を元の値（`stdio`）に復元する
 3. テンポラリファイルを削除する: `rm -f /tmp/qa_api_key.txt /tmp/upload_bg.txt`
 
