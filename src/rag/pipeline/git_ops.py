@@ -13,16 +13,19 @@ import os
 import subprocess
 from pathlib import Path
 
+from rag.infrastructure.file_lock import INGEST_LOCK_FILENAME, REBUILD_LOCK_FILENAME
+
 logger = logging.getLogger(__name__)
 
-# metadata.db 関連ファイルの .gitignore 内容
-_GITIGNORE_CONTENT = """\
-metadata.db
-metadata.db-wal
-metadata.db-shm
-.rebuild.lock
-.ingest.lock
-"""
+# source_store の .gitignore に含めるエントリ
+_GITIGNORE_ENTRIES: list[str] = [
+    "metadata.db",
+    "metadata.db-wal",
+    "metadata.db-shm",
+    REBUILD_LOCK_FILENAME,
+    INGEST_LOCK_FILENAME,
+]
+_GITIGNORE_CONTENT = "\n".join(_GITIGNORE_ENTRIES) + "\n"
 
 
 class GitOperations:
@@ -191,9 +194,12 @@ class GitOperations:
             gitignore.write_text(_GITIGNORE_CONTENT, encoding="utf-8")
             return
         content = gitignore.read_text(encoding="utf-8")
+        existing_entries = {
+            line.strip() for line in content.splitlines() if line.strip()
+        }
         required_entries = [
-            line for line in _GITIGNORE_CONTENT.strip().splitlines()
-            if line and line not in content
+            entry for entry in _GITIGNORE_ENTRIES
+            if entry not in existing_entries
         ]
         if required_entries:
             if not content.endswith("\n"):
