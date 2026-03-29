@@ -55,7 +55,7 @@ def chunk_like_indexer(text: str) -> tuple[str, list[str]]:
     content_type = detect_content_type(text)
 
     if content_type == ContentType.TABLE:
-        table_chunks = chunk_table_data(text)
+        table_chunks = chunk_table_data(text, row_context_size=1, max_chunk_size=CHUNK_SIZE)
         chunks = [c.content for c in table_chunks] if table_chunks else []
         return content_type.name, chunks
 
