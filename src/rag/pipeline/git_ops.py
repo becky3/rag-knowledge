@@ -20,6 +20,8 @@ _GITIGNORE_CONTENT = """\
 metadata.db
 metadata.db-wal
 metadata.db-shm
+.rebuild.lock
+.ingest.lock
 """
 
 
@@ -183,16 +185,20 @@ class GitOperations:
         return entries
 
     def _ensure_gitignore(self) -> None:
-        """metadata.db を .gitignore に含めることを保証する."""
+        """必要なエントリを .gitignore に含めることを保証する."""
         gitignore = self._repo_dir / ".gitignore"
         if not gitignore.exists():
             gitignore.write_text(_GITIGNORE_CONTENT, encoding="utf-8")
             return
         content = gitignore.read_text(encoding="utf-8")
-        if "metadata.db" not in content:
+        required_entries = [
+            line for line in _GITIGNORE_CONTENT.strip().splitlines()
+            if line and line not in content
+        ]
+        if required_entries:
             if not content.endswith("\n"):
                 content += "\n"
-            content += _GITIGNORE_CONTENT
+            content += "\n".join(required_entries) + "\n"
             gitignore.write_text(content, encoding="utf-8")
 
     def _run(self, cmd: list[str]) -> subprocess.CompletedProcess[str]:
