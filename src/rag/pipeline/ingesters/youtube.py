@@ -115,7 +115,7 @@ class YoutubeIngester:
         source_store: SourceStore,
         *,
         max_videos: int = 100,
-        request_interval: float = 1.0,
+        request_interval: float = 5.0,
         request_timeout: int = 30,
         whisper_model: str = "base",
         whisper_device: str = "cuda",
