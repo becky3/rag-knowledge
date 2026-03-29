@@ -38,6 +38,7 @@ class PipelineHistoryRecord:
     from_commit_id: str
     to_commit_id: str
     processed_at: str
+    mode: str = "incremental"
 
 
 @dataclass

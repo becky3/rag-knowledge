@@ -40,7 +40,8 @@ CREATE TABLE IF NOT EXISTS pipeline_history (
     id             INTEGER PRIMARY KEY AUTOINCREMENT,
     from_commit_id TEXT NOT NULL,
     to_commit_id   TEXT NOT NULL,
-    processed_at   TEXT NOT NULL
+    processed_at   TEXT NOT NULL,
+    mode           TEXT NOT NULL DEFAULT 'incremental'
 );
 """
 
@@ -66,12 +67,26 @@ class MetadataDB:
     def initialize(self) -> None:
         """スキーマを初期化する."""
         self._connection.executescript(_SCHEMA_SQL)
+        self._migrate()
 
     def close(self) -> None:
         """接続を閉じる."""
         if self._conn is not None:
             self._conn.close()
             self._conn = None
+
+    def _migrate(self) -> None:
+        """既存テーブルのスキーマをマイグレーションする."""
+        # pipeline_history に mode 列を追加（既存レコードは incremental 扱い）
+        cursor = self._connection.execute("PRAGMA table_info(pipeline_history)")
+        columns = {row["name"] for row in cursor.fetchall()}
+        if "mode" not in columns:
+            self._connection.execute(
+                "ALTER TABLE pipeline_history"
+                " ADD COLUMN mode TEXT NOT NULL DEFAULT 'incremental'"
+            )
+            self._connection.commit()
+            logger.info("pipeline_history に mode 列を追加しました")
 
     def __enter__(self) -> MetadataDB:
         return self
@@ -254,14 +269,16 @@ class MetadataDB:
         from_commit_id: str,
         to_commit_id: str,
         processed_at: str,
+        mode: str = "incremental",
     ) -> None:
         """パイプライン実行履歴を追加する."""
         self._connection.execute(
             """\
-            INSERT INTO pipeline_history (from_commit_id, to_commit_id, processed_at)
-            VALUES (?, ?, ?)
+            INSERT INTO pipeline_history
+                (from_commit_id, to_commit_id, processed_at, mode)
+            VALUES (?, ?, ?, ?)
             """,
-            (from_commit_id, to_commit_id, processed_at),
+            (from_commit_id, to_commit_id, processed_at, mode),
         )
         self._connection.commit()
 
@@ -289,9 +306,40 @@ class MetadataDB:
                 from_commit_id=row["from_commit_id"],
                 to_commit_id=row["to_commit_id"],
                 processed_at=row["processed_at"],
+                mode=row["mode"],
             )
             for row in rows
         ]
+
+    def needs_index_rebuild(self) -> bool:
+        """前回の index/full rebuild 以降に更新があったかを判定する.
+
+        Returns:
+            True: rebuild が必要（更新あり or 履歴なし）
+            False: rebuild 不要（更新なし）
+        """
+        # 最後の index/full rebuild を取得
+        row = self._connection.execute(
+            "SELECT id FROM pipeline_history"
+            " WHERE mode IN ('index', 'full')"
+            " ORDER BY id DESC LIMIT 1"
+        ).fetchone()
+
+        if row is None:
+            # index/full rebuild の履歴なし → 必要
+            return True
+
+        last_id = row["id"]
+
+        # それ以降のレコードがあるか確認
+        newer = self._connection.execute(
+            "SELECT EXISTS("
+            "  SELECT 1 FROM pipeline_history WHERE id > ?"
+            ") as has_newer",
+            (last_id,),
+        ).fetchone()
+
+        return bool(newer["has_newer"])
 
     def checkpoint(self) -> None:
         """WAL をフラッシュする（バックアップ前に実行）."""
