@@ -299,6 +299,7 @@ CLI / MCP 対応: `rag_update_aozora_catalog` / `rag_search_aozora` / `rag_add_a
 
    ```bash
    grep '^RAG_TRANSPORT=' .env | cut -d= -f2 > /tmp/qa_original_transport.txt
+   sed -i 's/^RAG_TRANSPORT=.*/RAG_TRANSPORT=http/' .env
    ```
 
 2. API キーが keyring に登録済みか確認する:
@@ -332,11 +333,13 @@ CLI / MCP 対応: `rag_update_aozora_catalog` / `rag_search_aozora` / `rag_add_a
    echo $! > /tmp/qa_rag_server.pid
    ```
 
-5. ヘルスチェックで起動を確認する（起動に数秒かかる場合がある）:
+5. サーバーの起動を待機する（起動に数秒かかる場合がある）:
 
    ```bash
-   curl -s -o /dev/null -w "%{http_code}" http://localhost:<RAG_HTTP_PORT>/upload/document
+   sleep 5
    ```
+
+   起動確認は F-1（最初のリクエスト）で HTTP 200 が返ることをもって行う。
 
 ベース URL: `http://localhost:<RAG_HTTP_PORT>`（デフォルト: `8081`）
 
@@ -367,7 +370,7 @@ cat /tmp/upload_bg.txt
 #### グループ片付け
 
 1. HTTP サーバーを停止する（起動時に記録した PID を使用）: `if [ -f /tmp/qa_rag_server.pid ]; then kill "$(cat /tmp/qa_rag_server.pid)" 2>/dev/null || true; rm -f /tmp/qa_rag_server.pid; fi`
-2. `.env` の `RAG_TRANSPORT` を起動前の値に復元する（ステップ 1 で退避した値を使用）
+2. `.env` の `RAG_TRANSPORT` を起動前の値に復元する: `if [ -f /tmp/qa_original_transport.txt ]; then sed -i "s/^RAG_TRANSPORT=.*/RAG_TRANSPORT=$(cat /tmp/qa_original_transport.txt)/" .env; fi`
 3. テンポラリファイルを削除する: `rm -f /tmp/qa_api_key.txt /tmp/upload_bg.txt /tmp/qa_original_transport.txt`
 
 ### G) Eval
