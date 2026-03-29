@@ -257,7 +257,7 @@ MCP 対応: `rag_add_youtube` / `rag_crawl_youtube`
 | # | コマンド（CLI） | 期待結果 | 検証種別 |
 |---|----------------|---------|---------|
 | 1 | `update-aozora-catalog` | カタログ CSV が source_store に配置される | `none` |
-| 2 | `search-aozora --author 太宰 --limit 300` | 結果に `001567`（走れメロス）が含まれる | `none` |
+| 2 | `search-aozora --author 太宰 --limit 100` | 結果に `001567`（走れメロス）が含まれる | `none` |
 | 3 | `ingest-aozora 001567` | 作品 1 件取り込み成功 | `ingest` |
 
 MCP 対応: `rag_update_aozora_catalog` / `rag_search_aozora` / `rag_add_aozora`
@@ -266,7 +266,12 @@ MCP 対応: `rag_update_aozora_catalog` / `rag_search_aozora` / `rag_add_aozora`
 
 #### グループ準備
 
-1. `.env` の `RAG_TRANSPORT` を `http` に変更する
+1. `.env` の `RAG_TRANSPORT` の現在の値を退避し、`http` に変更する:
+
+   ```bash
+   grep '^RAG_TRANSPORT=' .env | cut -d= -f2 > /tmp/qa_original_transport.txt
+   ```
+
 2. API キーが keyring に登録済みか確認する:
 
    ```bash
@@ -291,16 +296,17 @@ MCP 対応: `rag_update_aozora_catalog` / `rag_search_aozora` / `rag_add_aozora`
    chmod 600 /tmp/qa_api_key.txt
    ```
 
-4. HTTP サーバーを起動する:
+4. HTTP サーバーを起動し、PID を記録する:
 
    ```bash
    uv run python -m rag.server &
+   echo $! > /tmp/qa_rag_server.pid
    ```
 
 5. ヘルスチェックで起動を確認する（起動に数秒かかる場合がある）:
 
    ```bash
-   curl -s -o /dev/null -w "%{http_code}" http://localhost:<RAG_HTTP_PORT>/
+   curl -s -o /dev/null -w "%{http_code}" http://localhost:<RAG_HTTP_PORT>/upload/document
    ```
 
 ベース URL: `http://localhost:<RAG_HTTP_PORT>`（デフォルト: `8081`）
@@ -331,9 +337,9 @@ cat /tmp/upload_bg.txt
 
 #### グループ片付け
 
-1. HTTP サーバーを停止する: `pkill -f "python -m rag.server" 2>/dev/null || true`
-2. `.env` の `RAG_TRANSPORT` を元の値（`stdio`）に復元する
-3. テンポラリファイルを削除する: `rm -f /tmp/qa_api_key.txt /tmp/upload_bg.txt`
+1. HTTP サーバーを停止する（起動時に記録した PID を使用）: `if [ -f /tmp/qa_rag_server.pid ]; then kill "$(cat /tmp/qa_rag_server.pid)" 2>/dev/null || true; rm -f /tmp/qa_rag_server.pid; fi`
+2. `.env` の `RAG_TRANSPORT` を起動前の値に復元する（ステップ 1 で退避した値を使用）
+3. テンポラリファイルを削除する: `rm -f /tmp/qa_api_key.txt /tmp/upload_bg.txt /tmp/qa_original_transport.txt`
 
 ### G) Eval（CLI 固定）
 
