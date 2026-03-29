@@ -13,14 +13,19 @@ import os
 import subprocess
 from pathlib import Path
 
+from rag.infrastructure.file_lock import INGEST_LOCK_FILENAME, REBUILD_LOCK_FILENAME
+
 logger = logging.getLogger(__name__)
 
-# metadata.db 関連ファイルの .gitignore 内容
-_GITIGNORE_CONTENT = """\
-metadata.db
-metadata.db-wal
-metadata.db-shm
-"""
+# source_store の .gitignore に含めるエントリ
+_GITIGNORE_ENTRIES: list[str] = [
+    "metadata.db",
+    "metadata.db-wal",
+    "metadata.db-shm",
+    REBUILD_LOCK_FILENAME,
+    INGEST_LOCK_FILENAME,
+]
+_GITIGNORE_CONTENT = "\n".join(_GITIGNORE_ENTRIES) + "\n"
 
 
 class GitOperations:
@@ -183,16 +188,23 @@ class GitOperations:
         return entries
 
     def _ensure_gitignore(self) -> None:
-        """metadata.db を .gitignore に含めることを保証する."""
+        """必要なエントリを .gitignore に含めることを保証する."""
         gitignore = self._repo_dir / ".gitignore"
         if not gitignore.exists():
             gitignore.write_text(_GITIGNORE_CONTENT, encoding="utf-8")
             return
         content = gitignore.read_text(encoding="utf-8")
-        if "metadata.db" not in content:
+        existing_entries = {
+            line.strip() for line in content.splitlines() if line.strip()
+        }
+        required_entries = [
+            entry for entry in _GITIGNORE_ENTRIES
+            if entry not in existing_entries
+        ]
+        if required_entries:
             if not content.endswith("\n"):
                 content += "\n"
-            content += _GITIGNORE_CONTENT
+            content += "\n".join(required_entries) + "\n"
             gitignore.write_text(content, encoding="utf-8")
 
     def _run(self, cmd: list[str]) -> subprocess.CompletedProcess[str]:
