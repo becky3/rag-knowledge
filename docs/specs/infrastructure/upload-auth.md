@@ -39,10 +39,16 @@ API キーが平文で通信経路に流れることを防止する目的で、�
 |---|---|---|
 | `127.0.0.1` / `localhost` | 許可 | 許可 |
 | プライベートアドレス（`ipaddress.is_private` 判定: RFC 1918、リンクローカル、CGNAT 等） | 許可 | 許可 |
-| `0.0.0.0` | 起動拒否 | 起動拒否 |
+| `0.0.0.0`（`RAG_DNS_REBINDING_PROTECTION=true`） | 起動拒否 | 起動拒否 |
+| `0.0.0.0`（`RAG_DNS_REBINDING_PROTECTION=false`） | 許可 | 許可 |
 | 上記以外（パブリックアドレス） | 起動拒否 | 許可 |
 
-- **`0.0.0.0` の拒否理由**: 全インターフェースでバインドするため、意図しない外部公開のリスクがある。LAN 内の他マシンからアクセスする場合は、具体的なプライベート IP アドレスを指定する
+- **`0.0.0.0` の扱い**: 全インターフェースでバインドするため、意図しない外部公開のリスクがある。
+  デフォルト（`RAG_DNS_REBINDING_PROTECTION=true`）では起動を拒否する。
+  `RAG_DNS_REBINDING_PROTECTION=false` を明示的に設定した場合は、
+  利用者がリスクを理解した上での運用とみなし、`0.0.0.0` バインドを許可する。
+  この場合、バインドアドレス検証の許可に加え、FastMCP の DNS rebinding protection も無効化する。
+  LAN 内の他マシンからアクセスする場合は、具体的なプライベート IP アドレスの指定を推奨する
 - **HTTPS 未実装の現状**: HTTPS（TLS）対応は #449 で実装予定。現時点ではパブリックアドレスでの運用は不可
 - **stdio モードへの影響なし**: バインドアドレス検証は HTTP モードでのみ実行する
 
@@ -110,14 +116,17 @@ HTTP モードでのサーバー起動時に、バインドアドレスの安全
 検証フロー:
 
 1. `rag_http_host` の値を取得する
-2. `0.0.0.0` の場合: エラーメッセージを出力して起動を拒否する
+2. `0.0.0.0` の場合: `rag_dns_rebinding_protection` が `true` なら起動を拒否する。`false` なら許可する
 3. `127.0.0.1` または `localhost` の場合: 許可する
 4. プライベートアドレス（`ipaddress.is_private` 判定）の場合: 許可する
 5. 上記以外（パブリックアドレス）の場合: HTTPS が設定されていなければ起動を拒否する
 
 ### 設定項目
 
-本仕様で新たに追加する設定項目はない。API キーは keyring で管理し、バインドアドレスは既存の `rag_http_host`（`.env` では `RAG_HTTP_HOST`）を使用する。
+本仕様で新たに追加する設定項目はない。
+API キーは keyring で管理し、バインドアドレスは既存の `rag_http_host`（`.env` では `RAG_HTTP_HOST`）を使用する。
+バインドアドレス検証では `rag_dns_rebinding_protection`（`.env` では `RAG_DNS_REBINDING_PROTECTION`、デフォルト: `true`）も参照する。
+設定項目自体は rag-knowledge.md で定義済み。
 
 ## コンポーネント構成
 
@@ -181,7 +190,8 @@ flowchart TB
 
 | ケース | 振る舞い |
 |--------|---------|
-| `rag_http_host=0.0.0.0` | 起動拒否。エラーメッセージに具体的なプライベート IP の指定を案内する |
+| `rag_http_host=0.0.0.0`、`rag_dns_rebinding_protection=true` | 起動拒否。エラーメッセージに具体的なプライベート IP の指定、または `RAG_DNS_REBINDING_PROTECTION=false` の設定を案内する |
+| `rag_http_host=0.0.0.0`、`rag_dns_rebinding_protection=false` | 許可 |
 | `rag_http_host` がパブリックアドレスで HTTPS 未設定 | 起動拒否。エラーメッセージに HTTPS の必要性を案内する |
 | `rag_http_host` がパブリックアドレスで HTTPS 設定済み | 許可（#449 実装後に有効） |
 | stdio モードでのバインドアドレス検証 | 検証しない（HTTP モードでのみ実行） |

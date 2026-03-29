@@ -4,7 +4,7 @@
 
 テスト方針:
 - API キー検証（ヘッダー未指定、値不正、一致、keyring エラー）
-- バインドアドレス検証（0.0.0.0 拒否、localhost 許可、プライベート許可、パブリック拒否）
+- バインドアドレス検証（0.0.0.0 拒否/許可、localhost 許可、プライベート許可、パブリック拒否）
 - API キー未登録時の起動拒否
 - generate-api-key CLI サブコマンド（表示のみ、--save、--force、既存キーの上書き確認）
 """
@@ -157,41 +157,59 @@ class TestCheckApiKey:
 class TestValidateBindAddress:
     """_validate_bind_address のテスト."""
 
-    def test_0000_is_rejected(self) -> None:
-        """0.0.0.0 は拒否される."""
-        result = _validate_bind_address("0.0.0.0")
+    def test_0000_is_rejected_with_protection(self) -> None:
+        """0.0.0.0 は dns_rebinding_protection=True で拒否される."""
+        result = _validate_bind_address("0.0.0.0", dns_rebinding_protection=True)
         assert result is not None
         assert "0.0.0.0" in result
+        assert "RAG_DNS_REBINDING_PROTECTION=false" in result
+
+    def test_0000_is_allowed_without_protection(self) -> None:
+        """0.0.0.0 は dns_rebinding_protection=False で許可される."""
+        assert (
+            _validate_bind_address("0.0.0.0", dns_rebinding_protection=False) is None
+        )
 
     def test_localhost_is_allowed(self) -> None:
         """localhost は許可される."""
-        assert _validate_bind_address("localhost") is None
+        assert (
+            _validate_bind_address("localhost", dns_rebinding_protection=True) is None
+        )
 
     def test_127001_is_allowed(self) -> None:
         """127.0.0.1 は許可される."""
-        assert _validate_bind_address("127.0.0.1") is None
+        assert (
+            _validate_bind_address("127.0.0.1", dns_rebinding_protection=True) is None
+        )
 
     def test_private_rfc1918_10_is_allowed(self) -> None:
         """10.x.x.x プライベートアドレスは許可される."""
-        assert _validate_bind_address("10.0.0.1") is None
+        assert (
+            _validate_bind_address("10.0.0.1", dns_rebinding_protection=True) is None
+        )
 
     def test_private_rfc1918_172_is_allowed(self) -> None:
         """172.16.x.x プライベートアドレスは許可される."""
-        assert _validate_bind_address("172.16.0.1") is None
+        assert (
+            _validate_bind_address("172.16.0.1", dns_rebinding_protection=True) is None
+        )
 
     def test_private_rfc1918_192_is_allowed(self) -> None:
         """192.168.x.x プライベートアドレスは許可される."""
-        assert _validate_bind_address("192.168.1.100") is None
+        assert (
+            _validate_bind_address("192.168.1.100", dns_rebinding_protection=True)
+            is None
+        )
 
     def test_public_address_is_rejected_without_https(self) -> None:
         """パブリックアドレスは HTTPS なしで拒否される."""
-        result = _validate_bind_address("8.8.8.8")
+        result = _validate_bind_address("8.8.8.8", dns_rebinding_protection=True)
         assert result is not None
         assert "HTTPS" in result
 
     def test_hostname_is_rejected_without_https(self) -> None:
         """ホスト名（IP でない文字列）は HTTPS なしで拒否される."""
-        result = _validate_bind_address("myhost.local")
+        result = _validate_bind_address("myhost.local", dns_rebinding_protection=True)
         assert result is not None
         assert "HTTPS" in result
 

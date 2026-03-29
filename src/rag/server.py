@@ -2058,7 +2058,9 @@ async def upload_journal(request: Request) -> Response:
         return _upload_error(500, "インジェスト処理中にエラーが発生しました")
 
 
-def _validate_bind_address(host: str) -> str | None:
+def _validate_bind_address(
+    host: str, *, dns_rebinding_protection: bool
+) -> str | None:
     """HTTP モードのバインドアドレスを検証する.
 
     仕様: docs/specs/infrastructure/upload-auth.md
@@ -2069,11 +2071,14 @@ def _validate_bind_address(host: str) -> str | None:
     import ipaddress
 
     if host == "0.0.0.0":
-        return (
-            "Binding to 0.0.0.0 is not allowed. "
-            "Use a specific private IP address (e.g., 192.168.x.x) "
-            "for LAN access, or 127.0.0.1 for local access."
-        )
+        if dns_rebinding_protection:
+            return (
+                "Binding to 0.0.0.0 is not allowed. "
+                "Use a specific private IP address (e.g., 192.168.x.x) "
+                "for LAN access, or 127.0.0.1 for local access. "
+                "Or set RAG_DNS_REBINDING_PROTECTION=false to allow 0.0.0.0."
+            )
+        return None
 
     if host in ("127.0.0.1", "localhost"):
         return None
@@ -2137,7 +2142,10 @@ def _configure_and_run() -> None:
 
     # HTTP モードの事前検証（外部依存の起動前に設定の妥当性を確認する）
     if transport == "http":
-        bind_error = _validate_bind_address(settings.rag_http_host)
+        bind_error = _validate_bind_address(
+            settings.rag_http_host,
+            dns_rebinding_protection=settings.rag_dns_rebinding_protection,
+        )
         if bind_error is not None:
             logger.error(bind_error)
             raise SystemExit(1)
