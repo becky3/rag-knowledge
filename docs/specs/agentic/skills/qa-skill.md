@@ -282,7 +282,7 @@ CLI / MCP 対応: `rag_add_youtube` / `rag_crawl_youtube`
 | # | コマンド（CLI） | 期待結果 | 検証種別 |
 |---|----------------|---------|---------|
 | 1 | `update-aozora-catalog` | カタログ CSV が source_store に配置される | `none` |
-| 2 | `search-aozora --author 太宰` | 結果に `001567`（走れメロス）が含まれる | `none` |
+| 2 | `search-aozora --author 太宰 --limit 300` | 結果に `001567`（走れメロス）が含まれる | `none` |
 | 3 | `ingest-aozora 001567` | 作品 1 件取り込み成功 | `ingest` |
 
 CLI / MCP 対応: `rag_update_aozora_catalog` / `rag_search_aozora` / `rag_add_aozora`
@@ -293,18 +293,73 @@ CLI / MCP 対応: `rag_update_aozora_catalog` / `rag_search_aozora` / `rag_add_a
 
 目的: HTTP Upload API の動作確認。HTTP モードでの MCP サーバー起動が必要。
 
-前提: MCP サーバーを HTTP モードで起動する（`.env` で `RAG_TRANSPORT=http` を設定）。
+#### グループ準備
+
+1. `.env` の `RAG_TRANSPORT` を `http` に変更する
+2. API キーが keyring に登録済みか確認する:
+
+   ```bash
+   uv run python -c "
+   from rag.config import UPLOAD_API_KEY_SERVICE, UPLOAD_API_KEY_NAME
+   import keyring
+   key = keyring.get_password(UPLOAD_API_KEY_SERVICE, UPLOAD_API_KEY_NAME)
+   print('OK: API key found' if key else 'NG: API key not found')
+   "
+   ```
+
+   未登録の場合は `uv run python -m rag.cli generate-api-key --save` で生成・保存する
+
+3. API キーをテンポラリファイルに書き出す（curl コマンドで使用）:
+
+   ```bash
+   uv run python -c "
+   from rag.config import UPLOAD_API_KEY_SERVICE, UPLOAD_API_KEY_NAME
+   import keyring
+   print(keyring.get_password(UPLOAD_API_KEY_SERVICE, UPLOAD_API_KEY_NAME))
+   " > /tmp/qa_api_key.txt
+   ```
+
+4. HTTP サーバーを起動する:
+
+   ```bash
+   uv run python -m rag.server &
+   ```
+
+5. ヘルスチェックで起動を確認する（起動に数秒かかる場合がある）:
+
+   ```bash
+   curl -s -o /dev/null -w "%{http_code}" http://localhost:<RAG_HTTP_PORT>/
+   ```
 
 ベース URL: `http://localhost:<RAG_HTTP_PORT>`（デフォルト: `8081`）
 
+全リクエストに API キーヘッダー（`-H "X-API-Key: $(cat /tmp/qa_api_key.txt)"`）を付与する。
+
 | # | コマンド（curl） | 期待結果 | 検証種別 |
 |---|----------------|---------|---------|
-| 1 | `curl -X POST http://localhost:8081/upload/document -F "file=@README.md"` | HTTP 200、`status: ok` と `source_id` が返る | `ingest` |
-| 2 | `curl -X POST http://localhost:8081/upload/document -F "file=@README.md"` | HTTP 409（重複検出エラー、`upload_mode` デフォルト `fail`） | `none` |
-| 3 | `curl -X POST http://localhost:8081/upload/document -F "file=@README.md" -F "upload_mode=replace"` | HTTP 200 | `none` |
-| 4 | `curl -X POST http://localhost:8081/upload/journal -F "file=@.qa/journal_upload_test.md" -F "title=QA スキルの仕様書・スキル定義作成" -F "repository=rag-knowledge"` | HTTP 200、`status: ok` と `source_id` が返る | `ingest` |
-| 5 | `curl -X POST http://localhost:8081/upload/journal -F "file=@.qa/journal_upload_test.md" -F "repository=rag-knowledge"` | HTTP 400（必須フィールド `title` 欠落） | `none` |
-| 6 | ステップ 1 のコマンドを `&` でバックグラウンド送信 + 同一コマンドをフォアグラウンドで実行 | いずれか一方が HTTP 409 Conflict（ロック競合） | `none` |
+| 1 | `curl -X POST http://localhost:8081/upload/document -H "X-API-Key: $(cat /tmp/qa_api_key.txt)" -F "file=@.qa/upload_doc_test.md"` | HTTP 200、`status: ok` と `source_id` が返る | `ingest` |
+| 2 | `curl -X POST http://localhost:8081/upload/document -H "X-API-Key: $(cat /tmp/qa_api_key.txt)" -F "file=@.qa/upload_doc_test.md"` | HTTP 409（重複検出エラー、`upload_mode` デフォルト `fail`） | `none` |
+| 3 | `curl -X POST http://localhost:8081/upload/document -H "X-API-Key: $(cat /tmp/qa_api_key.txt)" -F "file=@.qa/upload_doc_test.md" -F "upload_mode=replace"` | HTTP 200 | `none` |
+| 4 | `curl -X POST http://localhost:8081/upload/journal -H "X-API-Key: $(cat /tmp/qa_api_key.txt)" -F "file=@.qa/journal_upload_test.md" -F "title=QA スキルの仕様書・スキル定義作成" -F "repository=rag-knowledge"` | HTTP 200、`status: ok` と `source_id` が返る | `ingest` |
+| 5 | `curl -X POST http://localhost:8081/upload/journal -H "X-API-Key: $(cat /tmp/qa_api_key.txt)" -F "file=@.qa/journal_upload_test.md" -F "repository=rag-knowledge"` | HTTP 400（必須フィールド `title` 欠落） | `none` |
+| 6 | 下記の並行リクエストコマンドを実行 | いずれか一方が HTTP 409 Conflict（ロック競合） | `none` |
+
+F-6 並行リクエストコマンド（API キーをファイル経由で共有し、バックグラウンドプロセスへの変数伝搬問題を回避する）:
+
+```bash
+(curl -s -w "\nBG: %{http_code}\n" -X POST http://localhost:8081/upload/document \
+  -H "X-API-Key: $(cat /tmp/qa_api_key.txt)" -F "file=@.qa/upload_doc_test.md" -F "upload_mode=replace" \
+  > /tmp/upload_bg.txt 2>&1 &) \
+&& curl -s -w "\nFG: %{http_code}\n" -X POST http://localhost:8081/upload/document \
+  -H "X-API-Key: $(cat /tmp/qa_api_key.txt)" -F "file=@.qa/upload_doc_test.md" -F "upload_mode=replace" \
+&& sleep 5 && cat /tmp/upload_bg.txt
+```
+
+#### グループ片付け
+
+1. HTTP サーバーを停止する
+2. `.env` の `RAG_TRANSPORT` を元の値（`stdio`）に復元する
+3. テンポラリファイルを削除する: `rm -f /tmp/qa_api_key.txt /tmp/upload_bg.txt`
 
 ### G) Eval
 
