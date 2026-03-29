@@ -115,6 +115,7 @@ uv run python -m rag.server
 # CLI
 uv run python -m rag.cli --help
 ```
+
 ## Journal CLI
 
 ### 単一エントリ登録
