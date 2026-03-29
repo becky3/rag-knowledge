@@ -34,6 +34,7 @@ RAG Knowledge は、外部 Web ページから収集した知識をベクトル 
 | 24 | コンテンツ一覧取得 | source_type 別の最新ソース一覧取得 | [infrastructure/content-listing.md](infrastructure/content-listing.md) |
 | 25 | コンテンツアップロード | HTTP モードでのファイル直接アップロード（multipart/form-data） | [infrastructure/content-upload.md](infrastructure/content-upload.md) |
 | 26 | Upload HTTP API 認証 | API キー認証・バインドアドレス制約 | [infrastructure/upload-auth.md](infrastructure/upload-auth.md) |
+| 27 | 定期 index rebuild | 条件付き index rebuild の自動実行 | [infrastructure/scheduled-rebuild.md](infrastructure/scheduled-rebuild.md) |
 
 ## 3. 技術スタック
 

@@ -220,6 +220,7 @@ git-flow ベースのブランチ戦略を採用。詳細は `~/.claude/docs/spe
 - [コンテンツ一覧取得](docs/specs/infrastructure/content-listing.md)
 - [コンテンツアップロード](docs/specs/infrastructure/content-upload.md)
 - [Upload HTTP API 認証](docs/specs/infrastructure/upload-auth.md)
+- [定期 index rebuild](docs/specs/infrastructure/scheduled-rebuild.md)
 
 ### インジェスター仕様
 

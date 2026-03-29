@@ -322,7 +322,7 @@ class TestConfigureAndRun:
         mod = import_module("rag.server")
         mock_settings = MagicMock()
         mock_settings.rag_transport = "http"
-        mock_settings.rag_http_host = "0.0.0.0"
+        mock_settings.rag_http_host = "127.0.0.1"
         mock_settings.rag_http_port = 9090
         mock_settings.rag_dns_rebinding_protection = True
 
@@ -333,7 +333,7 @@ class TestConfigureAndRun:
             _configure_and_run()
 
         mock_run.assert_called_once_with(transport="streamable-http")
-        assert mod.mcp.settings.host == "0.0.0.0"
+        assert mod.mcp.settings.host == "127.0.0.1"
         assert mod.mcp.settings.port == 9090
 
     def test_keyboard_interrupt_graceful_shutdown(self) -> None:

@@ -90,7 +90,7 @@ metadata.db、converted_store、検索インデックスは全て source_store �
 | ソース登録 | ソースメタデータ | なし | sources テーブルにレコードを挿入する |
 | ソース更新 | source_id、更新フィールド | なし | 指定レコードを更新する |
 | ソース検索 | 検索条件 | ソースメタデータのリスト | 条件に合致するレコードを返す |
-| パイプライン履歴追加 | from_commit_id、to_commit_id | なし | pipeline_history テーブルに実行履歴を追加する |
+| パイプライン履歴追加 | from_commit_id、to_commit_id、mode、processed_at | なし | pipeline_history テーブルに実行履歴を追加する |
 | 最終コミット ID 取得 | なし | コミット ID | pipeline_history の最新行の `to_commit_id` を返す。履歴がない場合は null commit hash を返す |
 | DB 再構築 | なし | なし | source_store のファイルと .meta をスキャンし、metadata.db を再構築する |
 
@@ -415,6 +415,7 @@ source_store 内の全ファイルのメタデータ索引。
 | `from_commit_id` | TEXT | NOT NULL | 処理前のコミット ID。初回は null commit hash（40文字ゼロ） |
 | `to_commit_id` | TEXT | NOT NULL | 処理後のコミット ID |
 | `processed_at` | TEXT | NOT NULL | 処理日時（ISO 8601） |
+| `mode` | TEXT | NOT NULL | 実行モード: `full`, `convert`, `index`, `incremental` |
 
 - `last_commit_id` の取得: `SELECT to_commit_id FROM pipeline_history ORDER BY id DESC LIMIT 1`
 - 初回実行時の `from_commit_id` には git の null commit hash `0000000000000000000000000000000000000000`（40文字ゼロ）を使用する

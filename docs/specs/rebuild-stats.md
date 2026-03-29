@@ -87,8 +87,9 @@ uv run python -m rag.cli rebuild --mode <MODE> [--source-type <TYPE>]
 |-----------|-----|------|------|
 | `--mode` | str | はい | 再構築モード: `full`、`convert`、`index`、`incremental` |
 | `--source-type` | str | いいえ | 対象媒体フィルタ: `web`、`bluesky`、`zenn`、`local` |
+| `--if-needed` | flag | いいえ | 前回の index/full rebuild 以降に更新がなければスキップする。`--mode` が `index` または `full` の場合のみ有効 |
 
-MCP ツール `rag_rebuild` と同じバリデーション・振る舞いを適用する。
+MCP ツール `rag_rebuild` と同じバリデーション・振る舞いを適用する。`--if-needed` の詳細は [infrastructure/scheduled-rebuild.md](infrastructure/scheduled-rebuild.md) を参照。
 
 ## コンポーネント構成
 

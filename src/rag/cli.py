@@ -371,6 +371,12 @@ def main() -> None:
         default=None,
         help="再構築前に source_store を git commit するメッセージ",
     )
+    rebuild_parser.add_argument(
+        "--if-needed",
+        action="store_true",
+        default=False,
+        help="前回 index/full rebuild 以降に更新がなければスキップ（index/full のみ有効）",
+    )
     _add_output_option(rebuild_parser)
     # stats サブコマンド
     subparsers.add_parser("stats", help="ナレッジベースの統計情報を表示")
@@ -1198,6 +1204,43 @@ def run_get_document(args: argparse.Namespace) -> None:
         print(response)
 
 
+def _format_elapsed(seconds: float) -> str:
+    """所要時間を時分秒表記にフォーマットする.
+
+    仕様: docs/specs/infrastructure/scheduled-rebuild.md
+    """
+    if seconds < 60:
+        return f"{seconds:.1f} 秒"
+    minutes = int(seconds // 60)
+    secs = seconds % 60
+    if minutes < 60:
+        return f"{minutes} 分 {secs:.1f} 秒"
+    hours = minutes // 60
+    mins = minutes % 60
+    return f"{hours} 時間 {mins} 分 {secs:.1f} 秒"
+
+
+def _show_error_dialog(message: str) -> None:
+    """Windows エラーダイアログを表示する.
+
+    仕様: docs/specs/infrastructure/scheduled-rebuild.md
+
+    非 Windows 環境ではスキップする。
+    """
+    if sys.platform != "win32":
+        return
+    try:
+        import ctypes
+        ctypes.windll.user32.MessageBoxW(
+            0,
+            message,
+            "RAG Knowledge - Rebuild Error",
+            0x10,  # MB_ICONERROR
+        )
+    except Exception:
+        logger.warning("Windows ダイアログの表示に失敗しました")
+
+
 def run_rebuild(args: argparse.Namespace) -> None:
     """再構築を実行する.
 
@@ -1216,6 +1259,7 @@ def run_rebuild(args: argparse.Namespace) -> None:
 
     mode: str = args.mode
     source_type: SourceType | None = args.source_type
+    if_needed: bool = args.if_needed
 
     # incremental + source_type のバリデーション
     if mode == "incremental" and source_type is not None:
@@ -1224,6 +1268,14 @@ def run_rebuild(args: argparse.Namespace) -> None:
         logger.error(
             "incremental モードでは source_type を指定できません"
         )
+        sys.exit(1)
+
+    # --if-needed は index/full のみ有効
+    if if_needed and mode not in ("index", "full"):
+        msg = "--if-needed は --mode index または --mode full でのみ使用できます"
+        if json_out:
+            _output_error(msg)
+        logger.error(msg)
         sys.exit(1)
 
     settings = get_settings()
@@ -1251,6 +1303,20 @@ def run_rebuild(args: argparse.Namespace) -> None:
 
     controller = build_pipeline_controller(settings)
 
+    # --if-needed: 更新チェック（ロック取得前に判定）
+    if if_needed and not controller.db.needs_index_rebuild():
+        if json_out:
+            _output_result({
+                "mode": mode,
+                "skipped": True,
+                "reason": "前回の index/full rebuild 以降に更新がありません",
+            })
+        else:
+            logger.info(
+                "前回の index/full rebuild 以降に更新がありません（スキップ）"
+            )
+        return
+
     # rebuild ロック取得
     from .infrastructure.file_lock import LockAcquisitionError, rebuild_lock
 
@@ -1262,8 +1328,11 @@ def run_rebuild(args: argparse.Namespace) -> None:
         if json_out:
             _output_error(msg)
         print(f"エラー: {msg}", file=sys.stderr)
+        if if_needed:
+            _show_error_dialog(msg)
         raise SystemExit(1)
 
+    has_error = False
     try:
         logger.info("再構築を開始します（モード: %s）", mode)
         if source_type:
@@ -1313,18 +1382,40 @@ def run_rebuild(args: argparse.Namespace) -> None:
                 "errors": summary.errors,
                 "elapsed": round(elapsed, 1),
             })
+            if summary.errors:
+                has_error = True
+                if if_needed:
+                    error_files = ", ".join(summary.errors)
+                    _show_error_dialog(
+                        f"rebuild --mode {mode} でエラーが発生しました。\n"
+                        f"エラーファイル: {error_files}"
+                    )
             return
 
         logger.info(
-            "再構築完了: %d 処理 / %d スキップ / %d エラー / %.1f 秒",
+            "再構築完了: %d 処理 / %d スキップ / %d エラー / %s",
             summary.processed,
             summary.skipped,
             len(summary.errors),
-            elapsed,
+            _format_elapsed(elapsed),
         )
         if summary.errors:
+            has_error = True
             for err_file in summary.errors:
                 logger.error("  エラーファイル: %s", err_file)
+    except Exception as e:
+        has_error = True
+        if if_needed:
+            _show_error_dialog(f"rebuild --mode {mode} でエラーが発生しました。\n{e}")
+        raise
+    else:
+        # 処理エラー（例外なしだがエラーファイルあり）
+        if has_error and if_needed:
+            error_files = ", ".join(summary.errors)
+            _show_error_dialog(
+                f"rebuild --mode {mode} でエラーが発生しました。\n"
+                f"エラーファイル: {error_files}"
+            )
     finally:
         lock.release()
 

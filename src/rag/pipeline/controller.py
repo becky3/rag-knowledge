@@ -194,6 +194,7 @@ class PipelineController:
                 from_commit_id=last_commit_id,
                 to_commit_id=head_commit,
                 processed_at=datetime.now(timezone.utc).isoformat(),
+                mode="incremental",
             )
 
         return summary
@@ -276,6 +277,7 @@ class PipelineController:
                 from_commit_id=NULL_COMMIT_HASH,
                 to_commit_id=to_commit,
                 processed_at=datetime.now(timezone.utc).isoformat(),
+                mode="full",
             )
 
         return PipelineSummary(
@@ -457,6 +459,19 @@ class PipelineController:
                 skipped += 1
             if progress_callback is not None:
                 progress_callback(processed + skipped, len(records), record.file_path)
+
+        # pipeline_history に記録（正常完了時のみ）
+        to_commit = ""
+        if self._git.has_commits():
+            to_commit = self._git.get_head_commit()
+
+        if not errors and to_commit:
+            self.db.add_pipeline_history(
+                from_commit_id=NULL_COMMIT_HASH,
+                to_commit_id=to_commit,
+                processed_at=datetime.now(timezone.utc).isoformat(),
+                mode="index",
+            )
 
         return PipelineSummary(
             mode=PipelineMode.INDEX_ONLY,
