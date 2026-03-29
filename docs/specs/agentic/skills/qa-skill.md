@@ -31,7 +31,7 @@ MCP ツール・CLI コマンド・HTTP API の機能を実際に実行し、正
 - **エラー時の継続動作**: 各ステップでエラーが発生した場合、NG として記録し次のステップに進む。グループ全体を中断しない
 - **取り込み後の共通検証フロー**: 取り込み・再構築を行うステップの後には、必ず共通検証フローを実行する（詳細は [QA 実行スキル](qa-execute-skill.md) に定義）
 - **実行パラメータの明示**: 全ステップで実行するコマンド・パラメータを表示してから実行する
-- **qa-execute による実行制御**: 各検証ステップの実行は [QA 実行スキル](qa-execute-skill.md) に委譲する。コマンドの直接実行・共通検証フローの省略は禁止
+- **qa-execute による実行制御**: 各検証ステップの実行は [QA 実行スキル](qa-execute-skill.md) に委譲する。プロダクトコマンドの直接実行・共通検証フローの省略は禁止（ホワイトリストに定義された環境確認・準備・片付けは例外）
 
 ## コマンド体系
 
@@ -151,7 +151,7 @@ qa スキルが qa-execute を経由せず直接実行してよい操作を以�
 
 | カテゴリ | 許可する操作 | 例 |
 |---------|------------|-----|
-| 環境確認 | 読み取り専用の状態確認コマンド | `git branch --show-current`, `curl heartbeat`, `curl /v1/models` |
+| 環境確認 | 読み取り専用の状態確認コマンド | `git branch --show-current`, `curl http://localhost:<CHROMADB_SERVER_PORT>/api/v2/heartbeat`, `curl http://localhost:<LM_STUDIO_PORT>/v1/models` |
 | グループ準備・片付け | `.env` 変更、サーバー起動・停止、worktree セットアップ・クリーンアップ | `uv run chroma run ...`, `taskkill`, `git worktree remove` |
 | YouTube 事前確認 | グループ D 実行前の AskUserQuestion | IP ブロックリスクの確認表示 |
 

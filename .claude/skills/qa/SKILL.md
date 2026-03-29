@@ -10,7 +10,7 @@ argument-hint: ""
 
 マージ後の動作確認スキル。MCP ツール・CLI コマンド・HTTP API の機能を実際に実行し、正常動作を検証する。仕様書: `docs/specs/agentic/skills/qa-skill.md`
 
-各検証ステップの実行は `/qa-execute` スキル（`.claude/skills/qa-execute/SKILL.md`）に委譲する。コマンドの直接実行・共通検証フローの省略は禁止。
+各検証ステップの実行は `/qa-execute` スキル（`.claude/skills/qa-execute/SKILL.md`）に委譲する。プロダクトコマンドの直接実行・共通検証フローの省略は禁止（ホワイトリストに定義された環境確認・準備・片付けは例外）。
 
 ## 処理手順
 
@@ -82,15 +82,15 @@ QA 検証グループ:
 1. ステップテーブルから次の 1 行を取得する
 2. その 1 行の情報（コマンド・期待結果・検証種別）を `/qa-execute` に渡して呼び出す
 3. qa-execute から結果（OK / NG / SKIP / STOP）が返るまで待機する。結果が返る前に次のステップに進んではならない
-4. 結果を記録し、次の行に進む（STOP の場合はループを中断する）
+4. 結果を記録し、次の行に進む（STOP の場合は当該グループのループを中断し、残りのステップ・グループをすべてスキップして結果サマリーへ進む）
 
-qa スキル自身はステップ間の制御（次ステップへの遷移、STOP 時の中断、結果の蓄積）のみを担う。コマンド実行・検証・ユーザー確認は全て qa-execute 側で完結する。
+qa スキル自身はステップ間の制御（次ステップへの遷移、STOP 時の QA 全体の中断と結果サマリーへの遷移、結果の蓄積）のみを担う。コマンド実行・検証・ユーザー確認は全て qa-execute 側で完結する。
 
 **qa スキルが直接実行してよい操作（ホワイトリスト）:**
 
 以下のみ qa-execute を経由せず直接実行できる。それ以外（プロダクトコマンド: 取り込み・検索・削除・再構築等）は全て qa-execute 経由:
 
-- 環境確認: `git branch --show-current`, `curl heartbeat`, `curl /v1/models` 等の読み取り専用コマンド
+- 環境確認: `git branch --show-current`, `curl http://localhost:<CHROMADB_SERVER_PORT>/api/v2/heartbeat`, `curl http://localhost:<LM_STUDIO_PORT>/v1/models` 等の読み取り専用コマンド
 - グループ準備・片付け: `.env` 変更、サーバー起動・停止、worktree セットアップ・クリーンアップ
 - YouTube 事前確認: グループ D 実行前の AskUserQuestion
 
