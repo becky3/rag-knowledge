@@ -28,6 +28,10 @@ from typing import Any, Literal
 from pydantic import BaseModel, Field, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
+# Upload HTTP API 認証の keyring パラメータ
+UPLOAD_API_KEY_SERVICE = "rag-knowledge"
+UPLOAD_API_KEY_NAME = "UPLOAD_API_KEY"
+
 # LM Studio のデフォルトベースURL（LMStudioEmbedding コンストラクタ用）
 DEFAULT_LMSTUDIO_BASE_URL = "http://localhost:1234"
 

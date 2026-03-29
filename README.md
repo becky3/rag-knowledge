@@ -80,6 +80,15 @@ cp .env.example .env  # 環境依存値を編集
 API キーは py-common-lib の `get_secret` で OS セキュアストレージから取得する（サービス名: `rag-knowledge`）。
 登録方法は [py-common-lib の仕様書](https://github.com/becky3/py-common-lib/blob/main/docs/specs/infrastructure/secret-store.md) を参照。
 
+HTTP モード（`RAG_TRANSPORT=http`）で MCP サーバーを起動する場合、Upload HTTP API 用の API キーの事前登録が必要:
+
+```bash
+# キーを生成して keyring に保存
+uv run python -m rag.cli generate-api-key --save
+```
+
+クライアント側では `X-API-Key` ヘッダーに生成したキーを設定する。
+
 ## 設定管理
 
 設定値はセキュリティレベルに応じて3層に分離し、各値の取得元は1つに固定する（フォールバックなし）。

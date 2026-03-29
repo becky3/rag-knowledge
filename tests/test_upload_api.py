@@ -49,6 +49,13 @@ def _mock_settings():
         yield
 
 
+@pytest.fixture(autouse=True)
+def _mock_auth():
+    """全テストで API キー認証をバイパスする."""
+    with patch("rag.server._check_api_key", return_value=None):
+        yield
+
+
 @pytest.fixture
 def app():
     """Starlette ASGI アプリを取得する."""
