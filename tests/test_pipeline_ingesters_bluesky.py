@@ -13,7 +13,7 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
@@ -458,7 +458,7 @@ class TestFollowUrls:
     """follow_urls のテスト."""
 
     async def test_web_url_delegated(self, source_store: SourceStore) -> None:
-        """Web URL が WebIngester に委譲されること."""
+        """Web URL が site_ingest（_fetch_web_urls）に委譲されること."""
         item = _make_feed_item()
         item["post"]["record"]["facets"] = [
             {
@@ -471,21 +471,13 @@ class TestFollowUrls:
             }
         ]
 
-        mock_web = AsyncMock()
-        mock_web.crawl = AsyncMock(return_value=MagicMock(placed=1, errors=0))
-        mock_client = _make_budget_client()
-
         ingester = make_bluesky_ingester(source_store)
-        stats = await ingester.follow_urls(
-            [item],
-            client=mock_client,
-            web_ingester=mock_web,
-            youtube_ingester=None,
-        )
-
-        mock_web.crawl.assert_called_once_with(
-            url="https://example.com/article", depth=0, client=mock_client,
-        )
+        with patch.object(ingester, "_fetch_web_urls", new_callable=AsyncMock, return_value=(1, 0)) as mock_fetch:
+            stats = await ingester.follow_urls(
+                [item],
+                youtube_ingester=None,
+            )
+            mock_fetch.assert_called_once_with(["https://example.com/article"])
         assert stats["web_placed"] == 1
 
     async def test_youtube_url_delegated(self, source_store: SourceStore) -> None:
@@ -510,8 +502,6 @@ class TestFollowUrls:
         ingester = make_bluesky_ingester(source_store)
         stats = await ingester.follow_urls(
             [item],
-            client=None,
-            web_ingester=None,
             youtube_ingester=mock_yt,
         )
 
@@ -536,7 +526,7 @@ class TestFollowUrls:
 
         ingester = make_bluesky_ingester(source_store)
         stats = await ingester.follow_urls(
-            [item], client=None, web_ingester=None, youtube_ingester=None,
+            [item], youtube_ingester=None,
         )
 
         assert stats["skipped"] == 1
@@ -557,16 +547,13 @@ class TestFollowUrls:
             }
         ]
 
-        mock_web = AsyncMock()
-        mock_web.crawl = AsyncMock(side_effect=Exception("connection error"))
-
         ingester = make_bluesky_ingester(source_store)
-        stats = await ingester.follow_urls(
-            [item],
-            client=_make_budget_client(),
-            web_ingester=mock_web,
-            youtube_ingester=None,
-        )
+        # _fetch_web_urls はバッチエラー隔離を行い、エラー件数を返す
+        with patch.object(ingester, "_fetch_web_urls", new_callable=AsyncMock, return_value=(0, 1)):
+            stats = await ingester.follow_urls(
+                [item],
+                youtube_ingester=None,
+            )
 
         assert stats["errors"] == 1
         assert stats["web_placed"] == 0
@@ -584,25 +571,21 @@ class TestFollowUrls:
         item2 = _make_feed_item(rkey="post2")
         item2["post"]["record"]["facets"] = [facet]
 
-        mock_web = AsyncMock()
-        mock_web.crawl = AsyncMock(return_value=MagicMock(placed=1, errors=0))
-
         ingester = make_bluesky_ingester(source_store)
-        stats = await ingester.follow_urls(
-            [item1, item2],
-            client=_make_budget_client(),
-            web_ingester=mock_web,
-            youtube_ingester=None,
-        )
-
-        mock_web.crawl.assert_called_once()
+        with patch.object(ingester, "_fetch_web_urls", new_callable=AsyncMock, return_value=(1, 0)) as mock_fetch:
+            stats = await ingester.follow_urls(
+                [item1, item2],
+                youtube_ingester=None,
+            )
+            # URL は重複排除されるので 1 件のリストで呼ばれる
+            mock_fetch.assert_called_once_with([url])
         assert stats["web_placed"] == 1
 
     async def test_empty_items(self, source_store: SourceStore) -> None:
         """配置済みアイテムが空の場合、何も実行されないこと."""
         ingester = make_bluesky_ingester(source_store)
         stats = await ingester.follow_urls(
-            [], client=None, web_ingester=None, youtube_ingester=None,
+            [], youtube_ingester=None,
         )
 
         assert stats["web_placed"] == 0

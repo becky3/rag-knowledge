@@ -11,12 +11,31 @@ from __future__ import annotations
 import json
 import logging
 from dataclasses import dataclass, field
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from typing import TYPE_CHECKING
+from urllib.parse import urlparse
 
 from rag.pipeline.ingesters._common import IngestResult
-from rag.pipeline.ingesters.web import _needs_html_extension
 from rag.store.path_converter import url_to_path
+
+# .html 付与をスキップする拡張子
+# converter が認識する拡張子 + Spider が Web 系と見なす拡張子の和集合
+# Spider._WEB_EXTENSIONS と整合させること
+_KNOWN_WEB_EXTENSIONS: frozenset[str] = frozenset(
+    {".html", ".htm", ".xhtml", ".shtml", ".php", ".asp", ".aspx", ".jsp",
+     ".pdf", ".json", ".md", ".txt", ".adoc"},
+)
+
+
+def _needs_html_extension(url: str) -> bool:
+    """URL パスが既知の拡張子を持たない場合に True を返す.
+
+    converter が認識する拡張子（.html, .pdf 等）を既に持つ URL には
+    .html を付与しない。拡張子がないか未知の場合のみ .html を付与する。
+    """
+    path = urlparse(url).path
+    ext = PurePosixPath(path).suffix.lower()
+    return ext not in _KNOWN_WEB_EXTENSIONS
 
 if TYPE_CHECKING:
     from rag.store.source_store import SourceStore

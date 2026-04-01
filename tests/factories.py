@@ -290,21 +290,6 @@ def make_youtube_ingester(source_store: Any, **overrides: Any) -> Any:
     return YoutubeIngester(source_store, **defaults)
 
 
-def make_web_ingester(source_store: Any, **overrides: Any) -> Any:
-    """WebIngester のテスト用ファクトリ."""
-    from rag.pipeline.ingesters.web import WebIngester
-
-    defaults: dict[str, Any] = {
-        "max_crawl_pages": 50,
-        "crawl_request_timeout": 30,
-        "crawl_max_errors": 5,
-        "respect_robots_txt": True,
-        "robots_txt_cache_ttl": 3600,
-        "safe_browsing_client": None,
-    }
-    defaults.update(overrides)
-    return WebIngester(source_store, **defaults)
-
 
 def make_local_ingester(source_store: Any, **overrides: Any) -> Any:
     """LocalIngester のテスト用ファクトリ."""

@@ -2,17 +2,22 @@
 
 ## 概要
 
-Scrapy を subprocess 方式で起動し、数千ページ規模の大規模サイトを一括取り込みする機能。Scrapy の汎用 Spider でサイトをクロールし、取得した HTML ファイルとメタデータ JSONL をブリッジ層で source_store に変換した後、パイプライン制御で converter → indexer を実行する。
+Scrapy を subprocess 方式で起動し、Web ページを一括取り込みする機能。2 つの動作モードを提供する:
+
+- **クロールモード**（単一 URL）: 開始 URL からリンクを辿り、数千ページ規模の大規模サイトを一括取り込みする
+- **複数 URL モード**（複数 URL）: 指定された URL のみを取得する（リンク辿りなし）。BlueSky インジェスターの URL 先取り込み等、バッチ取得に使用する
+
+Scrapy の汎用 Spider でページを取得し、HTML ファイルとメタデータ JSONL をブリッジ層で source_store に変換した後、パイプライン制御で converter → indexer を実行する。
 
 MCP ツール `rag_site_ingest` と CLI コマンド `site-ingest` の 2 つのインターフェースを提供する。
 
 スコープ:
 
-- Scrapy subprocess によるサイト一括クロール
+- Scrapy subprocess によるサイトクロール / 複数 URL 一括取得
 - 汎用 Spider のパラメータ化（URL、ドメイン制約、URL パターン）
 - JSONL メタデータ + HTML ファイルの一時保存
 - ブリッジ層による一時保存データから source_store への変換・配置
-- JOBDIR による中断再開
+- JOBDIR による中断再開（クロールモードのみ）
 - MCP ツール `rag_site_ingest` と CLI コマンド `site-ingest` の提供
 
 スコープ外:
@@ -36,8 +41,18 @@ MCP ツール `rag_site_ingest` と CLI コマンド `site-ingest` の 2 つの�
 
 ### ドメイン制約
 
-- Scrapy の `allowed_domains` により、クロール対象を初回 URL と同一ドメインに制限する
-- リンク辿りで発見された URL は同一ドメイン制約で自動的に制限される
+- **クロールモード**: Scrapy の `allowed_domains` により、クロール対象を開始 URL と同一ドメインに制限する。リンク辿りで発見された URL は同一ドメイン制約で自動的に制限される
+- **複数 URL モード**: 全 URL のドメインの和集合を `allowed_domains` に設定する。リンク辿りは行わないため、指定 URL 以外のページは取得されない
+
+### 複数 URL モード
+
+- `urls` パラメータで 2 つ以上の URL を指定した場合、複数 URL モードで動作する
+- 指定された URL のみを取得し、リンク辿り（クロール）は行わない
+- `url_pattern` は無視される（パターンフィルタ不要）
+- `max_pages` は無視される（取得ページ数 = 指定 URL 数）
+- JOBDIR によるレジュームは使用しない（指定 URL を毎回取得する）
+- `--force` は無効（JOBDIR が存在しないため）
+- 単一 URL 指定時（`url` パラメータ、または `urls` が 1 件のみ）は既存のクロール動作を維持する
 
 ### パスプレフィックス制約
 
@@ -124,17 +139,26 @@ MCP ツール `rag_site_ingest` と CLI コマンド `site-ingest` の 2 つの�
 
 | ツール | 入力 | 振る舞い |
 |--------|------|---------|
-| `rag_site_ingest` | `url`（必須）、`url_pattern`（任意）、`max_pages`（任意）、`force`（任意）、`download_only`（任意） | Scrapy subprocess で対象サイトをクロールし、取得した HTML を source_store に配置後、パイプライン処理を実行する（`download_only` 時はパイプライン処理をスキップ）。結果サマリー（取得ページ数、エラー数、所要時間）を返す |
+| `rag_site_ingest` | `url` または `urls`（排他）、`url_pattern`（任意）、`max_pages`（任意）、`force`（任意）、`download_only`（任意） | Scrapy subprocess でページを取得し、HTML を source_store に配置後、パイプライン処理を実行する（`download_only` 時はパイプライン処理をスキップ）。結果サマリー（取得ページ数、エラー数、所要時間）を返す |
 
 #### `rag_site_ingest` パラメータ
 
 | パラメータ | 型 | デフォルト | 説明 |
 |-----------|-----|-----------|------|
-| `url` | str | — | クロール開始 URL（必須） |
-| `url_pattern` | str | なし | クロール対象 URL のフィルタパターン（正規表現）。未指定時は開始 URL のパスプレフィックスから自動生成する（例: `https://example.com/docs/` → `^https://example\.com/docs/`）。パスが `/` のみの場合はパターンなし（ドメイン全体が対象）。明示的に指定した場合はその値を優先する |
-| `max_pages` | int | `site_ingest_max_pages` | ページ数上限。config.toml の値を上書き可能 |
-| `force` | bool | `false` | `true` の場合、クロールディレクトリ全体（JOBDIR、HTML、JSONL）を削除して最初からクロールする |
+| `url` | str | `""` | クロール開始 URL（クロールモード）。`urls` と排他 |
+| `urls` | list[str] | `[]` | 取得対象 URL のリスト（複数 URL モード）。`url` と排他。2 件以上でクロール無効 |
+| `url_pattern` | str | なし | クロール対象 URL のフィルタパターン（正規表現）。クロールモードのみ有効。未指定時は開始 URL のパスプレフィックスから自動生成する（例: `https://example.com/docs/` → `^https://example\.com/docs/`）。パスが `/` のみの場合はパターンなし（ドメイン全体が対象）。明示的に指定した場合はその値を優先する |
+| `max_pages` | int | `site_ingest_max_pages` | ページ数上限。クロールモードのみ有効。config.toml の値を上書き可能 |
+| `force` | bool | `false` | `true` の場合、クロールディレクトリ全体（JOBDIR、HTML、JSONL）を削除して最初からクロールする。クロールモードのみ有効 |
 | `download_only` | bool | `false` | `true` の場合、Scrapy クロール + Bridge（source_store 配置 + git commit）まで実行し、パイプライン処理（converter + indexer）をスキップする。source_store への commit は実行されるため、後から `rag_rebuild`（incremental）で差分処理可能 |
+
+`url` と `urls` の入力規則:
+
+- `url` のみ指定: クロールモード（既存動作）
+- `urls` のみ指定（2 件以上）: 複数 URL モード（リンク辿りなし）
+- `urls` が 1 件のみ: クロールモード（`url` 指定と同等）
+- 両方指定: バリデーションエラー
+- 両方未指定: バリデーションエラー
 
 ### CLI コマンド
 
@@ -146,10 +170,10 @@ MCP ツール `rag_site_ingest` と CLI コマンド `site-ingest` の 2 つの�
 
 | オプション | 型 | デフォルト | 説明 |
 |-----------|-----|-----------|------|
-| `url`（位置引数） | str | — | クロール開始 URL |
-| `--url-pattern` | str | なし | URL フィルタパターン |
-| `--max-pages` | int | `site_ingest_max_pages` | ページ数上限 |
-| `--force` | フラグ | `false` | クロールディレクトリ全体を削除して再クロール |
+| `url`（位置引数） | str（1 つ以上） | — | 取得対象 URL。1 件: クロールモード、2 件以上: 複数 URL モード |
+| `--url-pattern` | str | なし | URL フィルタパターン（クロールモードのみ） |
+| `--max-pages` | int | `site_ingest_max_pages` | ページ数上限（クロールモードのみ） |
+| `--force` | フラグ | `false` | クロールディレクトリ全体を削除して再クロール（クロールモードのみ） |
 | `--download-only` | フラグ | `false` | Scrapy クロール + Bridge（source_store 配置 + git commit）まで実行し、パイプライン処理をスキップ |
 
 ### 取り込み結果の出力形式
@@ -210,17 +234,20 @@ flowchart TD
 
 | パラメータ | 用途 |
 |-----------|------|
-| `start_url` | クロール開始 URL |
-| `allowed_domains` | ドメイン制約（初回 URL から自動導出） |
-| `url_pattern` | URL フィルタ（正規表現、任意） |
+| `start_url` | クロール開始 URL（クロールモード時。`start_urls` と排他） |
+| `start_urls` | 取得対象 URL のリスト（複数 URL モード時。JSON 配列文字列。`start_url` と排他） |
+| `allowed_domains` | ドメイン制約（URL から自動導出） |
+| `url_pattern` | URL フィルタ（正規表現、任意。クロールモードのみ） |
 | `output_dir` | HTML ファイルの保存先ディレクトリ |
 | `max_pages` | ページ数上限（200 OK カウント）。外部インターフェースでは許容範囲 1〜1,000 でクランプされる。Spider 内部では 0 を無制限として扱うが、CLI/MCP からは入力されない |
+| `no_follow` | リンク辿りを無効化するフラグ（複数 URL モード時に `true`） |
 
 Spider の振る舞い:
 
-- `start_url` からクロールを開始し、ページ内のリンクを辿る。リンク辿り時はクエリ文字列を除去して canonical URL に正規化する（静的サイトを主要ユースケースとする設計判断。`?page=2` 等のクエリでページが区別されるサイトでは一部ページが欠落する可能性がある）
+- **クロールモード**（`no_follow` が `false`）: `start_url` からクロールを開始し、ページ内のリンクを辿る。リンク辿り時はクエリ文字列を除去して canonical URL に正規化する（静的サイトを主要ユースケースとする設計判断。`?page=2` 等のクエリでページが区別されるサイトでは一部ページが欠落する可能性がある）
+- **複数 URL モード**（`no_follow` が `true`）: `start_urls` の全 URL を取得するが、ページ内のリンクは辿らない
 - `allowed_domains` に含まれないドメインへのリクエストは自動的にフィルタされる
-- `url_pattern` が指定されている場合、パターンに一致する URL のみ取得・保存する
+- `url_pattern` が指定されている場合、パターンに一致する URL のみ取得・保存する（クロールモードのみ）
 - 取得した HTML をファイルとして `output_dir` に保存する。URL パスのディレクトリ構造を維持する（例: `https://example.com/docs/api/auth.html` → `output_dir/docs/api/auth.html`）
 - URL パスが `.html`, `.htm` 等の Web 系拡張子で終わっている場合は `.html` を付加しない。拡張子がないパス（`/docs/api/` 等）のみ `.html` を付加する
 - `start_requests` をオーバーライドし `dont_filter=False` でリクエストを発行する。これにより start_url のフィンガープリントが重複フィルタに記録され、リンク辿りでの再取得を防止する
@@ -234,6 +261,7 @@ Scrapy プロセスの subprocess ラッパー。
 
 振る舞い:
 
+- `run()` メソッドはクロールモード（`start_url` 引数）と複数 URL モード（`start_urls` 引数）の 2 つの呼び出し方をサポートする
 - `asyncio.create_subprocess_exec` で Scrapy を起動し、インラインスクリプト内で `CrawlerProcess(settings=...)` を構成する
 - stdin は `DEVNULL` に設定する（MCP stdio モードでの親プロセス stdin 干渉を防止）
 - stderr はファイルにリダイレクトする（Twisted の子プロセス/スレッドが stderr パイプを継承し、メインプロセス終了後もパイプが閉じない Windows 固有の問題を回避）
@@ -271,7 +299,7 @@ Scrapy Downloader Middleware として動作し、各リクエストの送信前
 4. 検証に通過した場合、リクエストを次の Middleware（または Downloader）に渡す
 5. 検証に失敗した場合、リクエストを `IgnoreRequest` 例外で拒否し、警告ログを出力する
 
-拒否対象（Web インジェスターの `check_ssrf` と同一の判定基準）:
+拒否対象（`rag.utils.url.check_ssrf` と同一の判定基準）:
 
 | アドレス範囲 | 区分 |
 |-------------|------|
@@ -332,10 +360,10 @@ JSONL の各行から .meta サイドカーファイルへの変換:
 
 ### JOBDIR の分離
 
-一時保存ディレクトリは `{domain}/{crawl_key}/` の 2 階層で管理する。`crawl_key` は `start_url` と effective `url_pattern`（自動生成後の値）の SHA-256 先頭 16 文字。
+一時保存ディレクトリは `{domain}/{crawl_key}/` の 2 階層で管理する。
 
-- 同じ `start_url` + `url_pattern` の組み合わせ → 同じクロールディレクトリ → レジューム可能
-- 異なる `start_url` または `url_pattern` → 異なるクロールディレクトリ → JOBDIR のスケジューラキューが分離され、状態リークを防止
+- **クロールモード**: `crawl_key` は `start_url` と effective `url_pattern`（自動生成後の値）の SHA-256 先頭 16 文字。同じパラメータなら同じディレクトリでレジューム可能
+- **複数 URL モード**: `crawl_key` はソート済み URL リストの SHA-256 先頭 16 文字。`domain` は `_multi_` 固定（複数ドメインの場合があるため）。JOBDIR は使用しない（レジューム不要）
 
 ### 一時保存ディレクトリ
 
@@ -436,6 +464,10 @@ Scrapy は独立した Python パッケージとして `pyproject.toml` に依�
 | SSRF Middleware での DNS 解決失敗 | DNS 解決に失敗した場合、そのリクエストを `IgnoreRequest` で拒否する。ネットワーク障害等による一時的な DNS エラーは Scrapy のリトライ対象外となる |
 | `download_only` 指定時にパイプライン処理が必要な場合 | MCP: `rag_rebuild`（mode: full, source_type: web）、CLI: `uv run python -m rag.cli rebuild --mode full --source-type web` で後からパイプライン処理を実行する。incremental モードでも可（source_store への配置が git commit されていれば差分検知される） |
 | 同一ドメインへの異なるパラメータでの複数回クロール | クロールキー（`start_url` + effective `url_pattern` のハッシュ）により JOBDIR が分離されるため、前回クロールの URL キューが残留しない |
+| 複数 URL モードで無効なスキームの URL が混在 | バリデーションで全 URL を検証し、不正な URL があればエラーを返す |
+| 複数 URL モードで SSRF 対象の URL が混在 | 全 URL に対して SSRF チェックを実行し、1 つでも違反があればエラーを返す |
+| 複数 URL モードで一部の URL が取得失敗 | 取得可能な URL のみ処理する。失敗した URL はエラーとして計上する |
+| `url` と `urls` の両方が指定された場合 | バリデーションエラーとして拒否する |
 | 正常完了後のクリーンアップ失敗（Windows ファイルロック等） | 警告ログを出力し、処理全体は成功扱いとする。一時ディレクトリは手動削除が必要 |
 
 ## 関連ドキュメント
@@ -445,4 +477,4 @@ Scrapy は独立した Python パッケージとして `pyproject.toml` に依�
 - [pipeline-controller.md](pipeline-controller.md) — パイプライン制御仕様
 - [converter.md](converter.md) — コンバーター仕様
 - [ingesters/common.md](ingesters/common.md) — インジェスター共通仕様
-- [ingesters/web.md](ingesters/web.md) — Web インジェスター仕様
+- [ingesters/bluesky.md](ingesters/bluesky.md) — BlueSky インジェスター仕様（複数 URL モードの利用元）

@@ -81,6 +81,7 @@ class TestIsTextResponse:
         """テスト用 Spider インスタンス（Scrapy 初期化をバイパス）."""
         spider = SiteSpider.__new__(SiteSpider)
         spider._url_pattern = None
+        spider._no_follow = False
         spider._output_dir = tmp_path
         spider._max_pages = 0
         spider._page_count = 0
@@ -210,6 +211,7 @@ class TestParseMaxPages:
         spider = SiteSpider.__new__(SiteSpider)
         spider.name = "site_spider"
         spider._url_pattern = None
+        spider._no_follow = False
         spider._output_dir = tmp_path
         spider._max_pages = max_pages
         spider._page_count = 0
@@ -352,6 +354,7 @@ class TestParseFilepathRegression:
         spider = SiteSpider.__new__(SiteSpider)
         spider.name = "site_spider"
         spider._url_pattern = None
+        spider._no_follow = False
         spider._output_dir = output_dir
         spider._max_pages = 0
         spider._page_count = 0

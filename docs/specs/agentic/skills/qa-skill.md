@@ -48,7 +48,7 @@ MCP ツール・CLI コマンド・HTTP API の機能を実際に実行し、正
 | ID | グループ | 内容 | 外部 API | インターフェース |
 |----|---------|------|---------|----------------|
 | A | Local | add-document, crawl-documents, add-journal, migrate-journal | 不要 | CLI / MCP |
-| B | Web | site-ingest | Web アクセス | CLI / MCP |
+| B | Web | site-ingest（クロール + 複数URL） | Web アクセス | CLI / MCP |
 | C | SNS | crawl-zenn, crawl-bluesky | Zenn/BlueSky API | CLI / MCP |
 | D | YouTube | ingest-youtube, ingest-youtube-playlist | YouTube API | CLI / MCP |
 | E | Aozora | update-aozora-catalog, search-aozora, ingest-aozora | 青空文庫 | CLI / MCP |
@@ -78,7 +78,7 @@ Upload（F）は HTTP 固定、Eval（G）は CLI 固定のため、インター
 QA 検証グループ:
 
   A) Local    — add-document, crawl-documents, add-journal, migrate-journal
-  B) Web      — site-ingest
+  B) Web      — site-ingest（クロール + 複数URL）
   C) SNS      — crawl-zenn, crawl-bluesky
   D) YouTube  — ingest-youtube, ingest-youtube-playlist（実行前にユーザー確認）
   E) Aozora   — update-aozora-catalog, search-aozora, ingest-aozora
@@ -244,13 +244,14 @@ CLI / MCP 対応:
 
 ### B) Web
 
-目的: Web ページ取り込み・サイト一括取り込みの動作確認。
+目的: Web ページ取り込み（クロールモード + 複数 URL モード）の動作確認。
 
 | # | コマンド（CLI） | 期待結果 | 検証種別 |
 |---|----------------|---------|---------|
-| 1 | `site-ingest https://www.stat.go.jp/ --max-pages 20` | Scrapy 一括取り込み成功 | `ingest` |
+| 1 | `site-ingest https://www.stat.go.jp/ --max-pages 20` | Scrapy クロールモード一括取り込み成功 | `ingest` |
+| 2 | `site-ingest https://www.stat.go.jp/data/jinsui/ https://www.stat.go.jp/data/roudou/` | 複数 URL モードで 2 件取得成功（クロールなし） | `ingest` |
 
-CLI / MCP 対応: `rag_site_ingest`
+CLI / MCP 対応: `rag_site_ingest`（`url` パラメータ / `urls` パラメータ）
 
 ### C) SNS
 

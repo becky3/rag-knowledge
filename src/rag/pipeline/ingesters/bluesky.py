@@ -8,9 +8,11 @@ source_store にファイルを配置する。
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 import re
+import sys
 from datetime import datetime
 
 from rag.pipeline.ingesters._common import IngestResult, now_iso
@@ -18,7 +20,6 @@ from typing import TYPE_CHECKING, Any, Literal
 
 if TYPE_CHECKING:
     from py_common_lib.httpx import ConstrainedClient
-    from rag.pipeline.ingesters.web import WebIngester
     from rag.pipeline.ingesters.youtube import YoutubeIngester
     from rag.store.source_store import SourceStore
 
@@ -388,18 +389,17 @@ class BlueskyIngester:
         self,
         placed_items: list[dict[str, Any]],
         *,
-        client: ConstrainedClient | None = None,
-        web_ingester: WebIngester | None = None,
         youtube_ingester: YoutubeIngester | None = None,
     ) -> dict[str, int]:
-        """配置済み投稿から URL を抽出し、Web/YouTube インジェスターに委譲する.
+        """配置済み投稿から URL を抽出し、site_ingest/YouTube インジェスターに委譲する.
 
         仕様: docs/specs/ingesters/bluesky.md「投稿内 URL の自動取り込み」
 
+        Web URL は CLI の site-ingest コマンド（複数 URL モード）でバッチ取得する。
+        YouTube URL は個別に YoutubeIngester で取り込む。
+
         Args:
             placed_items: 配置済みフィードアイテムのリスト
-            client: ConstrainedClient（Web インジェスターに共有）
-            web_ingester: WebIngester インスタンス
             youtube_ingester: YoutubeIngester インスタンス
 
         Returns:
@@ -426,30 +426,27 @@ class BlueskyIngester:
 
         logger.info("投稿内から %d 件の URL を抽出しました", len(all_urls))
 
-        from py_common_lib.core.budget_tracker import BudgetExhaustedError
-
+        # URL を種別ごとに分類
+        web_urls: list[str] = []
+        youtube_urls: list[str] = []
         for url in all_urls:
-            # バジェット枯渇チェック（Web URL は ConstrainedClient 経由）
-            if client is not None and client.budget.remaining <= 0:
-                remaining_count = len(all_urls) - (
-                    stats["web_placed"] + stats["youtube_placed"]
-                    + stats["skipped"] + stats["errors"]
-                )
-                if remaining_count > 0:
-                    logger.warning(
-                        "バジェット枯渇のため残り %d 件の URL をスキップします",
-                        remaining_count,
-                    )
-                    stats["skipped"] += remaining_count
-                break
-
             url_type = classify_url(url)
-
-            if url_type == "skip":
+            if url_type == "web":
+                web_urls.append(url)
+            elif url_type == "youtube":
+                youtube_urls.append(url)
+            else:
                 stats["skipped"] += 1
-                continue
 
-            if url_type == "youtube" and youtube_ingester is not None:
+        # Web URL をバッチ取得（site-ingest 複数 URL モード、download_only）
+        if web_urls:
+            web_placed, web_errors = await self._fetch_web_urls(web_urls)
+            stats["web_placed"] = web_placed
+            stats["errors"] += web_errors
+
+        # YouTube URL を個別取り込み
+        for url in youtube_urls:
+            if youtube_ingester is not None:
                 try:
                     yt_result = await youtube_ingester.ingest_video(video_url=url)
                     stats["youtube_placed"] += yt_result.placed
@@ -458,26 +455,8 @@ class BlueskyIngester:
                 except Exception:
                     logger.exception("YouTube URL の取り込みに失敗: %s", url)
                     stats["errors"] += 1
-            elif url_type == "web" and web_ingester is not None:
-                try:
-                    web_result = await web_ingester.crawl(
-                        url=url, depth=0, client=client,
-                    )
-                    stats["web_placed"] += web_result.placed
-                    if web_result.errors > 0:
-                        stats["errors"] += web_result.errors
-                except BudgetExhaustedError:
-                    logger.warning("バジェット枯渇: %s をスキップ", url)
-                    stats["skipped"] += 1
-                    break
-                except Exception:
-                    logger.exception("Web URL の取り込みに失敗: %s", url)
-                    stats["errors"] += 1
             else:
-                logger.warning(
-                    "URL タイプ '%s' の委譲先インジェスターが未指定: %s",
-                    url_type, url,
-                )
+                logger.warning("YouTube インジェスターが未指定: %s", url)
                 stats["skipped"] += 1
 
         logger.info(
@@ -488,3 +467,72 @@ class BlueskyIngester:
             stats["errors"],
         )
         return stats
+
+    # Windows コマンドライン長制限（約32K文字）を考慮したバッチサイズ
+    # URL あたり平均 ~80 文字 × 200 = ~16K文字で安全マージンを確保
+    _URL_BATCH_SIZE = 200
+
+    async def _fetch_web_urls(self, urls: list[str]) -> tuple[int, int]:
+        """Web URL を site-ingest CLI subprocess（複数 URL モード）でバッチ取得する.
+
+        Windows のコマンドライン長制限を考慮し、URL リストが大きい場合は
+        バッチに分割して複数回の subprocess を実行する。
+
+        Args:
+            urls: 取得対象の Web URL リスト
+
+        Returns:
+            (配置されたファイル数の合計, エラー件数)
+        """
+        logger.info("site-ingest（複数 URL モード）で %d 件の Web URL を取り込みます", len(urls))
+
+        total_placed = 0
+        total_errors = 0
+        for i in range(0, len(urls), self._URL_BATCH_SIZE):
+            batch = urls[i:i + self._URL_BATCH_SIZE]
+            try:
+                placed = await self._run_site_ingest_batch(batch)
+                total_placed += placed
+            except Exception:
+                logger.exception(
+                    "site-ingest バッチ処理に失敗（スキップして続行）: batch_size=%d",
+                    len(batch),
+                )
+                total_errors += len(batch)
+
+        logger.info("site-ingest 完了: 合計 %d 件配置, %d 件エラー", total_placed, total_errors)
+        return total_placed, total_errors
+
+    async def _run_site_ingest_batch(self, urls: list[str]) -> int:
+        """site-ingest CLI subprocess を 1 バッチ分実行する."""
+        cmd = [
+            sys.executable, "-m", "rag.cli",
+            "site-ingest", *urls, "--download-only",
+        ]
+
+        process = await asyncio.create_subprocess_exec(
+            *cmd,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+        )
+        stdout, stderr = await process.communicate()
+
+        if process.returncode != 0:
+            stderr_text = stderr.decode("utf-8", errors="replace")
+            logger.error(
+                "site-ingest subprocess が失敗: exit_code=%d, stderr=%s",
+                process.returncode, stderr_text[:500],
+            )
+            raise RuntimeError(f"site-ingest failed with exit_code={process.returncode}")
+
+        # stdout から配置数を抽出（"N件新規配置" パターン）
+        stdout_text = stdout.decode("utf-8", errors="replace")
+        match = re.search(r"(\d+)件新規配置", stdout_text)
+        if match:
+            return int(match.group(1))
+
+        logger.warning(
+            "site-ingest の出力から配置数を取得できませんでした: %s",
+            stdout_text[:200],
+        )
+        return 0

@@ -692,7 +692,8 @@ async def rag_crawl_documents(
 
 @mcp.tool()
 async def rag_site_ingest(
-    url: str,
+    url: str = "",
+    urls: list[str] | None = None,
     url_pattern: str = "",
     max_pages: int | None = None,
     force: bool = False,
@@ -701,159 +702,96 @@ async def rag_site_ingest(
 ) -> str:
     """[rag-knowledge] RAG site ingest - Scrapy でサイトを一括取り込み.
 
-    knowledge base, bulk ingest, site crawl, large scale, scrapy.
-    数千ページ規模の大規模サイトを Scrapy subprocess で一括取り込みする。
-    数千ページ規模の大規模サイト向け。
+    knowledge base, bulk ingest, site crawl, large scale, scrapy, multi url.
+    Scrapy subprocess で Web ページを一括取り込みする。
+    単一 URL: リンクを辿るクロールモード（大規模サイト向け）。
+    複数 URL: 指定 URL のみ取得する複数 URL モード。
 
     並行実行非対応: Bridge が source_store へのファイル配置をロック保護外で
     実行するため、同一サイトに対する同時実行はデータ競合のリスクがある。
 
     Args:
-        url: クロール開始 URL
-        url_pattern: URL フィルタパターン（正規表現、任意）
-        max_pages: ページ数上限（未指定時は設定値を使用）
-        force: True の場合、JOBDIR を削除して最初からクロール
+        url: クロール開始 URL（クロールモード、urls と排他）
+        urls: 取得対象 URL のリスト（複数 URL モード、url と排他）
+        url_pattern: URL フィルタパターン（正規表現、クロールモードのみ）
+        max_pages: ページ数上限（クロールモードのみ、未指定時は設定値を使用）
+        force: True の場合、JOBDIR を削除して最初からクロール（クロールモードのみ）
         download_only: True の場合、Scrapy クロール + Bridge まで実行し、
             パイプライン処理（コンバート・インデックス構築）をスキップする
 
     Returns:
         取り込み結果のサマリー
     """
-    import re
-    import time as time_mod
-
-    from .scrapy.bridge import import_to_source_store
-    from .scrapy.runner import ScrapyRunner
     from .utils.url import check_ssrf, validate_url
 
-    settings = get_settings()
+    # url / urls の排他チェック
+    effective_urls = urls or []
+    if url and effective_urls:
+        return "エラー: url と urls は排他です。どちらか一方のみ指定してください"
+    if not url and not effective_urls:
+        return "エラー: url または urls を指定してください"
 
-    # URL バリデーション
-    try:
-        url = validate_url(url)
-        check_ssrf(url)
-    except ValueError as e:
-        return f"エラー: {e}"
+    # 単一 URL モード → リストに統一
+    if url:
+        effective_urls = [url]
 
-    # Safe Browsing チェック（起点 URL のみ）
-    try:
-        sb_client = _get_safe_browsing_client()
-        if sb_client is not None:
-            sb_result = await sb_client.check_url(url)
-            if not sb_result.is_safe:
-                threat_types = ", ".join(t.threat_type.value for t in sb_result.threats)
-                return f"エラー: 起点URLが安全でないと判定されました: {threat_types} — {url}"
-    except SafeBrowsingConfigError:
-        logger.warning("Safe Browsing の設定エラーのためチェックをスキップします: %s", url)
-    except SafetyCheckError as e:
-        return f"エラー: URL安全性チェックに失敗しました: {e}"
+    multi_url_mode = len(effective_urls) >= 2
 
-    # url_pattern バリデーション
-    if url_pattern:
+    # 全 URL バリデーション
+    validated_urls: list[str] = []
+    for u in effective_urls:
         try:
-            re.compile(url_pattern)
-        except re.error as e:
-            return f"エラー: 無効な正規表現パターン: {e}"
+            validated = validate_url(u)
+            check_ssrf(validated)
+            validated_urls.append(validated)
+        except ValueError as e:
+            return f"エラー: {e}"
 
-    # max_pages のクランプ
-    effective_max_pages = max_pages if max_pages is not None else settings.site_ingest_max_pages
-    if effective_max_pages < 1:
-        effective_max_pages = 1
-        logger.warning("max_pages を 1 にクランプしました")
-    elif effective_max_pages > 1000:
-        effective_max_pages = 1000
-        logger.warning("max_pages を 1000 にクランプしました")
+    # Safe Browsing チェック（クロールモードのみ: 起点 URL）
+    # 複数 URL モードでは数百件の URL に対する Google Safe Browsing API 呼び出しは
+    # 非現実的なためスキップする（仕様: site-ingest.md「Safe Browsing チェック」）
+    if not multi_url_mode:
+        try:
+            sb_client = _get_safe_browsing_client()
+            if sb_client is not None:
+                sb_result = await sb_client.check_url(validated_urls[0])
+                if not sb_result.is_safe:
+                    threat_types = ", ".join(t.threat_type.value for t in sb_result.threats)
+                    return f"エラー: 起点URLが安全でないと判定されました: {threat_types} — {validated_urls[0]}"
+        except SafeBrowsingConfigError:
+            logger.warning("Safe Browsing の設定エラーのためチェックをスキップします: %s", validated_urls[0])
+        except SafetyCheckError as e:
+            return f"エラー: URL安全性チェックに失敗しました: {e}"
 
-    # ドメイン導出
-    from urllib.parse import urlparse
-    parsed = urlparse(url)
-    allowed_domains = parsed.hostname or ""
+    # CLI subprocess に委譲
+    cli_args: list[str] = list(validated_urls)
+    if not multi_url_mode:
+        if url_pattern:
+            import re
+            try:
+                re.compile(url_pattern)
+            except re.error as e:
+                return f"エラー: 無効な正規表現パターン: {e}"
+            cli_args.extend(["--url-pattern", url_pattern])
+        if max_pages is not None:
+            cli_args.extend(["--max-pages", str(max_pages)])
+        if force:
+            cli_args.append("--force")
+    if download_only:
+        cli_args.append("--download-only")
 
-    controller = await _get_pipeline_controller()
-
-    start_time = time_mod.monotonic()
+    display_url = validated_urls[0] if not multi_url_mode else f"{len(validated_urls)} URLs"
 
     try:
-        # Scrapy Runner で クロール
-        runner = ScrapyRunner(
-            temp_dir=settings.site_ingest_temp_dir,
-            delay_sec=settings.site_ingest_delay_sec,
-            max_pages=effective_max_pages,
-            download_timeout=settings.site_ingest_download_timeout,
-            timeout_sec=settings.site_ingest_timeout_sec,
-            error_count=settings.site_ingest_error_count,
-        )
-
-        crawl_result = await runner.run(
-            start_url=url,
-            allowed_domains=allowed_domains,
-            url_pattern=url_pattern,
-            max_pages=effective_max_pages,
-            force=force,
-        )
-
-        if not crawl_result.jsonl_path.exists():
-            elapsed = time_mod.monotonic() - start_time
-            return (
-                f"クロールが完了しましたが、メタデータが出力されませんでした。"
-                f" exit_code={crawl_result.exit_code}, 所要時間={elapsed:.1f}秒"
-            )
-
-        # Bridge: JSONL + HTML → source_store
-        bridge_result = await asyncio.to_thread(
-            import_to_source_store,
-            jsonl_path=crawl_result.jsonl_path,
-            html_dir=crawl_result.output_dir,
-            source_store=controller.source_store,
-        )
-
-        # パイプライン処理
-        pipeline_summary: PipelineSummary | None = None
-        has_changes = (bridge_result.ingest.placed + bridge_result.ingest.overwritten) > 0
-        if has_changes and not download_only:
-            # CLI サブプロセスで差分更新（commit も CLI 内でロック保護下で実行）
-            commit_msg = f"ingest(web): site-ingest {url}"
-            rebuild_result = await _run_cli_subprocess(
-                "rebuild",
-                ["--mode", "incremental", "--commit-message", commit_msg],
-                ctx=ctx,
-            )
-            pipeline_summary = _parse_pipeline_summary(rebuild_result)
-        elif has_changes and download_only:
-            # download_only でもコミットは実行する（パイプライン処理のみスキップ）
-            await asyncio.to_thread(
-                controller.commit, f"ingest(web): site-ingest {url} (download_only)",
-            )
-
-        # 正常完了後のクリーンアップ（仕様: docs/specs/site-ingest.md）
-        if crawl_result.success:
-            await asyncio.to_thread(crawl_result.cleanup)
-
-        # 操作全体の所要時間（クロール + Bridge + パイプライン）
-        elapsed = time_mod.monotonic() - start_time
-
-        # 結果サマリー構築
-        parts: list[str] = []
-        parts.append(
-            f"サイト取り込み完了: {bridge_result.ingest.placed}件新規配置"
-            f", {bridge_result.ingest.overwritten}件上書き"
-            f", {bridge_result.ingest.skipped}件スキップ"
-            f", {bridge_result.ingest.errors}件エラー"
-        )
-        parts.append(f"所要時間: {elapsed:.1f}秒")
-        if download_only:
-            parts.append("パイプライン処理: スキップ（download_only）")
-        elif pipeline_summary is not None:
-            parts.append(f"パイプライン: {pipeline_summary.processed}件処理")
-            if pipeline_summary.errors:
-                parts.append(f"パイプラインエラー: {len(pipeline_summary.errors)}件")
-        if not crawl_result.success:
-            parts.append(f"Scrapy exit_code={crawl_result.exit_code}（部分的な結果）")
-
-        return " / ".join(parts)
+        result = await _run_cli_subprocess("site-ingest", cli_args, ctx=ctx)
+        return _format_cli_ingest_result(result, context=f"サイト: {display_url}")
+    except CLISubprocessError as e:
+        if e.lock_conflict:
+            return "エラー: 別のインジェストが実行中です。しばらく待ってから再試行してください"
+        return f"エラー: サイト取り込みに失敗しました（{display_url}） ({e})"
     except Exception:
-        logger.exception("Failed to site-ingest: %s", url)
-        return f"エラー: サイト取り込みに失敗しました。URL: {url}"
+        logger.exception("Failed to site-ingest: %s", display_url)
+        return f"エラー: サイト取り込みに失敗しました（{display_url}）"
 
 
 @mcp.tool()

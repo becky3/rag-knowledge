@@ -1033,32 +1033,18 @@ class TestRagSiteIngestSafeBrowsing:
 
     @pytest.mark.asyncio
     async def test_safe_browsing_disabled_skips_check(self) -> None:
-        """Safe Browsing クライアントが None の場合はスキップしてクロールが実行されること."""
+        """Safe Browsing クライアントが None の場合はスキップして CLI に委譲されること."""
         mod = import_module("rag.server")
-        from rag.scrapy.runner import ScrapyRunner
 
-        mock_crawl_result = MagicMock()
-        mock_crawl_result.jsonl_path.exists.return_value = False
-        mock_crawl_result.exit_code = 0
-
-        mock_settings = MagicMock()
-        mock_settings.site_ingest_temp_dir = "/tmp/site_ingest"
-        mock_settings.site_ingest_delay_sec = 1.0
-        mock_settings.site_ingest_max_pages = 1000
-        mock_settings.site_ingest_download_timeout = 30
-        mock_settings.site_ingest_timeout_sec = 0
-        mock_settings.site_ingest_error_count = 0
-
-        mock_controller = AsyncMock()
+        mock_cli_result = {"ingest": {"placed": 1, "skipped": 0, "errors": 0}}
 
         with (
             patch.object(mod, "_get_safe_browsing_client", return_value=None),
-            patch.object(mod, "get_settings", return_value=mock_settings),
-            patch.object(mod, "_get_pipeline_controller", new_callable=AsyncMock, return_value=mock_controller),
-            patch.object(ScrapyRunner, "run", new_callable=AsyncMock, return_value=mock_crawl_result) as mock_run,
+            patch.object(mod, "_run_cli_subprocess", new_callable=AsyncMock, return_value=mock_cli_result) as mock_run,
+            patch.object(mod, "_format_cli_ingest_result", return_value="取り込み完了"),
         ):
-            result = await mod.rag_site_ingest("https://example.com")
+            result = await mod.rag_site_ingest(url="https://example.com")
 
-        # Safe Browsing でブロックされず、クロールまで到達していること
+        # Safe Browsing でブロックされず、CLI 委譲まで到達していること
         mock_run.assert_called_once()
         assert "安全でない" not in result

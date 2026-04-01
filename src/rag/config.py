@@ -152,14 +152,6 @@ class RAGSettings(BaseModel):
     # ChromaDB コレクション名
     chromadb_collection_name: str
 
-    # クロール
-    rag_max_crawl_pages: int = Field(ge=1)
-    rag_crawl_max_errors: int = Field(ge=5, le=10)
-
-    # robots.txt
-    rag_respect_robots_txt: bool
-    rag_robots_txt_cache_ttl: int = Field(ge=0)
-
     # URL安全性チェック (Google Safe Browsing API)
     rag_url_safety_check: bool
     rag_url_safety_cache_ttl: int = Field(ge=0)
@@ -178,9 +170,6 @@ class RAGSettings(BaseModel):
     rag_zenn_max_articles: int = Field(ge=1, le=100)
     rag_zenn_request_timeout: int = Field(ge=1, le=120)
     rag_zenn_request_interval: float = Field(ge=0.1, le=60.0)
-
-    # クロール per-request タイムアウト
-    rag_crawl_request_timeout: int = Field(ge=1, le=120)
 
     # ドキュメントインジェスター
     rag_document_supported_extensions: str

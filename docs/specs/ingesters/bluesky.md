@@ -11,7 +11,7 @@ BlueSky（AT Protocol）の投稿を API 経由で取得し、source_store に�
 - 指定ユーザーの統一タイムラインの取得（投稿・引用リポスト・リポスト・リプライ）
 - リポストのフィルタリング（`include_reposts` パラメータによる除外制御）
 - source_store への JSON ファイル配置と .meta サイドカーファイルの生成
-- 投稿内 URL の自動取り込み（Web インジェスター / YouTube インジェスターへの委譲）
+- 投稿内 URL の自動取り込み（site_ingest / YouTube インジェスターへの委譲）
 - MCP ツールとしての投稿取り込みインターフェースの提供
 
 スコープ外:
@@ -65,8 +65,8 @@ BlueSky（AT Protocol）の投稿を API 経由で取得し、source_store に�
 
 | 項目 | 内容 |
 |------|------|
-| 最悪ケースリクエスト数 | BlueSky API: ceil(1000/100) = 10。URL 先取り込み: 1 URL あたり最大 3 リクエスト（Safe Browsing チェック + robots.txt 取得 + ページ取得）。バジェット残 490 リクエストで処理可能な URL 数は floor(490/3) ≒ 160 件。バジェット上限 500 は BlueSky API と URL 先取り込みで共有され、合計 500 リクエスト以内に収まる |
-| 最悪ケース所要時間 | BlueSky API のみ: 10 × 0.1 秒 = 1 秒（最小間隔）/ 10 秒（デフォルト 1.0 秒間隔）。URL 先取り込み込み: 最大 500 HTTP リクエスト（BlueSky API + URL 先取り込み）のレート制限待ちとして 500 × 0.1 秒 = 50 秒（最小間隔）/ 500 秒（デフォルト間隔）。操作全体タイムアウト 600 秒の範囲内 |
+| 最悪ケースリクエスト数 | BlueSky API: ceil(1000/100) = 10（ConstrainedClient バジェット消費）。URL 先取り込み: site_ingest（Scrapy subprocess）が独立して HTTP リクエストを管理するため、ConstrainedClient バジェットを消費しない。Web URL 数はタイムライン内容依存。投稿取得上限 1000 件 × 投稿あたり数 URL 程度のため、実質数千件が上限。Scrapy の `site_ingest_max_pages` は複数 URL モードでは適用されない |
+| 最悪ケース所要時間 | BlueSky API: 10 × 0.1 秒 = 1 秒（最小間隔）/ 10 秒（デフォルト 1.0 秒間隔）。URL 先取り込み: Scrapy subprocess の所要時間（URL 数 × `site_ingest_delay_sec`）。BlueSky API と URL 先取り込みは直列実行のため合計時間 |
 | 想定エラー率 | AT Protocol API 依存。リトライ機構なし（失敗したリクエストは再試行しない）。ConstrainedClient が連続失敗を監視し、5 回連続失敗でサーキットブレーカーが発動して操作を中断する。中断時は取得済みデータを処理する |
 
 ## 安全制約
@@ -84,7 +84,7 @@ BlueSky（AT Protocol）の投稿を API 経由で取得し、source_store に�
 | 取得投稿数 | 設定値 | 許容範囲 1〜1000、デフォルト 200 | 範囲内で変更可 |
 | リクエストタイムアウト | 設定値 | 許容範囲 1〜120 秒、デフォルト 30 秒 | 範囲内で変更可 |
 | リクエスト間隔 | 設定値 | 許容範囲 0.1〜60 秒、デフォルト 1.0 秒 | 範囲内で変更可 |
-| URL 先取り込みのエラー隔離 | ハードリミット | URL 先の取り込み失敗が BlueSky 投稿の取り込み結果に影響しない | 不可 |
+| URL 先取り込みのエラー隔離 | ハードリミット | URL 先の取り込み失敗（site_ingest subprocess 失敗含む）が BlueSky 投稿の取り込み結果に影響しない | 不可 |
 | 生 HTTP クライアント利用禁止 | CI チェック | `src/` 全体を grep で走査（httpx / aiohttp / requests / urllib.request）。`# safety:allowed` 行を除外。ConstrainedClient は py-common-lib パッケージで提供（`src/` 外のため検出対象外） | 許可例外は `# safety:allowed` コメントで可 |
 
 テスト実行時の安全な値: 投稿取得上限 3 件で実行する。異常値テスト（0、負数、上限超過）を含めること。
@@ -396,7 +396,7 @@ BlueSky の投稿は最大 300 文字の短文であり、1 投稿が意味の�
 
 ### 投稿内 URL の自動取り込み
 
-BlueSky 投稿内に含まれる URL を抽出し、URL の種別に応じて Web インジェスター / YouTube インジェスターに委譲して取り込む。この機能はデフォルトで有効であり、`crawl_bluesky` 実行時に常に動作する。
+BlueSky 投稿内に含まれる URL を抽出し、URL の種別に応じて site_ingest / YouTube インジェスターに委譲して取り込む。この機能はデフォルトで有効であり、`crawl_bluesky` 実行時に常に動作する。
 
 #### URL 抽出対象
 
@@ -421,15 +421,15 @@ BlueSky 投稿内に含まれる URL を抽出し、URL の種別に応じて We
 |-------------|--------|------|
 | `youtube.com/watch?v=`, `youtu.be/`, `youtube.com/shorts/` | YoutubeIngester.ingest_video | YouTube 動画の字幕・文字起こしを取り込む |
 | `bsky.app/profile/` | スキップ | BlueSky 投稿は既にインジェスト対象 |
-| 上記以外の HTTP/HTTPS URL | WebIngester.add | Web ページを取り込む |
+| 上記以外の HTTP/HTTPS URL | site_ingest（複数 URL モード） | Web ページをバッチ取得する |
 
 #### 処理フロー
 
 1. 全投稿の source_store への配置が完了した後、配置した投稿の JSON から URL を一括抽出する
 2. 抽出した URL を重複排除する（同一 URL が複数投稿に出現する場合）
 3. URL 種別を判定し、Web / YouTube / スキップに分類する
-4. Web インジェスターに ConstrainedClient を共有して URL 先を取り込む
-5. YouTube インジェスターで動画を取り込む（ConstrainedClient は YouTube 側の既存メカニズムに委ねる）
+4. Web URL を全てバッチ収集し、CLI の `site-ingest` コマンド（複数 URL モード）で 1 回の Scrapy subprocess として取り込む。`--download-only` を指定し、パイプライン処理は BlueSky 側で一括実行する
+5. YouTube インジェスターで動画を取り込む（個別処理）
 6. 全 URL の処理が完了した後、パイプライン制御に取り込み完了を通知する
 
 #### エラーハンドリング
@@ -438,9 +438,10 @@ BlueSky 投稿内に含まれる URL を抽出し、URL の種別に応じて We
 - BlueSky 投稿自体の取り込みは URL 先の失敗に影響されない
 - URL 先の取り込み結果は別途ログ出力する（BlueSky 投稿の IngestResult とは分離）
 
-#### ConstrainedClient の管理
+#### site_ingest との連携
 
-- Web インジェスターには BlueSky インジェスターに渡された ConstrainedClient を共有する。バジェット（リクエスト総数上限）は BlueSky の投稿取得と URL 先取り込みで共有される
+- Web URL の取り込みは CLI の `site-ingest` コマンドを subprocess で呼び出す。Scrapy が独自に HTTP リクエストを管理するため、ConstrainedClient のバジェットは消費しない
+- BlueSky API 呼び出しのみ ConstrainedClient のバジェットを消費する
 - YouTube インジェスターは内部で `youtube-transcript-api` / `yt-dlp` を使用しており、ConstrainedClient は適用外
 
 ## 外部連携
@@ -589,14 +590,15 @@ AppView のベース URL は設定可能とし、デフォルトは `https://pub
 | 投稿内の URL が既に source_store に存在する | Web/YouTube インジェスターの既存の重複検出でスキップされる |
 | 投稿内の URL 先の取り込みに失敗 | エラーをログに記録してスキップする。BlueSky 投稿の取り込みには影響しない |
 | 同一 URL が複数投稿に出現 | URL 抽出時に重複排除し、1 回のみ取り込む |
-| URL 先が Safe Browsing で危険判定 | Web インジェスターの既存の URL 安全性チェックでスキップされる |
+| URL 先が Safe Browsing で危険判定 | 複数 URL モードでは Safe Browsing チェックは実行されない（大量 URL への API 呼び出しは非現実的なため）。SSRF チェック（プライベート IP 拒否）のみ実行される |
 | YouTube URL の字幕取得に失敗 | YouTube インジェスターの既存のエラーハンドリングでスキップされる |
-| バジェット上限到達時の URL 取り込み | バジェットは BlueSky 投稿取得と URL 先取り込みで共有。上限到達時は残りの URL をスキップする |
+| Web URL が 0 件の場合 | site_ingest 呼び出しをスキップする |
+| site_ingest subprocess が失敗 | エラーをログに記録し、Web URL の取り込みを失敗として計上する。BlueSky 投稿の取り込みには影響しない |
 
 ## 関連ドキュメント
 
 - [ingesters/common.md](common.md) — インジェスター共通仕様（責務・制約・重複検出方式・インジェスター間委譲）
-- [ingesters/web.md](web.md) — Web インジェスター仕様（URL 先取り込みの委譲先）
+- [../site-ingest.md](../site-ingest.md) — サイト一括取り込み仕様（Web URL 先取り込みの委譲先）
 - [ingesters/youtube.md](youtube.md) — YouTube インジェスター仕様（YouTube URL 取り込みの委譲先）
 - [source-store.md](../source-store.md) — source_store 仕様（ディレクトリ構成、.meta 形式、URL パス変換）
 - [pipeline-controller.md](../pipeline-controller.md) — パイプライン制御仕様（git 操作、ステージ間連携）

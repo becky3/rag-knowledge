@@ -37,7 +37,6 @@ if TYPE_CHECKING:
     from .config import RAGSettings as Settings
     from .pipeline.controller import PipelineController
     from .pipeline.ingesters._common import IngestResult
-    from .pipeline.ingesters.web import WebIngester
     from .safe_browsing import SafeBrowsingClient
     from .pipeline.ingesters.youtube import YoutubeIngester
     from .pipeline.models import PipelineSummary
@@ -459,10 +458,10 @@ def main() -> None:
 
     # site-ingest: Scrapy によるサイト一括取り込み
     siteingest_parser = subparsers.add_parser("site-ingest", help="Scrapy でサイトを一括取り込み（大規模サイト向け）")
-    siteingest_parser.add_argument("url", help="クロール開始 URL")
-    siteingest_parser.add_argument("--url-pattern", default="", help="URL フィルタパターン（正規表現）")
-    siteingest_parser.add_argument("--max-pages", type=int, default=None, help="ページ数上限")
-    siteingest_parser.add_argument("--force", action="store_true", help="JOBDIR を削除して再クロール")
+    siteingest_parser.add_argument("url", nargs="+", help="取得対象 URL（1件: クロールモード、2件以上: 複数URLモード）")
+    siteingest_parser.add_argument("--url-pattern", default="", help="URL フィルタパターン（正規表現、クロールモードのみ）")
+    siteingest_parser.add_argument("--max-pages", type=int, default=None, help="ページ数上限（クロールモードのみ）")
+    siteingest_parser.add_argument("--force", action="store_true", help="JOBDIR を削除して再クロール（クロールモードのみ）")
     siteingest_parser.add_argument(
         "--download-only",
         action="store_true",
@@ -1938,24 +1937,6 @@ async def run_ingest_youtube_playlist(args: argparse.Namespace) -> None:
     _print_ingest_result(ingest_result, pipeline_summary, context=f"プレイリスト: {args.playlist_url}", json_output=json_out)
 
 
-def _create_web_ingester_cli(
-    source_store: SourceStore,
-    settings: Settings,
-    safe_browsing_client: SafeBrowsingClient | None = None,
-) -> WebIngester:
-    """CLI 用 WebIngester を生成する."""
-    from .pipeline.ingesters.web import WebIngester
-
-    return WebIngester(
-        source_store,
-        max_crawl_pages=settings.rag_max_crawl_pages,
-        crawl_request_timeout=settings.rag_crawl_request_timeout,
-        crawl_max_errors=settings.rag_crawl_max_errors,
-        respect_robots_txt=settings.rag_respect_robots_txt,
-        robots_txt_cache_ttl=settings.rag_robots_txt_cache_ttl,
-        safe_browsing_client=safe_browsing_client,
-    )
-
 
 def _create_youtube_ingester_cli(
     source_store: SourceStore, settings: Settings,
@@ -2010,15 +1991,9 @@ async def run_crawl_bluesky(args: argparse.Namespace) -> None:
             # 投稿内 URL の自動取り込み
             url_stats: dict[str, int] = {}
             if placed_items:
-                sb_client = _create_safe_browsing_client_cli(settings)
-                web_ingester = _create_web_ingester_cli(
-                    controller.source_store, settings, sb_client,
-                )
                 youtube_ingester = _create_youtube_ingester_cli(controller.source_store, settings)
                 url_stats = await bluesky_ingester.follow_urls(
                     placed_items,
-                    client=client,
-                    web_ingester=web_ingester,
                     youtube_ingester=youtube_ingester,
                 )
     except (ValueError, TypeError) as e:
@@ -2282,16 +2257,22 @@ async def run_site_ingest(args: argparse.Namespace) -> None:
     from .scrapy.runner import ScrapyRunner
     from .utils.url import check_ssrf, validate_url
 
-    # URL バリデーション
-    try:
-        url = validate_url(args.url)
-        check_ssrf(url)
-    except ValueError as e:
-        logger.error("エラー: %s", e)
-        sys.exit(1)
+    urls: list[str] = args.url  # nargs='+' なのでリスト
+    multi_url_mode = len(urls) >= 2
 
-    # url_pattern バリデーション
-    if args.url_pattern:
+    # 全 URL バリデーション
+    validated_urls: list[str] = []
+    for u in urls:
+        try:
+            validated = validate_url(u)
+            check_ssrf(validated)
+            validated_urls.append(validated)
+        except ValueError as e:
+            logger.error("エラー: %s", e)
+            sys.exit(1)
+
+    # クロールモード固有のバリデーション
+    if not multi_url_mode and args.url_pattern:
         try:
             re.compile(args.url_pattern)
         except re.error as e:
@@ -2300,42 +2281,61 @@ async def run_site_ingest(args: argparse.Namespace) -> None:
 
     controller, settings = _build_cli_pipeline_controller()
 
-    # max_pages のクランプ
-    effective_max_pages = (
-        args.max_pages if args.max_pages is not None
-        else settings.site_ingest_max_pages
-    )
-    if effective_max_pages < 1:
-        effective_max_pages = 1
-        logger.warning("max_pages を 1 にクランプしました")
-    elif effective_max_pages > 1000:
-        effective_max_pages = 1000
-        logger.warning("max_pages を 1000 にクランプしました")
+    # max_pages のクランプ（クロールモードのみ）
+    effective_max_pages: int | None = None
+    if not multi_url_mode:
+        effective_max_pages = (
+            args.max_pages if args.max_pages is not None
+            else settings.site_ingest_max_pages
+        )
+        if effective_max_pages < 1:
+            effective_max_pages = 1
+            logger.warning("max_pages を 1 にクランプしました")
+        elif effective_max_pages > 1000:
+            effective_max_pages = 1000
+            logger.warning("max_pages を 1000 にクランプしました")
 
     # ドメイン導出
     from urllib.parse import urlparse
-    parsed = urlparse(url)
-    allowed_domains = parsed.hostname or ""
+    if multi_url_mode:
+        # 複数 URL モード: 全ドメインの和集合
+        domains = []
+        for u in validated_urls:
+            hostname = urlparse(u).hostname
+            if hostname and hostname not in domains:
+                domains.append(hostname)
+        allowed_domains = ",".join(domains)
+    else:
+        parsed = urlparse(validated_urls[0])
+        allowed_domains = parsed.hostname or ""
 
     start_time = time_mod.monotonic()
 
-    # Scrapy Runner で クロール
+    # Scrapy Runner でクロール / 複数 URL 取得
     runner = ScrapyRunner(
         temp_dir=settings.site_ingest_temp_dir,
         delay_sec=settings.site_ingest_delay_sec,
-        max_pages=effective_max_pages,
+        max_pages=effective_max_pages or settings.site_ingest_max_pages,
         download_timeout=settings.site_ingest_download_timeout,
         timeout_sec=settings.site_ingest_timeout_sec,
         error_count=settings.site_ingest_error_count,
     )
 
-    crawl_result = await runner.run(
-        start_url=url,
-        allowed_domains=allowed_domains,
-        url_pattern=args.url_pattern,
-        max_pages=effective_max_pages,
-        force=args.force,
-    )
+    if multi_url_mode:
+        crawl_result = await runner.run(
+            start_urls=validated_urls,
+            allowed_domains=allowed_domains,
+        )
+    else:
+        crawl_result = await runner.run(
+            start_url=validated_urls[0],
+            allowed_domains=allowed_domains,
+            url_pattern=args.url_pattern,
+            max_pages=effective_max_pages,
+            force=args.force,
+        )
+
+    display_url = validated_urls[0] if not multi_url_mode else f"{len(validated_urls)} URLs"
 
     if not crawl_result.jsonl_path.exists():
         elapsed = time_mod.monotonic() - start_time
@@ -2356,10 +2356,9 @@ async def run_site_ingest(args: argparse.Namespace) -> None:
     pipeline_summary = None
     has_changes = (bridge_result.ingest.placed + bridge_result.ingest.overwritten) > 0
     if has_changes and not args.download_only:
-        pipeline_summary = controller.ingest_and_index(f"ingest(web): site-ingest {url}")
+        pipeline_summary = controller.ingest_and_index(f"ingest(web): site-ingest {display_url}")
     elif has_changes and args.download_only:
-        # download_only でもコミットは実行する（パイプライン処理のみスキップ）
-        controller.commit(f"ingest(web): site-ingest {url} (download_only)")
+        controller.commit(f"ingest(web): site-ingest {display_url} (download_only)")
 
     # 正常完了後のクリーンアップ（仕様: docs/specs/site-ingest.md）
     if crawl_result.success:

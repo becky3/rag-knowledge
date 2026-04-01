@@ -224,7 +224,6 @@ git-flow ベースのブランチ戦略を採用。詳細は `~/.claude/docs/spe
 ### インジェスター仕様
 
 - [インジェスター共通仕様](docs/specs/ingesters/common.md)
-- [Web インジェスター](docs/specs/ingesters/web.md)
 - [BlueSky インジェスター](docs/specs/ingesters/bluesky.md)
 - [Zenn インジェスター](docs/specs/ingesters/zenn.md)
 - [YouTube インジェスター](docs/specs/ingesters/youtube.md)

@@ -19,6 +19,7 @@ import shutil
 import sys
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Any
 from urllib.parse import urlparse
 
 logger = logging.getLogger(__name__)
@@ -31,6 +32,12 @@ def _crawl_key(start_url: str, url_pattern: str) -> str:
     異なる組み合わせは異なるキーを返し、JOBDIR の分離を保証する。
     """
     raw = f"{start_url}\n{url_pattern}"
+    return hashlib.sha256(raw.encode()).hexdigest()[:16]
+
+
+def _multi_url_key(urls: list[str]) -> str:
+    """複数 URL リストから一意のキーを生成する."""
+    raw = "\n".join(sorted(urls))
     return hashlib.sha256(raw.encode()).hexdigest()[:16]
 
 
@@ -98,7 +105,8 @@ class ScrapyRunner:
     async def run(
         self,
         *,
-        start_url: str,
+        start_url: str = "",
+        start_urls: list[str] | None = None,
         allowed_domains: str = "",
         url_pattern: str = "",
         max_pages: int | None = None,
@@ -107,42 +115,67 @@ class ScrapyRunner:
         """Scrapy Spider を subprocess で起動してクロールを実行する.
 
         Args:
-            start_url: クロール開始 URL
+            start_url: クロール開始 URL（クロールモード、start_urls と排他）
+            start_urls: 取得対象 URL のリスト（複数 URL モード、start_url と排他）
             allowed_domains: ドメイン制約（カンマ区切り）
-            url_pattern: URL フィルタ正規表現
+            url_pattern: URL フィルタ正規表現（クロールモードのみ）
             max_pages: ページ数上限（None の場合はインスタンス設定値を使用）
             force: True の場合、クロールディレクトリ全体を削除して最初からクロール
 
         Returns:
             クロール実行結果
         """
-        effective_max_pages = max_pages if max_pages is not None else self._max_pages
+        # 複数 URL モード判定
+        _urls = start_urls or []
+        multi_url_mode = len(_urls) >= 2
 
-        # url_pattern 未指定時: 開始 URL のパスプレフィックスから自動生成
-        parsed = urlparse(start_url)
-        if not url_pattern:
-            path = parsed.path.rstrip("/")
-            if path and path != "/":
-                # スキーム + ホスト + パスプレフィックスを正規表現エスケープ
-                # 末尾スラッシュ有無の両方にマッチするようにする
-                base_prefix = f"{parsed.scheme}://{parsed.hostname}{path}"
-                url_pattern = f"^{re.escape(base_prefix)}(?:/|$)"
-                logger.info("url_pattern を自動生成: %s", url_pattern)
+        if multi_url_mode:
+            # 複数 URL モード: リンク辿りなし
+            effective_start_urls = _urls
+            effective_start_url = ""
+            no_follow = True
+            effective_max_pages = 0  # 無制限（URL 数 = ページ数）
+            url_pattern = ""  # パターンフィルタ無効
+        elif len(_urls) == 1:
+            # urls が 1 件のみ: クロールモードとして扱う
+            effective_start_url = _urls[0]
+            effective_start_urls = []
+            no_follow = False
+            effective_max_pages = max_pages if max_pages is not None else self._max_pages
+        elif start_url:
+            effective_start_url = start_url
+            effective_start_urls = []
+            no_follow = False
+            effective_max_pages = max_pages if max_pages is not None else self._max_pages
+        else:
+            raise ValueError("start_url または start_urls は必須です")
 
-        # ドメイン + クロールキーから一時保存ディレクトリを決定
-        # クロールキー: start_url + effective url_pattern のハッシュ
-        # 同じパラメータなら同じディレクトリ（レジューム可能）、
-        # 異なるパラメータなら別ディレクトリ（JOBDIR 状態リーク防止）
-        domain = parsed.hostname or "unknown"
-        key = _crawl_key(start_url, url_pattern)
+        # クロールモード: url_pattern 未指定時は自動生成
+        if not multi_url_mode:
+            parsed = urlparse(effective_start_url)
+            if not url_pattern:
+                path = parsed.path.rstrip("/")
+                if path and path != "/":
+                    base_prefix = f"{parsed.scheme}://{parsed.hostname}{path}"
+                    url_pattern = f"^{re.escape(base_prefix)}(?:/|$)"
+                    logger.info("url_pattern を自動生成: %s", url_pattern)
+
+        # 一時保存ディレクトリの決定
+        if multi_url_mode:
+            domain = "_multi_"
+            key = _multi_url_key(effective_start_urls)
+        else:
+            parsed = urlparse(effective_start_url)
+            domain = parsed.hostname or "unknown"
+            key = _crawl_key(effective_start_url, url_pattern)
+
         crawl_dir = self._temp_dir / domain / key
-
         html_dir = crawl_dir / "html"
         jsonl_path = crawl_dir / "metadata.jsonl"
         jobdir = crawl_dir / "jobdir"
 
-        # --force: クロールディレクトリ全体をクリア（html/, metadata.jsonl, jobdir/）
-        if force and crawl_dir.exists():
+        # --force: クロールディレクトリ全体をクリア（クロールモードのみ有効）
+        if force and not multi_url_mode and crawl_dir.exists():
             logger.info("--force: クロールディレクトリを削除します: %s", crawl_dir)
             try:
                 shutil.rmtree(crawl_dir)
@@ -151,14 +184,22 @@ class ScrapyRunner:
                 logger.error(msg, exc_info=True)
                 raise RuntimeError(msg) from exc
 
+        # 複数 URL モード: 前回の一時ディレクトリをクリア（レジューム不要）
+        if multi_url_mode and crawl_dir.exists():
+            try:
+                shutil.rmtree(crawl_dir)
+            except OSError:
+                logger.warning(
+                    "複数 URL モードの一時ディレクトリ削除に失敗: %s", crawl_dir, exc_info=True,
+                )
+
         # ディレクトリ準備
         html_dir.mkdir(parents=True, exist_ok=True)
         crawl_dir.mkdir(parents=True, exist_ok=True)
 
         # パラメータを JSON ファイルに書き出し（コードインジェクション防止）
         params_path = crawl_dir / "spider_params.json"
-        params = {
-            "start_url": start_url,
+        params: dict[str, Any] = {
             "allowed_domains": allowed_domains,
             "url_pattern": url_pattern,
             "output_dir": str(html_dir),
@@ -169,7 +210,15 @@ class ScrapyRunner:
             "download_timeout": self._download_timeout,
             "timeout_sec": self._timeout_sec,
             "error_count": self._error_count,
+            "no_follow": no_follow,
         }
+        if multi_url_mode:
+            params["start_urls_json"] = json.dumps(effective_start_urls)
+            params["start_url"] = ""
+        else:
+            params["start_url"] = effective_start_url
+            params["start_urls_json"] = ""
+
         params_path.write_text(json.dumps(params, ensure_ascii=False), encoding="utf-8")
 
         # Scrapy 起動スクリプトを構築
@@ -179,11 +228,17 @@ class ScrapyRunner:
         env = os.environ.copy()
         env["PYTHONIOENCODING"] = "utf-8"
 
+        if multi_url_mode:
+            preview = ", ".join(effective_start_urls[:3])
+            log_url = f"{preview}..." if len(effective_start_urls) > 3 else preview
+        else:
+            log_url = effective_start_url
         logger.info(
-            "Scrapy Spider を起動: url=%s, max_pages=%d, delay=%.2f",
-            start_url,
+            "Scrapy Spider を起動: url=%s, max_pages=%d, delay=%.2f, no_follow=%s",
+            log_url,
             effective_max_pages,
             self._delay_sec,
+            no_follow,
         )
 
         # stderr をファイルにリダイレクト（Windows で Twisted の子プロセス/スレッドが
@@ -270,8 +325,8 @@ settings = {{
     'DOWNLOADER_MIDDLEWARES': {{
         'rag.scrapy.middleware.SsrfMiddleware': 50,
     }},
-    # クロール設定
-    'JOBDIR': params['jobdir'],
+    # クロール設定（JOBDIR はクロールモードのみ）
+    **({{ 'JOBDIR': params['jobdir'] }} if not params.get('no_follow') else {{}}),
     'FEEDS': {{
         params['jsonl_path']: {{
             'format': 'jsonlines',
@@ -296,11 +351,13 @@ process = CrawlerProcess(settings=settings)
 
 process.crawl(
     SiteSpider,
-    start_url=params['start_url'],
+    start_url=params.get('start_url', ''),
+    start_urls_json=params.get('start_urls_json', ''),
     allowed_domains=params['allowed_domains'],
-    url_pattern=params['url_pattern'],
+    url_pattern=params.get('url_pattern', ''),
     output_dir=params['output_dir'],
-    max_pages=params['max_pages'],
+    max_pages=params.get('max_pages', 0),
+    no_follow=params.get('no_follow', False),
 )
 process.start()
 """

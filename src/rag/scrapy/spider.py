@@ -26,10 +26,12 @@ class SiteSpider(scrapy.Spider):  # type: ignore[misc]
     """汎用サイトクロール Spider.
 
     パラメータ（Spider 引数）で動作をカスタマイズする:
-    - start_url: クロール開始 URL
+    - start_url: クロール開始 URL（クロールモード、start_urls_json と排他）
+    - start_urls_json: 取得対象 URL の JSON 配列文字列（複数 URL モード）
     - allowed_domains: ドメイン制約（カンマ区切り）
-    - url_pattern: URL フィルタ正規表現（任意）
+    - url_pattern: URL フィルタ正規表現（任意、クロールモードのみ）
     - output_dir: HTML ファイルの保存先ディレクトリ
+    - no_follow: リンク辿りを無効化（複数 URL モード時に true）
     """
 
     name = "site_spider"
@@ -50,20 +52,44 @@ class SiteSpider(scrapy.Spider):  # type: ignore[misc]
     def __init__(
         self,
         start_url: str = "",
+        start_urls_json: str = "",
         allowed_domains: str = "",
         url_pattern: str = "",
         output_dir: str = "",
         max_pages: int = 0,
+        no_follow: bool = False,
         **kwargs: Any,
     ) -> None:
         super().__init__(**kwargs)
 
-        if not start_url:
-            raise ValueError("start_url は必須です")
         if not output_dir:
             raise ValueError("output_dir は必須です")
 
-        self.start_urls = [start_url]
+        # start_urls の決定: start_urls_json が優先
+        if start_urls_json:
+            import json as _json
+            try:
+                parsed_start_urls = _json.loads(start_urls_json)
+            except Exception as exc:
+                raise ValueError("start_urls_json が不正な JSON です") from exc
+
+            if not isinstance(parsed_start_urls, list) or not all(
+                isinstance(u, str) for u in parsed_start_urls
+            ):
+                raise ValueError(
+                    "start_urls_json は文字列 URL の JSON 配列（list[str]）である必要があります"
+                )
+            if not parsed_start_urls:
+                raise ValueError("start_urls_json が空です")
+
+            self.start_urls = parsed_start_urls
+            # 複数 URL モード時はリンク辿りを無効化する（仕様）
+            self._no_follow = True
+        elif start_url:
+            self.start_urls = [start_url]
+            self._no_follow = bool(no_follow)
+        else:
+            raise ValueError("start_url または start_urls_json は必須です")
 
         # allowed_domains: カンマ区切り文字列をリストに変換
         if allowed_domains:
@@ -71,15 +97,19 @@ class SiteSpider(scrapy.Spider):  # type: ignore[misc]
                 d.strip() for d in allowed_domains.split(",") if d.strip()
             ]
         else:
-            # start_url からドメインを自動導出
-            parsed = urlparse(start_url)
-            hostname = parsed.hostname
-            if hostname:
-                self.allowed_domains = [hostname]
+            # start_urls から全ドメインを自動導出
+            domains: list[str] = []
+            for url in self.start_urls:
+                parsed = urlparse(url)
+                hostname = parsed.hostname
+                if hostname and hostname not in domains:
+                    domains.append(hostname)
+            if domains:
+                self.allowed_domains = domains
 
-        # URL パターンフィルタ（正規表現）
+        # URL パターンフィルタ（正規表現、クロールモードのみ）
         self._url_pattern: re.Pattern[str] | None = None
-        if url_pattern:
+        if url_pattern and not self._no_follow:
             self._url_pattern = re.compile(url_pattern)
 
         # HTML 保存先
@@ -137,7 +167,7 @@ class SiteSpider(scrapy.Spider):  # type: ignore[misc]
         filepath = self._save_html(response)
         if filepath is None:
             # 保存失敗時はメタデータを yield しない（JSONL に不整合な行を書かない）
-            if not max_reached:
+            if not max_reached and not self._no_follow:
                 yield from self._follow_links(response)
             if max_reached:
                 self.crawler.engine.close_spider(self, "max_pages_reached")
@@ -154,8 +184,8 @@ class SiteSpider(scrapy.Spider):  # type: ignore[misc]
             "filepath": str(filepath.relative_to(self._output_dir.resolve())),
         }
 
-        # 上限未到達時のみリンクを辿る
-        if not max_reached:
+        # 上限未到達時かつクロールモード時のみリンクを辿る
+        if not max_reached and not self._no_follow:
             yield from self._follow_links(response)
 
         if max_reached:
