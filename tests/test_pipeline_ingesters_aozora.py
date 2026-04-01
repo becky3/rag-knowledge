@@ -414,6 +414,22 @@ class TestSearch:
         results = ingester.search(author="Alice", limit=3)
         assert len(results) == 3
 
+    def test_search_results_sorted_by_book_id_asc(
+        self, source_store: SourceStore
+    ) -> None:
+        """検索結果が book_id 昇順でソートされる."""
+        records = [
+            _make_record(book_id="000003", last_name="Alice"),
+            _make_record(book_id="000001", last_name="Alice"),
+            _make_record(book_id="000005", last_name="Alice"),
+            _make_record(book_id="000002", last_name="Alice"),
+        ]
+        _write_catalog(source_store, records)
+        ingester = make_aozora_ingester(source_store)
+        results = ingester.search(author="Alice", limit=20)
+        book_ids = [r["book_id"] for r in results]
+        assert book_ids == ["000001", "000002", "000003", "000005"]
+
 
 # === 正常系取り込みテスト ===
 
