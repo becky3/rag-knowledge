@@ -21,7 +21,7 @@
 | ディレクトリ | 責務 |
 |---|---|
 | `src/rag/embedding/` | Embedding プロバイダー抽象化（ローカル / OpenAI）とファクトリ |
-| `src/rag/ingesters/` | インジェスタープラグイン（BaseIngester 抽象基底・IngestedContent 共通モデル・WebIngester・ZennIngester・DocumentIngester・BlueskyIngester） |
+| `src/rag/ingesters/` | インジェスタープラグイン（BaseIngester 抽象基底・IngestedContent 共通モデル・ZennIngester・DocumentIngester・BlueskyIngester） |
 | `src/rag/infrastructure/` | インフラ基盤（ChromaDB サーバーのライフサイクル管理・ファイルベースロック） |
 | `src/rag/pipeline/` | パイプライン制御（git 操作・差分検知・ステージ間連携・4モード実行） |
 | `src/rag/pipeline/factory.py` | PipelineController のファクトリ関数（server/cli 共通） |
@@ -55,7 +55,6 @@
 | `source-store.md` | `src/rag/store/` |
 | `pipeline-controller.md` | `src/rag/pipeline/` |
 | `ingesters/common.md` | `src/rag/pipeline/ingesters/_common.py` |
-| `ingesters/web.md` | `src/rag/pipeline/ingesters/web.py` |
 | `ingesters/bluesky.md` | `src/rag/pipeline/ingesters/bluesky.py` |
 | `ingesters/youtube.md` | `src/rag/pipeline/ingesters/youtube.py` |
 | `ingesters/zenn.md` | `src/rag/pipeline/ingesters/zenn.py` |

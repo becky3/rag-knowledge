@@ -28,14 +28,6 @@ rag_bm25_k1 = 2.5
 rag_bm25_b = 0.50
 # rag_min_combined_score = (未設定時は None)
 
-# クロール
-rag_max_crawl_pages = 500
-rag_crawl_max_errors = 5
-
-# robots.txt
-rag_respect_robots_txt = true
-rag_robots_txt_cache_ttl = 3600
-
 # URL 安全性チェック (Google Safe Browsing API)
 # true にするには keyring に GOOGLE_SAFE_BROWSING_API_KEY の登録が必要
 # 未登録・空・不正の場合は SafeBrowsingConfigError で即時中断する
@@ -54,9 +46,6 @@ rag_list_recent_limit = 20
 rag_zenn_max_articles = 100
 rag_zenn_request_timeout = 30
 rag_zenn_request_interval = 0.1
-
-# クロール per-request タイムアウト（秒）
-rag_crawl_request_timeout = 30
 
 # ドキュメントインジェスター
 rag_document_supported_extensions = ".md,.txt,.pdf,.adoc"

@@ -209,7 +209,7 @@ class TestBuildSpiderScript:
         assert "params['download_timeout']" in script
         assert "'LOG_LEVEL': 'INFO'" in script
         # max_pages は Spider パラメータとして渡される（CLOSESPIDER_PAGECOUNT ではない）
-        assert "max_pages=params['max_pages']" in script
+        assert "max_pages=params.get('max_pages', 0)" in script
 
     def test_script_contains_spider_args(self, tmp_path: Path) -> None:
         """スクリプトに Spider 引数が JSON 経由で渡される構造を含むこと."""
@@ -223,9 +223,9 @@ class TestBuildSpiderScript:
         script = runner._build_spider_script(params_path=params_path)
 
         # Spider 引数が params から渡される
-        assert "params['start_url']" in script
+        assert "params.get('start_url', '')" in script
         assert "params['allowed_domains']" in script
-        assert "params['url_pattern']" in script
+        assert "params.get('url_pattern', '')" in script
 
     def test_script_imports(self, tmp_path: Path) -> None:
         """スクリプトに必要な import が含まれること."""

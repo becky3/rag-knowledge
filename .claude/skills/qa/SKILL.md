@@ -22,7 +22,7 @@ argument-hint: ""
 QA 検証グループ:
 
   A) Local    — add-document, crawl-documents, add-journal, migrate-journal
-  B) Web      — site-ingest
+  B) Web      — site-ingest（クロール + 複数URL）
   C) SNS      — crawl-zenn, crawl-bluesky
   D) YouTube  — ingest-youtube, ingest-youtube-playlist（実行前にユーザー確認）
   E) Aozora   — update-aozora-catalog, search-aozora, ingest-aozora
@@ -179,7 +179,8 @@ NG を検出した場合、Issue 起票を提案する。
 | A) Local | crawl-documents | リポジトリの `docs/specs/` ディレクトリ全体 |
 | A) Local | add-journal | `.qa/journal_add_test.md`（`--title "コンテンツ一覧取得機能の実装"` `--repository rag-knowledge`） |
 | A) Local | migrate-journal | `.qa/journals/`（古いジャーナル 10 件、`--repository rag-knowledge`） |
-| B) Web | site-ingest（Scrapy） | `https://www.stat.go.jp/`（`--max-pages 20`） |
+| B) Web | site-ingest（クロール） | `https://www.stat.go.jp/`（`--max-pages 20`） |
+| B) Web | site-ingest（複数URL） | `https://www.stat.go.jp/data/jinsui/` と `https://www.stat.go.jp/data/roudou/` |
 | C) SNS | Zenn ユーザー | `rhythmcan` |
 | C) SNS | BlueSky ハンドル | `rhythmcan.bsky.social` |
 | D) YouTube | 動画 URL | `https://www.youtube.com/watch?v=GuFBDpzH3ck` |
@@ -226,9 +227,10 @@ MCP 対応コマンド:
 
 | # | コマンド（CLI） | 期待結果 | 検証種別 |
 |---|----------------|---------|---------|
-| 1 | `site-ingest https://www.stat.go.jp/ --max-pages 20` | Scrapy 一括取り込み成功 | `ingest` |
+| 1 | `site-ingest https://www.stat.go.jp/ --max-pages 20` | Scrapy クロールモード一括取り込み成功 | `ingest` |
+| 2 | `site-ingest https://www.stat.go.jp/data/jinsui/ https://www.stat.go.jp/data/roudou/` | 複数 URL モードで 2 件取得成功（クロールなし） | `ingest` |
 
-MCP 対応: `rag_site_ingest`
+MCP 対応: `rag_site_ingest`（`url` パラメータ / `urls` パラメータ）
 
 ### C) SNS
 

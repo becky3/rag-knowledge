@@ -8,7 +8,6 @@
 
 | 媒体 | 仕様書 |
 |------|--------|
-| Web | [web.md](web.md) |
 | BlueSky | [bluesky.md](bluesky.md) |
 | Zenn | [zenn.md](zenn.md) |
 | YouTube | [youtube.md](youtube.md) |
@@ -138,7 +137,6 @@ flowchart TB
     end
 
     subgraph Ingesters["インジェスター"]
-        WING["WebIngester"]
         ZING["ZennIngester"]
         BING["BlueskyIngester"]
         AING["AozoraIngester"]
@@ -163,7 +161,6 @@ flowchart TB
 
     CLIENT -->|stdio / http| TOOLS
     TOOLS -->|取り込み指示| Ingesters
-    WING --> CC
     ZING --> CC
     BING --> CC
     CC --> WEB

@@ -20,20 +20,19 @@ RAG Knowledge は、外部 Web ページから収集した知識をベクトル 
 | 10 | コンバーター | source_store のファイルを converted_store のテキストに変換 | [converter.md](converter.md) |
 | 11 | インデクサー | converted_store からチャンキング・Embedding・インデックス構築 | [indexer.md](indexer.md) |
 | 12 | インジェスター共通仕様 | インジェスターの共通制約・重複検出・パイプライン通知 | [ingesters/common.md](ingesters/common.md) |
-| 13 | Web インジェスター | Web ページ取得・URL 安全性チェック・robots.txt 遵守 | [ingesters/web.md](ingesters/web.md) |
-| 14 | BlueSky インジェスター | AT Protocol API 経由の投稿取得 | [ingesters/bluesky.md](ingesters/bluesky.md) |
-| 15 | Zenn インジェスター | Zenn API 経由の記事・スクラップ取得 | [ingesters/zenn.md](ingesters/zenn.md) |
-| 16 | Local インジェスター | ローカルファイルの配置 | [ingesters/local.md](ingesters/local.md) |
-| 17 | 検索レスポンス + 全文取得 | チャンク単位検索レスポンスと全文取得ツール | [search-response.md](search-response.md) |
-| 18 | 再構築・統計・バックアップ | パイプライン再構築の MCP/CLI 公開・統計拡張・バックアップ手順 | [rebuild-stats.md](rebuild-stats.md) |
-| 19 | サイト一括取り込み（Scrapy subprocess） | Scrapy subprocess による大規模サイトの一括取り込み | [site-ingest.md](site-ingest.md) |
-| 20 | YouTube インジェスター | YouTube 動画の字幕・音声文字起こし取得 | [ingesters/youtube.md](ingesters/youtube.md) |
-| 21 | 青空文庫インジェスター | 青空文庫の著作権切れ作品を取り込み | [ingesters/aozora.md](ingesters/aozora.md) |
-| 22 | Journal インジェスター | 開発ジャーナルの登録・検索 | [ingesters/journal.md](ingesters/journal.md) |
-| 23 | コンテンツ一覧取得 | source_type 別の最新ソース一覧取得 | [infrastructure/content-listing.md](infrastructure/content-listing.md) |
-| 24 | コンテンツアップロード | HTTP モードでのファイル直接アップロード（multipart/form-data） | [infrastructure/content-upload.md](infrastructure/content-upload.md) |
-| 25 | Upload HTTP API 認証 | API キー認証・バインドアドレス制約 | [infrastructure/upload-auth.md](infrastructure/upload-auth.md) |
-| 26 | 定期 index rebuild | 条件付き index rebuild の自動実行 | [infrastructure/scheduled-rebuild.md](infrastructure/scheduled-rebuild.md) |
+| 13 | BlueSky インジェスター | AT Protocol API 経由の投稿取得 | [ingesters/bluesky.md](ingesters/bluesky.md) |
+| 14 | Zenn インジェスター | Zenn API 経由の記事・スクラップ取得 | [ingesters/zenn.md](ingesters/zenn.md) |
+| 15 | Local インジェスター | ローカルファイルの配置 | [ingesters/local.md](ingesters/local.md) |
+| 16 | 検索レスポンス + 全文取得 | チャンク単位検索レスポンスと全文取得ツール | [search-response.md](search-response.md) |
+| 17 | 再構築・統計・バックアップ | パイプライン再構築の MCP/CLI 公開・統計拡張・バックアップ手順 | [rebuild-stats.md](rebuild-stats.md) |
+| 18 | サイト一括取り込み（Scrapy subprocess） | Scrapy subprocess による大規模サイトの一括取り込み | [site-ingest.md](site-ingest.md) |
+| 19 | YouTube インジェスター | YouTube 動画の字幕・音声文字起こし取得 | [ingesters/youtube.md](ingesters/youtube.md) |
+| 20 | 青空文庫インジェスター | 青空文庫の著作権切れ作品を取り込み | [ingesters/aozora.md](ingesters/aozora.md) |
+| 21 | Journal インジェスター | 開発ジャーナルの登録・検索 | [ingesters/journal.md](ingesters/journal.md) |
+| 22 | コンテンツ一覧取得 | source_type 別の最新ソース一覧取得 | [infrastructure/content-listing.md](infrastructure/content-listing.md) |
+| 23 | コンテンツアップロード | HTTP モードでのファイル直接アップロード（multipart/form-data） | [infrastructure/content-upload.md](infrastructure/content-upload.md) |
+| 24 | Upload HTTP API 認証 | API キー認証・バインドアドレス制約 | [infrastructure/upload-auth.md](infrastructure/upload-auth.md) |
+| 25 | 定期 index rebuild | 条件付き index rebuild の自動実行 | [infrastructure/scheduled-rebuild.md](infrastructure/scheduled-rebuild.md) |
 
 ## 3. 技術スタック
 
