@@ -18,10 +18,12 @@ from urllib.parse import urlparse
 from rag.pipeline.ingesters._common import IngestResult
 from rag.store.path_converter import url_to_path
 
-# converter が認識する拡張子（変換対象 + パススルー対象）
-# この拡張子を持つ URL は .html を付与しない
+# .html 付与をスキップする拡張子
+# converter が認識する拡張子 + Spider が Web 系と見なす拡張子の和集合
+# Spider._WEB_EXTENSIONS と整合させること
 _KNOWN_WEB_EXTENSIONS: frozenset[str] = frozenset(
-    {".html", ".htm", ".pdf", ".json", ".md", ".txt", ".adoc"},
+    {".html", ".htm", ".xhtml", ".shtml", ".php", ".asp", ".aspx", ".jsp",
+     ".pdf", ".json", ".md", ".txt", ".adoc"},
 )
 
 

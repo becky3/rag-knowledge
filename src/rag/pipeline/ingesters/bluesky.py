@@ -440,12 +440,9 @@ class BlueskyIngester:
 
         # Web URL をバッチ取得（site-ingest 複数 URL モード、download_only）
         if web_urls:
-            try:
-                web_placed = await self._fetch_web_urls(web_urls)
-                stats["web_placed"] = web_placed
-            except Exception:
-                logger.exception("Web URL のバッチ取り込みに失敗（%d 件）", len(web_urls))
-                stats["errors"] += len(web_urls)
+            web_placed, web_errors = await self._fetch_web_urls(web_urls)
+            stats["web_placed"] = web_placed
+            stats["errors"] += web_errors
 
         # YouTube URL を個別取り込み
         for url in youtube_urls:
@@ -475,7 +472,7 @@ class BlueskyIngester:
     # URL あたり平均 ~80 文字 × 200 = ~16K文字で安全マージンを確保
     _URL_BATCH_SIZE = 200
 
-    async def _fetch_web_urls(self, urls: list[str]) -> int:
+    async def _fetch_web_urls(self, urls: list[str]) -> tuple[int, int]:
         """Web URL を site-ingest CLI subprocess（複数 URL モード）でバッチ取得する.
 
         Windows のコマンドライン長制限を考慮し、URL リストが大きい場合は
@@ -485,18 +482,26 @@ class BlueskyIngester:
             urls: 取得対象の Web URL リスト
 
         Returns:
-            配置されたファイル数の合計
+            (配置されたファイル数の合計, エラー件数)
         """
         logger.info("site-ingest（複数 URL モード）で %d 件の Web URL を取り込みます", len(urls))
 
         total_placed = 0
+        total_errors = 0
         for i in range(0, len(urls), self._URL_BATCH_SIZE):
             batch = urls[i:i + self._URL_BATCH_SIZE]
-            placed = await self._run_site_ingest_batch(batch)
-            total_placed += placed
+            try:
+                placed = await self._run_site_ingest_batch(batch)
+                total_placed += placed
+            except Exception:
+                logger.exception(
+                    "site-ingest バッチ処理に失敗（スキップして続行）: batch_size=%d",
+                    len(batch),
+                )
+                total_errors += len(batch)
 
-        logger.info("site-ingest 完了: 合計 %d 件配置", total_placed)
-        return total_placed
+        logger.info("site-ingest 完了: 合計 %d 件配置, %d 件エラー", total_placed, total_errors)
+        return total_placed, total_errors
 
     async def _run_site_ingest_batch(self, urls: list[str]) -> int:
         """site-ingest CLI subprocess を 1 バッチ分実行する."""

@@ -472,7 +472,7 @@ class TestFollowUrls:
         ]
 
         ingester = make_bluesky_ingester(source_store)
-        with patch.object(ingester, "_fetch_web_urls", new_callable=AsyncMock, return_value=1) as mock_fetch:
+        with patch.object(ingester, "_fetch_web_urls", new_callable=AsyncMock, return_value=(1, 0)) as mock_fetch:
             stats = await ingester.follow_urls(
                 [item],
                 youtube_ingester=None,
@@ -548,7 +548,8 @@ class TestFollowUrls:
         ]
 
         ingester = make_bluesky_ingester(source_store)
-        with patch.object(ingester, "_fetch_web_urls", new_callable=AsyncMock, side_effect=Exception("connection error")):
+        # _fetch_web_urls はバッチエラー隔離を行い、エラー件数を返す
+        with patch.object(ingester, "_fetch_web_urls", new_callable=AsyncMock, return_value=(0, 1)):
             stats = await ingester.follow_urls(
                 [item],
                 youtube_ingester=None,
@@ -571,7 +572,7 @@ class TestFollowUrls:
         item2["post"]["record"]["facets"] = [facet]
 
         ingester = make_bluesky_ingester(source_store)
-        with patch.object(ingester, "_fetch_web_urls", new_callable=AsyncMock, return_value=1) as mock_fetch:
+        with patch.object(ingester, "_fetch_web_urls", new_callable=AsyncMock, return_value=(1, 0)) as mock_fetch:
             stats = await ingester.follow_urls(
                 [item1, item2],
                 youtube_ingester=None,

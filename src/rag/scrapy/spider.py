@@ -68,16 +68,28 @@ class SiteSpider(scrapy.Spider):  # type: ignore[misc]
         # start_urls の決定: start_urls_json が優先
         if start_urls_json:
             import json as _json
-            self.start_urls = _json.loads(start_urls_json)
-            if not self.start_urls:
+            try:
+                parsed_start_urls = _json.loads(start_urls_json)
+            except Exception as exc:
+                raise ValueError("start_urls_json が不正な JSON です") from exc
+
+            if not isinstance(parsed_start_urls, list) or not all(
+                isinstance(u, str) for u in parsed_start_urls
+            ):
+                raise ValueError(
+                    "start_urls_json は文字列 URL の JSON 配列（list[str]）である必要があります"
+                )
+            if not parsed_start_urls:
                 raise ValueError("start_urls_json が空です")
+
+            self.start_urls = parsed_start_urls
+            # 複数 URL モード時はリンク辿りを無効化する（仕様）
+            self._no_follow = True
         elif start_url:
             self.start_urls = [start_url]
+            self._no_follow = bool(no_follow)
         else:
             raise ValueError("start_url または start_urls_json は必須です")
-
-        # リンク辿り無効化フラグ
-        self._no_follow = bool(no_follow)
 
         # allowed_domains: カンマ区切り文字列をリストに変換
         if allowed_domains:
