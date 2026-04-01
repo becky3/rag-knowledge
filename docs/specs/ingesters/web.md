@@ -534,7 +534,6 @@ source_id の決定方式は [source-store.md](../source-store.md) の「source_
 | 再帰クロール中にページ数上限到達 | 残りの depth をスキップし、取得済みデータを処理する |
 | リンク先の URL 拡張子が許可リスト外（.exe, .zip, .png 等） | リンク抽出時にスキップする。リクエストは発生しない |
 | GET レスポンスの Content-Type が許可リスト外 | source_store に配置せずスキップする |
-| `pattern` が MSYS パス変換されている（Git Bash 環境） | エラーメッセージを返し、操作を拒否する |
 
 ## 関連ドキュメント
 

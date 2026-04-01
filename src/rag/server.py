@@ -73,6 +73,8 @@ with contextlib.redirect_stdout(io.StringIO()):
     from .store.models import NULL_COMMIT_HASH
 from .safe_browsing import (
     SafeBrowsingClient,
+    SafeBrowsingConfigError,
+    SafetyCheckError,
     create_safe_browsing_client,
 )
 
@@ -734,12 +736,17 @@ async def rag_site_ingest(
         return f"エラー: {e}"
 
     # Safe Browsing チェック（起点 URL のみ）
-    sb_client = _get_safe_browsing_client()
-    if sb_client is not None:
-        sb_result = await sb_client.check_url(url)
-        if not sb_result.is_safe:
-            threat_types = ", ".join(t.threat_type.value for t in sb_result.threats)
-            return f"エラー: 起点URLが安全でないと判定されました: {threat_types} — {url}"
+    try:
+        sb_client = _get_safe_browsing_client()
+        if sb_client is not None:
+            sb_result = await sb_client.check_url(url)
+            if not sb_result.is_safe:
+                threat_types = ", ".join(t.threat_type.value for t in sb_result.threats)
+                return f"エラー: 起点URLが安全でないと判定されました: {threat_types} — {url}"
+    except SafeBrowsingConfigError:
+        logger.warning("Safe Browsing の設定エラーのためチェックをスキップします: %s", url)
+    except SafetyCheckError as e:
+        return f"エラー: URL安全性チェックに失敗しました: {e}"
 
     # url_pattern バリデーション
     if url_pattern:

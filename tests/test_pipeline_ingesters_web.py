@@ -283,6 +283,53 @@ class TestCrawlDepthZero:
         # HTTP リクエストは起点の 1 回のみ
         assert client.get.call_count == 1
 
+    async def test_start_url_disallowed_extension(
+        self, source_store: SourceStore
+    ) -> None:
+        """起点 URL の拡張子が許可対象外ならエラーで早期終了すること."""
+        client = AsyncMock()
+
+        ingester = make_web_ingester(
+            source_store,
+            respect_robots_txt=False,
+        )
+        result = await ingester.crawl(
+            "https://example.com/file.zip",
+            depth=0,
+            client=client,
+        )
+
+        assert result.placed == 0
+        assert result.errors == 1
+        assert any("拡張子" in d for d in result.error_details)
+        # HTTP リクエストは発行されない
+        client.get.assert_not_called()
+
+    async def test_start_url_disallowed_content_type(
+        self, source_store: SourceStore
+    ) -> None:
+        """起点 URL の Content-Type が許可対象外ならエラーで早期終了すること."""
+        resp = _make_mock_response(
+            content=b"\x89PNG\r\n",
+            content_type="image/png",
+        )
+        client = AsyncMock()
+        client.get = AsyncMock(return_value=resp)
+
+        ingester = make_web_ingester(
+            source_store,
+            respect_robots_txt=False,
+        )
+        result = await ingester.crawl(
+            "https://example.com/page",
+            depth=0,
+            client=client,
+        )
+
+        assert result.placed == 0
+        assert result.errors == 1
+        assert any("Content-Type" in d for d in result.error_details)
+
 
 @pytest.mark.asyncio()
 class TestCrawlDepthZeroExtension:

@@ -247,6 +247,13 @@ class WebIngester:
                 result.error_details.append(f"Unsafe URL: {url}")
                 return result
 
+        # URL 拡張子フィルタ（起点 URL）
+        if not _is_crawlable_url(url):
+            logger.warning("起点 URL の拡張子が許可対象外です: %s", url)
+            result.errors += 1
+            result.error_details.append(f"拡張子が許可対象外: {url}")
+            return result
+
         # robots.txt チェック（起点 URL）
         if self._respect_robots_txt:
             if not await self._can_fetch(url, client):
@@ -263,6 +270,20 @@ class WebIngester:
             )
         if resp.status_code >= 400:
             raise ValueError(f"HTTP エラー: {resp.status_code} ({url})")
+
+        # Content-Type フィルタ（起点 URL）
+        resp_content_type = resp.headers.get("content-type", "")
+        if not _is_allowed_content_type(resp_content_type):
+            logger.warning(
+                "起点 URL の Content-Type が許可対象外です: %s (%s)",
+                url,
+                resp_content_type,
+            )
+            result.errors += 1
+            result.error_details.append(
+                f"Content-Type が許可対象外: {url} ({resp_content_type})"
+            )
+            return result
 
         index_data = resp.content
         index_html = _decode_html_bytes(index_data)
