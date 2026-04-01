@@ -414,6 +414,21 @@ class TestSearch:
         results = ingester.search(author="Alice", limit=3)
         assert len(results) == 3
 
+    def test_search_limit_clamp_at_max(
+        self, source_store: SourceStore
+    ) -> None:
+        """limit が MAX_SEARCH_LIMIT を超える場合にクランプされる."""
+        from rag.pipeline.ingesters.aozora import MAX_SEARCH_LIMIT
+
+        records = [
+            _make_record(book_id=f"{i:06d}", last_name="Alice")
+            for i in range(5)
+        ]
+        _write_catalog(source_store, records)
+        ingester = make_aozora_ingester(source_store)
+        results = ingester.search(author="Alice", limit=MAX_SEARCH_LIMIT + 1)
+        assert len(results) == 5  # 全5件 < MAX_SEARCH_LIMIT なので全件返る
+
     def test_search_results_sorted_by_book_id_asc(
         self, source_store: SourceStore
     ) -> None:
