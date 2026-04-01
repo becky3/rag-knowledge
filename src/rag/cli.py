@@ -86,8 +86,12 @@ def _install_stdout_guard() -> None:
 
     これにより print() や C 拡張の stdout 書き込みは全て stderr に流れ、
     _output_json のみが元の stdout に JSON を書き込む。
+    冪等: 既にインストール済みの場合は何もしない。
     """
     global _json_output_stream  # noqa: PLW0603
+
+    if _json_output_stream is not None:
+        return
 
     saved_fd = os.dup(sys.stdout.fileno())
     _json_output_stream = io.TextIOWrapper(
