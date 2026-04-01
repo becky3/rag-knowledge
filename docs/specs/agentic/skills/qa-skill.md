@@ -282,7 +282,7 @@ CLI / MCP 対応: `rag_add_youtube` / `rag_crawl_youtube`
 | # | コマンド（CLI） | 期待結果 | 検証種別 |
 |---|----------------|---------|---------|
 | 1 | `update-aozora-catalog` | カタログ CSV が source_store に配置される | `none` |
-| 2 | `search-aozora --author 太宰 --limit 100` | 結果に `001567`（走れメロス）が含まれる | `none` |
+| 2 | `search-aozora --author 太宰 --limit 300` | 結果に `001567`（走れメロス）が含まれる | `none` |
 | 3 | `ingest-aozora 001567` | 作品 1 件取り込み成功 | `ingest` |
 
 CLI / MCP 対応: `rag_update_aozora_catalog` / `rag_search_aozora` / `rag_add_aozora`
@@ -369,7 +369,7 @@ cat /tmp/upload_bg.txt
 
 #### グループ片付け
 
-1. HTTP サーバーを停止する（起動時に記録した PID を使用）: `if [ -f /tmp/qa_rag_server.pid ]; then kill "$(cat /tmp/qa_rag_server.pid)" 2>/dev/null || true; rm -f /tmp/qa_rag_server.pid; fi`
+1. HTTP サーバーを停止する（起動時に記録した PID を使用。`taskkill //T` でプロセスツリーごと停止する）: `if [ -f /tmp/qa_rag_server.pid ]; then taskkill //PID "$(cat /tmp/qa_rag_server.pid)" //T //F > /dev/null 2>&1 || true; rm -f /tmp/qa_rag_server.pid; fi`
 2. `.env` の `RAG_TRANSPORT` を起動前の値に復元する: `if [ -f /tmp/qa_original_transport.txt ]; then sed -i "s/^RAG_TRANSPORT=.*/RAG_TRANSPORT=$(cat /tmp/qa_original_transport.txt)/" .env; fi`
 3. テンポラリファイルを削除する: `rm -f /tmp/qa_api_key.txt /tmp/upload_bg.txt /tmp/qa_original_transport.txt`
 
@@ -406,9 +406,9 @@ CLI / MCP 対応: `rag_stats` / `rag_list_recent` / `rag_search` / `rag_get_docu
 
 ### ステップ 7: クリーンアップ
 
-QA 完了後、worktree 環境を片付ける。ChromaDB や MCP サーバーのプロセスがファイルをロックしているため、先にプロセスを停止する必要がある。
+QA 完了後、worktree 環境を片付ける。ChromaDB・HTTP サーバー等のプロセスがファイルをロックしているため、先にプロセスを停止する必要がある。
 
-1. バックグラウンドの ChromaDB サーバーを停止する（プロセス特定: `wmic process where "CommandLine like '%<worktree-path>%'"` または `netstat -ano | grep <port>`）
+1. worktree パスを参照する全プロセスを特定・停止する（`wmic process where "CommandLine like '%<worktree-path>%'" get ProcessId,CommandLine` で特定し、`taskkill //PID <pid> //T //F` でプロセスツリーごと停止）
 2. worktree ディレクトリを削除する: `git worktree remove <worktree-path>`
 3. worktree の参照をクリーンアップする: `git worktree prune`
 

@@ -43,7 +43,7 @@ CATALOG_REL_PATH = "aozora/catalog.csv"
 CATALOG_SOURCE_ID = "aozora:catalog"
 
 # 検索結果の最大表示件数（ハードリミット）
-MAX_SEARCH_LIMIT = 100
+MAX_SEARCH_LIMIT = 2000
 
 # CSV カラム名（list_person_all_extended_utf8.csv の主要カラム）
 COL_BOOK_ID = "作品ID"
@@ -213,10 +213,8 @@ class AozoraIngester:
                 "copyright": "フリー" if copyright_flag == "なし" else "あり",
             })
 
-            if len(results) >= limit:
-                break
-
-        return results
+        results.sort(key=lambda r: r["book_id"])
+        return results[:limit]
 
     # ------------------------------------------------------------------
     # 単一作品取り込み
