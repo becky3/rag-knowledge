@@ -15,6 +15,7 @@ from settings_defaults import TEST_SETTINGS_DEFAULTS
 from rag.bm25_index import BM25Index, BM25Result
 from rag.config import RAGSettings
 from rag.vector_store import RetrievalResult, VectorStore
+
 from rag.rag_knowledge import (
     BM25SearchItem,
     RAGKnowledgeService,
@@ -22,7 +23,6 @@ from rag.rag_knowledge import (
     RawSearchResults,
     VectorSearchItem,
 )
-from rag.web_crawler import CrawledPage, WebCrawler
 
 from factories import make_rag_knowledge_service
 
@@ -53,207 +53,13 @@ def mock_vector_store(mock_embedding_provider: MagicMock) -> MagicMock:
 
 
 @pytest.fixture
-def mock_web_crawler() -> MagicMock:
-    """モックWebCrawlerを作成する."""
-    mock = MagicMock(spec=WebCrawler)
-    mock.crawl_index_page = AsyncMock(return_value=[])
-    mock.crawl_page = AsyncMock(return_value=None)
-    mock.crawl_pages = AsyncMock(return_value=[])
-    # validate_url は入力URLをそのまま返す（検証OK）
-    mock.validate_url = MagicMock(side_effect=lambda url: url)
-    # クロール間隔（進捗フィードバック機能で使用）
-    mock._crawl_delay = 0.0  # テスト時は遅延なし
-    # create_client() が async context manager を返すようにモック
-    mock_client = MagicMock()
-    mock_client.__aenter__ = AsyncMock(return_value=mock_client)
-    mock_client.__aexit__ = AsyncMock(return_value=None)
-    mock.create_client.return_value = mock_client
-    return mock
-
-
-@pytest.fixture
 def rag_service(
     mock_vector_store: MagicMock,
-    mock_web_crawler: MagicMock,
 ) -> RAGKnowledgeService:
     """RAGKnowledgeServiceインスタンスを作成する."""
     return make_rag_knowledge_service(
         vector_store=mock_vector_store,
-        web_crawler=mock_web_crawler,
     )
-
-
-class TestIngestFromIndex:
-    """ingest_from_index() のテスト (AC16)."""
-
-    async def test_ingest_from_index(
-        self,
-        rag_service: RAGKnowledgeService,
-        mock_vector_store: MagicMock,
-        mock_web_crawler: MagicMock,
-    ) -> None:
-        """AC16: リンク集ページから記事を一括クロール→チャンキング→ベクトル保存できること."""
-        # Arrange
-        mock_web_crawler.crawl_index_page.return_value = [
-            "https://example.com/page1",
-            "https://example.com/page2",
-        ]
-        # crawl_page は URL ごとに個別に呼ばれる（順次クロール）
-        pages = [
-            CrawledPage(
-                url="https://example.com/page1",
-                title="Page 1",
-                text="This is page 1 content with enough text to be chunked.",
-                crawled_at="2024-01-01T00:00:00+00:00",
-            ),
-            CrawledPage(
-                url="https://example.com/page2",
-                title="Page 2",
-                text="This is page 2 content with enough text to be chunked.",
-                crawled_at="2024-01-01T00:00:00+00:00",
-            ),
-        ]
-        mock_web_crawler.crawl_page.side_effect = pages
-        mock_vector_store.add_documents.return_value = 1
-
-        # Act
-        result = await rag_service.ingest_from_index(
-            "https://example.com/index",
-            url_pattern=r"page\d",
-        )
-
-        # Assert
-        assert result["pages_crawled"] == 2
-        assert result["chunks_stored"] >= 2
-        assert result["errors"] == 0
-        # create_client() が呼ばれ、async context manager として使用されたこと
-        mock_web_crawler.create_client.assert_called_once()
-        mock_client = mock_web_crawler.create_client.return_value
-        # crawl_index_page に create_client() の同一インスタンスが渡されたこと
-        mock_web_crawler.crawl_index_page.assert_called_once()
-        call_args = mock_web_crawler.crawl_index_page.call_args
-        assert call_args[0] == ("https://example.com/index", r"page\d")
-        assert call_args.kwargs["client"] is mock_client
-        # crawl_page が各URLに対して同一 client で呼ばれたことを確認
-        assert mock_web_crawler.crawl_page.call_count == 2
-        for call in mock_web_crawler.crawl_page.call_args_list:
-            assert call.kwargs["client"] is mock_client
-
-    async def test_ingest_from_index_with_errors(
-        self,
-        rag_service: RAGKnowledgeService,
-        mock_vector_store: MagicMock,
-        mock_web_crawler: MagicMock,
-    ) -> None:
-        """クロール失敗したページはエラーとしてカウントされること."""
-        # Arrange
-        mock_web_crawler.crawl_index_page.return_value = [
-            "https://example.com/page1",
-            "https://example.com/page2",
-        ]
-        # crawl_page: page1は成功、page2は失敗（Noneを返す）
-        mock_web_crawler.crawl_page.side_effect = [
-            CrawledPage(
-                url="https://example.com/page1",
-                title="Page 1",
-                text="Content",
-                crawled_at="2024-01-01T00:00:00+00:00",
-            ),
-            None,  # page2 は失敗
-        ]
-
-        # Act
-        result = await rag_service.ingest_from_index("https://example.com/index")
-
-        # Assert
-        assert result["pages_crawled"] == 1
-        assert result["errors"] == 1  # 2件中1件失敗
-
-    async def test_ingest_from_index_no_urls(
-        self,
-        rag_service: RAGKnowledgeService,
-        mock_web_crawler: MagicMock,
-    ) -> None:
-        """URLが見つからない場合は空の結果を返すこと."""
-        # Arrange
-        mock_web_crawler.crawl_index_page.return_value = []
-
-        # Act
-        result = await rag_service.ingest_from_index("https://example.com/empty")
-
-        # Assert
-        assert result["pages_crawled"] == 0
-        assert result["chunks_stored"] == 0
-        assert result["errors"] == 0
-
-
-class TestIngestPage:
-    """ingest_page() のテスト (AC17)."""
-
-    async def test_ingest_page(
-        self,
-        rag_service: RAGKnowledgeService,
-        mock_vector_store: MagicMock,
-        mock_web_crawler: MagicMock,
-    ) -> None:
-        """AC17: 単一ページをクロール→チャンキング→ベクトル保存できること."""
-        # Arrange
-        mock_web_crawler.crawl_page.return_value = CrawledPage(
-            url="https://example.com/page1",
-            title="Test Page",
-            text="This is test content.",
-            crawled_at="2024-01-01T00:00:00+00:00",
-        )
-        mock_vector_store.add_documents.return_value = 1
-
-        # Act
-        result = await rag_service.ingest_page("https://example.com/page1")
-
-        # Assert
-        assert result == 1
-        mock_web_crawler.validate_url.assert_called_once_with("https://example.com/page1")
-        mock_web_crawler.crawl_page.assert_called_once_with("https://example.com/page1")
-        mock_vector_store.add_documents.assert_called_once()
-        # upsert後に古いチャンクを削除
-        mock_vector_store.delete_stale_chunks.assert_called_once()
-
-    async def test_ingest_page_crawl_failed(
-        self,
-        rag_service: RAGKnowledgeService,
-        mock_web_crawler: MagicMock,
-    ) -> None:
-        """クロール失敗時は0を返すこと."""
-        # Arrange
-        mock_web_crawler.crawl_page.return_value = None
-
-        # Act
-        result = await rag_service.ingest_page("https://example.com/fail")
-
-        # Assert
-        assert result == 0
-
-    async def test_ingest_page_upsert(
-        self,
-        rag_service: RAGKnowledgeService,
-        mock_vector_store: MagicMock,
-        mock_web_crawler: MagicMock,
-    ) -> None:
-        """同一URLの再取り込み時はupsert後に古いチャンクを削除すること."""
-        # Arrange
-        mock_web_crawler.crawl_page.return_value = CrawledPage(
-            url="https://example.com/page1",
-            title="Updated Page",
-            text="Updated content.",
-            crawled_at="2024-01-02T00:00:00+00:00",
-        )
-        mock_vector_store.delete_stale_chunks.return_value = 2  # 古い2件削除
-
-        # Act
-        await rag_service.ingest_page("https://example.com/page1")
-
-        # Assert: upsert後に古いチャンクを削除
-        mock_vector_store.add_documents.assert_called_once()
-        mock_vector_store.delete_stale_chunks.assert_called_once()
 
 
 class TestRetrieve:
@@ -418,12 +224,10 @@ class TestRAGDebugLog:
     def rag_service_log_enabled(
         self,
         mock_vector_store: MagicMock,
-        mock_web_crawler: MagicMock,
     ) -> RAGKnowledgeService:
         """デバッグログ有効なRAGKnowledgeServiceを作成する."""
         return make_rag_knowledge_service(
             vector_store=mock_vector_store,
-            web_crawler=mock_web_crawler,
             debug_log_enabled=True,
         )
 
@@ -431,12 +235,10 @@ class TestRAGDebugLog:
     def rag_service_log_disabled(
         self,
         mock_vector_store: MagicMock,
-        mock_web_crawler: MagicMock,
     ) -> RAGKnowledgeService:
         """デバッグログ無効なRAGKnowledgeServiceを作成する."""
         return make_rag_knowledge_service(
             vector_store=mock_vector_store,
-            web_crawler=mock_web_crawler,
         )
 
     async def test_retrieve_logs_query(
@@ -647,56 +449,24 @@ class TestRAGRetrievalResultSources:
 class TestFragmentNormalization:
     """URL フラグメント正規化のテスト (AC36, AC37)."""
 
-    async def test_ingest_page_normalizes_fragment_url(
-        self,
-        rag_service: RAGKnowledgeService,
-        mock_vector_store: MagicMock,
-        mock_web_crawler: MagicMock,
-    ) -> None:
-        """AC36: ingest_page() がフラグメント付きURLを正規化して処理すること."""
-        # Arrange
-        # fixtureデフォルトの side_effect（入力をそのまま返す）をリセットし、
-        # フラグメント除去後の正規化済みURLを返すようにする
-        mock_web_crawler.validate_url.side_effect = None
-        mock_web_crawler.validate_url.return_value = "https://example.com/page"
-        mock_web_crawler.crawl_page.return_value = CrawledPage(
-            url="https://example.com/page",
-            title="Test Page",
-            text="This is test content.",
-            crawled_at="2024-01-01T00:00:00+00:00",
-        )
-        mock_vector_store.add_documents.return_value = 1
-
-        # Act
-        result = await rag_service.ingest_page("https://example.com/page#section")
-
-        # Assert
-        assert result == 1
-        # validate_url にフラグメント付きURLが渡される
-        mock_web_crawler.validate_url.assert_called_once_with("https://example.com/page#section")
-        # crawl_page にはフラグメント除去済みURLが渡される
-        mock_web_crawler.crawl_page.assert_called_once_with("https://example.com/page")
-
     async def test_ingest_crawled_page_uses_normalized_url_for_hash(
         self,
         rag_service: RAGKnowledgeService,
         mock_vector_store: MagicMock,
-        mock_web_crawler: MagicMock,
     ) -> None:
         """AC37: _ingest_crawled_page() がフラグメント除去済みURLでハッシュ計算すること."""
         import hashlib
 
-        # Arrange: フラグメント付きURLのCrawledPage
+        # Arrange: フラグメント付きURL
         mock_vector_store.add_documents.return_value = 1
-        page = CrawledPage(
+
+        # Act
+        await rag_service._ingest_crawled_page(
             url="https://example.com/page#fragment",
             title="Test Page",
             text="Test content.",
             crawled_at="2024-01-01T00:00:00+00:00",
         )
-
-        # Act
-        await rag_service._ingest_crawled_page(page)
 
         # Assert: add_documents に渡されたチャンクのIDとメタデータを検証
         call_args = mock_vector_store.add_documents.call_args[0][0]
@@ -758,13 +528,11 @@ class TestSimilarityThreshold:
     async def test_retrieve_passes_threshold_to_search(
         self,
         mock_vector_store: MagicMock,
-        mock_web_crawler: MagicMock,
     ) -> None:
         """retrieve() がコンストラクタで受け取った閾値を search() に渡すこと."""
         # Arrange
         service = make_rag_knowledge_service(
             vector_store=mock_vector_store,
-            web_crawler=mock_web_crawler,
             similarity_threshold=0.5,
         )
         mock_vector_store.search.return_value = []
@@ -797,217 +565,6 @@ class TestSimilarityThreshold:
             n_results=5,
             similarity_threshold=None,
         )
-
-
-class TestSafeBrowsingIntegration:
-    """Safe Browsing統合テスト (Issue #159)."""
-
-    @pytest.fixture
-    def mock_safe_browsing_client(self) -> MagicMock:
-        """モックSafeBrowsingClientを作成する."""
-        from rag.safe_browsing import SafeBrowsingResult
-
-        mock = MagicMock()
-        # デフォルトは安全なURL
-        mock.check_url = AsyncMock(
-            return_value=SafeBrowsingResult(url="https://safe.com", is_safe=True)
-        )
-        mock.check_urls = AsyncMock(return_value={})
-        return mock
-
-    @pytest.fixture
-    def rag_service_with_safe_browsing(
-        self,
-        mock_vector_store: MagicMock,
-        mock_web_crawler: MagicMock,
-        mock_safe_browsing_client: MagicMock,
-    ) -> RAGKnowledgeService:
-        """Safe Browsing有効なRAGKnowledgeServiceを作成する."""
-        return make_rag_knowledge_service(
-            vector_store=mock_vector_store,
-            web_crawler=mock_web_crawler,
-            safe_browsing_client=mock_safe_browsing_client,
-        )
-
-    async def test_ingest_page_safe_url_allowed(
-        self,
-        rag_service_with_safe_browsing: RAGKnowledgeService,
-        mock_web_crawler: MagicMock,
-        mock_safe_browsing_client: MagicMock,
-        mock_vector_store: MagicMock,
-    ) -> None:
-        """安全なURLは取り込みが許可されること."""
-        from rag.safe_browsing import SafeBrowsingResult
-
-        # Arrange
-        mock_safe_browsing_client.check_url.return_value = SafeBrowsingResult(
-            url="https://safe.com", is_safe=True
-        )
-        mock_web_crawler.crawl_page.return_value = CrawledPage(
-            url="https://safe.com",
-            title="Safe Page",
-            text="Safe content",
-            crawled_at="2024-01-01T00:00:00+00:00",
-        )
-        mock_vector_store.add_documents.return_value = 1
-
-        # Act
-        result = await rag_service_with_safe_browsing.ingest_page("https://safe.com")
-
-        # Assert
-        mock_safe_browsing_client.check_url.assert_called_once_with("https://safe.com")
-        mock_web_crawler.crawl_page.assert_called_once()
-        assert result == 1
-
-    async def test_ingest_page_unsafe_url_rejected(
-        self,
-        rag_service_with_safe_browsing: RAGKnowledgeService,
-        mock_web_crawler: MagicMock,
-        mock_safe_browsing_client: MagicMock,
-    ) -> None:
-        """AC9: rag add で危険なURL指定時、適切なエラーメッセージが返ること."""
-        from rag.safe_browsing import SafeBrowsingResult, ThreatMatch, ThreatType
-
-        # Arrange
-        mock_safe_browsing_client.check_url.return_value = SafeBrowsingResult(
-            url="https://malware.com",
-            is_safe=False,
-            threats=[
-                ThreatMatch(
-                    threat_type=ThreatType.MALWARE,
-                    platform_type="ANY_PLATFORM",
-                    threat_url="https://malware.com",
-                )
-            ],
-        )
-
-        # Act & Assert
-        with pytest.raises(ValueError, match="URLが安全ではありません") as exc_info:
-            await rag_service_with_safe_browsing.ingest_page("https://malware.com")
-
-        # エラーメッセージに脅威タイプが含まれること
-        assert "MALWARE" in str(exc_info.value)
-        assert "https://malware.com" in str(exc_info.value)
-
-        # クロールは実行されない
-        mock_web_crawler.crawl_page.assert_not_called()
-
-    async def test_ingest_from_index_filters_unsafe_urls(
-        self,
-        rag_service_with_safe_browsing: RAGKnowledgeService,
-        mock_web_crawler: MagicMock,
-        mock_safe_browsing_client: MagicMock,
-    ) -> None:
-        """AC10: rag crawl のリンク集内に危険URLがあった場合、そのURLのみスキップされること."""
-        from rag.safe_browsing import SafeBrowsingResult, ThreatMatch, ThreatType
-
-        # Arrange
-        urls = [
-            "https://safe1.com",
-            "https://malware.com",
-            "https://safe2.com",
-        ]
-        mock_web_crawler.crawl_index_page.return_value = urls
-
-        mock_safe_browsing_client.check_urls.return_value = {
-            "https://safe1.com": SafeBrowsingResult(url="https://safe1.com", is_safe=True),
-            "https://malware.com": SafeBrowsingResult(
-                url="https://malware.com",
-                is_safe=False,
-                threats=[
-                    ThreatMatch(
-                        threat_type=ThreatType.MALWARE,
-                        platform_type="ANY_PLATFORM",
-                        threat_url="https://malware.com",
-                    )
-                ],
-            ),
-            "https://safe2.com": SafeBrowsingResult(url="https://safe2.com", is_safe=True),
-        }
-
-        # crawl_page は各安全なURLに対して個別に呼ばれる
-        mock_web_crawler.crawl_page.side_effect = [
-            CrawledPage(
-                url="https://safe1.com",
-                title="Safe 1",
-                text="Content 1",
-                crawled_at="2024-01-01T00:00:00+00:00",
-            ),
-            CrawledPage(
-                url="https://safe2.com",
-                title="Safe 2",
-                text="Content 2",
-                crawled_at="2024-01-01T00:00:00+00:00",
-            ),
-        ]
-
-        # Act
-        result = await rag_service_with_safe_browsing.ingest_from_index(
-            "https://example.com/index"
-        )
-
-        # Assert
-        assert result["unsafe_urls"] == 1
-        assert result["pages_crawled"] == 2  # 安全な2ページのみクロール
-        # safe URLs のみがクロールされる（crawl_page が2回呼ばれる）
-        assert mock_web_crawler.crawl_page.call_count == 2
-
-    async def test_ingest_from_index_all_unsafe_skips_crawl(
-        self,
-        rag_service_with_safe_browsing: RAGKnowledgeService,
-        mock_web_crawler: MagicMock,
-        mock_safe_browsing_client: MagicMock,
-    ) -> None:
-        """AC10: 全URLが危険な場合、クロールがスキップされること."""
-        from rag.safe_browsing import SafeBrowsingResult, ThreatMatch, ThreatType
-
-        # Arrange
-        urls = ["https://phishing.com"]
-        mock_web_crawler.crawl_index_page.return_value = urls
-        mock_safe_browsing_client.check_urls.return_value = {
-            "https://phishing.com": SafeBrowsingResult(
-                url="https://phishing.com",
-                is_safe=False,
-                threats=[
-                    ThreatMatch(
-                        threat_type=ThreatType.SOCIAL_ENGINEERING,
-                        platform_type="ANY_PLATFORM",
-                        threat_url="https://phishing.com",
-                    )
-                ],
-            ),
-        }
-
-        # Act
-        result = await rag_service_with_safe_browsing.ingest_from_index(
-            "https://example.com/index"
-        )
-
-        # Assert
-        assert result["pages_crawled"] == 0
-        assert result["unsafe_urls"] == 1
-        mock_web_crawler.crawl_pages.assert_not_called()
-
-    async def test_no_safe_browsing_client_skips_check(
-        self,
-        rag_service: RAGKnowledgeService,
-        mock_web_crawler: MagicMock,
-        mock_vector_store: MagicMock,
-    ) -> None:
-        """Safe Browsingクライアントがない場合、チェックがスキップされること."""
-        # Arrange
-        mock_web_crawler.crawl_page.return_value = CrawledPage(
-            url="https://example.com",
-            title="Test",
-            text="Content",
-            crawled_at="2024-01-01T00:00:00+00:00",
-        )
-
-        # Act
-        await rag_service.ingest_page("https://example.com")
-
-        # Assert: チェックなしで正常に処理される
-        mock_web_crawler.crawl_page.assert_called_once()
 
 
 class TestGetFullPageText:
@@ -1074,7 +631,6 @@ class TestRetrieveRawResults:
     async def test_vector_and_bm25_raw_results_returned(
         self,
         mock_vector_store: MagicMock,
-        mock_web_crawler: MagicMock,
     ) -> None:
         """AC1: ベクトル検索とBM25の生結果が個別に返ること."""
         # Arrange
@@ -1094,7 +650,6 @@ class TestRetrieveRawResults:
 
         service = make_rag_knowledge_service(
             vector_store=mock_vector_store,
-            web_crawler=mock_web_crawler,
             bm25_index=mock_bm25,
         )
 
@@ -1123,7 +678,6 @@ class TestRetrieveRawResults:
     async def test_bm25_none_returns_vector_only(
         self,
         mock_vector_store: MagicMock,
-        mock_web_crawler: MagicMock,
     ) -> None:
         """BM25なしの場合はベクトル検索結果のみ返ること."""
         # Arrange
@@ -1137,7 +691,6 @@ class TestRetrieveRawResults:
 
         service = make_rag_knowledge_service(
             vector_store=mock_vector_store,
-            web_crawler=mock_web_crawler,
         )
 
         # Act
@@ -1150,7 +703,6 @@ class TestRetrieveRawResults:
     async def test_both_empty_returns_empty_raw_results(
         self,
         mock_vector_store: MagicMock,
-        mock_web_crawler: MagicMock,
     ) -> None:
         """両方空なら空の RawSearchResults."""
         # Arrange
@@ -1160,7 +712,6 @@ class TestRetrieveRawResults:
 
         service = make_rag_knowledge_service(
             vector_store=mock_vector_store,
-            web_crawler=mock_web_crawler,
             bm25_index=mock_bm25,
         )
 
@@ -1174,7 +725,6 @@ class TestRetrieveRawResults:
     async def test_raw_scores_preserved(
         self,
         mock_vector_store: MagicMock,
-        mock_web_crawler: MagicMock,
     ) -> None:
         """生スコアが変換されず保持されること."""
         # Arrange
@@ -1200,7 +750,6 @@ class TestRetrieveRawResults:
 
         service = make_rag_knowledge_service(
             vector_store=mock_vector_store,
-            web_crawler=mock_web_crawler,
             bm25_index=mock_bm25,
         )
 
@@ -1216,7 +765,6 @@ class TestRetrieveRawResults:
     async def test_similarity_threshold_not_applied(
         self,
         mock_vector_store: MagicMock,
-        mock_web_crawler: MagicMock,
     ) -> None:
         """retrieve_raw_results は similarity_threshold=None で呼ぶこと."""
         # Arrange
@@ -1224,7 +772,6 @@ class TestRetrieveRawResults:
 
         service = make_rag_knowledge_service(
             vector_store=mock_vector_store,
-            web_crawler=mock_web_crawler,
             similarity_threshold=0.5,  # サービスには閾値を設定
         )
 
@@ -1242,7 +789,6 @@ class TestRetrieveRawResults:
     async def test_source_type_filter_passed_to_stores(
         self,
         mock_vector_store: MagicMock,
-        mock_web_crawler: MagicMock,
     ) -> None:
         """source_type 指定時にベクトルストアと BM25 に正しく伝播すること."""
         mock_vector_store.search.return_value = []
@@ -1251,7 +797,6 @@ class TestRetrieveRawResults:
 
         service = make_rag_knowledge_service(
             vector_store=mock_vector_store,
-            web_crawler=mock_web_crawler,
             similarity_threshold=0.5,
             bm25_index=mock_bm25,
         )

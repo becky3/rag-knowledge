@@ -37,7 +37,6 @@
 | `src/rag/config.py` | pydantic-settings による環境変数・設定管理 |
 | `src/rag/rag_knowledge.py` | ナレッジサービス（取り込み・検索・削除のオーケストレーション） |
 | `src/rag/markdown.py` | RAG 用 Markdown コンバーター（リンク・画像 URL 除去） |
-| `src/rag/web_crawler.py` | Web クローラー（ページ取得・本文抽出・SSRF 対策・robots.txt 遵守） |
 | `src/rag/vector_store.py` | ベクトルストア（ChromaDB による Embedding 格納・検索） |
 | `src/rag/bm25_index.py` | BM25 インデックス（日本語形態素解析・ディスク永続化） |
 | `src/rag/hybrid_search.py` | ハイブリッド検索エンジン（ベクトル + BM25 スコア統合） |

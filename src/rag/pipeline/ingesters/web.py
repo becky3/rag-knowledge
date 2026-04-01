@@ -75,12 +75,6 @@ def _decode_html_bytes(data: bytes) -> str:
         return data.decode("utf-8", errors="replace")
 
 
-def _extract_title(data: bytes) -> str:
-    """HTML バイト列からタイトルを抽出する."""
-    html_text = _decode_html_bytes(data)
-    return _extract_title_from_text(html_text)
-
-
 def _extract_title_from_text(html_text: str) -> str:
     """デコード済み HTML テキストからタイトルを抽出する."""
     soup = BeautifulSoup(html_text, "html.parser")
@@ -150,14 +144,6 @@ def _is_allowed_content_type(content_type: str) -> bool:
     return mime in _CRAWL_ALLOWED_CONTENT_TYPES
 
 
-def _looks_like_msys_path(pattern: str) -> bool:
-    """pattern が MSYS パス変換されたように見えるか判定する.
-
-    Git Bash 環境では /foo が C:/Program Files/Git/foo 等に変換される。
-    """
-    return len(pattern) >= 3 and pattern[0].isalpha() and pattern[1:3] in (":/", ":\\")
-
-
 def _needs_html_extension(url: str) -> bool:
     """URL パスが既知の拡張子を持たない場合に True を返す.
 
@@ -201,86 +187,6 @@ class WebIngester:
         # robots.txt キャッシュ: key = scheme://hostname:port
         self._robots_cache: dict[str, tuple[RobotFileParser | None, float]] = {}
 
-    async def add(
-        self,
-        url: str,
-        *,
-        client: Any | None = None,
-    ) -> IngestResult:
-        """単一ページを取得して source_store に配置する.
-
-        Args:
-            url: 取り込み対象ページの URL
-            client: ConstrainedClient インスタンス
-
-        Returns:
-            配置結果
-        """
-        result = IngestResult()
-
-        url = validate_url(url)
-        check_ssrf(url)
-
-        if client is None:
-            raise ValueError("client (ConstrainedClient) が必要です")
-
-        # Safe Browsing チェック
-        if self._safe_browsing_client is not None:
-            sb_results = await self._safe_browsing_client.check_urls([url])
-            sb_result = sb_results.get(url)
-            if sb_result is not None and not sb_result.is_safe:
-                logger.warning("Safe Browsing で危険と判定された URL: %s", url)
-                result.errors += 1
-                result.error_details.append(f"Unsafe URL: {url}")
-                return result
-
-        # robots.txt チェック
-        if self._respect_robots_txt:
-            if not await self._can_fetch(url, client):
-                logger.info("robots.txt により拒否されました: %s", url)
-                result.skipped += 1
-                return result
-
-        # ページ取得（リダイレクトブロック）
-        resp = await client.get(
-            url,
-            follow_redirects=False,
-        )
-        if 300 <= resp.status_code < 400:
-            raise ValueError(
-                f"リダイレクトは SSRF 防止のため拒否されています: "
-                f"{resp.status_code} ({url})"
-            )
-        if resp.status_code >= 400:
-            raise ValueError(
-                f"HTTP エラー: {resp.status_code} ({url})"
-            )
-
-        data = resp.content
-
-        # タイトル抽出
-        title = _extract_title(data)
-
-        # source_store に配置
-        metadata = {
-            "source_id": url,
-            "source_type": "web",
-            "title": title,
-            "collected_at": now_iso(),
-            "url": url,
-        }
-
-        ext = ".html" if _needs_html_extension(url) else ""
-        self._store.place_file_from_url(
-            url=url,
-            data=data,
-            metadata=metadata,
-            extension=ext,
-        )
-        result.placed += 1
-
-        return result
-
     async def crawl(
         self,
         url: str,
@@ -289,15 +195,16 @@ class WebIngester:
         depth: int = 1,
         client: Any | None = None,
     ) -> IngestResult:
-        """リンク集ページから一括クロールして source_store に配置する.
+        """URL を起点にクロールして source_store に配置する.
 
-        再帰クロール対応: depth > 1 の場合、取得した各ページの HTML から
-        リンクを再抽出し、次の depth の対象とする。
+        起点 URL のページを必ず配置する。depth >= 1 の場合は起点ページの
+        リンクを抽出し、リンク先ページも配置する。depth > 1 の場合は
+        取得した各ページの HTML からリンクを再抽出し、次の depth の対象とする。
 
         Args:
-            url: リンク集ページの URL
+            url: 起点ページの URL
             pattern: リンクをフィルタする正規表現パターン
-            depth: クロール深度（1〜10。デフォルト: 1 = 従来動作）
+            depth: クロール深度（0〜10。デフォルト: 1。0 = 起点 URL のみ）
             client: ConstrainedClient インスタンス
 
         Returns:
@@ -318,7 +225,7 @@ class WebIngester:
                 depth,
                 MAX_CRAWL_DEPTH_HARD_LIMIT,
             )
-        depth = max(1, min(depth, MAX_CRAWL_DEPTH_HARD_LIMIT))
+        depth = max(0, min(depth, MAX_CRAWL_DEPTH_HARD_LIMIT))
 
         # パターンコンパイル（1回のみ）
         regex: re.Pattern[str] | None = None
@@ -340,7 +247,14 @@ class WebIngester:
                 result.error_details.append(f"Unsafe URL: {url}")
                 return result
 
-        # インデックスページ取得
+        # robots.txt チェック（起点 URL）
+        if self._respect_robots_txt:
+            if not await self._can_fetch(url, client):
+                logger.info("robots.txt により拒否されました: %s", url)
+                result.skipped += 1
+                return result
+
+        # 起点ページ取得
         resp = await client.get(url, follow_redirects=False)
         if 300 <= resp.status_code < 400:
             raise ValueError(
@@ -350,7 +264,30 @@ class WebIngester:
         if resp.status_code >= 400:
             raise ValueError(f"HTTP エラー: {resp.status_code} ({url})")
 
-        index_html = _decode_html_bytes(resp.content)
+        index_data = resp.content
+        index_html = _decode_html_bytes(index_data)
+
+        # 起点ページを source_store に配置
+        index_title = _extract_title_from_text(index_html)
+        index_metadata = {
+            "source_id": url,
+            "source_type": "web",
+            "title": index_title,
+            "collected_at": now_iso(),
+            "url": url,
+        }
+        ext = ".html" if _needs_html_extension(url) else ""
+        self._store.place_file_from_url(
+            url=url,
+            data=index_data,
+            metadata=index_metadata,
+            extension=ext,
+        )
+        result.placed += 1
+
+        # depth=0: 起点 URL のみ配置、リンク抽出なし
+        if depth == 0:
+            return result
 
         # 全 depth で共有する状態
         visited: set[str] = {url}
@@ -498,171 +435,6 @@ class WebIngester:
             pending_links = next_depth_links
 
         return result
-
-    async def crawl_preview(
-        self,
-        url: str,
-        *,
-        pattern: str = "",
-        depth: int = 1,
-        client: Any | None = None,
-    ) -> list[dict[str, str]]:
-        """クロール対象ページのタイトル・URL 一覧を返す.
-
-        source_store への配置は行わない。
-        再帰クロール対応: depth > 1 の場合、各ページからリンクを
-        再抽出して次の depth の候補とする。
-
-        Args:
-            url: リンク集ページの URL
-            pattern: リンクをフィルタする正規表現パターン
-            depth: クロール深度（1〜10。デフォルト: 1）
-            client: ConstrainedClient インスタンス
-
-        Returns:
-            タイトルと URL の辞書リスト
-        """
-        try:
-            url = validate_url(url)
-        except ValueError:
-            return []
-
-        check_ssrf(url)
-
-        if client is None:
-            raise ValueError("client (ConstrainedClient) が必要です")
-
-        # depth をハードリミットにクランプ
-        if depth > MAX_CRAWL_DEPTH_HARD_LIMIT:
-            logger.warning(
-                "depth %d はハードリミット %d を超えています。クランプします",
-                depth,
-                MAX_CRAWL_DEPTH_HARD_LIMIT,
-            )
-        depth = max(1, min(depth, MAX_CRAWL_DEPTH_HARD_LIMIT))
-
-        # パターンコンパイル（1回のみ）
-        regex: re.Pattern[str] | None = None
-        if pattern:
-            try:
-                regex = re.compile(pattern)
-            except re.error:
-                logger.warning("無効な正規表現パターン: %s", pattern)
-                return []
-
-        # インデックスページ取得
-        resp = await client.get(url, follow_redirects=False)
-        if 300 <= resp.status_code < 400:
-            raise ValueError(
-                f"リダイレクトは SSRF 防止のため拒否されています: "
-                f"{resp.status_code} ({url})"
-            )
-        if resp.status_code >= 400:
-            raise ValueError(f"HTTP エラー: {resp.status_code} ({url})")
-
-        index_html = _decode_html_bytes(resp.content)
-
-        # 全 depth で共有する状態
-        visited: set[str] = {url}
-        remaining_pages = self._max_crawl_pages
-        error_count = 0
-        pending_links = _extract_links(index_html, url)
-        previews: list[dict[str, str]] = []
-
-        for current_depth in range(1, depth + 1):
-            if remaining_pages <= 0 or not pending_links:
-                break
-            if error_count >= self._crawl_max_errors:
-                logger.warning(
-                    "累計エラー数が閾値 %d に到達。操作を中断します",
-                    self._crawl_max_errors,
-                )
-                break
-
-            # パターンフィルタ
-            if regex:
-                pending_links = [
-                    link for link in pending_links if regex.search(link)
-                ]
-
-            # 訪問済み除外 + 登録
-            new_links: list[str] = []
-            for link in pending_links:
-                if link not in visited:
-                    visited.add(link)
-                    new_links.append(link)
-            pending_links = new_links
-
-            # robots.txt フィルタ
-            if self._respect_robots_txt:
-                filtered: list[str] = []
-                for link in pending_links:
-                    if await self._can_fetch(link, client):
-                        filtered.append(link)
-                pending_links = filtered
-
-            # 残ページ数上限チェック
-            if len(pending_links) > remaining_pages:
-                pending_links = pending_links[:remaining_pages]
-
-            # 各ページのタイトル取得 + 次 depth 用リンク収集
-            next_depth_links: list[str] = []
-
-            for link in pending_links:
-                if error_count >= self._crawl_max_errors:
-                    logger.warning(
-                        "累計エラー数が閾値 %d に到達。操作を中断します",
-                        self._crawl_max_errors,
-                    )
-                    break
-
-                title = ""
-                try:
-                    check_ssrf(link)
-
-                    page_resp = await client.get(
-                        link, follow_redirects=False
-                    )
-                    if 300 <= page_resp.status_code < 400:
-                        # リダイレクト: スキップ扱い（crawl と統一）
-                        continue
-                    if page_resp.status_code == 404:
-                        # リンク切れ: スキップ（エラーカウント対象外）
-                        continue
-                    if page_resp.status_code >= 400:
-                        # 403/429/5xx: エラーカウント
-                        error_count += 1
-                        continue
-
-                    # Content-Type フィルタ
-                    resp_ct = page_resp.headers.get("content-type", "")
-                    if not _is_allowed_content_type(resp_ct):
-                        logger.info(
-                            "Content-Type が許可対象外のためスキップ: %s (%s)",
-                            link,
-                            resp_ct,
-                        )
-                        continue
-
-                    page_data = page_resp.content
-                    # 1回だけデコードしてタイトル・リンク抽出に共有
-                    page_html = _decode_html_bytes(page_data)
-                    title = _extract_title_from_text(page_html)
-
-                    # 次 depth 用: デコード済み HTML からリンクを抽出
-                    if current_depth < depth:
-                        page_links = _extract_links(page_html, link)
-                        next_depth_links.extend(page_links)
-                except Exception:
-                    logger.debug("ページ取得に失敗: %s", link)
-                    error_count += 1
-
-                previews.append({"title": title, "url": link})
-                remaining_pages -= 1
-
-            pending_links = next_depth_links
-
-        return previews
 
     # --- robots.txt ---
 

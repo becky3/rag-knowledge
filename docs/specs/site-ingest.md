@@ -13,7 +13,7 @@ MCP ツール `rag_site_ingest` と CLI コマンド `site-ingest` の 2 つの�
 - JSONL メタデータ + HTML ファイルの一時保存
 - ブリッジ層による一時保存データから source_store への変換・配置
 - JOBDIR による中断再開
-- 既存 `rag_crawl` の非推奨化
+- MCP ツール `rag_site_ingest` と CLI コマンド `site-ingest` の提供
 
 スコープ外:
 
@@ -23,7 +23,6 @@ MCP ツール `rag_site_ingest` と CLI コマンド `site-ingest` の 2 つの�
 
 ## 背景
 
-- 既存の `rag_crawl` は ConstrainedClient 経由の httpx ベースであり、ハードリミット 500 ページ・操作全体タイムアウト 600 秒の制約がある。数千ページ規模のサイト取り込みには適さない
 - Scrapy をライブラリとして組み込む方式は、Twisted の `ReactorNotRestartable` 問題（reactor はプロセスごとに 1 回しか起動できない）により、MCP サーバー（長時間稼働 asyncio プロセス）での複数回クロールが不可能。subprocess 方式で根本回避する
 - #308 の検証で、Scrapy subprocess 方式が Unity Manual 3,503 ページ / 16 分 / データ品質 12/12 完全一致の実績を確認済み
 
@@ -60,7 +59,7 @@ MCP ツール `rag_site_ingest` と CLI コマンド `site-ingest` の 2 つの�
 
 ### ページ数上限
 
-- `site_ingest_max_pages`（config.toml）でクロール対象ページ数を制限する（デフォルト: 10,000）
+- `site_ingest_max_pages`（config.toml）でクロール対象ページ数を制限する（デフォルト: 500）
 - Spider 内で 200 OK レスポンスのみをカウントし、上限に達したら `close_spider` で自前クローズする
 - 404 等の非 200 レスポンスはカウントに含めない（Scrapy の `CLOSESPIDER_PAGECOUNT` は全レスポンスをカウントするため使用しない）
 
@@ -111,7 +110,7 @@ MCP ツール `rag_site_ingest` と CLI コマンド `site-ingest` の 2 つの�
 | SSRF チェック（per-request） | ハードリミット | Downloader Middleware で各リクエストの DNS 解決結果を検証。プライベート IP を拒否 | 無効化不可 |
 | ドメイン制約 | ハードリミット | `allowed_domains` で初回 URL と同一ドメインに制限 | 無効化不可 |
 | robots.txt 遵守 | ハードリミット | `ROBOTSTXT_OBEY = True`（固定） | 無効化不可 |
-| ページ数上限 | 設定値 | 許容範囲 1〜50,000、デフォルト 10,000 | 範囲内で変更可 |
+| ページ数上限 | 設定値 | 許容範囲 1〜1,000、デフォルト 500 | 範囲内で変更可 |
 | リクエスト間隔 | 設定値 | 許容範囲 0.05〜60 秒、デフォルト 0.1 秒 | 範囲内で変更可 |
 | ダウンロードタイムアウト | 設定値 | 許容範囲 1〜300 秒、デフォルト 30 秒 | 範囲内で変更可 |
 | 操作全体タイムアウト | 設定値 | 許容範囲 60〜86,400 秒、デフォルト 7,200 | 範囲内で変更可 |
@@ -164,12 +163,6 @@ MCP ツール `rag_site_ingest` と CLI コマンド `site-ingest` の 2 つの�
 | source_store 配置結果 | 配置ファイル数、上書き数、スキップ数（重複等）、エラー数 |
 | パイプライン処理結果 | コンバート・インデックス構築の処理件数 |
 
-### 既存 `rag_crawl` との関係
-
-- `rag_crawl`、`rag_crawl_preview`、`rag_add` は非推奨として残す（動作は維持）
-- MCP ツールの description に非推奨メッセージと `rag_site_ingest` への誘導を追加する
-- 将来的に `rag_crawl` は廃止予定
-
 ## コンポーネント構成
 
 ### 全体フロー
@@ -221,7 +214,7 @@ flowchart TD
 | `allowed_domains` | ドメイン制約（初回 URL から自動導出） |
 | `url_pattern` | URL フィルタ（正規表現、任意） |
 | `output_dir` | HTML ファイルの保存先ディレクトリ |
-| `max_pages` | ページ数上限（200 OK カウント）。外部インターフェースでは許容範囲 1〜50,000 でクランプされる。Spider 内部では 0 を無制限として扱うが、CLI/MCP からは入力されない |
+| `max_pages` | ページ数上限（200 OK カウント）。外部インターフェースでは許容範囲 1〜1,000 でクランプされる。Spider 内部では 0 を無制限として扱うが、CLI/MCP からは入力されない |
 
 Spider の振る舞い:
 
@@ -413,7 +406,7 @@ sequenceDiagram
 | 設定項目 | 型 | デフォルト | 許容範囲 | 説明 |
 |---------|-----|-----------|---------|------|
 | `site_ingest_delay_sec` | float | `0.1` | 0.05〜60 | リクエスト間隔（秒） |
-| `site_ingest_max_pages` | int | `10000` | 1〜50,000 | ページ数上限 |
+| `site_ingest_max_pages` | int | `500` | 1〜1,000 | ページ数上限 |
 | `site_ingest_download_timeout` | int | `30` | 1〜300 | 1 リクエストのタイムアウト（秒） |
 | `site_ingest_timeout_sec` | float | `7200` | 60〜86,400 | 操作全体タイムアウト（秒） |
 | `site_ingest_error_count` | int | `10` | 1〜1,000 | エラー停止閾値 |
@@ -447,9 +440,9 @@ Scrapy は独立した Python パッケージとして `pyproject.toml` に依�
 
 ## 関連ドキュメント
 
-- [rag-knowledge.md](rag-knowledge.md) — RAG ナレッジ全体仕様（既存 `rag_crawl` の定義元）
+- [rag-knowledge.md](rag-knowledge.md) — RAG ナレッジ全体仕様
 - [source-store.md](source-store.md) — source_store 仕様
 - [pipeline-controller.md](pipeline-controller.md) — パイプライン制御仕様
 - [converter.md](converter.md) — コンバーター仕様
 - [ingesters/common.md](ingesters/common.md) — インジェスター共通仕様
-- [ingesters/web.md](ingesters/web.md) — Web インジェスター仕様（既存 `rag_crawl` の実装元）
+- [ingesters/web.md](ingesters/web.md) — Web インジェスター仕様

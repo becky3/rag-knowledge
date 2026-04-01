@@ -100,44 +100,15 @@ def make_vector_store_http(embedding_provider: Any, **overrides: Any) -> Any:
     )
 
 
-def make_web_crawler(**overrides: Any) -> Any:
-    """WebCrawler のテスト用ファクトリ."""
-    from rag.web_crawler import WebCrawler
-
-    defaults: dict[str, Any] = {
-        "timeout": 30.0,
-        "max_pages": 50,
-        "crawl_delay": 0.1,
-        "max_concurrent": 5,
-        "respect_robots_txt": False,
-        "robots_txt_cache_ttl": 3600,
-    }
-    defaults.update(overrides)
-    return WebCrawler(**defaults)
-
-
-def make_robots_checker(**overrides: Any) -> Any:
-    """RobotsChecker のテスト用ファクトリ."""
-    from rag.web_crawler import RobotsChecker
-
-    defaults: dict[str, Any] = {
-        "cache_ttl": 3600,
-    }
-    defaults.update(overrides)
-    return RobotsChecker(**defaults)
-
-
 def make_rag_knowledge_service(**overrides: Any) -> Any:
     """RAGKnowledgeService のテスト用ファクトリ."""
     from rag.rag_knowledge import RAGKnowledgeService
 
     defaults: dict[str, Any] = {
         "vector_store": overrides.pop("vector_store", MagicMock()),
-        "web_crawler": overrides.pop("web_crawler", MagicMock()),
         "chunk_size": 200,
         "chunk_overlap": 30,
         "similarity_threshold": None,
-        "safe_browsing_client": None,
         "bm25_index": None,
         "hybrid_search_enabled": False,
         "vector_weight": 1.0,

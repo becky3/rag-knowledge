@@ -41,7 +41,6 @@ from rag.embedding.factory import get_embedding_provider
 from rag.evaluation import evaluate_retrieval
 from rag.vector_store import VectorStore
 from rag.rag_knowledge import RAGKnowledgeService
-from rag.web_crawler import CrawledPage, WebCrawler
 
 OUTPUT_DIR = Path(".tmp/prefix-comparison")
 DEFAULT_DATASET = "tests/fixtures/rag_evaluation_dataset.json"
@@ -67,25 +66,23 @@ class ComparisonResult:
     avg_mrr: float
 
 
-def _load_fixture_pages(fixture_path: str) -> list[CrawledPage]:
-    """フィクスチャからCrawledPageリストを生成する."""
+def _load_fixture_pages(fixture_path: str) -> list[dict[str, str]]:
+    """フィクスチャからページデータのリストを生成する."""
     with open(fixture_path, encoding="utf-8") as f:
         fixture_data = json.load(f)
 
-    pages: list[CrawledPage] = []
+    pages: list[dict[str, str]] = []
     for doc in fixture_data.get("documents", []):
         source_url = doc.get("source_url", "")
         content = doc.get("content", "")
         if not source_url or not content:
             continue
-        pages.append(
-            CrawledPage(
-                url=source_url,
-                title=doc.get("title", ""),
-                text=content,
-                crawled_at="2026-01-01T00:00:00Z",
-            )
-        )
+        pages.append({
+            "url": source_url,
+            "title": doc.get("title", ""),
+            "text": content,
+            "crawled_at": "2026-01-01T00:00:00Z",
+        })
     return pages
 
 
@@ -125,7 +122,6 @@ async def build_and_evaluate(
 
         rag_service = RAGKnowledgeService(
             vector_store=vector_store,
-            web_crawler=WebCrawler(),
             chunk_size=settings.rag_chunk_size,
             chunk_overlap=settings.rag_chunk_overlap,
             similarity_threshold=settings.rag_similarity_threshold,
@@ -136,7 +132,7 @@ async def build_and_evaluate(
 
         # 本番と同じ _ingest_crawled_page 経由でデータ投入
         for page in pages:
-            await rag_service._ingest_crawled_page(page)
+            await rag_service._ingest_crawled_page(**page)
 
         # 評価実行
         logger.info("[%s] Evaluating...", label)

@@ -2,16 +2,17 @@
 
 仕様: docs/specs/rag-knowledge.md, docs/specs/search-response.md, docs/specs/rebuild-stats.md,
       docs/specs/site-ingest.md
-16個のRAGツール（rag_search, rag_get_document, rag_add, rag_crawl, rag_crawl_preview,
+18個のRAGツール（rag_search, rag_get_document,
 rag_crawl_zenn, rag_crawl_bluesky, rag_add_youtube, rag_crawl_youtube,
 rag_add_document, rag_crawl_documents, rag_add_journal,
-rag_site_ingest, rag_delete, rag_rebuild, rag_stats）が
+rag_site_ingest, rag_delete, rag_rebuild, rag_stats,
+rag_update_aozora_catalog, rag_search_aozora, rag_add_aozora, rag_crawl_aozora,
+rag_list_recent）が
 MCPサーバーとして公開されていることを検証する。
 """
 
 from __future__ import annotations
 
-import contextlib
 from importlib import import_module
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -22,7 +23,7 @@ from rag.rag_knowledge import (
     RawSearchResults,
     VectorSearchItem,
 )
-from rag.server import _configure_and_run, _reset_pipeline_controller, _reset_rag_service
+from rag.server import _configure_and_run, _reset_pipeline_controller, _reset_rag_service, _reset_safe_browsing_client
 
 
 @pytest.fixture(autouse=True)
@@ -30,11 +31,12 @@ def _reset_rag_global_state() -> None:
     """各テスト前にRAGサービスのグローバル状態をリセットする."""
     _reset_rag_service()
     _reset_pipeline_controller()
+    _reset_safe_browsing_client()
 
 
 @pytest.mark.asyncio
 async def test_rag_server_exposes_tools() -> None:
-    """RAG MCPサーバーが21個のツールを公開すること."""
+    """RAG MCPサーバーが18個のツールを公開すること."""
     mod = import_module("rag.server")
     server = mod.mcp
 
@@ -42,8 +44,8 @@ async def test_rag_server_exposes_tools() -> None:
     tool_names = {t.name for t in tools}
 
     expected = {
-        "rag_search", "rag_get_document", "rag_add", "rag_crawl",
-        "rag_crawl_preview", "rag_crawl_zenn", "rag_crawl_bluesky",
+        "rag_search", "rag_get_document",
+        "rag_crawl_zenn", "rag_crawl_bluesky",
         "rag_add_youtube", "rag_crawl_youtube",
         "rag_add_document", "rag_add_journal", "rag_crawl_documents",
         "rag_site_ingest",
@@ -57,12 +59,12 @@ async def test_rag_server_exposes_tools() -> None:
 
 @pytest.mark.asyncio
 async def test_rag_server_tool_count() -> None:
-    """RAG MCPサーバーのツール数が正確に21であること."""
+    """RAG MCPサーバーのツール数が正確に18であること."""
     mod = import_module("rag.server")
     server = mod.mcp
 
     tools = await server.list_tools()
-    assert len(tools) == 21
+    assert len(tools) == 18
 
 
 class TestRagSearchOutput:
@@ -561,130 +563,6 @@ class TestRagGetDocumentTool:
         assert "無効な format" in result
 
 
-class TestRagCrawlPreviewTool:
-    """rag_crawl_preview ツールのテスト（Issue #45）."""
-
-    def _mock_preview_context(
-        self,
-        mod: object,
-        preview_return: list[dict[str, str]] | None = None,
-        preview_side_effect: Exception | None = None,
-    ) -> contextlib.AbstractContextManager[AsyncMock]:
-        """crawl_preview 用モックコンテキストを生成する."""
-        from contextlib import contextmanager
-
-        mock_settings = MagicMock()
-        mock_settings.rag_crawl_default_depth = 1
-        mock_settings.source_store_dir = "/tmp/test_source_store"
-        mock_settings.rag_crawl_request_timeout = 10
-        mock_settings.rag_crawl_delay_sec = 0.5
-
-        mock_ingester_instance = AsyncMock()
-        if preview_side_effect:
-            mock_ingester_instance.crawl_preview = AsyncMock(
-                side_effect=preview_side_effect,
-            )
-        else:
-            mock_ingester_instance.crawl_preview = AsyncMock(
-                return_value=preview_return if preview_return is not None else [],
-            )
-
-        mock_client = AsyncMock()
-        mock_client.__aenter__ = AsyncMock(return_value=mock_client)
-        mock_client.__aexit__ = AsyncMock(return_value=False)
-
-        @contextmanager
-        def ctx():
-            with (
-                patch.object(mod, "get_settings", return_value=mock_settings),
-                patch("pathlib.Path.mkdir"),
-                patch.object(mod, "SourceStore", return_value=MagicMock()),
-                patch.object(mod, "_create_web_ingester", return_value=mock_ingester_instance),
-                patch.object(mod, "ConstrainedClient", return_value=mock_client),
-            ):
-                yield mock_ingester_instance
-
-        return ctx()
-
-    @pytest.mark.asyncio
-    async def test_crawl_preview_returns_page_list(self) -> None:
-        """クロール対象ページの一覧テキストが返ること."""
-        mod = import_module("rag.server")
-        pages = [
-            {"url": "https://example.com/page1", "title": "ページ1"},
-            {"url": "https://example.com/page2", "title": "ページ2"},
-        ]
-
-        with self._mock_preview_context(mod, preview_return=pages):
-            result = await mod.rag_crawl_preview("https://example.com/index")
-
-        assert "クロール対象: 2ページ" in result
-        assert "ページ1" in result
-        assert "https://example.com/page1" in result
-        assert "ページ2" in result
-        assert "https://example.com/page2" in result
-
-    @pytest.mark.asyncio
-    async def test_crawl_preview_empty_result(self) -> None:
-        """対象ページが見つからない場合のメッセージが返ること."""
-        mod = import_module("rag.server")
-
-        with self._mock_preview_context(mod, preview_return=[]):
-            result = await mod.rag_crawl_preview("https://example.com/empty")
-
-        assert result == "対象ページが見つかりませんでした"
-
-    @pytest.mark.asyncio
-    async def test_crawl_preview_shows_fallback_title(self) -> None:
-        """タイトル取得不可の場合にフォールバックテキストが表示されること."""
-        mod = import_module("rag.server")
-        pages = [{"url": "https://example.com/page1", "title": ""}]
-
-        with self._mock_preview_context(mod, preview_return=pages):
-            result = await mod.rag_crawl_preview("https://example.com/index")
-
-        assert "(タイトル取得不可)" in result
-
-    @pytest.mark.asyncio
-    async def test_crawl_preview_with_pattern(self) -> None:
-        """patternパラメータがcrawl_previewに渡されること."""
-        mod = import_module("rag.server")
-
-        with self._mock_preview_context(mod, preview_return=[]) as mock_ingester:
-            await mod.rag_crawl_preview(
-                "https://example.com/index", pattern=r"\.html$"
-            )
-
-        mock_ingester.crawl_preview.assert_called_once()
-        call_kwargs = mock_ingester.crawl_preview.call_args
-        assert call_kwargs[1].get("pattern") == r"\.html$"
-
-    @pytest.mark.asyncio
-    async def test_crawl_preview_value_error(self) -> None:
-        """URL検証エラー時にエラーメッセージが返ること."""
-        mod = import_module("rag.server")
-
-        with self._mock_preview_context(
-            mod, preview_side_effect=ValueError("許可されていないスキームです"),
-        ):
-            result = await mod.rag_crawl_preview("ftp://example.com")
-
-        assert "エラー:" in result
-        assert "許可されていないスキームです" in result
-
-    @pytest.mark.asyncio
-    async def test_crawl_preview_unexpected_error(self) -> None:
-        """予期しないエラー時にエラーメッセージが返ること."""
-        mod = import_module("rag.server")
-
-        with self._mock_preview_context(
-            mod, preview_side_effect=RuntimeError("Unexpected"),
-        ):
-            result = await mod.rag_crawl_preview("https://example.com/index")
-
-        assert "エラー: プレビューに失敗しました" in result
-
-
 class TestRagStatsOutput:
     """rag_stats ツールの出力フォーマットテスト（Issue #25）."""
 
@@ -1009,66 +887,6 @@ class TestFormatCliIngestResult:
         assert "1件配置" in text
 
 
-# --- 移行済みツールのテスト（#409） ---
-
-
-class TestRagAddTool:
-    """rag_add ツールのテスト（CLI サブプロセス移行後）."""
-
-    @pytest.mark.asyncio
-    async def test_success(self) -> None:
-        """正常系: CLI サブプロセスの結果がフォーマットされて返ること."""
-        mod = import_module("rag.server")
-        mock_result = {
-            "placed": 1, "skipped": 0, "overwritten": 0,
-            "errors": 0, "error_details": [],
-        }
-        with patch.object(
-            mod, "_run_cli_subprocess", new_callable=AsyncMock, return_value=mock_result,
-        ) as mock_cli:
-            result = await mod.rag_add("https://example.com/page")
-
-        mock_cli.assert_called_once_with("add", ["https://example.com/page"], ctx=None)
-        assert "1件配置" in result
-
-    @pytest.mark.asyncio
-    async def test_lock_conflict(self) -> None:
-        """ロック競合時に専用メッセージを返すこと."""
-        mod = import_module("rag.server")
-        with patch.object(
-            mod, "_run_cli_subprocess", new_callable=AsyncMock,
-            side_effect=mod.CLISubprocessError("lock conflict", lock_conflict=True),
-        ):
-            result = await mod.rag_add("https://example.com/page")
-
-        assert "別のインジェストが実行中" in result
-
-    @pytest.mark.asyncio
-    async def test_cli_error(self) -> None:
-        """CLISubprocessError 時にエラーメッセージを返すこと."""
-        mod = import_module("rag.server")
-        with patch.object(
-            mod, "_run_cli_subprocess", new_callable=AsyncMock,
-            side_effect=mod.CLISubprocessError("connection timeout"),
-        ):
-            result = await mod.rag_add("https://example.com/page")
-
-        assert "エラー" in result
-        assert "https://example.com/page" in result
-
-    @pytest.mark.asyncio
-    async def test_unexpected_error(self) -> None:
-        """予期しない例外時にエラーメッセージを返すこと."""
-        mod = import_module("rag.server")
-        with patch.object(
-            mod, "_run_cli_subprocess", new_callable=AsyncMock,
-            side_effect=RuntimeError("unexpected"),
-        ):
-            result = await mod.rag_add("https://example.com/page")
-
-        assert "エラー" in result
-
-
 class TestRagDeleteTool:
     """rag_delete ツールのテスト（CLI サブプロセス移行後）."""
 
@@ -1173,3 +991,74 @@ class TestRagRebuildTool:
             result = await mod.rag_rebuild("full")
 
         assert "エラー" in result
+
+
+class TestRagSiteIngestSafeBrowsing:
+    """rag_site_ingest の Safe Browsing チェックテスト（#481）."""
+
+    @pytest.mark.asyncio
+    async def test_unsafe_url_returns_error(self) -> None:
+        """起点 URL が危険判定された場合にエラーを返すこと."""
+        mod = import_module("rag.server")
+
+        from rag.safe_browsing import SafeBrowsingResult, ThreatMatch, ThreatType
+
+        unsafe_result = SafeBrowsingResult(
+            url="https://malicious.example.com",
+            is_safe=False,
+            threats=[
+                ThreatMatch(
+                    threat_type=ThreatType.MALWARE,
+                    platform_type="ANY_PLATFORM",
+                    threat_url="https://malicious.example.com",
+                ),
+            ],
+        )
+
+        mock_sb_client = AsyncMock()
+        mock_sb_client.check_url = AsyncMock(return_value=unsafe_result)
+
+        mock_settings = MagicMock()
+
+        with (
+            patch.object(mod, "_get_safe_browsing_client", return_value=mock_sb_client),
+            patch.object(mod, "get_settings", return_value=mock_settings),
+            patch("rag.utils.url.check_ssrf"),
+        ):
+            result = await mod.rag_site_ingest("https://malicious.example.com")
+
+        assert "エラー" in result
+        assert "安全でない" in result
+        assert "MALWARE" in result
+
+    @pytest.mark.asyncio
+    async def test_safe_browsing_disabled_skips_check(self) -> None:
+        """Safe Browsing クライアントが None の場合はスキップしてクロールが実行されること."""
+        mod = import_module("rag.server")
+        from rag.scrapy.runner import ScrapyRunner
+
+        mock_crawl_result = MagicMock()
+        mock_crawl_result.jsonl_path.exists.return_value = False
+        mock_crawl_result.exit_code = 0
+
+        mock_settings = MagicMock()
+        mock_settings.site_ingest_temp_dir = "/tmp/site_ingest"
+        mock_settings.site_ingest_delay_sec = 1.0
+        mock_settings.site_ingest_max_pages = 1000
+        mock_settings.site_ingest_download_timeout = 30
+        mock_settings.site_ingest_timeout_sec = 0
+        mock_settings.site_ingest_error_count = 0
+
+        mock_controller = AsyncMock()
+
+        with (
+            patch.object(mod, "_get_safe_browsing_client", return_value=None),
+            patch.object(mod, "get_settings", return_value=mock_settings),
+            patch.object(mod, "_get_pipeline_controller", new_callable=AsyncMock, return_value=mock_controller),
+            patch.object(ScrapyRunner, "run", new_callable=AsyncMock, return_value=mock_crawl_result) as mock_run,
+        ):
+            result = await mod.rag_site_ingest("https://example.com")
+
+        # Safe Browsing でブロックされず、クロールまで到達していること
+        mock_run.assert_called_once()
+        assert "安全でない" not in result

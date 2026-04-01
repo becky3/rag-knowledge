@@ -3,12 +3,9 @@
 仕様: docs/specs/rag-knowledge.md, docs/specs/search-response.md
 独立リポジトリとして動作する。
 
-FastMCP を使用して 21 個の RAG ツールを公開する:
+FastMCP を使用して 18 個の RAG ツールを公開する:
 - rag_search: ナレッジベース検索（チャンク単位返却）
 - rag_get_document: ソース全文取得
-- rag_add: 単一ページをナレッジベースに取り込み
-- rag_crawl: リンク集ページからクロール＆一括取り込み
-- rag_crawl_preview: クロール対象ページのプレビュー（タイトル・URL一覧）
 - rag_crawl_zenn: Zenn 記事の一括取り込み
 - rag_crawl_bluesky: BlueSky 投稿の一括取り込み
 - rag_add_youtube: YouTube 動画の字幕・文字起こしをナレッジベースに取り込み
@@ -63,7 +60,6 @@ with contextlib.redirect_stdout(io.StringIO()):
         get_document,
     )
     from .vector_store import VectorStore
-    from .web_crawler import WebCrawler
 
     # パイプライン関連
     from .pipeline.controller import PipelineController
@@ -71,14 +67,10 @@ with contextlib.redirect_stdout(io.StringIO()):
     from .upload import sanitize_filename as sanitize_upload_filename
     from .pipeline.ingesters.aozora import AozoraIngester as PipelineAozoraIngester
     from .pipeline.ingesters.local import _UPLOAD_DIR as _LOCAL_UPLOAD_DIR
-    from .pipeline.ingesters.web import WebIngester as PipelineWebIngester
+
     from .pipeline.models import PipelineMode, PipelineSummary, detect_source_type
     from .store.metadata_db import MetadataDB
     from .store.models import NULL_COMMIT_HASH
-    from .store.source_store import SourceStore
-
-from py_common_lib.httpx import ConstrainedClient  # safety:allowed
-
 from .safe_browsing import (
     SafeBrowsingClient,
     create_safe_browsing_client,
@@ -155,15 +147,6 @@ def _build_rag_service() -> RAGKnowledgeService:
             hnsw_construction_ef=settings.hnsw_construction_ef,
             hnsw_search_ef=settings.hnsw_search_ef,
         )
-        web_crawler = WebCrawler(
-            timeout=settings.rag_crawl_request_timeout,
-            max_pages=settings.rag_max_crawl_pages,
-            crawl_delay=settings.rag_crawl_delay_sec,
-            max_concurrent=settings.rag_crawl_max_concurrent,
-            respect_robots_txt=settings.rag_respect_robots_txt,
-            robots_txt_cache_ttl=settings.rag_robots_txt_cache_ttl,
-        )
-
         bm25_index = BM25Index(
             k1=settings.rag_bm25_k1,
             b=settings.rag_bm25_b,
@@ -172,11 +155,9 @@ def _build_rag_service() -> RAGKnowledgeService:
 
     return RAGKnowledgeService(
         vector_store=vector_store,
-        web_crawler=web_crawler,
         chunk_size=settings.rag_chunk_size,
         chunk_overlap=settings.rag_chunk_overlap,
         similarity_threshold=settings.rag_similarity_threshold,
-        safe_browsing_client=None,
         bm25_index=bm25_index,
         hybrid_search_enabled=settings.rag_hybrid_search_enabled,
         vector_weight=settings.rag_vector_weight,
@@ -229,6 +210,13 @@ _safe_browsing_client_cache: SafeBrowsingClient | None = None
 _safe_browsing_client_initialized = False
 
 
+def _reset_safe_browsing_client() -> None:
+    """SafeBrowsingClient のキャッシュをリセットする（テスト用）."""
+    global _safe_browsing_client_cache, _safe_browsing_client_initialized
+    _safe_browsing_client_cache = None
+    _safe_browsing_client_initialized = False
+
+
 def _get_safe_browsing_client() -> SafeBrowsingClient | None:
     """SafeBrowsingClient を取得する（プロセス内キャッシュ）.
 
@@ -269,23 +257,6 @@ def _format_ingest_response(
 
 
 # --- ファクトリヘルパー ---
-
-
-def _create_web_ingester(
-    source_store: SourceStore,
-    safe_browsing_client: SafeBrowsingClient | None = None,
-) -> PipelineWebIngester:
-    """設定に基づいて PipelineWebIngester を生成する."""
-    settings = get_settings()
-    return PipelineWebIngester(
-        source_store,
-        max_crawl_pages=settings.rag_max_crawl_pages,
-        crawl_request_timeout=settings.rag_crawl_request_timeout,
-        crawl_max_errors=settings.rag_crawl_max_errors,
-        respect_robots_txt=settings.rag_respect_robots_txt,
-        robots_txt_cache_ttl=settings.rag_robots_txt_cache_ttl,
-        safe_browsing_client=safe_browsing_client,
-    )
 
 
 def _get_supported_extensions() -> list[str]:
@@ -406,140 +377,6 @@ async def rag_get_document(
         response = response[:truncate_at] + truncation_notice
 
     return response
-
-
-@mcp.tool()
-async def rag_add(url: str, ctx: MCPContext | None = None) -> str:
-    """[rag-knowledge] RAG add - 単一ページをナレッジベースに取り込む（非推奨: rag_site_ingest を推奨）.
-
-    knowledge base, ingest, web page, crawl single URL.
-    非推奨: 大規模サイトには rag_site_ingest を使用してください。
-
-    Args:
-        url: 取り込むページのURL
-
-    Returns:
-        取り込み結果のメッセージ
-    """
-    try:
-        result = await _run_cli_subprocess("add", [url], ctx=ctx)
-        return _format_cli_ingest_result(result, context=url)
-    except CLISubprocessError as e:
-        if e.lock_conflict:
-            return "エラー: 別のインジェストが実行中です。しばらく待ってから再試行してください"
-        return f"エラー: ページの取り込みに失敗しました。URL: {url} ({e})"
-    except Exception:
-        logger.exception("Failed to add page: %s", url)
-        return f"エラー: ページの取り込みに失敗しました。URL: {url}"
-
-
-@mcp.tool()
-async def rag_crawl(
-    url: str, pattern: str = "", depth: int | None = None,
-    ctx: MCPContext | None = None,
-) -> str:
-    """[rag-knowledge] RAG crawl - リンク集ページからクロール＆一括取り込み（非推奨: rag_site_ingest を推奨）.
-
-    knowledge base, bulk ingest, web crawl, link index, recursive crawl.
-    非推奨: 大規模サイトには rag_site_ingest を使用してください。上限500ページ。
-    再帰クロール対応: depth > 1 でリンクを複数階層辿れる。
-
-    Args:
-        url: リンク集ページのURL
-        pattern: URLフィルタリング用の正規表現パターン（depth >= 2 の場合は必須）
-        depth: クロール深度（1〜10。未指定時は設定値を使用。1 = 直接リンクのみ）
-
-    Returns:
-        クロール結果のサマリー
-    """
-    args: list[str] = [url]
-    if pattern:
-        args.extend(["--pattern", pattern])
-    if depth is not None:
-        args.extend(["--depth", str(depth)])
-
-    try:
-        result = await _run_cli_subprocess("crawl", args, ctx=ctx)
-        return _format_cli_ingest_result(result, context=url)
-    except CLISubprocessError as e:
-        if e.lock_conflict:
-            return "エラー: 別のインジェストが実行中です。しばらく待ってから再試行してください"
-        return f"エラー: クロールに失敗しました。URL: {url} ({e})"
-    except Exception:
-        logger.exception("Failed to crawl: %s", url)
-        return f"エラー: クロールに失敗しました。URL: {url}"
-
-
-@mcp.tool()
-async def rag_crawl_preview(
-    url: str, pattern: str = "", depth: int | None = None
-) -> str:
-    """[rag-knowledge] RAG crawl preview - クロール対象ページのプレビュー（非推奨: rag_site_ingest を推奨）.
-
-    knowledge base, crawl preview, dry run, link list, recursive.
-    非推奨: 大規模サイトには rag_site_ingest を使用してください。
-    実際の取り込み（チャンキング・ベクトル化）は行わず、
-    クロール対象となるページのタイトルとURLの一覧を返す。
-
-    Args:
-        url: リンク集ページのURL
-        pattern: URLフィルタリング用の正規表現パターン（depth >= 2 の場合は必須）
-        depth: クロール深度（1〜10。未指定時は設定値を使用。1 = 直接リンクのみ）
-
-    Returns:
-        クロール対象ページの一覧テキスト
-    """
-    settings = get_settings()
-
-    if depth is None:
-        depth = settings.rag_crawl_default_depth
-
-    # depth >= 2 の場合は pattern 必須
-    if depth >= 2 and not pattern:
-        return (
-            "エラー: depth が 2 以上の場合は pattern の指定が必須です。"
-            "再帰クロールではパターンなしだと無関係なページまで辿る恐れがあります"
-        )
-
-    # MSYS パス変換検出
-    from .pipeline.ingesters.web import _looks_like_msys_path
-    if pattern and _looks_like_msys_path(pattern):
-        return (
-            f"エラー: pattern が Windows パスに変換されています: {pattern!r}。"
-            "Git Bash 環境では先頭の / が自動変換されます。"
-            "先頭の / を除去するか、MSYS_NO_PATHCONV=1 を設定してください"
-        )
-
-    # crawl_preview は配置を行わないため、PipelineController の重い初期化を避ける
-    source_store_dir = Path(settings.source_store_dir)
-    source_store_dir.mkdir(parents=True, exist_ok=True)
-    source_store = SourceStore(source_store_dir)
-    web_ingester = _create_web_ingester(source_store)
-
-    try:
-        async with ConstrainedClient(
-            request_timeout=settings.rag_crawl_request_timeout,
-            request_interval=settings.rag_crawl_delay_sec,
-        ) as client:
-            pages = await web_ingester.crawl_preview(
-                url, pattern=pattern, depth=depth, client=client,
-            )
-
-        if not pages:
-            return "対象ページが見つかりませんでした"
-
-        lines: list[str] = [f"クロール対象: {len(pages)}ページ", ""]
-        for i, page in enumerate(pages, start=1):
-            title = page.get("title", "") or "(タイトル取得不可)"
-            page_url = page.get("url", "")
-            lines.append(f"{i}. {title}")
-            lines.append(f"   {page_url}")
-        return "\n".join(lines)
-    except ValueError as e:
-        return f"エラー: {e}"
-    except Exception:
-        logger.exception("Failed to preview crawl: %s", url)
-        return f"エラー: プレビューに失敗しました。URL: {url}"
 
 
 _VALID_ZENN_CONTENT_TYPES: frozenset[str] = frozenset({"articles", "scraps", "all"})
@@ -864,7 +701,7 @@ async def rag_site_ingest(
 
     knowledge base, bulk ingest, site crawl, large scale, scrapy.
     数千ページ規模の大規模サイトを Scrapy subprocess で一括取り込みする。
-    既存の rag_crawl（上限500ページ）では足りない大規模サイト向け。
+    数千ページ規模の大規模サイト向け。
 
     並行実行非対応: Bridge が source_store へのファイル配置をロック保護外で
     実行するため、同一サイトに対する同時実行はデータ競合のリスクがある。
@@ -896,6 +733,14 @@ async def rag_site_ingest(
     except ValueError as e:
         return f"エラー: {e}"
 
+    # Safe Browsing チェック（起点 URL のみ）
+    sb_client = _get_safe_browsing_client()
+    if sb_client is not None:
+        sb_result = await sb_client.check_url(url)
+        if not sb_result.is_safe:
+            threat_types = ", ".join(t.threat_type.value for t in sb_result.threats)
+            return f"エラー: 起点URLが安全でないと判定されました: {threat_types} — {url}"
+
     # url_pattern バリデーション
     if url_pattern:
         try:
@@ -908,9 +753,9 @@ async def rag_site_ingest(
     if effective_max_pages < 1:
         effective_max_pages = 1
         logger.warning("max_pages を 1 にクランプしました")
-    elif effective_max_pages > 50000:
-        effective_max_pages = 50000
-        logger.warning("max_pages を 50000 にクランプしました")
+    elif effective_max_pages > 1000:
+        effective_max_pages = 1000
+        logger.warning("max_pages を 1000 にクランプしました")
 
     # ドメイン導出
     from urllib.parse import urlparse

@@ -7,9 +7,7 @@
 - SSRF 対策（localhost、プライベート IP）
 - タイトル抽出（charset_normalizer + BeautifulSoup）
 - リンク抽出（同一ドメイン、フラグメント除去、重複除去）
-- add（単一ページ追加）
-- crawl（一括クロール）
-- crawl_preview（プレビュー）
+- crawl（起点 URL 配置 + リンク先クロール、depth=0 対応）
 """
 
 from __future__ import annotations
@@ -23,7 +21,6 @@ from rag.pipeline.ingesters.web import (
     MAX_CRAWL_DEPTH_HARD_LIMIT,
     _decode_html_bytes,
     _extract_links,
-    _extract_title,
     _is_allowed_content_type,
     _is_crawlable_url,
     _needs_html_extension,
@@ -128,25 +125,6 @@ class TestCheckSsrf:
             check_ssrf("http://bad-dns.example.com/")
 
 
-class TestExtractTitle:
-    """_extract_title のテスト."""
-
-    def test_basic_title(self) -> None:
-        """基本的な title タグの抽出."""
-        html = b"<html><head><title>Test Page</title></head></html>"
-        assert _extract_title(html) == "Test Page"
-
-    def test_no_title(self) -> None:
-        """title タグがない場合に空文字列."""
-        html = b"<html><head></head><body>content</body></html>"
-        assert _extract_title(html) == ""
-
-    def test_utf8_title(self) -> None:
-        """UTF-8 の日本語タイトル."""
-        html = "<html><head><title>テストページ</title></head></html>".encode("utf-8")
-        assert _extract_title(html) == "テストページ"
-
-
 class TestExtractLinks:
     """_extract_links のテスト."""
 
@@ -230,11 +208,11 @@ class TestNeedsHtmlExtension:
 
 
 @pytest.mark.asyncio()
-class TestAdd:
-    """add のテスト."""
+class TestCrawlDepthZero:
+    """crawl(depth=0) のテスト（起点 URL のみ配置）."""
 
-    async def test_basic_add(self, source_store: SourceStore) -> None:
-        """基本的な単一ページ追加が動作すること."""
+    async def test_basic_depth_zero(self, source_store: SourceStore) -> None:
+        """depth=0 で起点 URL のみが配置されること."""
         html_content = b"<html><head><title>Test Page</title></head><body>content</body></html>"
         resp = _make_mock_response(content=html_content)
         client = AsyncMock()
@@ -244,8 +222,9 @@ class TestAdd:
             source_store,
             respect_robots_txt=False,
         )
-        result = await ingester.add(
+        result = await ingester.crawl(
             "https://example.com/docs/guide",
+            depth=0,
             client=client,
         )
 
@@ -256,13 +235,13 @@ class TestAdd:
         """空の URL でエラーになること."""
         ingester = make_web_ingester(source_store)
         with pytest.raises(ValueError, match="空"):
-            await ingester.add("", client=AsyncMock())
+            await ingester.crawl("", depth=0, client=AsyncMock())
 
     async def test_no_client_raises(self, source_store: SourceStore) -> None:
         """client 未指定でエラーになること."""
         ingester = make_web_ingester(source_store)
         with pytest.raises(ValueError, match="client"):
-            await ingester.add("https://example.com")
+            await ingester.crawl("https://example.com", depth=0)
 
     async def test_redirect_blocked(self, source_store: SourceStore) -> None:
         """リダイレクトがブロックされること."""
@@ -275,12 +254,39 @@ class TestAdd:
             respect_robots_txt=False,
         )
         with pytest.raises(ValueError, match="リダイレクト"):
-            await ingester.add("https://example.com/redirect", client=client)
+            await ingester.crawl("https://example.com/redirect", depth=0, client=client)
+
+    async def test_no_link_extraction(self, source_store: SourceStore) -> None:
+        """depth=0 ではリンク抽出が行われないこと."""
+        html_content = b"""
+        <html><head><title>Index</title></head><body>
+        <a href="https://example.com/page1">Page 1</a>
+        <a href="https://example.com/page2">Page 2</a>
+        </body></html>
+        """
+        resp = _make_mock_response(content=html_content)
+        client = AsyncMock()
+        client.get = AsyncMock(return_value=resp)
+
+        ingester = make_web_ingester(
+            source_store,
+            respect_robots_txt=False,
+        )
+        result = await ingester.crawl(
+            "https://example.com/index",
+            depth=0,
+            client=client,
+        )
+
+        # 起点のみ配置、リンク先は取り込まない
+        assert result.placed == 1
+        # HTTP リクエストは起点の 1 回のみ
+        assert client.get.call_count == 1
 
 
 @pytest.mark.asyncio()
-class TestAddExtension:
-    """add の拡張子付与テスト."""
+class TestCrawlDepthZeroExtension:
+    """crawl(depth=0) の拡張子付与テスト."""
 
     async def test_extensionless_url_gets_html_extension(
         self, source_store: SourceStore,
@@ -295,8 +301,9 @@ class TestAddExtension:
             source_store,
             respect_robots_txt=False,
         )
-        result = await ingester.add(
+        result = await ingester.crawl(
             "https://example.com/docs/guide",
+            depth=0,
             client=client,
         )
 
@@ -322,8 +329,9 @@ class TestAddExtension:
             source_store,
             respect_robots_txt=False,
         )
-        result = await ingester.add(
+        result = await ingester.crawl(
             "https://example.com/page.html",
+            depth=0,
             client=client,
         )
 
@@ -335,7 +343,6 @@ class TestAddExtension:
         assert not any(p.endswith(".html.html") for p in file_paths), (
             f"Double .html detected: {file_paths}"
         )
-
 
     async def test_pdf_url_no_html_extension(
         self, source_store: SourceStore,
@@ -350,8 +357,9 @@ class TestAddExtension:
             source_store,
             respect_robots_txt=False,
         )
-        result = await ingester.add(
+        result = await ingester.crawl(
             "https://example.com/report.pdf",
+            depth=0,
             client=client,
         )
 
@@ -397,7 +405,8 @@ class TestCrawlExtension:
             client=client,
         )
 
-        assert result.placed == 1
+        # 起点 URL + リンク先 1 ページ = 2
+        assert result.placed == 2
 
         files = source_store.list_files(source_type="web")
         file_paths = [f.as_posix() for f in files]
@@ -434,7 +443,8 @@ class TestCrawl:
             client=client,
         )
 
-        assert result.placed == 2
+        # 起点 URL + リンク先 2 ページ = 3
+        assert result.placed == 3
 
     async def test_pattern_filter(self, source_store: SourceStore) -> None:
         """正規表現パターンでフィルタされること."""
@@ -461,71 +471,8 @@ class TestCrawl:
             client=client,
         )
 
-        assert result.placed == 1
-
-
-@pytest.mark.asyncio()
-class TestCrawlPreview:
-    """crawl_preview のテスト."""
-
-    async def test_basic_preview(self, source_store: SourceStore) -> None:
-        """基本的なプレビューが動作すること."""
-        index_html = b"""
-        <html><body>
-        <a href="https://example.com/page1">Page 1</a>
-        </body></html>
-        """
-        page_html = b"<html><head><title>Page Title</title></head></html>"
-
-        index_resp = _make_mock_response(content=index_html)
-        page_resp = _make_mock_response(content=page_html)
-        client = AsyncMock()
-        client.get = AsyncMock(side_effect=[index_resp, page_resp])
-
-        ingester = make_web_ingester(
-            source_store,
-            respect_robots_txt=False,
-        )
-        previews = await ingester.crawl_preview(
-            "https://example.com/index",
-            client=client,
-        )
-
-        assert len(previews) == 1
-        assert previews[0]["url"] == "https://example.com/page1"
-        assert previews[0]["title"] == "Page Title"
-
-    async def test_invalid_url_returns_empty(
-        self, source_store: SourceStore
-    ) -> None:
-        """無効な URL で空リストが返ること."""
-        ingester = make_web_ingester(source_store)
-        result = await ingester.crawl_preview("", client=AsyncMock())
-        assert result == []
-
-    async def test_invalid_pattern_returns_empty(
-        self, source_store: SourceStore
-    ) -> None:
-        """無効な正規表現パターンで空リストが返ること."""
-        index_html = b"""
-        <html><body>
-        <a href="https://example.com/page1">Page 1</a>
-        </body></html>
-        """
-        index_resp = _make_mock_response(content=index_html)
-        client = AsyncMock()
-        client.get = AsyncMock(return_value=index_resp)
-
-        ingester = make_web_ingester(
-            source_store,
-            respect_robots_txt=False,
-        )
-        result = await ingester.crawl_preview(
-            "https://example.com/index",
-            pattern="[invalid",
-            client=client,
-        )
-        assert result == []
+        # 起点 URL + パターンに一致した 1 ページ = 2
+        assert result.placed == 2
 
 
 class TestDecodeHtmlBytes:
@@ -547,10 +494,10 @@ class TestDecodeHtmlBytes:
 class TestCrawlDepth:
     """crawl の再帰クロール（depth）テスト."""
 
-    async def test_depth_1_same_as_default(
+    async def test_depth_1_places_start_and_links(
         self, source_store: SourceStore
     ) -> None:
-        """depth=1 は従来動作と同じ結果になること."""
+        """depth=1 で起点 URL とリンク先が配置されること."""
         index_html = b"""
         <html><body>
         <a href="https://example.com/page1">Page 1</a>
@@ -573,7 +520,8 @@ class TestCrawlDepth:
             client=client,
         )
 
-        assert result.placed == 1
+        # 起点 URL + リンク先 1 ページ = 2
+        assert result.placed == 2
         assert result.errors == 0
 
     async def test_depth_2_follows_links(
@@ -610,7 +558,8 @@ class TestCrawlDepth:
             client=client,
         )
 
-        assert result.placed == 2
+        # 起点 URL + page1 + page2 = 3
+        assert result.placed == 3
         assert result.errors == 0
 
     async def test_depth_loop_detection(
@@ -646,8 +595,8 @@ class TestCrawlDepth:
             client=client,
         )
 
-        # page1 only — index and page1 are both visited, no new links for depth 2
-        assert result.placed == 1
+        # 起点 URL + page1 = 2（index と page1 は訪問済み、depth 2 の新規リンクなし）
+        assert result.placed == 2
 
     async def test_depth_clamped_to_hard_limit(
         self, source_store: SourceStore
@@ -678,8 +627,8 @@ class TestCrawlDepth:
             client=client,
         )
 
-        # ハードリミット(10)でクランプされるため、最大 10 ページ
-        assert result.placed <= MAX_CRAWL_DEPTH_HARD_LIMIT
+        # 起点 URL + ハードリミット(10)でクランプされたリンク先
+        assert result.placed <= MAX_CRAWL_DEPTH_HARD_LIMIT + 1
         assert result.errors == 0
 
     async def test_max_pages_shared_across_depths(
@@ -716,8 +665,8 @@ class TestCrawlDepth:
             client=client,
         )
 
-        # max_crawl_pages=2 なので最大 2 ページ
-        assert result.placed == 2
+        # 起点 URL + max_crawl_pages=2 のリンク先 = 3
+        assert result.placed == 3
 
 
 @pytest.mark.asyncio()
@@ -757,7 +706,8 @@ class TestCrawlMaxErrors:
             client=client,
         )
 
-        assert result.placed == 0
+        # 起点 URL は配置される（リンク先が全て 403）
+        assert result.placed == 1
         # エラー数は閾値（5）で止まる（6件全ては処理されない）
         assert result.errors == 5
 
@@ -771,51 +721,6 @@ class TestCrawlMaxErrors:
             respect_robots_txt=False,
         )
         assert ingester._crawl_max_errors == 5
-
-
-@pytest.mark.asyncio()
-class TestCrawlPreviewDepth:
-    """crawl_preview の再帰クロール（depth）テスト."""
-
-    async def test_preview_depth_2(
-        self, source_store: SourceStore
-    ) -> None:
-        """depth=2 のプレビューでリンクを辿った結果が返ること."""
-        index_html = b"""
-        <html><body>
-        <a href="https://example.com/docs/page1">Page 1</a>
-        </body></html>
-        """
-        page1_html = b"""
-        <html><head><title>Page 1</title></head><body>
-        <a href="https://example.com/docs/page2">Page 2</a>
-        </body></html>
-        """
-        page2_html = b"<html><head><title>Page 2</title></head><body>end</body></html>"
-
-        index_resp = _make_mock_response(content=index_html)
-        page1_resp = _make_mock_response(content=page1_html)
-        page2_resp = _make_mock_response(content=page2_html)
-        client = AsyncMock()
-        client.get = AsyncMock(
-            side_effect=[index_resp, page1_resp, page2_resp]
-        )
-
-        ingester = make_web_ingester(
-            source_store,
-            respect_robots_txt=False,
-        )
-        previews = await ingester.crawl_preview(
-            "https://example.com/index",
-            pattern=r"/docs/",
-            depth=2,
-            client=client,
-        )
-
-        assert len(previews) == 2
-        urls = [p["url"] for p in previews]
-        assert "https://example.com/docs/page1" in urls
-        assert "https://example.com/docs/page2" in urls
 
 
 class TestIsCrawlableUrl:
@@ -956,5 +861,5 @@ class TestCrawlContentTypeFilter:
             client=client,
         )
 
-        assert result.placed == 1  # page1 のみ
+        assert result.placed == 2  # 起点 URL + page1
         assert result.skipped == 1  # page2 はスキップ

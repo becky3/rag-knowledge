@@ -472,7 +472,7 @@ class TestFollowUrls:
         ]
 
         mock_web = AsyncMock()
-        mock_web.add = AsyncMock(return_value=MagicMock(placed=1, errors=0))
+        mock_web.crawl = AsyncMock(return_value=MagicMock(placed=1, errors=0))
         mock_client = _make_budget_client()
 
         ingester = make_bluesky_ingester(source_store)
@@ -483,8 +483,8 @@ class TestFollowUrls:
             youtube_ingester=None,
         )
 
-        mock_web.add.assert_called_once_with(
-            url="https://example.com/article", client=mock_client,
+        mock_web.crawl.assert_called_once_with(
+            url="https://example.com/article", depth=0, client=mock_client,
         )
         assert stats["web_placed"] == 1
 
@@ -558,7 +558,7 @@ class TestFollowUrls:
         ]
 
         mock_web = AsyncMock()
-        mock_web.add = AsyncMock(side_effect=Exception("connection error"))
+        mock_web.crawl = AsyncMock(side_effect=Exception("connection error"))
 
         ingester = make_bluesky_ingester(source_store)
         stats = await ingester.follow_urls(
@@ -585,7 +585,7 @@ class TestFollowUrls:
         item2["post"]["record"]["facets"] = [facet]
 
         mock_web = AsyncMock()
-        mock_web.add = AsyncMock(return_value=MagicMock(placed=1, errors=0))
+        mock_web.crawl = AsyncMock(return_value=MagicMock(placed=1, errors=0))
 
         ingester = make_bluesky_ingester(source_store)
         stats = await ingester.follow_urls(
@@ -595,7 +595,7 @@ class TestFollowUrls:
             youtube_ingester=None,
         )
 
-        mock_web.add.assert_called_once()
+        mock_web.crawl.assert_called_once()
         assert stats["web_placed"] == 1
 
     async def test_empty_items(self, source_store: SourceStore) -> None:

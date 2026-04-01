@@ -9,7 +9,7 @@ import asyncio
 import hashlib
 import logging
 import mimetypes
-from collections.abc import Awaitable, Callable, Sequence
+from collections.abc import Sequence
 from dataclasses import dataclass, field
 from pathlib import Path, PurePosixPath
 from typing import TYPE_CHECKING, Any, cast
@@ -25,9 +25,6 @@ from .vector_store import DocumentChunk, VectorStore
 if TYPE_CHECKING:
     from .bm25_index import BM25Index
     from .hybrid_search import HybridSearchEngine
-    from .safe_browsing import SafeBrowsingClient
-    from py_common_lib.httpx import ConstrainedClient
-    from .web_crawler import CrawlPreviewPage, CrawledPage, WebCrawler
 
 logger = logging.getLogger(__name__)
 
@@ -228,12 +225,10 @@ class RAGKnowledgeService:
     def __init__(
         self,
         vector_store: VectorStore,
-        web_crawler: WebCrawler,
         *,
         chunk_size: int,
         chunk_overlap: int,
         similarity_threshold: float | None,
-        safe_browsing_client: SafeBrowsingClient | None,
         bm25_index: BM25Index | None,
         hybrid_search_enabled: bool,
         vector_weight: float,
@@ -244,11 +239,9 @@ class RAGKnowledgeService:
 
         Args:
             vector_store: ベクトルストア
-            web_crawler: Webクローラー
             chunk_size: チャンクの最大文字数
             chunk_overlap: チャンク間のオーバーラップ文字数
             similarity_threshold: 類似度閾値（Noneで無制限）
-            safe_browsing_client: Safe Browsing クライアント（オプション）
             bm25_index: BM25インデックス（オプション、ハイブリッド検索用）
             hybrid_search_enabled: ハイブリッド検索の有効/無効
             vector_weight: ベクトル検索の重み（ハイブリッド検索用）
@@ -256,11 +249,9 @@ class RAGKnowledgeService:
             debug_log_enabled: RAGデバッグログの有効/無効
         """
         self._vector_store = vector_store
-        self._web_crawler = web_crawler
         self._chunk_size = chunk_size
         self._chunk_overlap = chunk_overlap
         self._similarity_threshold = similarity_threshold
-        self._safe_browsing_client = safe_browsing_client
         self._bm25_index = bm25_index
         self._hybrid_search_enabled = hybrid_search_enabled
         self._min_combined_score = min_combined_score
@@ -282,210 +273,6 @@ class RAGKnowledgeService:
         """リソースを解放する."""
         self._vector_store.close()
 
-    async def crawl_preview(
-        self,
-        index_url: str,
-        url_pattern: str = "",
-    ) -> list[CrawlPreviewPage]:
-        """クロール対象ページのタイトルとURLを一覧取得する（プレビュー）.
-
-        実際の取り込み（チャンキング・ベクトル化）は行わない。
-
-        Args:
-            index_url: リンク集ページのURL
-            url_pattern: 正規表現パターンでリンクをフィルタリング（任意）
-
-        Returns:
-            CrawlPreviewPage のリスト（タイトルとURL）
-
-        Raises:
-            ValueError: URL検証に失敗した場合
-        """
-        return await self._web_crawler.crawl_preview(index_url, url_pattern)
-
-    async def ingest_from_index(
-        self,
-        index_url: str,
-        url_pattern: str = "",
-        progress_callback: Callable[[int, int], Awaitable[None]] | None = None,
-    ) -> dict[str, int]:
-        """リンク集ページから一括取り込み.
-
-        Args:
-            index_url: リンク集ページのURL
-            url_pattern: 正規表現パターンでリンクをフィルタリング（任意）
-            progress_callback: 進捗コールバック関数（オプション）
-                引数: (crawled: int, total: int)
-                crawled: クロール完了ページ数
-                total: 総ページ数
-
-        Returns:
-            {"pages_crawled": N, "chunks_stored": M, "errors": E, "unsafe_urls": U}
-
-        Raises:
-            SafetyCheckError: Safe Browsing API障害時に送出される
-        """
-        return await self._ingest_from_index_impl(
-            index_url, url_pattern, progress_callback
-        )
-
-    async def _ingest_from_index_impl(
-        self,
-        index_url: str,
-        url_pattern: str,
-        progress_callback: Callable[[int, int], Awaitable[None]] | None,
-    ) -> dict[str, int]:
-        """レガシーパス: WebCrawler 直接使用でリンク集ページから一括取り込みする.
-
-        Args:
-            index_url: リンク集ページのURL
-            url_pattern: 正規表現パターンでリンクをフィルタリング
-            progress_callback: 進捗コールバック関数
-
-        Returns:
-            {"pages_crawled": N, "chunks_stored": M, "errors": E, "unsafe_urls": U}
-        """
-        # 共有 ConstrainedClient で操作全体のバジェットを管理
-        async with self._web_crawler.create_client() as client:
-            return await self._ingest_from_index_impl_with_client(
-                index_url, url_pattern, progress_callback, client
-            )
-
-    async def _ingest_from_index_impl_with_client(
-        self,
-        index_url: str,
-        url_pattern: str,
-        progress_callback: Callable[[int, int], Awaitable[None]] | None,
-        client: ConstrainedClient,
-    ) -> dict[str, int]:
-        """レガシーパス実装（ConstrainedClient 共有）."""
-        # リンク集ページからURLリストを抽出
-        urls = await self._web_crawler.crawl_index_page(
-            index_url, url_pattern, client=client
-        )
-        if not urls:
-            logger.warning("No URLs found in index page: %s", index_url)
-            return {"pages_crawled": 0, "chunks_stored": 0, "errors": 0, "unsafe_urls": 0}
-
-        # Safe Browsing チェック（有効な場合のみ）
-        safe_urls = urls
-        unsafe_count = 0
-        if self._safe_browsing_client:
-            check_results = await self._safe_browsing_client.check_urls(urls)
-            safe_urls = []
-            for url in urls:
-                result = check_results.get(url)
-                if result and not result.is_safe:
-                    threat_types = [t.threat_type.value for t in result.threats]
-                    logger.warning(
-                        "Unsafe URL skipped: %s (threats: %s)", url, threat_types
-                    )
-                    unsafe_count += 1
-                else:
-                    safe_urls.append(url)
-            if unsafe_count > 0:
-                logger.info(
-                    "Safe Browsing: %d URLs skipped as unsafe out of %d",
-                    unsafe_count,
-                    len(urls),
-                )
-
-        if not safe_urls:
-            logger.warning("No safe URLs to crawl after Safe Browsing check")
-            return {"pages_crawled": 0, "chunks_stored": 0, "errors": 0, "unsafe_urls": unsafe_count}
-
-        # 複数ページを並行クロール（進捗報告付き）
-        # WebCrawler.crawl_page() は内部でセマフォ制御と遅延を行う
-        total_urls = len(safe_urls)
-        tasks = [
-            asyncio.create_task(
-                self._web_crawler.crawl_page(url, client=client)
-            )
-            for url in safe_urls
-        ]
-
-        pages: list[CrawledPage] = []
-        completed_count = 0
-        for coro in asyncio.as_completed(tasks):
-            page = await coro
-            completed_count += 1
-            if page is not None:
-                pages.append(page)
-
-            # 進捗コールバック呼び出し（エラーを隔離）
-            if progress_callback:
-                try:
-                    await progress_callback(completed_count, total_urls)
-                except Exception:
-                    logger.debug("Progress callback failed", exc_info=True)
-
-        # 各ページをチャンキングして保存
-        total_chunks = 0
-        # errorsはクロール失敗数（safe_urlsの数からpagesの数を引く）
-        errors = len(safe_urls) - len(pages)
-
-        for page in pages:
-            try:
-                chunks_stored = await self._ingest_crawled_page(page)
-                total_chunks += chunks_stored
-            except Exception:
-                logger.exception("Failed to ingest page: %s", page.url)
-                errors += 1
-
-        logger.info(
-            "Ingested from index: pages=%d, chunks=%d, errors=%d, unsafe=%d",
-            len(pages),
-            total_chunks,
-            errors,
-            unsafe_count,
-        )
-
-        return {
-            "pages_crawled": len(pages),
-            "chunks_stored": total_chunks,
-            "errors": errors,
-            "unsafe_urls": unsafe_count,
-        }
-
-    async def ingest_page(self, url: str) -> int:
-        """単一ページ取り込み.
-
-        同一URLの再取り込み時は、まず add_documents() による upsert を行い、
-        その後 delete_stale_chunks() で不要になったチャンクを削除する。
-
-        Args:
-            url: 取り込むページのURL
-
-        Returns:
-            チャンク数
-
-        Raises:
-            ValueError: URL検証に失敗した場合、またはURLが危険と判定された場合
-        """
-        # URL検証を先に行い、失敗時は例外を投げる（ユーザーにエラー理由を伝えるため）
-        # 戻り値（正規化済みURL）を以降の処理で使用
-        validated_url = self._web_crawler.validate_url(url)
-
-        # Safe Browsing チェック（有効な場合のみ）
-        if self._safe_browsing_client:
-            result = await self._safe_browsing_client.check_url(validated_url)
-            if not result.is_safe:
-                threat_types = [t.threat_type.value for t in result.threats]
-                logger.warning(
-                    "Unsafe URL rejected: %s (threats: %s)", validated_url, threat_types
-                )
-                raise ValueError(
-                    f"URLが安全ではありません: {validated_url} "
-                    f"(検出された脅威: {', '.join(threat_types)})"
-                )
-
-        page = await self._web_crawler.crawl_page(validated_url)
-        if page is None:
-            logger.warning("Failed to crawl page: %s", validated_url)
-            return 0
-
-        return await self._ingest_crawled_page(page)
-
     def _smart_chunk(self, text: str) -> list[tuple[str, str]]:
         """コンテンツタイプに応じた適切なチャンキング手法を選択する.
 
@@ -496,25 +283,35 @@ class RAGKnowledgeService:
         """
         return smart_chunk(text, self._chunk_size, self._chunk_overlap)
 
-    async def _ingest_crawled_page(self, page: CrawledPage) -> int:
+    async def _ingest_crawled_page(
+        self,
+        *,
+        url: str,
+        title: str,
+        text: str,
+        crawled_at: str,
+    ) -> int:
         """クロール済みページをチャンキングして保存する.
 
         Args:
-            page: クロール済みページ
+            url: ページURL
+            title: ページタイトル
+            text: ページ本文テキスト
+            crawled_at: 取得日時（ISO 8601形式）
 
         Returns:
             保存されたチャンク数
         """
         # テキストをスマートチャンキング（コンテンツタイプに応じた手法を選択）
-        chunks = self._smart_chunk(page.text)
+        chunks = self._smart_chunk(text)
 
         if not chunks:
             # チャンク生成失敗時は既存ナレッジを削除しない（データ喪失防止）
-            logger.info("No chunks generated for page: %s", page.url)
+            logger.info("No chunks generated for page: %s", url)
             return 0
 
         # URLからフラグメントを除去して正規化（上流で除去済みだが防御的に再適用）
-        normalized_url, _ = urldefrag(page.url)
+        normalized_url, _ = urldefrag(url)
 
         # DocumentChunkに変換
         # SHA256の先頭16文字を使用（衝突確率が十分に低い）
@@ -525,9 +322,9 @@ class RAGKnowledgeService:
                 text=content,
                 metadata={
                     "source_id": normalized_url,
-                    "title": page.title,
+                    "title": title,
                     "chunk_index": i,
-                    "crawled_at": page.crawled_at,
+                    "crawled_at": crawled_at,
                     "source_type": "web",
                     "section_path": section_path,
                 },
