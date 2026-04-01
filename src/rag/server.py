@@ -1228,8 +1228,9 @@ async def _run_cli_subprocess(
             process.stdin.close()
             await process.stdin.wait_closed()
 
-    result_line = ""
-    try:
+    async def _read_stdout() -> str:
+        """stdout を行単位で読み、progress 通知を処理し、最終 result/error 行を返す."""
+        _result_line = ""
         assert process.stdout is not None  # noqa: S101
         while True:
             raw = await process.stdout.readline()
@@ -1254,10 +1255,24 @@ async def _run_cli_subprocess(
                         continue
                     # result/error のみ最終結果として保持
                     if msg_type in {"result", "error"}:
-                        result_line = line
+                        _result_line = line
             except json.JSONDecodeError:
                 # 非 JSON 行（ログ等）は result_line を上書きしない
                 pass
+        return _result_line
+
+    async def _drain_stderr() -> bytes:
+        """stderr を並行に drain する（パイプバッファ溢れ防止）."""
+        if process.stderr is None:
+            return b""
+        return await process.stderr.read()
+
+    # stdout と stderr を並行に読み取る（パイプバッファのデッドロック防止）
+    try:
+        result_line, stderr_bytes = await asyncio.gather(
+            _read_stdout(),
+            _drain_stderr(),
+        )
     except asyncio.CancelledError:
         if process.returncode is None:
             with contextlib.suppress(ProcessLookupError):
@@ -1266,8 +1281,6 @@ async def _run_cli_subprocess(
                 await process.wait()
         raise
 
-    # stderr 読み取り + wait
-    stderr_bytes = await process.stderr.read() if process.stderr else b""
     await process.wait()
 
     assert process.returncode is not None  # noqa: S101

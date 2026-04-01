@@ -8,9 +8,11 @@ from __future__ import annotations
 import argparse
 import asyncio
 import hashlib
+import io
 import json
 import logging
 import math
+import os
 import sys
 from datetime import datetime, timezone
 from pathlib import Path
@@ -66,14 +68,55 @@ class RegressionInfo(TypedDict):
 logger = logging.getLogger(__name__)
 
 
+# --- stdout 保護機構 ---
+# --output json モード時に stdout を JSON 専用チャネルとして保護する。
+# OS レベルで fd 1 を stderr にリダイレクトし、サードパーティライブラリの
+# stdout 出力（yt-dlp 等）が JSON 通信を汚染しないようにする。
+# JSON 出力は保存した元の fd に直接書き込む。
+
+_json_output_stream: io.TextIOWrapper | None = None
+
+
+def _install_stdout_guard() -> None:
+    """stdout を JSON 専用に保護する.
+
+    1. fd 1 を複製して保存（JSON 出力先）
+    2. fd 1 を stderr（fd 2）にリダイレクト
+    3. sys.stdout を stderr に差し替え
+
+    これにより print() や C 拡張の stdout 書き込みは全て stderr に流れ、
+    _output_json のみが元の stdout に JSON を書き込む。
+    """
+    global _json_output_stream  # noqa: PLW0603
+
+    saved_fd = os.dup(sys.stdout.fileno())
+    _json_output_stream = io.TextIOWrapper(
+        io.FileIO(saved_fd, mode="w", closefd=True),
+        encoding="utf-8",
+        line_buffering=True,
+    )
+
+    os.dup2(sys.stderr.fileno(), sys.stdout.fileno())
+    sys.stdout = sys.stderr
+
+
 # --- JSON 出力ヘルパー ---
 # worker.py の JSON Lines プロトコルと互換のフォーマットで出力する。
 # 仕様: docs/specs/rag-knowledge.md (MCP 薄層アダプターパターン)
 
 
 def _output_json(data: dict[str, object]) -> None:
-    """JSON Lines 形式で 1 行出力する."""
-    print(json.dumps(data, ensure_ascii=False), flush=True)
+    """JSON Lines 形式で 1 行出力する.
+
+    stdout 保護機構が有効な場合は保存した元の fd に書き込む。
+    無効な場合（text モード）は通常の print を使用する。
+    """
+    line = json.dumps(data, ensure_ascii=False)
+    if _json_output_stream is not None:
+        _json_output_stream.write(line + "\n")
+        _json_output_stream.flush()
+    else:
+        print(line, flush=True)
 
 
 def _output_progress(processed: int, total: int, current: str) -> None:
@@ -519,6 +562,10 @@ def main() -> None:
     )
 
     args = parser.parse_args()
+
+    # --output json モード時は stdout を保護する
+    if _is_json_output(args):
+        _install_stdout_guard()
 
     # コマンドディスパッチ（sync / async 統一）
     _ASYNC_COMMANDS: dict[str, object] = {
