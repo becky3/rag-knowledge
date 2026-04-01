@@ -7,11 +7,14 @@ from __future__ import annotations
 
 import datetime
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import pytest
 
 from rag.pipeline.ingesters.local import MAX_FILES_HARD_LIMIT, _UPLOAD_DIR
+
+if TYPE_CHECKING:
+    from rag.pipeline.ingesters.local import LocalIngester
 from rag.store.source_store import SourceStore
 
 from factories import make_local_ingester

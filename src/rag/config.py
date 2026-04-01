@@ -152,11 +152,8 @@ class RAGSettings(BaseModel):
     # ChromaDB コレクション名
     chromadb_collection_name: str
 
-    # クロール（範囲外の値は WebCrawler / ConstrainedClient が警告付きでクランプする）
+    # クロール
     rag_max_crawl_pages: int = Field(ge=1)
-    rag_crawl_delay_sec: float = Field(ge=0)
-    rag_crawl_max_concurrent: int = Field(ge=1)
-    rag_crawl_default_depth: int = Field(ge=1, le=10)
     rag_crawl_max_errors: int = Field(ge=5, le=10)
 
     # robots.txt
@@ -230,7 +227,7 @@ class RAGSettings(BaseModel):
 
     # サイト一括取り込み（Scrapy subprocess）
     site_ingest_delay_sec: float = Field(ge=0.05, le=60.0)
-    site_ingest_max_pages: int = Field(ge=1, le=50000)
+    site_ingest_max_pages: int = Field(ge=1, le=1000)
     site_ingest_download_timeout: int = Field(ge=1, le=300)
     site_ingest_timeout_sec: float = Field(ge=60.0, le=86400.0)
     site_ingest_error_count: int = Field(ge=1, le=1000)

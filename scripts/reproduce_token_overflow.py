@@ -203,7 +203,7 @@ source_storeのファイルをプレーンテキストまたはMarkdown形式に
         """\
 | 機能名 | 概要 | 技術スタック | 入力形式 | 出力形式 | エラーハンドリング | パフォーマンス特性 | セキュリティ考慮事項 | 依存関係 | 設定項目 |
 |--------|------|------------|----------|----------|------------------|------------------|-------------------|---------|---------|
-| Webクロール | 外部Webページを取得しHTMLを解析してテキストを抽出する機能。robots.txtを遵守しクロールディレイを設定可能 | httpx,BeautifulSoup4,markdownify | URL文字列またはURLリスト | Markdown形式のテキストファイル | タイムアウト・接続エラー・HTTP4xx/5xxはリトライ後スキップ。サーキットブレーカーで連続エラー時は中断 | 同時接続数制限あり。大規模サイトはScrapyサブプロセスに委譲 | URL安全性チェック（Google Safe Browsing API）を実施。DNSリバインディング保護 | py-common-lib ConstrainedClient | rag_max_crawl_pages,rag_crawl_delay_sec,rag_crawl_default_depth |
+| Webクロール | 外部Webページを取得しHTMLを解析してテキストを抽出する機能。robots.txtを遵守しクロールディレイを設定可能 | httpx,BeautifulSoup4,markdownify | URL文字列またはURLリスト | Markdown形式のテキストファイル | タイムアウト・接続エラー・HTTP4xx/5xxはリトライ後スキップ。サーキットブレーカーで連続エラー時は中断 | 同時接続数制限あり。大規模サイトはScrapyサブプロセスに委譲 | URL安全性チェック（Google Safe Browsing API）を実施。DNSリバインディング保護 | py-common-lib ConstrainedClient | rag_max_crawl_pages,rag_crawl_max_errors |
 | ベクトル検索 | ChromaDBによる高次元ベクトル空間でのコサイン類似度検索。Embeddingモデルでテキストをベクトル化し近傍探索を実行 | ChromaDB,OpenAI SDK | 検索クエリ文字列 | スコア付きドキュメントチャンクリスト | Embedding接続エラー時はConnectionError送出。空クエリは空結果を返却 | インメモリインデックスで高速応答。大規模データはバッチ処理 | APIキーはOSセキュアストレージで管理。通信はHTTPS | OpenAI SDK,chromadb | embedding_model_local,rag_retrieval_count |
 """,
         tok,

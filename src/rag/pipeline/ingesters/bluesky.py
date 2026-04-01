@@ -460,8 +460,8 @@ class BlueskyIngester:
                     stats["errors"] += 1
             elif url_type == "web" and web_ingester is not None:
                 try:
-                    web_result = await web_ingester.add(
-                        url=url, client=client,
+                    web_result = await web_ingester.crawl(
+                        url=url, depth=0, client=client,
                     )
                     stats["web_placed"] += web_result.placed
                     if web_result.errors > 0:

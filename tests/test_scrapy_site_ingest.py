@@ -8,7 +8,7 @@
 - URL バリデーション（空、スキーム不正）
 - SSRF チェック（プライベート IP 拒否）
 - url_pattern の正規表現バリデーション
-- max_pages のクランプ（下限 1、上限 50000）
+- max_pages のクランプ（下限 1、上限 1000）
 - ScrapyRunner → Bridge → pipeline の統合フロー（モック）
 - JSONL 未出力時の早期リターン
 - Config 設定値の反映
@@ -23,7 +23,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from rag.server import _reset_pipeline_controller, _reset_rag_service
+from rag.server import _reset_pipeline_controller, _reset_rag_service, _reset_safe_browsing_client
 
 
 @pytest.fixture(autouse=True)
@@ -31,6 +31,7 @@ def _reset_global_state() -> None:
     """各テスト前にグローバル状態をリセットする."""
     _reset_rag_service()
     _reset_pipeline_controller()
+    _reset_safe_browsing_client()
 
 
 def _make_mock_settings() -> MagicMock:
@@ -42,6 +43,7 @@ def _make_mock_settings() -> MagicMock:
     s.site_ingest_download_timeout = 30
     s.site_ingest_timeout_sec = 0
     s.site_ingest_error_count = 0
+    s.rag_url_safety_check = False
     return s
 
 
@@ -141,8 +143,8 @@ class TestMcpSiteIngestMaxPagesClamp:
             assert "メタデータが出力されませんでした" in result
 
     @pytest.mark.asyncio
-    async def test_max_pages_clamped_to_50000_when_exceeds(self) -> None:
-        """max_pages=100000 が 50000 にクランプされること."""
+    async def test_max_pages_clamped_to_1000_when_exceeds(self) -> None:
+        """max_pages=100000 が 1000 にクランプされること."""
         from rag.scrapy.runner import CrawlResult, ScrapyRunner
 
         mock_crawl_result = CrawlResult(
@@ -165,9 +167,9 @@ class TestMcpSiteIngestMaxPagesClamp:
                 force=False,
             )
             assert "メタデータが出力されませんでした" in result
-            # run() が呼ばれた際の max_pages が 50000 であること
+            # run() が呼ばれた際の max_pages が 1000 であること
             call_kwargs = mock_run.call_args.kwargs
-            assert call_kwargs["max_pages"] == 50000
+            assert call_kwargs["max_pages"] == 1000
 
 
 class TestMcpSiteIngestFlow:
@@ -609,8 +611,8 @@ class TestCliSiteIngestMaxPagesClamp:
             assert call_kwargs["max_pages"] == 1
 
     @pytest.mark.asyncio
-    async def test_max_pages_clamped_to_50000(self) -> None:
-        """max_pages=999999 が 50000 にクランプされること."""
+    async def test_max_pages_clamped_to_1000(self) -> None:
+        """max_pages=999999 が 1000 にクランプされること."""
         from rag.scrapy.runner import CrawlResult, ScrapyRunner
 
         mock_crawl_result = CrawlResult(
@@ -630,7 +632,7 @@ class TestCliSiteIngestMaxPagesClamp:
 
             await run_site_ingest(args)
             call_kwargs = mock_run.call_args.kwargs
-            assert call_kwargs["max_pages"] == 50000
+            assert call_kwargs["max_pages"] == 1000
 
     @pytest.mark.asyncio
     async def test_max_pages_uses_settings_default(self) -> None:
@@ -645,7 +647,7 @@ class TestCliSiteIngestMaxPagesClamp:
         )
 
         mock_settings = _make_cli_mock_settings()
-        mock_settings.site_ingest_max_pages = 2000
+        mock_settings.site_ingest_max_pages = 800
 
         args = argparse.Namespace(url="https://example.com", url_pattern="", max_pages=None, force=False, download_only=False)
 
@@ -657,7 +659,7 @@ class TestCliSiteIngestMaxPagesClamp:
 
             await run_site_ingest(args)
             call_kwargs = mock_run.call_args.kwargs
-            assert call_kwargs["max_pages"] == 2000
+            assert call_kwargs["max_pages"] == 800
 
 
 class TestCliSiteIngestFlow:

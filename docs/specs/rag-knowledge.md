@@ -5,14 +5,13 @@
 外部 Web ページから収集した知識をベクトル DB に蓄積し、
 MCP クライアントからのクエリに対して関連情報を検索・提供する
 RAG（Retrieval-Augmented Generation）基盤。
-MCP サーバーとして独立動作し、16 個のツールを提供する。
+MCP サーバーとして独立動作し、18 個のツールを提供する。
 
 スコープ:
 
-- 知識の取り込み（クロール・単一ページ追加・Zenn 記事取り込み・BlueSky 投稿取り込み・ドキュメントファイル取り込み）
+- 知識の取り込み（サイト一括取り込み・Zenn 記事取り込み・BlueSky 投稿取り込み・ドキュメントファイル取り込み）
 - 知識の検索（ベクトル検索・BM25 キーワード検索）
 - 知識の管理（統計表示・削除）
-- クロールプレビュー（対象ページの事前確認）
 - 検索精度の評価（評価 CLI）
 
 ## 背景
@@ -55,7 +54,7 @@ MCP サーバーとして独立動作し、16 個のツールを提供する。
 | 検索 | `rag_retrieval_count`, `rag_similarity_threshold` |
 | ハイブリッド検索 | `rag_hybrid_search_enabled`, `rag_vector_weight`, `rag_bm25_k1`, `rag_bm25_b`, `rag_min_combined_score` |
 | ChromaDB | `chromadb_collection_name` |
-| クロール | `rag_max_crawl_pages`, `rag_crawl_delay_sec`, `rag_crawl_max_concurrent` |
+| クロール | `rag_max_crawl_pages` |
 | robots.txt | `rag_respect_robots_txt`, `rag_robots_txt_cache_ttl` |
 | URL 安全性 | `rag_url_safety_check`, `rag_url_safety_cache_ttl`, `rag_url_safety_timeout` |
 | レスポンス制御 | `rag_max_response_chars`（rag_get_document のトランケーション）, `rag_stats_max_sources` |
@@ -80,32 +79,6 @@ MCP サーバーとして独立動作し、16 個のツールを提供する。
 - サーキットブレーカー: 5 回連続失敗で操作全体を中断する
 - 設定値がハードリミットの許容範囲外の場合は範囲内にクランプする（エラーにはしない。警告ログを出力する）
 
-## 想定プロファイル
-
-### rag_crawl（一括クロール）
-
-| 項目 | 内容 |
-|------|------|
-| 最悪ケースリクエスト数 | 1（インデックスページ）+ 1（robots.txt）+ 498（個別ページ。バジェット 500 から先行リクエスト分を差し引き）= 500。バジェットトラッカー上限 500 で打ち切り |
-| 最悪ケース所要時間 | 500 × 0.1 秒（ハードリミット最小間隔での理論最短）= 50 秒。デフォルト設定（1.0 秒間隔）では 500 秒。per-request タイムアウト・処理時間は含まない。操作全体タイムアウト 600 秒で打ち切り |
-| 想定エラー率 | 外部 Web サイト依存。リトライ機構なし（失敗ページはスキップし処理を続行）。5 回連続失敗でサーキットブレーカーが発動し操作中断 |
-
-### rag_add（単一ページ追加）
-
-| 項目 | 内容 |
-|------|------|
-| 最悪ケースリクエスト数 | 1（robots.txt）+ 1（対象ページ）= 2 |
-| 最悪ケース所要時間 | 2 × 30 秒（per-request タイムアウト）= 60 秒 |
-| 想定エラー率 | 低リスク。単一ページのみ |
-
-### rag_crawl_preview（プレビュー）
-
-| 項目 | 内容 |
-|------|------|
-| 最悪ケースリクエスト数 | 1（インデックスページ）+ 1（robots.txt）+ 498（タイトル取得）= 500。バジェットトラッカー上限 500 で打ち切り |
-| 最悪ケース所要時間 | 500 × 0.1 秒（ハードリミット最小間隔での理論最短）= 50 秒。デフォルト設定（1.0 秒間隔）では 500 秒。操作全体タイムアウト 600 秒で打ち切り |
-| 想定エラー率 | タイトル取得失敗時は空文字列とし処理を続行 |
-
 ## 安全制約
 
 | 制約名 | 種別 | 値 | 解除可否 |
@@ -126,15 +99,12 @@ MCP サーバーとして独立動作し、16 個のツールを提供する。
 
 ### MCP ツール
 
-MCP サーバーが公開する 16 個のツール。
+MCP サーバーが公開する 18 個のツール。
 
 | ツール | 入力 | 振る舞い |
 | --- | --- | --- |
 | rag_search | クエリ、件数、source_type（任意）、filters（任意） | ベクトル検索と BM25 の生結果をチャンク単位で返す。各結果にスコア・Source・Title・Chunk位置・Typeのメタデータを含める。`source_type` 指定時はそのソース種別のチャンクのみを検索対象とする。`filters` 指定時はカスタムメタデータで絞り込む（JSON オブジェクト、完全一致）。詳細は [search-response.md](search-response.md) を参照 |
 | rag_get_document | source_id、format（任意） | ソース全文を取得する。`format=text` で変換済みテキスト（converted_store）、`format=original` でオリジナル（source_store）を返す。MCP 経由では `rag_max_response_chars` でトランケーションを行う。詳細は [search-response.md](search-response.md) を参照 |
-| rag_add | URL | 単一ページをクロールして取り込む。同一 URL の再取り込み時は既存の知識を最新に置き換える |
-| rag_crawl | URL、パターン | リンク集ページから一括クロールして取り込む。同一ドメインのみ対象 |
-| rag_crawl_preview | URL、パターン | リンク集ページからクロール対象ページのタイトルと URL の一覧を返す。取り込みは行わない |
 | rag_crawl_zenn | username、max_articles（任意） | 指定ユーザーの Zenn 記事を API 経由で取得し、ナレッジベースに取り込む。同一記事の再取り込み時は `source_id`（記事の公開 URL）の一致で検出し、既存の知識を最新に置き換える |
 | rag_crawl_bluesky | handle、max_posts（任意）、include_reposts（任意） | 指定ユーザーの BlueSky 投稿を AT Protocol API 経由で取得し、ナレッジベースに取り込む。max_posts はタイムライン全体（リポスト含む）に適用。BlueSky は投稿編集不可のため、既存 `source_id` と一致する投稿はスキップする（上書き不要） |
 | rag_add_youtube | video_url | 単一 YouTube 動画の字幕/文字起こしを取得し、ナレッジベースに取り込む。詳細は [ingesters/youtube.md](ingesters/youtube.md) を参照 |
@@ -142,19 +112,18 @@ MCP サーバーが公開する 16 個のツール。
 | rag_add_document | content、filename、encoding（任意）、upload_mode（任意） | 単一ドキュメントファイルを読み取り、ナレッジベースに取り込む。同一ファイルの再取り込み時は `source_id`（file URI）の一致で検出し、既存の知識を最新に置き換える |
 | rag_crawl_documents | dir_path、pattern（任意） | 指定ディレクトリ内のドキュメントファイルを glob パターンで検索し、一括でナレッジベースに取り込む。同一ファイルの再取り込み時は `source_id`（file URI）の一致で検出し、既存の知識を最新に置き換える |
 | rag_add_journal | title、body、repository、entry_id（任意） | ジャーナルエントリを source_store に配置し、パイプライン処理でインデックスに取り込む。詳細は [ingesters/journal.md](ingesters/journal.md) を参照 |
-| rag_site_ingest | url、url_pattern（任意）、max_pages（任意）、force（任意） | Scrapy subprocess で対象サイトをクロールし、source_store に配置後、パイプライン処理を実行する。大規模サイト向け（上限 50,000 ページ）。詳細は [site-ingest.md](site-ingest.md) を参照 |
+| rag_site_ingest | url、url_pattern（任意）、max_pages（任意）、force（任意） | Scrapy subprocess で対象サイトをクロールし、source_store に配置後、パイプライン処理を実行する。上限 1,000 ページ。詳細は [site-ingest.md](site-ingest.md) を参照 |
 | rag_delete | URL | ソース URL 指定でナレッジを論理削除する。metadata.db のステータスを `deleted` に変更し、検索インデックスから該当チャンクを削除する。source_store 内のファイルは削除しない |
 | rag_rebuild | mode、source_type（任意） | パイプラインの再構築を実行する。mode: `full`（全再構築）、`convert`（コンバートのみ再実行）、`index`（インデックスのみ再構築）、`incremental`（差分更新）。source_type 指定時はその媒体のみ対象。詳細は [rebuild-stats.md](rebuild-stats.md) を参照 |
 | rag_stats | なし | 統計情報（総チャンク数、ソース URL 数）と蓄積データ概要（ドメイン別ソース URL 一覧・タイトル）を返す。表示件数上限は `RAG_STATS_MAX_SOURCES` で制御する |
 
 ### 取り込みツールの出力形式
 
-取り込みツール（rag_add、rag_crawl、rag_crawl_zenn、rag_crawl_bluesky、rag_add_youtube、rag_crawl_youtube、
+取り込みツール（rag_crawl_zenn、rag_crawl_bluesky、rag_add_youtube、rag_crawl_youtube、
 rag_add_document、rag_crawl_documents、rag_add_journal、rag_site_ingest）は、
 source_store への配置結果とパイプライン処理結果を統合したサマリーを返す。
 配置結果には配置ファイル数・スキップ数・エラー数を含み、
 パイプライン処理結果にはコンバート・インデックス構築の処理件数を含む。
-rag_crawl_preview は source_store への配置を行わないため本出力形式の対象外。
 
 ### 検索結果の設計
 
@@ -175,7 +144,6 @@ rag_search はベクトル検索と BM25 検索の生結果をチャンク単位
 | --- | --- |
 | evaluate | 評価データセットで検索精度を計測しレポートを出力する。ベースライン比較でリグレッションを検出できる |
 | init-test-db | テスト用のベクトル DB と BM25 インデックスを初期化する |
-| crawl-preview | 指定 URL からクロール対象ページのタイトルと URL の一覧を表示する。`--format json` で JSON 出力に対応 |
 | get-document | ソース全文を取得する。`--format text\|original`、`--output` でファイル出力（トランケーションなし） |
 
 評価指標: Precision、Recall、F1、NDCG@K、MRR
@@ -280,8 +248,8 @@ MCP サーバーは CLI コマンドを呼び出す薄いアダプター層と�
 
 | ツール分類 | 実行方式 | 対象 |
 |-----------|---------|------|
-| 検索系 | インプロセス（RAGKnowledgeService 直接呼び出し） | `rag_search`, `rag_get_document`, `rag_stats`, `rag_crawl_preview`, `rag_search_aozora`, `rag_list_recent` |
-| 書き込み系 | CLI サブプロセス（`--output json` で結果をパース） | `rag_add`, `rag_crawl`, `rag_crawl_zenn`, `rag_crawl_bluesky`, `rag_add_youtube`, `rag_crawl_youtube`, `rag_add_document`, `rag_crawl_documents`, `rag_add_journal`, `rag_add_aozora`, `rag_crawl_aozora`, `rag_update_aozora_catalog`, `rag_delete`, `rag_rebuild` |
+| 検索系 | インプロセス（RAGKnowledgeService 直接呼び出し） | `rag_search`, `rag_get_document`, `rag_stats`, `rag_search_aozora`, `rag_list_recent` |
+| 書き込み系 | CLI サブプロセス（`--output json` で結果をパース） | `rag_crawl_zenn`, `rag_crawl_bluesky`, `rag_add_youtube`, `rag_crawl_youtube`, `rag_add_document`, `rag_crawl_documents`, `rag_add_journal`, `rag_add_aozora`, `rag_crawl_aozora`, `rag_update_aozora_catalog`, `rag_delete`, `rag_rebuild` |
 | Upload HTTP API | CLI サブプロセス（書き込み系と同一方式） | `/upload/document`, `/upload/journal` |
 | 特殊 | Scrapy サブプロセス + Bridge（現行維持） | `rag_site_ingest` |
 
@@ -289,8 +257,6 @@ MCP サーバーは CLI コマンドを呼び出す薄いアダプター層と�
 
 | MCP ツール / エンドポイント | CLI コマンド | 備考 |
 |---------------------------|------------|------|
-| `rag_add` | `add` | |
-| `rag_crawl` | `crawl` | |
 | `rag_crawl_zenn` | `crawl-zenn` | |
 | `rag_crawl_bluesky` | `crawl-bluesky` | |
 | `rag_add_youtube` | `ingest-youtube` | |
@@ -467,19 +433,6 @@ flowchart LR
     GET --> ANS
 ```
 
-### クロールプレビューフロー
-
-```mermaid
-flowchart LR
-    URL["リンク集 URL"] --> INDEX["リンク抽出"]
-    INDEX --> FILTER["パターンフィルタ・robots.txt"]
-    FILTER --> TITLE["各ページのタイトル取得"]
-    TITLE --> LIST["タイトル + URL 一覧を返却"]
-```
-
-クロール前に対象ページを確認する機能。実際の取り込み（チャンキング・Embedding 生成・DB 格納）は行わない。
-タイトル取得に失敗した場合はタイトルを空文字列とし、URL のみ返す。
-
 ### コンポーネント一覧
 
 | コンポーネント | 役割 |
@@ -528,7 +481,6 @@ flowchart LR
 | Embedding プロバイダー接続不可 | 疎通確認で検出し、エラーを返す |
 | `OPENAI_API_KEY` が未登録 | オンライン Embedding プロバイダーの初期化に失敗し、エラーを返す |
 | `GOOGLE_SAFE_BROWSING_API_KEY` が未登録・空・不正 | 設定エラー（`SafeBrowsingConfigError`）として即時中断する |
-| クロールプレビュー時のタイトル取得失敗 | タイトルを空文字列とし、URL のみ返す。他のページの処理は続行する |
 | rag_get_document レスポンスサイズ超過 | MCP 経由で `RAG_MAX_RESPONSE_CHARS` 超過時はトランケーションし、末尾に CLI `--output` オプションでの全文取得を案内する。CLI の `--output` 指定時はトランケーションなし |
 | バジェット上限到達 | 取得済みデータを返し、上限到達の旨をログ出力する |
 | サーキットブレーカー発動 | 操作を中断し、取得済みデータを返す。エラーの詳細をログ出力する |

@@ -94,9 +94,7 @@
 
 | 操作 | 媒体 | MCP ツール | 概要 |
 |------|------|-----------|------|
-| 単一ページ取り込み | web | `rag_add` | 単一ページを HTTP 取得し配置 |
-| 一括クロール | web | `rag_crawl` | リンク集から一括取得して配置 |
-| クロールプレビュー | web | `rag_crawl_preview` | クロール対象のタイトル・URL 一覧を返す（配置なし） |
+| サイト一括取り込み | web | `rag_site_ingest` | Scrapy でサイトを一括取得して配置 |
 | BlueSky 投稿取り込み | bluesky | `rag_crawl_bluesky` | タイムラインから投稿を取得して配置 |
 | Zenn コンテンツ取り込み | zenn | `rag_crawl_zenn` | Zenn API から記事・スクラップを取得して配置 |
 | YouTube 単一動画取り込み | youtube | `rag_add_youtube` | 単一動画の字幕/文字起こしを取得して配置 |

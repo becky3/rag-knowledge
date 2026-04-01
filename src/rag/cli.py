@@ -306,31 +306,6 @@ def main() -> None:
         help="BM25 bパラメータ（例: 0.75）",
     )
 
-    # crawl-preview サブコマンド
-    preview_parser = subparsers.add_parser("crawl-preview", help="クロール対象ページをプレビュー")
-    preview_parser.add_argument(
-        "--url",
-        required=True,
-        help="リンク集ページのURL",
-    )
-    preview_parser.add_argument(
-        "--pattern",
-        default="",
-        help="URLフィルタリング用の正規表現パターン（depth >= 2 の場合は必須）",
-    )
-    preview_parser.add_argument(
-        "--depth",
-        type=int,
-        default=None,
-        help="クロール深度（1〜10。未指定時は設定値を使用）",
-    )
-    preview_parser.add_argument(
-        "--format",
-        choices=["text", "json"],
-        default="text",
-        help="出力フォーマット（text/json）",
-    )
-
     # get-document サブコマンド
     doc_parser = subparsers.add_parser("get-document", help="ソースの全文を取得")
     doc_parser.add_argument(
@@ -438,18 +413,6 @@ def main() -> None:
     _add_output_option(delete_parser)
 
     # --- インジェスト系サブコマンド ---
-
-    # add: 単一ページ取り込み
-    add_parser = subparsers.add_parser("add", help="単一ページをナレッジベースに取り込む")
-    add_parser.add_argument("url", help="取り込むページのURL")
-    _add_output_option(add_parser)
-
-    # crawl: リンク集クロール
-    crawl_parser = subparsers.add_parser("crawl", help="リンク集ページからクロール＆一括取り込み")
-    crawl_parser.add_argument("url", help="リンク集ページのURL")
-    crawl_parser.add_argument("--pattern", default="", help="URLフィルタリング用の正規表現パターン（depth >= 2 の場合は必須）")
-    crawl_parser.add_argument("--depth", type=int, default=None, help="クロール深度（1〜10。未指定時は設定値を使用）")
-    _add_output_option(crawl_parser)
 
     # ingest-youtube: YouTube 単一動画取り込み
     yt_parser = subparsers.add_parser("ingest-youtube", help="YouTube 動画を取り込み")
@@ -562,9 +525,6 @@ def main() -> None:
     _ASYNC_COMMANDS: dict[str, object] = {
         "evaluate": run_evaluation,
         "init-test-db": init_test_db,
-        "crawl-preview": run_crawl_preview,
-        "add": run_add,
-        "crawl": run_crawl,
         "ingest-youtube": run_ingest_youtube,
         "ingest-youtube-playlist": run_ingest_youtube_playlist,
         "crawl-bluesky": run_crawl_bluesky,
@@ -625,7 +585,6 @@ async def create_rag_service(
     from .embedding.factory import get_embedding_provider
     from .vector_store import VectorStore
     from .rag_knowledge import RAGKnowledgeService
-    from .web_crawler import WebCrawler
 
     settings = get_settings()
     embedding_provider = get_embedding_provider(settings, settings.embedding_provider)
@@ -639,23 +598,11 @@ async def create_rag_service(
         hnsw_search_ef=settings.hnsw_search_ef,
     )
 
-    # WebCrawlerはダミー（評価時は使用しない）
-    web_crawler = WebCrawler(
-        timeout=settings.rag_crawl_request_timeout,
-        max_pages=settings.rag_max_crawl_pages,
-        crawl_delay=settings.rag_crawl_delay_sec,
-        max_concurrent=settings.rag_crawl_max_concurrent,
-        respect_robots_txt=settings.rag_respect_robots_txt,
-        robots_txt_cache_ttl=settings.rag_robots_txt_cache_ttl,
-    )
-
     return RAGKnowledgeService(
         vector_store=vector_store,
-        web_crawler=web_crawler,
         chunk_size=chunk_size,
         chunk_overlap=chunk_overlap,
         similarity_threshold=threshold,
-        safe_browsing_client=None,
         bm25_index=bm25_index,
         hybrid_search_enabled=bm25_index is not None,
         vector_weight=vector_weight,
@@ -1030,15 +977,13 @@ def write_markdown_report(
 async def init_test_db(args: argparse.Namespace) -> None:
     """テスト用ChromaDB・BM25インデックスを初期化する.
 
-    フィクスチャ JSON → CrawledPage 変換 → _ingest_crawled_page() で投入。
+    フィクスチャ JSON → _ingest_crawled_page() で投入。
     本番と同じチャンキングパスを通ることで、評価結果が本番動作を反映する。
     BM25インデックスも同一フィクスチャから構築・永続化する。
 
     Args:
         args: コマンドライン引数
     """
-    from .web_crawler import CrawledPage
-
     logger.info("Initializing test DB (ChromaDB + BM25)...")
     logger.info("ChromaDB persist directory: %s", args.persist_dir)
     logger.info("BM25 persist directory: %s", args.bm25_persist_dir)
@@ -1059,22 +1004,20 @@ async def init_test_db(args: argparse.Namespace) -> None:
         logger.warning("No documents found in fixture")
         return
 
-    # CrawledPage に変換
-    pages: list[CrawledPage] = []
+    # ドキュメントリストを構築
+    pages: list[dict[str, str]] = []
     for doc in documents:
         source_url = doc.get("source_url", "")
         content = doc.get("content", "")
         if not source_url or not content:
             logger.warning("Skipping document with missing source_url or content")
             continue
-        pages.append(
-            CrawledPage(
-                url=source_url,
-                title=doc.get("title", ""),
-                text=content,
-                crawled_at=datetime.now(timezone.utc).isoformat(),
-            )
-        )
+        pages.append({
+            "url": source_url,
+            "title": doc.get("title", ""),
+            "text": content,
+            "crawled_at": datetime.now(timezone.utc).isoformat(),
+        })
 
     # RAGKnowledgeService 経由で投入（本番と同じチャンキングパス）
     rag_service = await create_rag_service(
@@ -1084,7 +1027,7 @@ async def init_test_db(args: argparse.Namespace) -> None:
     )
     total = 0
     for page in pages:
-        count = await rag_service._ingest_crawled_page(page)
+        count = await rag_service._ingest_crawled_page(**page)
         total += count
     logger.info(
         "Added %d chunks from %d documents to test ChromaDB at %s",
@@ -1104,82 +1047,6 @@ async def init_test_db(args: argparse.Namespace) -> None:
         "BM25 index persisted at %s (%d documents)",
         args.bm25_persist_dir, bm25_index.get_document_count(),
     )
-
-
-async def run_crawl_preview(args: argparse.Namespace) -> None:
-    """クロール対象ページのプレビューを実行する.
-
-    Args:
-        args: コマンドライン引数
-    """
-    from .config import get_settings
-    from .pipeline.ingesters.web import WebIngester
-    from .store.source_store import SourceStore
-
-    from py_common_lib.httpx import ConstrainedClient  # safety:allowed
-
-    logger.info("Starting crawl preview for: %s", args.url)
-
-    settings = get_settings()
-    # crawl_preview は配置を行わないため、ディレクトリ作成のみ（DB 初期化不要）
-    source_store_dir = Path(settings.source_store_dir)
-    source_store_dir.mkdir(parents=True, exist_ok=True)
-    source_store = SourceStore(source_store_dir)
-
-    depth = args.depth if args.depth is not None else settings.rag_crawl_default_depth
-
-    # depth >= 2 の場合は pattern 必須
-    if depth >= 2 and not args.pattern:
-        logger.error("depth が 2 以上の場合は --pattern の指定が必須です")
-        sys.exit(1)
-
-    # MSYS パス変換検出
-    from .pipeline.ingesters.web import _looks_like_msys_path
-    if args.pattern and _looks_like_msys_path(args.pattern):
-        logger.error(
-            "pattern が Windows パスに変換されています: %r。"
-            "Git Bash 環境では先頭の / が自動変換されます。"
-            "先頭の / を除去するか、MSYS_NO_PATHCONV=1 を設定してください",
-            args.pattern,
-        )
-        sys.exit(1)
-
-    web_ingester = WebIngester(
-        source_store,
-        max_crawl_pages=settings.rag_max_crawl_pages,
-        crawl_request_timeout=settings.rag_crawl_request_timeout,
-        crawl_max_errors=settings.rag_crawl_max_errors,
-        respect_robots_txt=settings.rag_respect_robots_txt,
-        robots_txt_cache_ttl=settings.rag_robots_txt_cache_ttl,
-        safe_browsing_client=None,
-    )
-
-    try:
-        async with ConstrainedClient(
-            request_timeout=settings.rag_crawl_request_timeout,
-            request_interval=settings.rag_crawl_delay_sec,
-        ) as client:
-            pages = await web_ingester.crawl_preview(
-                args.url, pattern=args.pattern, depth=depth, client=client,
-            )
-    except ValueError as e:
-        logger.error("URL validation failed: %s", e)
-        sys.exit(1)
-
-    if not pages:
-        print("対象ページが見つかりませんでした")
-        return
-
-    if args.format == "json":
-        data = [{"title": p.get("title", ""), "url": p.get("url", "")} for p in pages]
-        print(json.dumps(data, ensure_ascii=False, indent=2))
-    else:
-        print(f"クロール対象: {len(pages)}ページ")
-        print()
-        for i, page in enumerate(pages, start=1):
-            title = page.get("title", "") or "(タイトル取得不可)"
-            print(f"{i}. {title}")
-            print(f"   {page.get('url', '')}")
 
 
 def run_get_document(args: argparse.Namespace) -> None:
@@ -1607,7 +1474,6 @@ def run_search(args: argparse.Namespace) -> None:
     from .embedding.factory import get_embedding_provider
     from .rag_knowledge import RAGKnowledgeService
     from .vector_store import VectorStore
-    from .web_crawler import WebCrawler
 
     settings = get_settings()
     embedding_provider = get_embedding_provider(settings, settings.embedding_provider)
@@ -1630,18 +1496,9 @@ def run_search(args: argparse.Namespace) -> None:
 
     service = RAGKnowledgeService(
         vector_store=vector_store,
-        web_crawler=WebCrawler(
-            timeout=settings.rag_crawl_request_timeout,
-            max_pages=settings.rag_max_crawl_pages,
-            crawl_delay=settings.rag_crawl_delay_sec,
-            max_concurrent=settings.rag_crawl_max_concurrent,
-            respect_robots_txt=settings.rag_respect_robots_txt,
-            robots_txt_cache_ttl=settings.rag_robots_txt_cache_ttl,
-        ),
         chunk_size=settings.rag_chunk_size,
         chunk_overlap=settings.rag_chunk_overlap,
         similarity_threshold=None,
-        safe_browsing_client=None,
         bm25_index=bm25_index,
         hybrid_search_enabled=True,
         vector_weight=settings.rag_vector_weight,
@@ -2004,110 +1861,6 @@ def _print_ingest_result(
         print(f"パイプライン: {pipeline_summary.processed}件処理")
         if pipeline_summary.errors:
             print(f"パイプラインエラー: {len(pipeline_summary.errors)}件")
-
-
-async def run_add(args: argparse.Namespace) -> None:
-    """単一ページ取り込み."""
-    from .pipeline.ingesters.web import WebIngester
-
-    from py_common_lib.httpx import ConstrainedClient  # safety:allowed
-
-    json_out = _is_json_output(args)
-
-    controller, settings = _build_cli_pipeline_controller()
-    sb_client = _create_safe_browsing_client_cli(settings)
-    web_ingester = WebIngester(
-        controller.source_store,
-        max_crawl_pages=settings.rag_max_crawl_pages,
-        crawl_request_timeout=settings.rag_crawl_request_timeout,
-        crawl_max_errors=settings.rag_crawl_max_errors,
-        respect_robots_txt=settings.rag_respect_robots_txt,
-        robots_txt_cache_ttl=settings.rag_robots_txt_cache_ttl,
-        safe_browsing_client=sb_client,
-    )
-
-    try:
-        async with ConstrainedClient(
-            request_timeout=settings.rag_crawl_request_timeout,
-            request_interval=settings.rag_crawl_delay_sec,
-        ) as client:
-            ingest_result = await web_ingester.add(
-                args.url, client=client,
-            )
-    except ValueError as e:
-        if json_out:
-            _output_error(str(e))
-        logger.error("エラー: %s", e)
-        sys.exit(1)
-
-    pipeline_summary = controller.ingest_and_index(f"ingest(web): add {args.url}")
-    _print_ingest_result(ingest_result, pipeline_summary, context=args.url, json_output=json_out)
-
-
-async def run_crawl(args: argparse.Namespace) -> None:
-    """リンク集クロール."""
-    from .pipeline.ingesters.web import WebIngester
-
-    from py_common_lib.httpx import ConstrainedClient  # safety:allowed
-
-    json_out = _is_json_output(args)
-
-    controller, settings = _build_cli_pipeline_controller()
-
-    depth = args.depth if args.depth is not None else settings.rag_crawl_default_depth
-
-    # depth >= 2 の場合は pattern 必須
-    if depth >= 2 and not args.pattern:
-        if json_out:
-            _output_error("depth が 2 以上の場合は --pattern の指定が必須です")
-        logger.error("depth が 2 以上の場合は --pattern の指定が必須です")
-        sys.exit(1)
-
-    # MSYS パス変換検出
-    from .pipeline.ingesters.web import _looks_like_msys_path
-    if args.pattern and _looks_like_msys_path(args.pattern):
-        msg = (
-            f"pattern が Windows パスに変換されています: {args.pattern!r}。"
-            "Git Bash 環境では先頭の / が自動変換されます。"
-            "先頭の / を除去するか、MSYS_NO_PATHCONV=1 を設定してください"
-        )
-        if json_out:
-            _output_error(msg)
-        logger.error(
-            "pattern が Windows パスに変換されています: %r。"
-            "Git Bash 環境では先頭の / が自動変換されます。"
-            "先頭の / を除去するか、MSYS_NO_PATHCONV=1 を設定してください",
-            args.pattern,
-        )
-        sys.exit(1)
-
-    sb_client = _create_safe_browsing_client_cli(settings)
-    web_ingester = WebIngester(
-        controller.source_store,
-        max_crawl_pages=settings.rag_max_crawl_pages,
-        crawl_request_timeout=settings.rag_crawl_request_timeout,
-        crawl_max_errors=settings.rag_crawl_max_errors,
-        respect_robots_txt=settings.rag_respect_robots_txt,
-        robots_txt_cache_ttl=settings.rag_robots_txt_cache_ttl,
-        safe_browsing_client=sb_client,
-    )
-
-    try:
-        async with ConstrainedClient(
-            request_timeout=settings.rag_crawl_request_timeout,
-            request_interval=settings.rag_crawl_delay_sec,
-        ) as client:
-            ingest_result = await web_ingester.crawl(
-                args.url, pattern=args.pattern, depth=depth, client=client,
-            )
-    except ValueError as e:
-        if json_out:
-            _output_error(str(e))
-        logger.error("エラー: %s", e)
-        sys.exit(1)
-
-    pipeline_summary = controller.ingest_and_index(f"ingest(web): crawl {args.url}")
-    _print_ingest_result(ingest_result, pipeline_summary, context=args.url, json_output=json_out)
 
 
 async def run_ingest_youtube(args: argparse.Namespace) -> None:
@@ -2555,9 +2308,9 @@ async def run_site_ingest(args: argparse.Namespace) -> None:
     if effective_max_pages < 1:
         effective_max_pages = 1
         logger.warning("max_pages を 1 にクランプしました")
-    elif effective_max_pages > 50000:
-        effective_max_pages = 50000
-        logger.warning("max_pages を 50000 にクランプしました")
+    elif effective_max_pages > 1000:
+        effective_max_pages = 1000
+        logger.warning("max_pages を 1000 にクランプしました")
 
     # ドメイン導出
     from urllib.parse import urlparse

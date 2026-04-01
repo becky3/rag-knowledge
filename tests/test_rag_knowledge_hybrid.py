@@ -12,7 +12,6 @@ import pytest
 from rag.bm25_index import BM25Index, BM25Result
 from rag.vector_store import RetrievalResult, VectorStore
 from rag.rag_knowledge import RAGKnowledgeService, RAGRetrievalResult
-from rag.web_crawler import CrawledPage, WebCrawler
 
 from factories import make_rag_knowledge_service
 
@@ -38,17 +37,6 @@ def mock_vector_store(mock_embedding_provider: MagicMock) -> MagicMock:
 
 
 @pytest.fixture
-def mock_web_crawler() -> MagicMock:
-    """モックWebCrawlerを作成する."""
-    mock = MagicMock(spec=WebCrawler)
-    mock.crawl_index_page = AsyncMock(return_value=[])
-    mock.crawl_page = AsyncMock(return_value=None)
-    mock.crawl_pages = AsyncMock(return_value=[])
-    mock.validate_url = MagicMock(side_effect=lambda url: url)
-    return mock
-
-
-@pytest.fixture
 def mock_bm25_index() -> MagicMock:
     """モックBM25Indexを作成する."""
     mock = MagicMock(spec=BM25Index)
@@ -62,25 +50,21 @@ def mock_bm25_index() -> MagicMock:
 @pytest.fixture
 def rag_service_vector_only(
     mock_vector_store: MagicMock,
-    mock_web_crawler: MagicMock,
 ) -> RAGKnowledgeService:
     """ベクトル検索のみのRAGKnowledgeServiceインスタンスを作成する."""
     return make_rag_knowledge_service(
         vector_store=mock_vector_store,
-        web_crawler=mock_web_crawler,
     )
 
 
 @pytest.fixture
 def rag_service_hybrid(
     mock_vector_store: MagicMock,
-    mock_web_crawler: MagicMock,
     mock_bm25_index: MagicMock,
 ) -> RAGKnowledgeService:
     """ハイブリッド検索有効のRAGKnowledgeServiceインスタンスを作成する."""
     return make_rag_knowledge_service(
         vector_store=mock_vector_store,
-        web_crawler=mock_web_crawler,
         bm25_index=mock_bm25_index,
         hybrid_search_enabled=True,
         vector_weight=0.5,
@@ -116,14 +100,12 @@ class TestHybridSearchDisabled:
     async def test_hybrid_disabled_bm25_not_used(
         self,
         mock_vector_store: MagicMock,
-        mock_web_crawler: MagicMock,
         mock_bm25_index: MagicMock,
     ) -> None:
         """AC9: hybrid_enabled=falseの場合、BM25インデックスが検索に使用されないこと."""
         # Arrange: BM25インデックスを渡すがハイブリッド検索は無効
         service = make_rag_knowledge_service(
             vector_store=mock_vector_store,
-            web_crawler=mock_web_crawler,
             bm25_index=mock_bm25_index,
         )
 
@@ -178,22 +160,20 @@ class TestBM25IndexIntegration:
     async def test_ingest_adds_to_bm25(
         self,
         rag_service_hybrid: RAGKnowledgeService,
-        mock_web_crawler: MagicMock,
         mock_vector_store: MagicMock,
         mock_bm25_index: MagicMock,
     ) -> None:
         """AC6: 取り込み時にBM25インデックスにもドキュメントが追加されること."""
         # Arrange
-        mock_web_crawler.crawl_page.return_value = CrawledPage(
+        mock_vector_store.add_documents.return_value = 1
+
+        # Act
+        result = await rag_service_hybrid._ingest_crawled_page(
             url="https://example.com/page1",
             title="Test Page",
             text="これはテストコンテンツです。十分な長さのテキストが必要です。",
             crawled_at="2024-01-01T00:00:00+00:00",
         )
-        mock_vector_store.add_documents.return_value = 1
-
-        # Act
-        result = await rag_service_hybrid.ingest_page("https://example.com/page1")
 
         # Assert
         assert result >= 1
@@ -226,7 +206,6 @@ class TestTableDataSearch:
     async def test_table_data_search_ryuuou(
         self,
         mock_vector_store: MagicMock,
-        mock_web_crawler: MagicMock,
         mock_bm25_index: MagicMock,
     ) -> None:
         """AC12: 「魔王」クエリでテーブル内のデータが検索できること.
@@ -237,7 +216,6 @@ class TestTableDataSearch:
         # similarity_threshold=0.5 のサービスを作成
         service = make_rag_knowledge_service(
             vector_store=mock_vector_store,
-            web_crawler=mock_web_crawler,
             similarity_threshold=0.5,
             bm25_index=mock_bm25_index,
             hybrid_search_enabled=True,
@@ -380,13 +358,11 @@ class TestHybridSearchEngineInitialization:
     def test_hybrid_engine_initialized_when_enabled(
         self,
         mock_vector_store: MagicMock,
-        mock_web_crawler: MagicMock,
         mock_bm25_index: MagicMock,
     ) -> None:
         """AC9: hybrid_search_enabled=Trueの場合、HybridSearchEngineが初期化されること."""
         service = make_rag_knowledge_service(
             vector_store=mock_vector_store,
-            web_crawler=mock_web_crawler,
             bm25_index=mock_bm25_index,
             hybrid_search_enabled=True,
             vector_weight=0.5,
@@ -398,13 +374,11 @@ class TestHybridSearchEngineInitialization:
     def test_hybrid_engine_not_initialized_when_disabled(
         self,
         mock_vector_store: MagicMock,
-        mock_web_crawler: MagicMock,
         mock_bm25_index: MagicMock,
     ) -> None:
         """AC9: hybrid_search_enabled=Falseの場合、HybridSearchEngineは初期化されないこと."""
         service = make_rag_knowledge_service(
             vector_store=mock_vector_store,
-            web_crawler=mock_web_crawler,
             bm25_index=mock_bm25_index,
         )
 
@@ -414,12 +388,10 @@ class TestHybridSearchEngineInitialization:
     def test_hybrid_engine_not_initialized_without_bm25_index(
         self,
         mock_vector_store: MagicMock,
-        mock_web_crawler: MagicMock,
     ) -> None:
         """AC9: bm25_indexがNoneの場合、hybrid_enabled=Trueでも初期化されないこと."""
         service = make_rag_knowledge_service(
             vector_store=mock_vector_store,
-            web_crawler=mock_web_crawler,
             hybrid_search_enabled=True,
             vector_weight=0.5,
         )
