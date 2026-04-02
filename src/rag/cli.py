@@ -1127,8 +1127,9 @@ def run_get_document(args: argparse.Namespace) -> None:
     if result.error:
         if json_out:
             _output_error(result.error)
-        print(f"エラー: {result.error}", file=sys.stderr)
-        sys.exit(1)
+        else:
+            print(f"エラー: {result.error}", file=sys.stderr)
+            sys.exit(1)
 
     if json_out:
         _output_result({

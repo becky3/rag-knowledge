@@ -1248,7 +1248,7 @@ def _format_cli_stats_result(result: dict[str, Any]) -> str:
         parts.append("  未設定" if ss.get("status") == "unconfigured" else "  ディレクトリが存在しません")
     else:
         parts.append(f"  総ファイル数: {ss.get('total_files', 0):,}")
-        parts.append(f"  総サイズ: {format_file_size(int(str(ss.get('total_size', 0))))}")
+        parts.append(f"  総サイズ: {format_file_size(int(ss.get('total_size', 0)))}")
         by_type = ss.get("by_type")
         if by_type and isinstance(by_type, dict):
             parts.append("  媒体別:")
@@ -1267,7 +1267,7 @@ def _format_cli_stats_result(result: dict[str, Any]) -> str:
         parts.append("  未設定" if cs.get("status") == "unconfigured" else "  ディレクトリが存在しません")
     else:
         parts.append(f"  総ファイル数: {cs.get('total_files', 0):,}")
-        parts.append(f"  総サイズ: {format_file_size(int(str(cs.get('total_size', 0))))}")
+        parts.append(f"  総サイズ: {format_file_size(int(cs.get('total_size', 0)))}")
 
     # インデックス
     idx = result.get("index", {})
