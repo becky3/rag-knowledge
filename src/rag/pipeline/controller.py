@@ -11,8 +11,10 @@ from __future__ import annotations
 import hashlib
 import logging
 import subprocess
+from collections.abc import Callable, Sequence
 from datetime import datetime, timezone
 from pathlib import Path
+from typing import TypeVar
 
 from rag.converter.converter import ConversionSkippedError, get_converted_rel_path
 from rag.infrastructure.file_lock import INGEST_LOCK_FILENAME, REBUILD_LOCK_FILENAME
@@ -42,6 +44,8 @@ from rag.store.source_store import SourceStore
 from rag.pipeline.ingesters._common import ProgressCallback
 
 logger = logging.getLogger(__name__)
+
+_T = TypeVar("_T")
 
 # .meta を持たない媒体
 _NO_META_TYPES: frozenset[SourceType] = frozenset({"local"})
@@ -247,41 +251,33 @@ class PipelineController:
             )
 
         # 5-6. コンバート + インデックス
-        processed = 0
-        skipped = 0
-        errors: list[str] = []
-        warnings: list[str] = []
+        def _convert_and_index(record: SourceRecord) -> None:
+            converted_path = self._converter.convert(
+                record.file_path,
+                self._source_store.root_dir,
+                self._converted_store_dir,
+            )
+            metadata = self._build_metadata_from_record(record)
+            self._indexer.add(record.source_id, converted_path, metadata)
 
-        for record in records:
-            try:
-                converted_path = self._converter.convert(
-                    record.file_path,
-                    self._source_store.root_dir,
-                    self._converted_store_dir,
-                )
-                metadata = self._build_metadata_from_record(record)
-                self._indexer.add(record.source_id, converted_path, metadata)
-                processed += 1
-            except ConversionSkippedError as e:
-                logger.warning("全再構築中にコンバートスキップ: %s (%s)", record.file_path, e)
-                warnings.append(f"{record.file_path}: {e}")
-                skipped += 1
-            except Exception:
-                logger.exception("全再構築中にエラー: %s", record.file_path)
-                errors.append(record.file_path)
-                skipped += 1
-            if progress_callback is not None:
-                progress_callback(
-                    processed + skipped, len(records),
-                    f"[{PHASE_CONVERT_AND_INDEX}] {record.file_path}",
-                )
-
-        # pipeline_history に記録（正常完了時のみ）
         to_commit = ""
         if self._git.has_commits():
             to_commit = self._git.get_head_commit()
 
-        if not errors and to_commit:
+        summary = self._run_processing_loop(
+            records,
+            process_fn=_convert_and_index,
+            get_file_path=lambda r: r.file_path,
+            phase=PHASE_CONVERT_AND_INDEX,
+            mode=PipelineMode.FULL_REBUILD,
+            log_prefix="全再構築中に",
+            progress_callback=progress_callback,
+            from_commit_id=NULL_COMMIT_HASH,
+            to_commit_id=to_commit,
+        )
+
+        # pipeline_history に記録（正常完了時のみ）
+        if not summary.errors and to_commit:
             self.db.add_pipeline_history(
                 from_commit_id=NULL_COMMIT_HASH,
                 to_commit_id=to_commit,
@@ -289,16 +285,7 @@ class PipelineController:
                 mode="full",
             )
 
-        return PipelineSummary(
-            mode=PipelineMode.FULL_REBUILD,
-            total_files=len(records),
-            processed=processed,
-            skipped=skipped,
-            errors=errors,
-            warnings=warnings,
-            from_commit_id=NULL_COMMIT_HASH,
-            to_commit_id=to_commit,
-        )
+        return summary
 
     def _check_uncommitted_changes(
         self,
@@ -372,44 +359,21 @@ class PipelineController:
             )
 
         # 3. 全ファイルをコンバート
-        processed = 0
-        skipped = 0
-        errors: list[str] = []
-        warnings: list[str] = []
+        def _convert_single(record: SourceRecord) -> None:
+            self._converter.convert(
+                record.file_path,
+                self._source_store.root_dir,
+                self._converted_store_dir,
+            )
 
-        for record in records:
-            try:
-                self._converter.convert(
-                    record.file_path,
-                    self._source_store.root_dir,
-                    self._converted_store_dir,
-                )
-                processed += 1
-            except ConversionSkippedError as e:
-                logger.warning(
-                    "コンバート再実行中にスキップ: %s (%s)", record.file_path, e,
-                )
-                warnings.append(f"{record.file_path}: {e}")
-                skipped += 1
-            except Exception:
-                logger.exception(
-                    "コンバート再実行中にエラー: %s", record.file_path,
-                )
-                errors.append(record.file_path)
-                skipped += 1
-            if progress_callback is not None:
-                progress_callback(
-                    processed + skipped, len(records),
-                    f"[{PHASE_CONVERT}] {record.file_path}",
-                )
-
-        return PipelineSummary(
+        return self._run_processing_loop(
+            records,
+            process_fn=_convert_single,
+            get_file_path=lambda r: r.file_path,
+            phase=PHASE_CONVERT,
             mode=PipelineMode.CONVERT_ONLY,
-            total_files=len(records),
-            processed=processed,
-            skipped=skipped,
-            errors=errors,
-            warnings=warnings,
+            log_prefix="コンバート再実行中に",
+            progress_callback=progress_callback,
         )
 
     def run_index_only(
@@ -453,47 +417,32 @@ class PipelineController:
             )
 
         # 3. converted_store からインデックス再構築
-        processed = 0
-        skipped = 0
-        errors: list[str] = []
-        warnings: list[str] = []
-
-        for record in records:
-            try:
-                converted_rel = get_converted_rel_path(record.file_path)
-                converted_path = self._converted_store_dir / converted_rel
-                if not converted_path.exists():
-                    logger.warning(
-                        "converted_store にファイルがありません: %s",
-                        converted_path,
-                    )
-                    warnings.append(
-                        f"{record.file_path}: converted file not found",
-                    )
-                    skipped += 1
-                    continue
-
-                metadata = self._build_metadata_from_record(record)
-                self._indexer.add(record.source_id, converted_path, metadata)
-                processed += 1
-            except Exception:
-                logger.exception(
-                    "インデックス再構築中にエラー: %s", record.file_path,
+        def _index_single(record: SourceRecord) -> None:
+            converted_rel = get_converted_rel_path(record.file_path)
+            converted_path = self._converted_store_dir / converted_rel
+            if not converted_path.exists():
+                raise ConversionSkippedError(
+                    f"converted file not found: {converted_path}",
                 )
-                errors.append(record.file_path)
-                skipped += 1
-            if progress_callback is not None:
-                progress_callback(
-                    processed + skipped, len(records),
-                    f"[{PHASE_INDEX}] {record.file_path}",
-                )
+            metadata = self._build_metadata_from_record(record)
+            self._indexer.add(record.source_id, converted_path, metadata)
 
-        # pipeline_history に記録（正常完了時のみ）
         to_commit = ""
         if self._git.has_commits():
             to_commit = self._git.get_head_commit()
 
-        if not errors and to_commit:
+        summary = self._run_processing_loop(
+            records,
+            process_fn=_index_single,
+            get_file_path=lambda r: r.file_path,
+            phase=PHASE_INDEX,
+            mode=PipelineMode.INDEX_ONLY,
+            log_prefix="インデックス再構築中に",
+            progress_callback=progress_callback,
+        )
+
+        # pipeline_history に記録（正常完了時のみ）
+        if not summary.errors and to_commit:
             self.db.add_pipeline_history(
                 from_commit_id=NULL_COMMIT_HASH,
                 to_commit_id=to_commit,
@@ -501,14 +450,7 @@ class PipelineController:
                 mode="index",
             )
 
-        return PipelineSummary(
-            mode=PipelineMode.INDEX_ONLY,
-            total_files=len(records),
-            processed=processed,
-            skipped=skipped,
-            errors=errors,
-            warnings=warnings,
-        )
+        return summary
 
     # --- 変更ファイルの特定 ---
 
@@ -574,6 +516,65 @@ class PipelineController:
         status = mapping.get(status_char, ChangeStatus.MODIFIED)
         return ChangeEntry(status=status, file_path=file_path, old_path=old_path)
 
+    # --- 共通処理ループ ---
+
+    def _run_processing_loop(
+        self,
+        items: Sequence[_T],
+        *,
+        process_fn: Callable[[_T], None],
+        get_file_path: Callable[[_T], str],
+        phase: str,
+        mode: PipelineMode,
+        log_prefix: str,
+        progress_callback: ProgressCallback | None = None,
+        from_commit_id: str = "",
+        to_commit_id: str = "",
+    ) -> PipelineSummary:
+        """共通の処理ループ.
+
+        各パイプラインモードで共通する
+        ループ + try/except + progress + PipelineSummary 組み立てを一元化する。
+        """
+        processed = 0
+        skipped = 0
+        errors: list[str] = []
+        warnings: list[str] = []
+
+        for item in items:
+            file_path = get_file_path(item)
+            try:
+                process_fn(item)
+                processed += 1
+            except ConversionSkippedError as e:
+                logger.warning(
+                    "%sスキップ: %s (%s)", log_prefix, file_path, e,
+                )
+                warnings.append(f"{file_path}: {e}")
+                skipped += 1
+            except Exception:
+                logger.exception(
+                    "%sエラー: %s", log_prefix, file_path,
+                )
+                errors.append(file_path)
+                skipped += 1
+            if progress_callback is not None:
+                progress_callback(
+                    processed + skipped, len(items),
+                    f"[{phase}] {file_path}",
+                )
+
+        return PipelineSummary(
+            mode=mode,
+            total_files=len(items),
+            processed=processed,
+            skipped=skipped,
+            errors=errors,
+            warnings=warnings,
+            from_commit_id=from_commit_id,
+            to_commit_id=to_commit_id,
+        )
+
     # --- 変更処理 ---
 
     def _process_changes(
@@ -585,40 +586,14 @@ class PipelineController:
         progress_callback: ProgressCallback | None = None,
     ) -> PipelineSummary:
         """変更エントリを処理する."""
-        processed = 0
-        skipped = 0
-        errors: list[str] = []
-        warnings: list[str] = []
-
-        for entry in changes:
-            try:
-                self._process_single_change(entry)
-                processed += 1
-            except ConversionSkippedError as e:
-                logger.warning(
-                    "コンバートスキップ: %s (%s)", entry.file_path, e,
-                )
-                warnings.append(f"{entry.file_path}: {e}")
-                skipped += 1
-            except Exception:
-                logger.exception(
-                    "パイプライン処理中にエラー: %s", entry.file_path,
-                )
-                errors.append(entry.file_path)
-                skipped += 1
-            if progress_callback is not None:
-                progress_callback(
-                    processed + skipped, len(changes),
-                    f"[{PHASE_CONVERT_AND_INDEX}] {entry.file_path}",
-                )
-
-        return PipelineSummary(
+        return self._run_processing_loop(
+            changes,
+            process_fn=self._process_single_change,
+            get_file_path=lambda e: e.file_path,
+            phase=PHASE_CONVERT_AND_INDEX,
             mode=mode,
-            total_files=len(changes),
-            processed=processed,
-            skipped=skipped,
-            errors=errors,
-            warnings=warnings,
+            log_prefix="パイプライン処理中に",
+            progress_callback=progress_callback,
             from_commit_id=from_commit_id,
             to_commit_id=to_commit_id,
         )
