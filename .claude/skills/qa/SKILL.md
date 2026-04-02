@@ -58,15 +58,16 @@ QA 検証グループ:
 5. LM Studio の接続先を確認し、必要に応じて `localhost` に変更する
 6. `.tmp` ディレクトリを作成する
 7. メインリポジトリから `.qa/` ディレクトリをコピーする（`.qa/` は `.gitignore` 対象のため worktree に含まれない）
-8. CLI フェーズを含む場合、ChromaDB サーバーを手動起動する: `uv run chroma run --path <persist_dir> --port <CHROMADB_SERVER_PORT>`（初回は venv 構築のため起動に時間がかかる。目安: 10〜20 秒。heartbeat 確認前に十分待機すること）。「MCP のみ」選択時は MCP サーバーが自動起動するためスキップする
+8. ChromaDB サーバーを手動起動する: `uv run chroma run --path <persist_dir> --port <CHROMADB_SERVER_PORT>`（初回は venv 構築のため起動に時間がかかる。目安: 10〜20 秒。heartbeat 確認前に十分待機すること）
+9. MCP フェーズを含む場合、worktree で MCP サーバーを HTTP モードで起動する: `cd <worktree-path> && uv run python -m rag.server &`。メインリポジトリの MCP サーバーが起動中の場合はポート競合するため先に停止すること。`.mcp.json` は `url` ベース（`http://localhost:<RAG_HTTP_PORT>/mcp`）のため変更不要
 
 以降の全コマンドは worktree ディレクトリで実行する。
 
 ### 4. 環境確認
 
 - 現在のブランチ・作業ディレクトリを表示
-- MCP サーバーの状態確認（CLI 検証時は disabled 推奨、MCP 検証時は enabled であることを確認）
-- ChromaDB サーバー疎通確認（CLI フェーズを含む場合のみ）: `curl http://localhost:<CHROMADB_SERVER_PORT>/api/v2/heartbeat` で応答を確認。「MCP のみ」選択時はスキップ
+- MCP サーバーの状態確認（CLI 検証時は停止推奨、MCP 検証時は HTTP モードで起動中であることを確認）
+- ChromaDB サーバー疎通確認: `curl http://localhost:<CHROMADB_SERVER_PORT>/api/v2/heartbeat` で応答を確認
 - LM Studio の接続確認（Embedding API が必要なグループの場合）
 - `.env` のストレージパスが worktree 内の絶対パスを指していることを確認
 - 問題があればユーザーに報告し、解決してから続行
@@ -96,12 +97,11 @@ qa スキル自身はステップ間の制御（次ステップへの遷移、ST
 
 インターフェース選択に応じた実行方針:
 
-- **CLI のみ**: MCP disabled を確認し、全グループを CLI で実行
-- **MCP のみ**: MCP enabled を確認し、全グループを MCP で実行
+- **CLI のみ**: MCP サーバーが停止していることを確認し、全グループを CLI で実行
+- **MCP のみ**: MCP サーバーが HTTP モードで起動中であることを確認し、全グループを MCP で実行
 - **both**: 2フェーズで実行
-  1. CLI フェーズ: MCP disabled を確認 → 全グループを CLI で実行
-  2. 切り替え: ユーザーに `/mcp` で enabled に切り替えてもらう
-  3. MCP フェーズ: MCP enabled を確認 → 全グループを MCP で実行
+  1. CLI フェーズ: 全グループを CLI で実行
+  2. MCP フェーズ: MCP サーバーが HTTP モードで起動中であることを確認 → 全グループを MCP で実行
 
 **全ステップ共通ルール:**
 
@@ -219,9 +219,13 @@ MCP 対応コマンド:
 | CLI コマンド | MCP ツール |
 |------------|-----------|
 | `add-document --file <path>` | `rag_add_document` |
-| `crawl-documents <dir>` | `rag_crawl_documents` |
+| `crawl-documents <dir>` | `rag_crawl_documents`（HTTP モード非対応、CLI のみ） |
 | `add-journal --title <t> --file <f> --repository <r>` | `rag_add_journal` |
 | `migrate-journal --dir <d> --repository <r>` | （CLI のみ） |
+
+**MCP テスト時の注意:**
+- A-2 (PDF): 大きい PDF は MCP パラメータサイズ制約で失敗する場合がある。失敗時は CLI で代替実行する
+- A-4 (crawl-documents): HTTP モード非対応のため MCP テスト時はスキップする
 
 ### B) Web
 
@@ -266,14 +270,9 @@ MCP 対応: `rag_update_aozora_catalog` / `rag_search_aozora` / `rag_add_aozora`
 
 #### グループ準備
 
-1. `.env` の `RAG_TRANSPORT` の現在の値を退避し、`http` に変更する:
+MCP サーバーが HTTP モードで起動中であること（worktree セットアップで起動済み）。
 
-   ```bash
-   grep '^RAG_TRANSPORT=' .env | cut -d= -f2 > /tmp/qa_original_transport.txt
-   sed -i 's/^RAG_TRANSPORT=.*/RAG_TRANSPORT=http/' .env
-   ```
-
-2. API キーが keyring に登録済みか確認する:
+1. API キーが keyring に登録済みか確認する:
 
    ```bash
    uv run python -c "
@@ -296,21 +295,6 @@ MCP 対応: `rag_update_aozora_catalog` / `rag_search_aozora` / `rag_add_aozora`
    " > /tmp/qa_api_key.txt
    chmod 600 /tmp/qa_api_key.txt
    ```
-
-4. HTTP サーバーを起動し、PID を記録する:
-
-   ```bash
-   uv run python -m rag.server &
-   echo $! > /tmp/qa_rag_server.pid
-   ```
-
-5. サーバーの起動を待機する（起動に数秒かかる場合がある）:
-
-   ```bash
-   sleep 5
-   ```
-
-   起動確認は F-1（最初のリクエスト）で HTTP 200 が返ることをもって行う。
 
 ベース URL: `http://localhost:<RAG_HTTP_PORT>`（デフォルト: `8081`）
 
@@ -340,9 +324,7 @@ cat /tmp/upload_bg.txt
 
 #### グループ片付け
 
-1. HTTP サーバーを停止する（起動時に記録した PID を使用。`taskkill //T` でプロセスツリーごと停止する）: `if [ -f /tmp/qa_rag_server.pid ]; then taskkill //PID "$(cat /tmp/qa_rag_server.pid)" //T //F > /dev/null 2>&1 || true; rm -f /tmp/qa_rag_server.pid; fi`
-2. `.env` の `RAG_TRANSPORT` を起動前の値に復元する: `if [ -f /tmp/qa_original_transport.txt ]; then sed -i "s/^RAG_TRANSPORT=.*/RAG_TRANSPORT=$(cat /tmp/qa_original_transport.txt)/" .env; fi`
-3. テンポラリファイルを削除する: `rm -f /tmp/qa_api_key.txt /tmp/upload_bg.txt /tmp/qa_original_transport.txt`
+1. テンポラリファイルを削除する: `rm -f /tmp/qa_api_key.txt /tmp/upload_bg.txt`
 
 ### G) Eval（CLI 固定）
 
@@ -400,5 +382,7 @@ QA 完了後、worktree 環境を片付ける。ChromaDB・HTTP サーバー等�
 
 - テストデータの作成時、実在の著作物・キャラクター情報を使用しない（`~/.claude/rules/invariants.md`）
 - 各グループの実行中にエラーが発生した場合、そのステップを NG として記録し、次のステップに進む。グループ全体を中断しない
-- MCP ツールの検証では、MCP サーバーが enabled であることを確認してから実行する。disabled の場合はユーザーに `/mcp` での状態変更を依頼する
-- **MCP と CLI の共存**: HttpClient + ファイルベースロックにより MCP と CLI の同時アクセスは技術的に可能だが、QA では検証環境の単純化のため CLI 検証時は MCP disabled を推奨する
+- MCP ツールの検証では、MCP サーバーが HTTP モードで起動中であることを確認してから実行する。起動していない場合はユーザーに起動を依頼する
+- **MCP と CLI の共存**: HttpClient + ファイルベースロックにより MCP と CLI の同時アクセスは技術的に可能だが、QA では検証環境の単純化のため CLI 検証時は MCP サーバーを停止推奨
+- **HTTP モード非対応ツール**: `crawl-documents` は HTTP モードでは実行不可（クライアントとサーバーが別マシンの可能性がありローカルパスを解決できないため）。MCP テスト時はスキップし、CLI テスト時のみ実行する
+- **大きいバイナリファイルの MCP テスト制約**: MCP の `content` パラメータに大きいファイル（PDF 等）を base64 で渡す場合、クライアント側のパラメータサイズ制約により失敗することがある。MCP テスト時は小さいファイルを使用するか、スキップして CLI で代替する

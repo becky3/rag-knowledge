@@ -1,11 +1,7 @@
 {
   "mcpServers": {
     "rag-knowledge": {
-      "command": "uv",
-      "args": ["run", "python", "-m", "rag.server"],
-      "env": {
-        "RAG_TRANSPORT": "stdio"
-      }
+      "url": "http://localhost:8081/mcp"
     }
   }
 }

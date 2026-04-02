@@ -7,32 +7,32 @@
 
 ## MCP サーバー運用ルール
 
-本リポジトリは MCP サーバーの実装リポジトリであり、`.mcp.json` で Claude Code の MCP サーバーとして登録されている。MCP サーバーが enabled の場合、Claude Code セッション中はサーバープロセスが常駐する。
+本リポジトリは MCP サーバーの実装リポジトリであり、`.mcp.json` で Claude Code の MCP サーバーとして登録されている。MCP サーバーは HTTP モード（`RAG_TRANSPORT=http`）で運用し、`.mcp.json` は `url` ベースで接続する。サーバーは別プロセスで起動しておく必要がある。
 
 ### セッション開始時の状態確認
 
-作業開始時に MCP サーバーの状態を確認すること。前回セッションの状態が引き継がれるため、意図しない状態で作業を始めるリスクがある。
+作業開始時に MCP サーバーの状態を確認すること。HTTP モードではサーバーは別プロセスで動作するため、enabled であってもサーバープロセスが停止していればツールは使えない。
 
-- **enabled の場合**: MCP サーバーが稼働中。CLI 操作はファイルベースロックにより共存可能だが、テスト実行は DB 分離のため disabled 推奨
-- **disabled の場合**: MCP ツールは使用できないが、CLI・テスト・開発作業は自由に行える
+- **サーバー起動中 + enabled の場合**: MCP ツールが使用可能。CLI 操作はファイルベースロックにより共存可能
+- **サーバー停止中 or disabled の場合**: MCP ツールは使用できないが、CLI・テスト・開発作業は自由に行える
 
-状態に応じて必要なら、ユーザーに `/mcp` での状態変更を依頼する。`/mcp` での状態変更はエージェントからは実行できない。
+MCP の接続状態の変更はユーザーに `/mcp` での操作を依頼する。サーバープロセスの起動・停止はエージェントから実行可能。
 
 ### MCP サーバーと他プロセスの共存
 
 ChromaDB は HttpClient 経由でサーバーに接続するため、MCP と CLI の同時アクセスが可能。書き込み操作はファイルベースロック（fcntl/msvcrt）でプロセス間排他制御される。
 
-| 作業 | 必要な MCP 状態 |
-|------|---------------|
-| 通常開発・CLI 操作 | enabled / disabled どちらでも可 |
-| テスト実行 | disabled 推奨（テスト用 DB との分離のため） |
-| MCP ツールの動作確認 | enabled |
+| 作業 | MCP サーバー | 備考 |
+|------|-------------|------|
+| 通常開発・CLI 操作 | 起動中 / 停止中どちらでも可 | |
+| テスト実行 | 停止推奨 | テスト用 DB との分離のため |
+| MCP ツールの動作確認 | 起動中 + enabled | |
 
 **注意**: BM25 インデックスは単一プロセス前提のインメモリキャッシュを持つ。MCP 経由の書き込み後はキャッシュが自動リセットされるが、CLI 直接実行で BM25 を更新した場合、MCP 側の検索結果に反映されるのは次回のサービスリセット後となる。
 
 ### DB 破損時の復旧
 
-MCP を disable → ChromaDB サーバーが起動していることを確認（停止していれば `uv run chroma run --path <CHROMADB_PERSIST_DIR>` で手動起動）→ CLI `rebuild --mode full` で復旧する。
+MCP サーバープロセスを停止 → ChromaDB サーバーが起動していることを確認（停止していれば `uv run chroma run --path <CHROMADB_PERSIST_DIR>` で手動起動）→ CLI `rebuild --mode full` で復旧する。
 
 ### worktree 環境セットアップ
 
@@ -66,7 +66,7 @@ worktree で CLI 操作・動作確認を行う場合、以下のセットアッ
    mkdir -p <worktree-path>/.tmp
    ```
 
-5. ChromaDB サーバーを起動する（メインリポジトリの MCP が enabled の場合はポート 8000 が使用中のため、`.env` で `CHROMADB_SERVER_PORT` を変更すること）。初回は venv 構築のため起動に時間がかかる（目安: 10〜20 秒）。heartbeat 確認前に十分待機すること:
+5. ChromaDB サーバーを起動する（メインリポジトリの MCP サーバーが起動中の場合はポート 8000 が使用中のため、`.env` で `CHROMADB_SERVER_PORT` を変更すること）。初回は venv 構築のため起動に時間がかかる（目安: 10〜20 秒）。heartbeat 確認前に十分待機すること:
 
    ```bash
    uv run chroma run --path <worktree-path>/.tmp/test_chroma_db --port <別ポート>
@@ -98,23 +98,23 @@ uv run python -m rag.cli search --query "<クエリ>"
 
 worktree で開発中のコードを MCP サーバーとして動作確認する手順:
 
-1. `.mcp.json` の `args` に `--directory` を追加し、worktree の絶対パスを指定する:
-
-   ```json
-   "args": ["--directory", "D:\\GitHub\\becky3\\rag-knowledge-wt-XXX", "run", "python", "-m", "rag.server"]
-   ```
-
-2. worktree の `.env` でストレージパスを絶対パスに変更する（相対パスだとメインリポジトリのストレージを参照してしまう）:
+1. worktree の `.env` でストレージパスを絶対パスに変更する（相対パスだとメインリポジトリのストレージを参照してしまう）:
 
    ```
    CHROMADB_PERSIST_DIR=D:/GitHub/becky3/rag-knowledge-wt-XXX/.tmp/test_chroma_db
    ```
 
-3. `/mcp` で disable → enable（プロセス再起動が必要。reconnect では `.env` が再読み込みされない）
+2. worktree で MCP サーバーを HTTP モードで起動する:
 
-4. 動作確認完了後、`.mcp.json` を元に戻す（`--directory` を削除）
+   ```bash
+   cd <worktree-path> && uv run python -m rag.server &
+   ```
 
-注意: `--directory .` は MCP サーバー起動時の cwd に依存するため使用不可。絶対パスを指定すること。
+3. `.mcp.json` の `url` は `http://localhost:<RAG_HTTP_PORT>/mcp` のまま変更不要（worktree のサーバーが同じポートで起動するため）。メインリポジトリの MCP サーバーが起動中の場合はポート競合するため、先に停止すること
+
+4. `/mcp` で reconnect（サーバー再接続）。`.mcp.json` を変更した場合はセッション再起動が必要
+
+5. 動作確認完了後、worktree のサーバープロセスを停止する
 
 ## Claude Code 拡張機能
 

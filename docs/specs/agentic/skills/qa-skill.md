@@ -25,7 +25,9 @@ MCP ツール・CLI コマンド・HTTP API の機能を実際に実行し、正
 ## 制約
 
 - **worktree 環境での実行**: 本番ストレージに影響を与えないよう、worktree 環境で実行する。ストレージパスは worktree 内の絶対パスを使用する
-- **MCP サーバーの分離**: MCP ツール検証時は MCP サーバーを enabled にする。CLI 検証時は disabled を推奨する（HttpClient + ファイルベースロックにより同時アクセスは技術的に可能だが、検証環境の単純化のため分離する）
+- **MCP サーバーの分離**: MCP ツール検証時は MCP サーバーを HTTP モードで起動する。CLI 検証時は停止を推奨する（HttpClient + ファイルベースロックにより同時アクセスは技術的に可能だが、検証環境の単純化のため分離する）
+- **HTTP モード非対応ツール**: `crawl-documents`（`rag_crawl_documents`）は HTTP モードでは実行不可（クライアントとサーバーが別マシンの可能性がありローカルパスを解決できないため）。MCP テスト時はスキップし、CLI テスト時のみ実行する
+- **大きいバイナリファイルの MCP テスト制約**: MCP の `content` パラメータに大きいファイル（PDF 等）を渡す場合、クライアント側のパラメータサイズ制約により失敗することがある。MCP テスト時は小さいファイルを使用するか、CLI で代替する
 - **YouTube の実行制限**: YouTube グループ（D）を選択した場合、実行直前にユーザー確認を必ず挟む。IP ブロックリスクがあるため
 - **外部 API への最小アクセス**: 外部 API を使用するグループでは、取り込み件数を最小限に制限する（具体値は検証リソース定義に従う）
 - **エラー時の継続動作**: 各ステップでエラーが発生した場合、NG として記録し次のステップに進む。グループ全体を中断しない
@@ -114,15 +116,16 @@ QA 検証グループ:
 4. LM Studio の接続先を確認し、必要に応じて `localhost` に変更する
 5. `.tmp` ディレクトリを作成する
 6. メインリポジトリから `.qa/` ディレクトリをコピーする（`.qa/` は `.gitignore` 対象のため worktree に含まれない）
-7. CLI フェーズを含む場合、ChromaDB サーバーを手動起動する: `uv run chroma run --path <persist_dir> --port <CHROMADB_SERVER_PORT>`（初回は venv 構築のため起動に時間がかかる。目安: 10〜20 秒。heartbeat 確認前に十分待機すること）。「MCP のみ」選択時は MCP サーバーが自動起動するためスキップする
+7. ChromaDB サーバーを手動起動する: `uv run chroma run --path <persist_dir> --port <CHROMADB_SERVER_PORT>`（初回は venv 構築のため起動に時間がかかる。目安: 10〜20 秒。heartbeat 確認前に十分待機すること）
+8. MCP フェーズを含む場合、worktree で MCP サーバーを HTTP モードで起動する: `cd <worktree-path> && uv run python -m rag.server &`。メインリポジトリの MCP サーバーが起動中の場合はポート競合するため先に停止すること。`.mcp.json` は `url` ベースのため変更不要
 
 以降の全コマンドは worktree ディレクトリで実行する。
 
 ### ステップ 4: 環境確認
 
 - 現在のブランチ・ディレクトリを確認する
-- MCP サーバーの状態を確認する（CLI 検証時は disabled 推奨）
-- ChromaDB サーバー疎通確認（CLI フェーズを含む場合のみ）: `curl http://localhost:<CHROMADB_SERVER_PORT>/api/v2/heartbeat` で応答を確認する。「MCP のみ」選択時はスキップする
+- MCP サーバーの状態を確認する（MCP フェーズでは HTTP モードで起動中であること、CLI 検証時は停止推奨）
+- ChromaDB サーバー疎通確認: `curl http://localhost:<CHROMADB_SERVER_PORT>/api/v2/heartbeat` で応答を確認する
 - LM Studio の接続確認（Embedding API が必要なグループの場合）
 - `.env` のストレージパスが worktree 内の絶対パスを指していることを確認する
 
@@ -157,12 +160,11 @@ qa スキルが qa-execute を経由せず直接実行してよい操作を以�
 
 #### インターフェース選択に応じた実行方針
 
-- **CLI のみ**: MCP サーバーが disabled であることを確認し、全グループを CLI で実行する
-- **MCP のみ**: MCP サーバーが enabled であることを確認し、全グループを MCP で実行する
+- **CLI のみ**: MCP サーバーを停止し、全グループを CLI で実行する
+- **MCP のみ**: MCP サーバーが HTTP モードで起動中であることを確認し、全グループを MCP で実行する
 - **both**: 2フェーズで実行する
-  1. **CLI フェーズ**: MCP disabled を確認し、全グループを CLI で実行する
-  2. **切り替え**: ユーザーに `/mcp` で MCP サーバーを enabled に切り替えてもらう
-  3. **MCP フェーズ**: MCP enabled を確認し、全グループを MCP で実行する
+  1. **CLI フェーズ**: MCP サーバーを停止し、全グループを CLI で実行する
+  2. **MCP フェーズ**: MCP サーバーを HTTP モードで起動し、全グループを MCP で実行する
 
 MCP フェーズでの追加確認（書き込み系ツール実行時）:
 
@@ -238,9 +240,13 @@ CLI / MCP 対応:
 | CLI コマンド | MCP ツール |
 |------------|-----------|
 | `add-document --file <path>` | `rag_add_document` |
-| `crawl-documents <dir>` | `rag_crawl_documents` |
+| `crawl-documents <dir>` | `rag_crawl_documents`（HTTP モード非対応、CLI のみ） |
 | `add-journal --title <t> --file <f> --repository <r>` | `rag_add_journal` |
 | `migrate-journal --dir <d> --repository <r>` | （CLI のみ） |
+
+**MCP テスト時の注意:**
+- A-2 (PDF): 大きい PDF は MCP パラメータサイズ制約で失敗する場合がある。失敗時は CLI で代替実行する
+- A-4 (crawl-documents): HTTP モード非対応のため MCP テスト時はスキップする
 
 ### B) Web
 
@@ -291,18 +297,11 @@ CLI / MCP 対応: `rag_update_aozora_catalog` / `rag_search_aozora` / `rag_add_a
 
 ### F) Upload
 
-目的: HTTP Upload API の動作確認。HTTP モードでの MCP サーバー起動が必要。
+目的: HTTP Upload API の動作確認。MCP サーバーが HTTP モードで起動中であること（worktree セットアップで起動済み）。
 
 #### グループ準備
 
-1. `.env` の `RAG_TRANSPORT` の現在の値を退避し、`http` に変更する:
-
-   ```bash
-   grep '^RAG_TRANSPORT=' .env | cut -d= -f2 > /tmp/qa_original_transport.txt
-   sed -i 's/^RAG_TRANSPORT=.*/RAG_TRANSPORT=http/' .env
-   ```
-
-2. API キーが keyring に登録済みか確認する:
+1. API キーが keyring に登録済みか確認する:
 
    ```bash
    uv run python -c "
@@ -324,19 +323,6 @@ CLI / MCP 対応: `rag_update_aozora_catalog` / `rag_search_aozora` / `rag_add_a
    print(keyring.get_password(UPLOAD_API_KEY_SERVICE, UPLOAD_API_KEY_NAME))
    " > /tmp/qa_api_key.txt
    chmod 600 /tmp/qa_api_key.txt
-   ```
-
-4. HTTP サーバーを起動し、PID を記録する:
-
-   ```bash
-   uv run python -m rag.server &
-   echo $! > /tmp/qa_rag_server.pid
-   ```
-
-5. サーバーの起動を待機する（起動に数秒かかる場合がある）:
-
-   ```bash
-   sleep 5
    ```
 
    起動確認は F-1（最初のリクエスト）で HTTP 200 が返ることをもって行う。
@@ -369,9 +355,7 @@ cat /tmp/upload_bg.txt
 
 #### グループ片付け
 
-1. HTTP サーバーを停止する（起動時に記録した PID を使用。`taskkill //T` でプロセスツリーごと停止する）: `if [ -f /tmp/qa_rag_server.pid ]; then taskkill //PID "$(cat /tmp/qa_rag_server.pid)" //T //F > /dev/null 2>&1 || true; rm -f /tmp/qa_rag_server.pid; fi`
-2. `.env` の `RAG_TRANSPORT` を起動前の値に復元する: `if [ -f /tmp/qa_original_transport.txt ]; then sed -i "s/^RAG_TRANSPORT=.*/RAG_TRANSPORT=$(cat /tmp/qa_original_transport.txt)/" .env; fi`
-3. テンポラリファイルを削除する: `rm -f /tmp/qa_api_key.txt /tmp/upload_bg.txt /tmp/qa_original_transport.txt`
+1. テンポラリファイルを削除する: `rm -f /tmp/qa_api_key.txt /tmp/upload_bg.txt`
 
 ### G) Eval
 
