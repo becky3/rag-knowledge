@@ -131,6 +131,11 @@ def _output_progress(processed: int, total: int, current: str) -> None:
     _output_json({"type": "progress", "processed": processed, "total": total, "current": current})
 
 
+def _output_info(message: str) -> None:
+    """info JSON を出力する（total 不明の進捗通知用）."""
+    _output_json({"type": "info", "message": message})
+
+
 def _wrap_progress(
     cb: Callable[[int, int, str], None] | None,
     phase: str,
@@ -2587,10 +2592,13 @@ async def run_site_ingest(args: argparse.Namespace) -> None:
         error_count=settings.site_ingest_error_count,
     )
 
+    info_cb = _output_info if json_out else None
+
     if multi_url_mode:
         crawl_result = await runner.run(
             start_urls=validated_urls,
             allowed_domains=allowed_domains,
+            info_callback=info_cb,
         )
     else:
         crawl_result = await runner.run(
@@ -2599,6 +2607,7 @@ async def run_site_ingest(args: argparse.Namespace) -> None:
             url_pattern=args.url_pattern,
             max_pages=effective_max_pages,
             force=args.force,
+            info_callback=info_cb,
         )
 
     display_url = validated_urls[0] if not multi_url_mode else f"{len(validated_urls)} URLs"

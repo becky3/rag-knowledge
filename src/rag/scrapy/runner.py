@@ -19,7 +19,7 @@ import shutil
 import sys
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable
 from urllib.parse import urlparse
 
 logger = logging.getLogger(__name__)
@@ -111,6 +111,7 @@ class ScrapyRunner:
         url_pattern: str = "",
         max_pages: int | None = None,
         force: bool = False,
+        info_callback: Callable[[str], None] | None = None,
     ) -> CrawlResult:
         """Scrapy Spider を subprocess で起動してクロールを実行する.
 
@@ -121,6 +122,7 @@ class ScrapyRunner:
             url_pattern: URL フィルタ正規表現（クロールモードのみ）
             max_pages: ページ数上限（None の場合はインスタンス設定値を使用）
             force: True の場合、クロールディレクトリ全体を削除して最初からクロール
+            info_callback: クロール中の URL を通知するコールバック（URL 文字列を受け取る）
 
         Returns:
             クロール実行結果
@@ -255,7 +257,22 @@ class ScrapyRunner:
                 stderr=stderr_file,
                 env=env,
             )
-            exit_code = await process.wait()
+            if info_callback is not None:
+                monitor_task = asyncio.create_task(
+                    self._monitor_jsonl(jsonl_path, info_callback),
+                )
+                try:
+                    exit_code = await process.wait()
+                finally:
+                    monitor_task.cancel()
+                    try:
+                        await monitor_task
+                    except asyncio.CancelledError:
+                        pass
+                    # 未通知の残行を最終通知
+                    self._flush_remaining_jsonl(jsonl_path, info_callback)
+            else:
+                exit_code = await process.wait()
         finally:
             stderr_file.close()
 
@@ -287,6 +304,50 @@ class ScrapyRunner:
             crawl_dir=crawl_dir,
             stderr_tail=stderr_tail,
         )
+
+    async def _monitor_jsonl(
+        self,
+        jsonl_path: Path,
+        callback: Callable[[str], None],
+    ) -> None:
+        """JSONL ファイルを定期ポーリングし、新しい行を検出して callback に通知する."""
+        self._jsonl_notified_count = 0
+        while True:
+            await asyncio.sleep(2)
+            self._notify_new_jsonl_lines(jsonl_path, callback)
+
+    def _notify_new_jsonl_lines(
+        self,
+        jsonl_path: Path,
+        callback: Callable[[str], None],
+    ) -> None:
+        """JSONL ファイルの未通知行を読み取り callback で通知する."""
+        if not jsonl_path.exists():
+            return
+        try:
+            lines = jsonl_path.read_text(encoding="utf-8").splitlines()
+        except OSError:
+            return
+        new_lines = lines[self._jsonl_notified_count:]
+        for i, line in enumerate(new_lines, start=self._jsonl_notified_count + 1):
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                data = json.loads(line)
+                url = data.get("url", "")
+                callback(f"クロール中({i}件目): {url}")
+            except json.JSONDecodeError:
+                pass
+        self._jsonl_notified_count = len(lines)
+
+    def _flush_remaining_jsonl(
+        self,
+        jsonl_path: Path,
+        callback: Callable[[str], None],
+    ) -> None:
+        """Scrapy 終了後、未通知の残行を最終通知する."""
+        self._notify_new_jsonl_lines(jsonl_path, callback)
 
     def _build_spider_script(self, *, params_path: Path) -> str:
         """Scrapy Spider を実行するインラインスクリプトを構築する.

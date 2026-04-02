@@ -1009,6 +1009,10 @@ async def _run_cli_subprocess(
                                 message=current,
                             )
                         continue
+                    if msg_type == "info":
+                        if ctx is not None:
+                            await ctx.info(str(data.get("message", "")))
+                        continue
                     # result/error のみ最終結果として保持
                     if msg_type in {"result", "error"}:
                         _result_line = line

@@ -100,6 +100,12 @@ MCP ツール `rag_site_ingest` と CLI コマンド `site-ingest` の 2 つの�
 - Scrapy の `CLOSESPIDER_ERRORCOUNT` 設定で制御する
 - 閾値到達後も JOBDIR が残存するため、再実行で続きから取得できる
 
+### 進捗通知
+
+- Scrapy subprocess は事前に総ページ数が不明なため、既存の `ProgressCallback(processed, total, current)` によるプログレスバー表示は適さない。代わりに `info` タイプの出力で、クロール中の URL をリアルタイムに通知する
+- CLI は Scrapy subprocess の待機中に、JSONL ファイル（追記モード）を定期ポーリングし、新しい行を検出するたびに `{"type": "info", "message": "..."}` を stdout に出力する
+- MCP サーバーは CLI の stdout から `"type": "info"` の JSON 行を検出し、`ctx.info(message)` のみを呼び出す（`ctx.report_progress()` は呼ばない）
+
 ### Windows エンコーディング
 
 - cp932 コンソールでの `UnicodeEncodeError` 対策として、subprocess 起動時に `PYTHONIOENCODING=utf-8` を環境変数に設定する
@@ -187,6 +193,18 @@ MCP ツール `rag_site_ingest` と CLI コマンド `site-ingest` の 2 つの�
 | source_store 配置結果 | 配置ファイル数、上書き数、スキップ数（重複等）、エラー数 |
 | パイプライン処理結果 | コンバート・インデックス構築の処理件数 |
 
+### 進捗通知の出力形式
+
+`--output json` モード時、Scrapy クロール中に以下の JSON Lines を stdout に出力する:
+
+```json
+{"type": "info", "message": "クロール中(3件目): https://example.com/docs/page3.html"}
+```
+
+`N件目` は JSONL ファイルの行番号（1始まり）を使用する。JSONL には 200 OK レスポンスのみが出力されるため、実質的にクロール成功ページ数と一致する。
+
+既存の `{"type": "progress", ...}` とは異なり、`processed` / `total` フィールドを持たない。MCP サーバーは `"type": "info"` を検出した場合、`ctx.info(message)` のみを呼び出し、`ctx.report_progress()` は呼ばない。
+
 ## コンポーネント構成
 
 ### 全体フロー
@@ -269,6 +287,13 @@ Scrapy プロセスの subprocess ラッパー。
 - 環境変数 `PYTHONIOENCODING=utf-8` を設定する
 - `process.wait()` でプロセスの終了を待機し、exit code で成否を判定する
 - exit code 0 以外の場合はエラーログを出力する（stderr ファイルの末尾を読み取り）
+
+進捗通知（JSONL ファイル監視）:
+
+- `process.wait()` の待機中に、asyncio タスクで JSONL ファイルの行数を定期ポーリングする（間隔: 1-2 秒）
+- 新しい行を検出するたびに、呼び出し元から渡された通知コールバック（URL 文字列を受け取る）で報告する
+- Scrapy プロセス終了時に監視タスクを停止し、未通知の残行を最終通知する
+- `--output json` モードでない場合（テキスト出力モード）は監視タスクを起動しない
 
 Scrapy に渡す設定:
 
@@ -404,7 +429,15 @@ sequenceDiagram
     CMD->>CMD: 一時保存ディレクトリ準備
     CMD->>RUNNER: Scrapy 起動要求
     RUNNER->>SPIDER: subprocess 起動
-    SPIDER->>SPIDER: クロール実行（HTML 保存 + JSONL 出力）
+    par クロール実行と進捗監視
+        SPIDER->>SPIDER: クロール実行（HTML 保存 + JSONL 出力）
+    and
+        loop JSONL ファイル監視（1-2秒間隔）
+            RUNNER->>RUNNER: 新しい JSONL 行を検出
+            RUNNER->>CMD: クロール中 URL を通知
+            CMD->>USER: info 出力（クロール中: URL）
+        end
+    end
     SPIDER->>RUNNER: プロセス終了（exit code）
     RUNNER->>CMD: クロール結果
     CMD->>BRIDGE: JSONL + HTML → source_store 変換
