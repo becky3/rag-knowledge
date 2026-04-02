@@ -456,6 +456,7 @@ class PipelineController:
         processed = 0
         skipped = 0
         errors: list[str] = []
+        warnings: list[str] = []
 
         for record in records:
             try:
@@ -465,6 +466,9 @@ class PipelineController:
                     logger.warning(
                         "converted_store にファイルがありません: %s",
                         converted_path,
+                    )
+                    warnings.append(
+                        f"{record.file_path}: converted file not found",
                     )
                     skipped += 1
                     continue
@@ -503,6 +507,7 @@ class PipelineController:
             processed=processed,
             skipped=skipped,
             errors=errors,
+            warnings=warnings,
         )
 
     # --- 変更ファイルの特定 ---
