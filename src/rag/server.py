@@ -509,7 +509,7 @@ async def rag_crawl_documents(
     knowledge base, ingest, document directory, bulk import, glob.
     指定ディレクトリ内のドキュメントファイルを glob パターンで検索し、
     一括でナレッジベースに取り込む。
-    CLI 専用。HTTP モードではクライアントとサーバーが別マシンの可能性があり、
+    stdio モード専用。HTTP モードではクライアントとサーバーが別マシンの可能性があり、
     ローカルパスを解決できないため無効。
 
     Args:

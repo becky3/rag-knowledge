@@ -112,7 +112,7 @@ worktree で開発中のコードを MCP サーバーとして動作確認する
 
 3. `.mcp.json` の `url` は `http://localhost:<RAG_HTTP_PORT>/mcp` のまま変更不要（worktree のサーバーが同じポートで起動するため）。メインリポジトリの MCP サーバーが起動中の場合はポート競合するため、先に停止すること
 
-4. `/mcp` で reconnect（サーバー再接続）。`.mcp.json` を変更した場合はセッション再起動が必要
+4. `/mcp` で disabled の場合は enable、enabled の場合は reconnect（サーバー再接続）。`.mcp.json` を変更した場合はセッション再起動が必要
 
 5. 動作確認完了後、worktree のサーバープロセスを停止する
 

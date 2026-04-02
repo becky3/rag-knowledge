@@ -124,7 +124,7 @@ QA 検証グループ:
 ### ステップ 4: 環境確認
 
 - 現在のブランチ・ディレクトリを確認する
-- MCP サーバーの状態を確認する（MCP フェーズでは HTTP モードで起動中であること、CLI 検証時は停止推奨）
+- MCP サーバーの状態を確認する（MCP フェーズでは HTTP モードで起動中かつ `/mcp` で enabled であること、CLI 検証時は停止推奨）。disabled の場合はユーザーに有効化を依頼する
 - ChromaDB サーバー疎通確認: `curl http://localhost:<CHROMADB_SERVER_PORT>/api/v2/heartbeat` で応答を確認する
 - LM Studio の接続確認（Embedding API が必要なグループの場合）
 - `.env` のストレージパスが worktree 内の絶対パスを指していることを確認する
