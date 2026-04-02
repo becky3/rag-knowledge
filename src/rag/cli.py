@@ -20,6 +20,7 @@ from typing import TYPE_CHECKING, TypedDict
 from urllib.parse import urldefrag
 
 from .filter_parser import parse_filters
+from .pipeline.models import PHASE_FETCH
 from .evaluation import (
     EvaluationReport,
     FailureTag,
@@ -35,6 +36,8 @@ FAILURE_TAG_DESCRIPTIONS: dict[str, tuple[str, str]] = {
 }
 
 if TYPE_CHECKING:
+    from collections.abc import Callable
+
     from .bm25_index import BM25Index
     from .config import RAGSettings as Settings
     from .pipeline.controller import PipelineController
@@ -128,6 +131,20 @@ def _output_progress(processed: int, total: int, current: str) -> None:
     _output_json({"type": "progress", "processed": processed, "total": total, "current": current})
 
 
+def _wrap_progress(
+    cb: Callable[[int, int, str], None] | None,
+    phase: str,
+) -> Callable[[int, int, str], None] | None:
+    """progress_callback にフェーズ名プレフィックスを付与するラッパー."""
+    if cb is None:
+        return None
+
+    def wrapped(processed: int, total: int, current: str) -> None:
+        cb(processed, total, f"[{phase}] {current}")
+
+    return wrapped
+
+
 def _output_error(message: str) -> None:
     """エラー JSON を出力し、exit code 1 で終了する."""
     _output_json({"type": "error", "error": True, "message": message})
@@ -164,6 +181,7 @@ def _ingest_result_to_dict(
             "processed": pipeline_summary.processed,
             "skipped": pipeline_summary.skipped,
             "errors": pipeline_summary.errors,
+            "warnings": pipeline_summary.warnings,
         }
     return data
 
@@ -1331,6 +1349,7 @@ def run_rebuild(args: argparse.Namespace) -> None:
                 "processed": summary.processed,
                 "skipped": summary.skipped,
                 "errors": summary.errors,
+                "warnings": summary.warnings,
                 "elapsed": round(elapsed, 1),
             })
             if summary.errors:
@@ -1344,12 +1363,16 @@ def run_rebuild(args: argparse.Namespace) -> None:
             return
 
         logger.info(
-            "再構築完了: %d 処理 / %d スキップ / %d エラー / %s",
+            "再構築完了: %d 処理 / %d スキップ / %d エラー / %d 警告 / %s",
             summary.processed,
             summary.skipped,
             len(summary.errors),
+            len(summary.warnings),
             _format_elapsed(elapsed),
         )
+        if summary.warnings:
+            for warn in summary.warnings:
+                logger.warning("  警告: %s", warn)
         if summary.errors:
             has_error = True
             for err_file in summary.errors:
@@ -1726,6 +1749,7 @@ def run_delete(args: argparse.Namespace) -> None:
         args: コマンドライン引数
     """
     json_out = _is_json_output(args)
+    progress_cb = _output_progress if json_out else None
 
     controller, _settings = _build_cli_pipeline_controller()
     source_id: str = args.source_id
@@ -1740,7 +1764,10 @@ def run_delete(args: argparse.Namespace) -> None:
         sys.exit(1)
 
     try:
-        summary = controller.ingest_and_index(f"delete: {source_id}")
+        summary = controller.ingest_and_index(
+            f"delete: {source_id}",
+            progress_callback=progress_cb,
+        )
     except Exception:
         logger.exception("削除パイプライン実行に失敗: %s", source_id)
         if json_out:
@@ -1760,14 +1787,19 @@ def run_delete(args: argparse.Namespace) -> None:
                 "processed": summary.processed,
                 "skipped": summary.skipped,
                 "errors": summary.errors,
+                "warnings": summary.warnings,
             },
         })
         return
 
+    if summary.warnings:
+        print(f"パイプライン警告: {len(summary.warnings)}件")
+        for warn in summary.warnings:
+            print(f"  - {warn}")
     if summary.errors:
-        print(f"警告: パイプラインでエラーが発生しました: {source_id}", file=sys.stderr)
+        print(f"パイプラインエラー: {len(summary.errors)}件")
         for err in summary.errors:
-            print(f"  - {err}", file=sys.stderr)
+            print(f"  - {err}")
     print(f"削除しました: {source_id}")
 
 
@@ -1781,6 +1813,7 @@ async def run_add_journal(args: argparse.Namespace) -> None:
     from .pipeline.ingesters.journal import JournalIngester
 
     json_out = _is_json_output(args)
+    progress_cb = _output_progress if json_out else None
 
     controller, _settings = _build_cli_pipeline_controller()
 
@@ -1829,7 +1862,8 @@ async def run_add_journal(args: argparse.Namespace) -> None:
             raise SystemExit(1)
 
         pipeline_summary = controller.ingest_and_index(
-            f"ingest(journal): add {args.title}"
+            f"ingest(journal): add {args.title}",
+            progress_callback=progress_cb,
         )
         _print_ingest_result(
             ingest_result, pipeline_summary, context=f"journal/{args.repository}",
@@ -2045,8 +2079,14 @@ def _print_ingest_result(
     print(ingest_result.summary(context=context))
     if pipeline_summary is not None:
         print(f"パイプライン: {pipeline_summary.processed}件処理")
+        if pipeline_summary.warnings:
+            print(f"パイプライン警告: {len(pipeline_summary.warnings)}件")
+            for warn in pipeline_summary.warnings:
+                print(f"  - {warn}")
         if pipeline_summary.errors:
             print(f"パイプラインエラー: {len(pipeline_summary.errors)}件")
+            for err in pipeline_summary.errors:
+                print(f"  - {err}")
 
 
 async def run_ingest_youtube(args: argparse.Namespace) -> None:
@@ -2054,6 +2094,7 @@ async def run_ingest_youtube(args: argparse.Namespace) -> None:
     from .pipeline.ingesters.youtube import YoutubeIngester
 
     json_out = _is_json_output(args)
+    progress_cb = _output_progress if json_out else None
 
     controller, settings = _build_cli_pipeline_controller()
 
@@ -2080,7 +2121,10 @@ async def run_ingest_youtube(args: argparse.Namespace) -> None:
         _print_ingest_result(ingest_result, None, context=f"動画: {args.video_url}", json_output=json_out)
         return
 
-    pipeline_summary = controller.ingest_and_index(f"ingest(youtube): {args.video_url}")
+    pipeline_summary = controller.ingest_and_index(
+        f"ingest(youtube): {args.video_url}",
+        progress_callback=progress_cb,
+    )
     _print_ingest_result(ingest_result, pipeline_summary, context=f"動画: {args.video_url}", json_output=json_out)
 
 
@@ -2111,7 +2155,7 @@ async def run_ingest_youtube_playlist(args: argparse.Namespace) -> None:
         ingest_result = await youtube_ingester.crawl_playlist(
             args.playlist_url,
             max_videos=max_videos,
-            progress_callback=progress_cb,
+            progress_callback=_wrap_progress(progress_cb, PHASE_FETCH),
         )
     except (ValueError, TypeError) as e:
         if json_out:
@@ -2123,7 +2167,10 @@ async def run_ingest_youtube_playlist(args: argparse.Namespace) -> None:
         _print_ingest_result(ingest_result, None, context=f"プレイリスト: {args.playlist_url}", json_output=json_out)
         return
 
-    pipeline_summary = controller.ingest_and_index(f"ingest(youtube-playlist): {args.playlist_url}")
+    pipeline_summary = controller.ingest_and_index(
+        f"ingest(youtube-playlist): {args.playlist_url}",
+        progress_callback=progress_cb,
+    )
     _print_ingest_result(ingest_result, pipeline_summary, context=f"プレイリスト: {args.playlist_url}", json_output=json_out)
 
 
@@ -2178,7 +2225,7 @@ async def run_crawl_bluesky(args: argparse.Namespace) -> None:
                 max_posts=max_posts,
                 include_reposts=include_reposts,
                 client=client,
-                progress_callback=progress_cb,
+                progress_callback=_wrap_progress(progress_cb, PHASE_FETCH),
             )
 
             # 投稿内 URL の自動取り込み
@@ -2195,7 +2242,10 @@ async def run_crawl_bluesky(args: argparse.Namespace) -> None:
         logger.error("エラー: %s", e)
         sys.exit(1)
 
-    pipeline_summary = controller.ingest_and_index(f"ingest(bluesky): {args.handle}")
+    pipeline_summary = controller.ingest_and_index(
+        f"ingest(bluesky): {args.handle}",
+        progress_callback=progress_cb,
+    )
     if json_out:
         data = _ingest_result_to_dict(ingest_result, pipeline_summary)
         if url_stats:
@@ -2249,7 +2299,7 @@ async def run_crawl_zenn(args: argparse.Namespace) -> None:
                 content_type=args.content_type,
                 force=args.force,
                 client=client,
-                progress_callback=progress_cb,
+                progress_callback=_wrap_progress(progress_cb, PHASE_FETCH),
             )
     except (ValueError, TypeError) as e:
         if json_out:
@@ -2267,7 +2317,10 @@ async def run_crawl_zenn(args: argparse.Namespace) -> None:
             print(f"コンテンツが見つかりませんでした（ユーザー: {args.username}）")
         return
 
-    pipeline_summary = controller.ingest_and_index(f"ingest(zenn): {args.username}")
+    pipeline_summary = controller.ingest_and_index(
+        f"ingest(zenn): {args.username}",
+        progress_callback=progress_cb,
+    )
     _print_ingest_result(ingest_result, pipeline_summary, context=f"ユーザー: {args.username}", json_output=json_out)
 
 
@@ -2278,6 +2331,7 @@ async def run_add_document(args: argparse.Namespace) -> None:
     from .upload import decode_upload_content
 
     json_out = _is_json_output(args)
+    progress_cb = _output_progress if json_out else None
 
     controller, settings = _build_cli_pipeline_controller()
 
@@ -2398,7 +2452,10 @@ async def run_add_document(args: argparse.Namespace) -> None:
             print(f"エラー: {ingest_result.error_details[0]}", file=sys.stderr)
             raise SystemExit(1)
 
-        pipeline_summary = controller.ingest_and_index(f"ingest(local): add {filename}")
+        pipeline_summary = controller.ingest_and_index(
+            f"ingest(local): add {filename}",
+            progress_callback=progress_cb,
+        )
         _print_ingest_result(ingest_result, pipeline_summary, context=display_name, json_output=json_out)
     finally:
         lock.release()
@@ -2428,7 +2485,7 @@ async def run_crawl_documents(args: argparse.Namespace) -> None:
 
     ingest_result = local_ingester.crawl_documents(
         args.dir_path, args.pattern, upload_mode=args.upload_mode,
-        progress_callback=progress_cb,
+        progress_callback=_wrap_progress(progress_cb, PHASE_FETCH),
     )
 
     if ingest_result.placed == 0 and ingest_result.errors == 0:
@@ -2443,7 +2500,10 @@ async def run_crawl_documents(args: argparse.Namespace) -> None:
         print(f"エラー: {ingest_result.error_details[0]}", file=sys.stderr)
         raise SystemExit(1)
 
-    pipeline_summary = controller.ingest_and_index(f"ingest(local): crawl {args.dir_path}")
+    pipeline_summary = controller.ingest_and_index(
+        f"ingest(local): crawl {args.dir_path}",
+        progress_callback=progress_cb,
+    )
     _print_ingest_result(ingest_result, pipeline_summary, context=f"ディレクトリ: {args.dir_path}", json_output=json_out)
 
 
@@ -2457,6 +2517,7 @@ async def run_site_ingest(args: argparse.Namespace) -> None:
     from .utils.url import check_ssrf, validate_url
 
     json_out = _is_json_output(args)
+    progress_cb = _output_progress if json_out else None
 
     urls: list[str] = args.url  # nargs='+' なのでリスト
     multi_url_mode = len(urls) >= 2
@@ -2572,7 +2633,10 @@ async def run_site_ingest(args: argparse.Namespace) -> None:
     pipeline_summary = None
     has_changes = (bridge_result.ingest.placed + bridge_result.ingest.overwritten) > 0
     if has_changes and not args.download_only:
-        pipeline_summary = controller.ingest_and_index(f"ingest(web): site-ingest {display_url}")
+        pipeline_summary = controller.ingest_and_index(
+            f"ingest(web): site-ingest {display_url}",
+            progress_callback=progress_cb,
+        )
     elif has_changes and args.download_only:
         controller.commit(f"ingest(web): site-ingest {display_url} (download_only)")
 
@@ -2705,6 +2769,7 @@ async def run_ingest_aozora(args: argparse.Namespace) -> None:
     from py_common_lib.httpx import ConstrainedClient  # safety:allowed
 
     json_out = _is_json_output(args)
+    progress_cb = _output_progress if json_out else None
 
     controller, settings = _build_cli_pipeline_controller()
 
@@ -2727,7 +2792,10 @@ async def run_ingest_aozora(args: argparse.Namespace) -> None:
         logger.error("エラー: %s", e)
         sys.exit(1)
 
-    pipeline_summary = controller.ingest_and_index(f"ingest(aozora): book_id={args.book_id}")
+    pipeline_summary = controller.ingest_and_index(
+        f"ingest(aozora): book_id={args.book_id}",
+        progress_callback=progress_cb,
+    )
     _print_ingest_result(ingest_result, pipeline_summary, context=f"作品ID: {args.book_id}", json_output=json_out)
 
 
@@ -2759,7 +2827,7 @@ async def run_ingest_aozora_author(args: argparse.Namespace) -> None:
                 args.person_id,
                 max_works=max_works,
                 client=client,
-                progress_callback=progress_cb,
+                progress_callback=_wrap_progress(progress_cb, PHASE_FETCH),
             )
     except (ValueError, TypeError) as e:
         if json_out:
@@ -2767,7 +2835,10 @@ async def run_ingest_aozora_author(args: argparse.Namespace) -> None:
         logger.error("エラー: %s", e)
         sys.exit(1)
 
-    pipeline_summary = controller.ingest_and_index(f"ingest(aozora): person_id={args.person_id}")
+    pipeline_summary = controller.ingest_and_index(
+        f"ingest(aozora): person_id={args.person_id}",
+        progress_callback=progress_cb,
+    )
     _print_ingest_result(ingest_result, pipeline_summary, context=f"著者ID: {args.person_id}", json_output=json_out)
 
 

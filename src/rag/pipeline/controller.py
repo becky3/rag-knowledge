@@ -14,10 +14,13 @@ import subprocess
 from datetime import datetime, timezone
 from pathlib import Path
 
-from rag.converter.converter import get_converted_rel_path
+from rag.converter.converter import ConversionSkippedError, get_converted_rel_path
 from rag.infrastructure.file_lock import INGEST_LOCK_FILENAME, REBUILD_LOCK_FILENAME
 from rag.pipeline.git_ops import GitOperations
 from rag.pipeline.models import (
+    PHASE_CONVERT,
+    PHASE_CONVERT_AND_INDEX,
+    PHASE_INDEX,
     ChangeEntry,
     ChangeStatus,
     PipelineMode,
@@ -247,6 +250,7 @@ class PipelineController:
         processed = 0
         skipped = 0
         errors: list[str] = []
+        warnings: list[str] = []
 
         for record in records:
             try:
@@ -258,12 +262,19 @@ class PipelineController:
                 metadata = self._build_metadata_from_record(record)
                 self._indexer.add(record.source_id, converted_path, metadata)
                 processed += 1
+            except ConversionSkippedError as e:
+                logger.warning("全再構築中にコンバートスキップ: %s (%s)", record.file_path, e)
+                warnings.append(f"{record.file_path}: {e}")
+                skipped += 1
             except Exception:
                 logger.exception("全再構築中にエラー: %s", record.file_path)
                 errors.append(record.file_path)
                 skipped += 1
             if progress_callback is not None:
-                progress_callback(processed + skipped, len(records), record.file_path)
+                progress_callback(
+                    processed + skipped, len(records),
+                    f"[{PHASE_CONVERT_AND_INDEX}] {record.file_path}",
+                )
 
         # pipeline_history に記録（正常完了時のみ）
         to_commit = ""
@@ -284,6 +295,7 @@ class PipelineController:
             processed=processed,
             skipped=skipped,
             errors=errors,
+            warnings=warnings,
             from_commit_id=NULL_COMMIT_HASH,
             to_commit_id=to_commit,
         )
@@ -363,6 +375,7 @@ class PipelineController:
         processed = 0
         skipped = 0
         errors: list[str] = []
+        warnings: list[str] = []
 
         for record in records:
             try:
@@ -372,6 +385,12 @@ class PipelineController:
                     self._converted_store_dir,
                 )
                 processed += 1
+            except ConversionSkippedError as e:
+                logger.warning(
+                    "コンバート再実行中にスキップ: %s (%s)", record.file_path, e,
+                )
+                warnings.append(f"{record.file_path}: {e}")
+                skipped += 1
             except Exception:
                 logger.exception(
                     "コンバート再実行中にエラー: %s", record.file_path,
@@ -379,7 +398,10 @@ class PipelineController:
                 errors.append(record.file_path)
                 skipped += 1
             if progress_callback is not None:
-                progress_callback(processed + skipped, len(records), record.file_path)
+                progress_callback(
+                    processed + skipped, len(records),
+                    f"[{PHASE_CONVERT}] {record.file_path}",
+                )
 
         return PipelineSummary(
             mode=PipelineMode.CONVERT_ONLY,
@@ -387,6 +409,7 @@ class PipelineController:
             processed=processed,
             skipped=skipped,
             errors=errors,
+            warnings=warnings,
         )
 
     def run_index_only(
@@ -433,6 +456,7 @@ class PipelineController:
         processed = 0
         skipped = 0
         errors: list[str] = []
+        warnings: list[str] = []
 
         for record in records:
             try:
@@ -442,6 +466,9 @@ class PipelineController:
                     logger.warning(
                         "converted_store にファイルがありません: %s",
                         converted_path,
+                    )
+                    warnings.append(
+                        f"{record.file_path}: converted file not found",
                     )
                     skipped += 1
                     continue
@@ -456,7 +483,10 @@ class PipelineController:
                 errors.append(record.file_path)
                 skipped += 1
             if progress_callback is not None:
-                progress_callback(processed + skipped, len(records), record.file_path)
+                progress_callback(
+                    processed + skipped, len(records),
+                    f"[{PHASE_INDEX}] {record.file_path}",
+                )
 
         # pipeline_history に記録（正常完了時のみ）
         to_commit = ""
@@ -477,6 +507,7 @@ class PipelineController:
             processed=processed,
             skipped=skipped,
             errors=errors,
+            warnings=warnings,
         )
 
     # --- 変更ファイルの特定 ---
@@ -557,11 +588,18 @@ class PipelineController:
         processed = 0
         skipped = 0
         errors: list[str] = []
+        warnings: list[str] = []
 
         for entry in changes:
             try:
                 self._process_single_change(entry)
                 processed += 1
+            except ConversionSkippedError as e:
+                logger.warning(
+                    "コンバートスキップ: %s (%s)", entry.file_path, e,
+                )
+                warnings.append(f"{entry.file_path}: {e}")
+                skipped += 1
             except Exception:
                 logger.exception(
                     "パイプライン処理中にエラー: %s", entry.file_path,
@@ -569,7 +607,10 @@ class PipelineController:
                 errors.append(entry.file_path)
                 skipped += 1
             if progress_callback is not None:
-                progress_callback(processed + skipped, len(changes), entry.file_path)
+                progress_callback(
+                    processed + skipped, len(changes),
+                    f"[{PHASE_CONVERT_AND_INDEX}] {entry.file_path}",
+                )
 
         return PipelineSummary(
             mode=mode,
@@ -577,6 +618,7 @@ class PipelineController:
             processed=processed,
             skipped=skipped,
             errors=errors,
+            warnings=warnings,
             from_commit_id=from_commit_id,
             to_commit_id=to_commit_id,
         )
