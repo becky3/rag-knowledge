@@ -10,7 +10,7 @@ import logging
 from pathlib import Path
 from typing import TYPE_CHECKING, Literal
 
-from rag.pipeline.ingesters._common import IngestResult
+from rag.pipeline.ingesters._common import IngestResult, ProgressCallback
 
 if TYPE_CHECKING:
     from rag.store.source_store import SourceStore
@@ -84,6 +84,7 @@ class LocalIngester:
         pattern: str = "**/*",
         *,
         upload_mode: UploadMode = "fail",
+        progress_callback: ProgressCallback | None = None,
     ) -> IngestResult:
         """ディレクトリ内のドキュメントファイルを一括配置する.
 
@@ -92,6 +93,7 @@ class LocalIngester:
             pattern: glob パターン
             upload_mode: 同名ファイル存在時の動作
                 ``fail`` — スキップ（個別ファイル）、``replace`` — 上書き
+            progress_callback: 進捗コールバック (processed, total, current)
         """
         result = IngestResult()
         try:
@@ -105,7 +107,7 @@ class LocalIngester:
         resolved_dir = Path(dir_path.strip()).resolve()
         dir_basename = resolved_dir.name
         date_prefix = self._upload_date_prefix()
-        for fp in files:
+        for file_idx, fp in enumerate(files):
             try:
                 if fp.stat().st_size == 0:
                     logger.warning("Skipping empty file (0 bytes): %s", fp)
@@ -131,6 +133,9 @@ class LocalIngester:
                 logger.exception("Failed to copy file: %s", fp)
                 result.errors += 1
                 result.error_details.append(str(fp))
+
+            if progress_callback is not None:
+                progress_callback(file_idx + 1, len(files), str(fp))
         return result
 
     @staticmethod

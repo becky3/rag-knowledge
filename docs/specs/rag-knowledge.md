@@ -305,6 +305,21 @@ CLI の JSON 出力は JSON Lines 形式:
 | `{"type": "result", ...}` | コマンド結果（コマンド固有のフィールドを含む） |
 | `{"type": "error", "error": true, "message": "..."}` | エラー報告（exit code 1） |
 
+全 CLI コマンドが `--output json` オプションに対応している（evaluate, init-test-db, get-document, migrate-journal, generate-api-key を除く。evaluate・init-test-db は評価専用、get-document はテキスト出力がそのまま結果となるため、これらは MCP 経由で使用しないか別の方式で結果を取得する）。
+
+#### 進捗コールバック
+
+複数件処理を行うコマンドは `--output json` モード時に `progress` メッセージを出力し、MCP 経由で進捗を通知する。
+
+| CLI コマンド | 進捗の粒度 |
+|------------|----------|
+| `rebuild` | パイプライン処理ファイル単位 |
+| `ingest-youtube-playlist` | 動画単位 |
+| `crawl-bluesky` | 投稿単位 |
+| `crawl-zenn` | 記事/スクラップ単位 |
+| `crawl-documents` | ファイル単位 |
+| `ingest-aozora-author` | 作品単位 |
+
 #### CLI stdin 入力プロトコル
 
 `rag_add_journal` と `rag_add_document` は MCP クライアントからコンテンツを文字列で受け取る。CLI コマンドはファイルパスを期待するため、`--stdin` オプションで stdin からコンテンツを読み取る方式を提供する。

@@ -5,8 +5,11 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
+
+ProgressCallback = Callable[[int, int, str], None]
 
 
 @dataclass

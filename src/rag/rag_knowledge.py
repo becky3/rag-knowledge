@@ -115,6 +115,20 @@ class VectorSearchItem:
     collected_at: str = ""
     section_path: str = ""
 
+    def to_dict(self) -> dict[str, object]:
+        """JSON 出力用 dict に変換する."""
+        return {
+            "text": self.text,
+            "source_url": self.source_url,
+            "distance": self.distance,
+            "chunk_index": self.chunk_index,
+            "title": self.title,
+            "source_type": self.source_type,
+            "total_chunks": self.total_chunks,
+            "collected_at": self.collected_at,
+            "section_path": self.section_path,
+        }
+
 
 @dataclass
 class BM25SearchItem:
@@ -144,6 +158,21 @@ class BM25SearchItem:
     total_chunks: int = 0
     collected_at: str = ""
     section_path: str = ""
+
+    def to_dict(self) -> dict[str, object]:
+        """JSON 出力用 dict に変換する."""
+        return {
+            "text": self.text,
+            "source_url": self.source_url,
+            "score": self.score,
+            "doc_id": self.doc_id,
+            "chunk_index": self.chunk_index,
+            "title": self.title,
+            "source_type": self.source_type,
+            "total_chunks": self.total_chunks,
+            "collected_at": self.collected_at,
+            "section_path": self.section_path,
+        }
 
 
 @dataclass

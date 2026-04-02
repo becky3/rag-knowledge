@@ -12,7 +12,7 @@ import json
 import logging
 from typing import TYPE_CHECKING, Any
 
-from rag.pipeline.ingesters._common import IngestResult, now_iso
+from rag.pipeline.ingesters._common import IngestResult, ProgressCallback, now_iso
 
 if TYPE_CHECKING:
 
@@ -54,6 +54,7 @@ class ZennIngester:
         content_type: str = "all",
         force: bool = False,
         client: Any | None = None,
+        progress_callback: ProgressCallback | None = None,
     ) -> IngestResult:
         """Zenn コンテンツを取得し source_store に配置する.
 
@@ -63,6 +64,7 @@ class ZennIngester:
             content_type: 取得対象（``articles``, ``scraps``, ``all``）
             force: 既存ファイルを上書きするか（デフォルト: False＝スキップモード）
             client: ConstrainedClient インスタンス
+            progress_callback: 進捗コールバック (processed, total, current)
 
         Returns:
             配置結果
@@ -86,13 +88,32 @@ class ZennIngester:
             raise ValueError("client (ConstrainedClient) が必要です")
 
         # content_type に応じて処理
-        if content_type in ("articles", "all"):
-            await self._crawl_articles(
-                username, effective_max, client, result, force=force
+        # content_type="all" 時は articles → scraps の順に処理するため、
+        # 進捗の total がリセットされないようオフセットで合計管理する
+        progress_offset = [0]
+
+        def _offset_progress(processed: int, total: int, current: str) -> None:
+            assert progress_callback is not None  # noqa: S101
+            progress_callback(
+                progress_offset[0] + processed,
+                progress_offset[0] + total,
+                current,
             )
+
+        effective_cb = _offset_progress if progress_callback is not None else None
+
+        if content_type in ("articles", "all"):
+            items_before = result.placed + result.skipped + result.errors
+            await self._crawl_articles(
+                username, effective_max, client, result, force=force,
+                progress_callback=effective_cb,
+            )
+            progress_offset[0] = (result.placed + result.skipped + result.errors) - items_before
+
         if content_type in ("scraps", "all"):
             await self._crawl_scraps(
-                username, effective_max, client, result, force=force
+                username, effective_max, client, result, force=force,
+                progress_callback=effective_cb,
             )
 
         return result
@@ -105,6 +126,7 @@ class ZennIngester:
         result: IngestResult,
         *,
         force: bool = False,
+        progress_callback: ProgressCallback | None = None,
     ) -> None:
         """記事を取得して配置する."""
         # 一覧走査
@@ -112,7 +134,7 @@ class ZennIngester:
             username, "articles", max_articles, client
         )
 
-        for slug in slugs:
+        for i, slug in enumerate(slugs):
             try:
                 # スキップ判定: 既存ファイルがあり force でなければスキップ
                 rel_path = f"zenn/{username}/articles/{slug}.json"
@@ -172,6 +194,9 @@ class ZennIngester:
                 result.errors += 1
                 result.error_details.append(f"articles/{slug}")
 
+            if progress_callback is not None:
+                progress_callback(i + 1, len(slugs), f"articles/{slug}")
+
     async def _crawl_scraps(
         self,
         username: str,
@@ -180,6 +205,7 @@ class ZennIngester:
         result: IngestResult,
         *,
         force: bool = False,
+        progress_callback: ProgressCallback | None = None,
     ) -> None:
         """スクラップを取得して配置する."""
         # 一覧走査
@@ -187,7 +213,7 @@ class ZennIngester:
             username, "scraps", max_articles, client
         )
 
-        for slug in slugs:
+        for i, slug in enumerate(slugs):
             try:
                 # スキップ判定: 既存ファイルがあり force でなければスキップ
                 rel_path = f"zenn/{username}/scraps/{slug}.json"
@@ -239,6 +265,9 @@ class ZennIngester:
                 logger.exception("スクラップの取得・配置に失敗しました: %s", slug)
                 result.errors += 1
                 result.error_details.append(f"scraps/{slug}")
+
+            if progress_callback is not None:
+                progress_callback(i + 1, len(slugs), f"scraps/{slug}")
 
     async def _discover_slugs(
         self,

@@ -11,7 +11,6 @@ from __future__ import annotations
 import hashlib
 import logging
 import subprocess
-from collections.abc import Callable
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -37,10 +36,9 @@ from rag.store.models import (
 from rag.store.resolve import resolve_source_id, resolve_title
 from rag.store.source_store import SourceStore
 
-logger = logging.getLogger(__name__)
+from rag.pipeline.ingesters._common import ProgressCallback
 
-# 進捗コールバック型: (processed, total, current_file) -> None
-ProgressCallback = Callable[[int, int, str], None]
+logger = logging.getLogger(__name__)
 
 # .meta を持たない媒体
 _NO_META_TYPES: frozenset[SourceType] = frozenset({"local"})

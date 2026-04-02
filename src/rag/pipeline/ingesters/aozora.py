@@ -15,7 +15,7 @@ import zipfile
 from pathlib import PurePosixPath
 from typing import TYPE_CHECKING, Any
 
-from rag.pipeline.ingesters._common import IngestResult, now_iso
+from rag.pipeline.ingesters._common import IngestResult, ProgressCallback, now_iso
 
 if TYPE_CHECKING:
 
@@ -275,6 +275,7 @@ class AozoraIngester:
         *,
         max_works: int | None = None,
         client: Any | None = None,
+        progress_callback: ProgressCallback | None = None,
     ) -> IngestResult:
         """指定著者の著作権フリー作品を一括取り込みする.
 
@@ -282,6 +283,7 @@ class AozoraIngester:
             person_id: 著者の人物 ID
             max_works: 最大取り込み数
             client: ConstrainedClient インスタンス
+            progress_callback: 進捗コールバック (processed, total, current)
 
         Returns:
             配置結果
@@ -322,7 +324,8 @@ class AozoraIngester:
         result = IngestResult()
         consecutive_failures = 0
 
-        for record in targets:
+        for work_idx, record in enumerate(targets):
+            book_id = record.get(COL_BOOK_ID, "?")
             try:
                 placed = await self._ingest_work(record, client, result)
                 if placed:
@@ -331,7 +334,6 @@ class AozoraIngester:
                     # スキップ（重複）の場合はリセット
                     consecutive_failures = 0
             except Exception:
-                book_id = record.get(COL_BOOK_ID, "?")
                 logger.exception("作品の取得・配置に失敗しました: %s", book_id)
                 result.errors += 1
                 result.error_details.append(f"book_id={book_id}")
@@ -343,6 +345,9 @@ class AozoraIngester:
                         "操作を中断します"
                     )
                     break
+
+            if progress_callback is not None:
+                progress_callback(work_idx + 1, len(targets), f"book_id={book_id}")
 
         return result
 
