@@ -121,8 +121,12 @@ def _format_ingest_response(
     parts = [ingest_result.summary(context=context)]
     if pipeline_summary is not None:
         parts.append(f"パイプライン: {pipeline_summary.processed}件処理")
+        if pipeline_summary.warnings:
+            details = "; ".join(pipeline_summary.warnings[:5])
+            parts.append(f"パイプライン警告: {len(pipeline_summary.warnings)}件 ({details})")
         if pipeline_summary.errors:
-            parts.append(f"パイプラインエラー: {len(pipeline_summary.errors)}件")
+            details = "; ".join(pipeline_summary.errors[:5])
+            parts.append(f"パイプラインエラー: {len(pipeline_summary.errors)}件 ({details})")
     return " / ".join(parts)
 
 
@@ -828,9 +832,16 @@ def _format_rebuild_summary(summary: PipelineSummary, elapsed: float) -> str:
         f"再構築完了 ({mode_name})",
         f"  処理件数: {summary.processed}",
         f"  スキップ: {summary.skipped}",
+        f"  警告: {len(summary.warnings)}",
         f"  エラー: {len(summary.errors)}",
         f"  所要時間: {elapsed:.1f} 秒",
     ]
+    if summary.warnings:
+        parts.append("  警告詳細:")
+        for warn in summary.warnings[:10]:
+            parts.append(f"    - {warn}")
+        if len(summary.warnings) > 10:
+            parts.append(f"    ... 他 {len(summary.warnings) - 10} 件")
     if summary.errors:
         parts.append("  エラーファイル:")
         for err_file in summary.errors[:10]:
@@ -992,8 +1003,10 @@ async def _run_cli_subprocess(
                             processed = data.get("processed", 0)
                             total = data.get("total", 0)
                             current = data.get("current", "")
-                            await ctx.info(f"処理中: {processed}/{total} - {current}")
-                            await ctx.report_progress(float(processed), float(total))
+                            await ctx.report_progress(
+                                float(processed), float(total),
+                                message=current,
+                            )
                         continue
                     # result/error のみ最終結果として保持
                     if msg_type in {"result", "error"}:
@@ -1105,6 +1118,7 @@ def _parse_pipeline_summary(data: dict[str, Any]) -> PipelineSummary | None:
             processed=data.get("processed", 0),
             skipped=data.get("skipped", 0),
             errors=data.get("errors", []),
+            warnings=data.get("warnings", []),
         )
     except ValueError:
         return None

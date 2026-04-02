@@ -48,8 +48,16 @@ class PipelineSummary:
     processed: int
     skipped: int
     errors: list[str] = field(default_factory=list)
+    warnings: list[str] = field(default_factory=list)
     from_commit_id: str = ""
     to_commit_id: str = ""
+
+
+# プログレス通知のフェーズ名
+PHASE_FETCH = "Fetch"
+PHASE_CONVERT = "Convert"
+PHASE_INDEX = "Index"
+PHASE_CONVERT_AND_INDEX = "Convert & Index"
 
 
 def detect_source_type(rel_path: str) -> SourceType:

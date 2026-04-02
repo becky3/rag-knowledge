@@ -157,7 +157,7 @@ MCP サーバー（server.py）は stdout を行単位で読み取り、`progres
 1. `asyncio.create_subprocess_exec` で CLI サブプロセスを起動
 2. stdout を行単位で非同期に読み取る（`readline()` ループ）
 3. 各行を JSON パースし:
-   - `type: "progress"` → `ctx.info()` でログ通知 + `ctx.report_progress()` で数値通知
+   - `type: "progress"` → `ctx.report_progress(processed, total, message=current)` で進捗通知
    - `type: "result"` → 結果として返却
    - `type: "error"` → エラーとして処理
 4. stderr はプロセス終了後に読み取る
