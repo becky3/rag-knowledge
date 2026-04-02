@@ -509,7 +509,8 @@ async def rag_crawl_documents(
     knowledge base, ingest, document directory, bulk import, glob.
     指定ディレクトリ内のドキュメントファイルを glob パターンで検索し、
     一括でナレッジベースに取り込む。
-    stdio モード専用。HTTP モードでは無効。
+    stdio モード専用。HTTP モードではクライアントとサーバーが別マシンの可能性があり、
+    ローカルパスを解決できないため無効。
 
     Args:
         dir_path: 取り込み対象ディレクトリのパス（絶対パスまたは相対パス）
@@ -520,7 +521,7 @@ async def rag_crawl_documents(
         取り込み結果のサマリーテキスト
     """
     if get_settings().rag_transport == "http":
-        return "エラー: rag_crawl_documents は HTTP モードでは無効です（セキュリティ上の制約）"
+        return "エラー: rag_crawl_documents は HTTP モードでは無効です（クライアントとサーバーが別マシンの可能性があり、ローカルパスを解決できないため）"
 
     args: list[str] = [dir_path]
     if pattern != "**/*":
