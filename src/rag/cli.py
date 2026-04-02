@@ -400,7 +400,8 @@ def main() -> None:
     )
     _add_output_option(rebuild_parser)
     # stats サブコマンド
-    subparsers.add_parser("stats", help="ナレッジベースの統計情報を表示")
+    stats_parser = subparsers.add_parser("stats", help="ナレッジベースの統計情報を表示")
+    _add_output_option(stats_parser)
 
     # list-recent サブコマンド
     list_recent_parser = subparsers.add_parser(
@@ -425,6 +426,7 @@ def main() -> None:
         default=None,
         help="取得件数（1〜100、未指定時は設定値を使用）",
     )
+    _add_output_option(list_recent_parser)
 
     # search サブコマンド
     search_parser = subparsers.add_parser("search", help="ナレッジベースを検索")
@@ -452,6 +454,7 @@ def main() -> None:
         default=None,
         help="メタデータフィルタ（key=value 形式、例: 'repository=rag-knowledge'）",
     )
+    _add_output_option(search_parser)
 
     # delete サブコマンド
     delete_parser = subparsers.add_parser("delete", help="ソースをナレッジベースから論理削除")
@@ -515,6 +518,7 @@ def main() -> None:
         default=False,
         help="Scrapy クロール + Bridge（source_store 配置 + git commit）まで実行し、パイプライン処理をスキップ",
     )
+    _add_output_option(siteingest_parser)
 
     # update-aozora-catalog: 青空文庫カタログ更新
     update_aozora_parser = subparsers.add_parser("update-aozora-catalog", help="青空文庫カタログを更新")
@@ -525,6 +529,7 @@ def main() -> None:
     search_aozora_parser.add_argument("--author", default=None, help="著者名（部分一致）")
     search_aozora_parser.add_argument("--title", default=None, help="作品タイトル（部分一致）")
     search_aozora_parser.add_argument("--limit", type=int, default=20, help="最大表示件数（デフォルト: 20）")
+    _add_output_option(search_aozora_parser)
 
     # ingest-aozora: 青空文庫作品取り込み
     ingest_aozora_parser = subparsers.add_parser("ingest-aozora", help="青空文庫の作品を取り込み")
@@ -1364,19 +1369,20 @@ def run_stats(args: argparse.Namespace) -> None:
     from .store.metadata_db import MetadataDB
     from .vector_store import VectorStore
 
+    json_out = _is_json_output(args)
     settings = get_settings()
 
-    parts: list[str] = ["RAG Knowledge 統計"]
+    # --- データ収集 ---
+    stats_data: dict[str, object] = {}
 
-    # --- source_store セクション ---
-    parts.append("")
-    parts.append("■ source_store")
+    # source_store
+    source_store_data: dict[str, object] = {}
     if not settings.source_store_dir:
-        parts.append("  未設定")
+        source_store_data["status"] = "unconfigured"
     else:
         source_store_dir = Path(settings.source_store_dir)
         if not source_store_dir.exists():
-            parts.append("  ディレクトリが存在しません")
+            source_store_data["status"] = "not_found"
         else:
             total_files = 0
             total_size = 0
@@ -1405,26 +1411,23 @@ def run_stats(args: argparse.Namespace) -> None:
                 by_type[st]["files"] += 1
                 by_type[st]["size"] += size
 
-            parts.append(f"  総ファイル数: {total_files:,}")
-            parts.append(f"  総サイズ: {_format_cli_size(total_size)}")
+            source_store_data["total_files"] = total_files
+            source_store_data["total_size"] = total_size
             if by_type:
-                parts.append("  媒体別:")
-                for st_key in sorted(by_type.keys()):
-                    info = by_type[st_key]
-                    parts.append(
-                        f"    {st_key}: {info['files']} files"
-                        f" ({_format_cli_size(info['size'])})"
-                    )
+                source_store_data["by_type"] = {
+                    k: {"files": v["files"], "size": v["size"]}
+                    for k, v in sorted(by_type.items())
+                }
+    stats_data["source_store"] = source_store_data
 
-    # --- converted_store セクション ---
-    parts.append("")
-    parts.append("■ converted_store")
+    # converted_store
+    converted_store_data: dict[str, object] = {}
     if not settings.converted_store_dir:
-        parts.append("  未設定")
+        converted_store_data["status"] = "unconfigured"
     else:
         cs_dir = Path(settings.converted_store_dir)
         if not cs_dir.exists():
-            parts.append("  ディレクトリが存在しません")
+            converted_store_data["status"] = "not_found"
         else:
             cs_files = 0
             cs_size = 0
@@ -1432,12 +1435,12 @@ def run_stats(args: argparse.Namespace) -> None:
                 if file.is_file():
                     cs_files += 1
                     cs_size += file.stat().st_size
-            parts.append(f"  総ファイル数: {cs_files:,}")
-            parts.append(f"  総サイズ: {_format_cli_size(cs_size)}")
+            converted_store_data["total_files"] = cs_files
+            converted_store_data["total_size"] = cs_size
+    stats_data["converted_store"] = converted_store_data
 
-    # --- インデックスセクション ---
-    parts.append("")
-    parts.append("■ インデックス")
+    # インデックス
+    index_data: dict[str, object] = {}
     try:
         embedding_provider = get_embedding_provider(settings, settings.embedding_provider)
         with contextlib.redirect_stdout(io.StringIO()):
@@ -1450,25 +1453,23 @@ def run_stats(args: argparse.Namespace) -> None:
                 hnsw_construction_ef=settings.hnsw_construction_ef,
                 hnsw_search_ef=settings.hnsw_search_ef,
             )
-        index_stats = vector_store.get_stats()
-        total_chunks = int(str(index_stats.get("total_chunks", 0)))
-        source_count = int(str(index_stats.get("source_count", 0)))
-        parts.append(f"  総チャンク数: {total_chunks:,}")
-        parts.append(f"  ソース数: {source_count:,}")
+        raw_stats = vector_store.get_stats()
+        index_data["total_chunks"] = int(str(raw_stats.get("total_chunks", 0)))
+        index_data["source_count"] = int(str(raw_stats.get("source_count", 0)))
     except Exception:
         logger.exception("インデックス統計の取得に失敗")
-        parts.append("  エラー: 統計の取得に失敗しました")
+        index_data["error"] = "統計の取得に失敗しました"
+    stats_data["index"] = index_data
 
-    # --- パイプラインセクション ---
-    parts.append("")
-    parts.append("■ パイプライン")
+    # パイプライン
+    pipeline_data: dict[str, object] = {}
     if not settings.source_store_dir:
-        parts.append("  未設定")
+        pipeline_data["status"] = "unconfigured"
     else:
         from .store.models import NULL_COMMIT_HASH
         db_path = Path(settings.source_store_dir) / "metadata.db"
         if not db_path.exists():
-            parts.append("  未初期化")
+            pipeline_data["status"] = "uninitialized"
         else:
             db = MetadataDB(db_path)
             try:
@@ -1476,17 +1477,77 @@ def run_stats(args: argparse.Namespace) -> None:
                 history = db.get_pipeline_history()
                 last_commit_id = db.get_last_commit_id()
                 deleted_count = db.source_count(status="deleted")
-                last_at = history[-1].processed_at if history else "（未実行）"
-                parts.append(f"  最終処理: {last_at}")
-                parts.append(f"  実行回数: {len(history)}")
+                pipeline_data["last_processed_at"] = (
+                    history[-1].processed_at if history else None
+                )
+                pipeline_data["run_count"] = len(history)
                 commit_str = str(last_commit_id)
-                if commit_str == NULL_COMMIT_HASH:
-                    parts.append("  last_commit_id: （未実行）")
-                else:
-                    parts.append(f"  last_commit_id: {commit_str[:7]}")
-                parts.append(f"  論理削除: {deleted_count} 件")
+                pipeline_data["last_commit_id"] = (
+                    None if commit_str == NULL_COMMIT_HASH else commit_str[:7]
+                )
+                pipeline_data["deleted_count"] = deleted_count
             finally:
                 db.close()
+    stats_data["pipeline"] = pipeline_data
+
+    # --- 出力 ---
+    if json_out:
+        _output_result(stats_data)
+        return
+
+    # text 出力
+    parts: list[str] = ["RAG Knowledge 統計"]
+
+    parts.append("")
+    parts.append("■ source_store")
+    if source_store_data.get("status") == "unconfigured":
+        parts.append("  未設定")
+    elif source_store_data.get("status") == "not_found":
+        parts.append("  ディレクトリが存在しません")
+    else:
+        parts.append(f"  総ファイル数: {source_store_data.get('total_files', 0):,}")
+        parts.append(f"  総サイズ: {_format_cli_size(int(str(source_store_data.get('total_size', 0))))}")
+        by_type_data = source_store_data.get("by_type")
+        if by_type_data and isinstance(by_type_data, dict):
+            parts.append("  媒体別:")
+            for st_key in sorted(by_type_data.keys()):
+                info = by_type_data[st_key]
+                parts.append(
+                    f"    {st_key}: {info['files']} files"
+                    f" ({_format_cli_size(info['size'])})"
+                )
+
+    parts.append("")
+    parts.append("■ converted_store")
+    if converted_store_data.get("status") == "unconfigured":
+        parts.append("  未設定")
+    elif converted_store_data.get("status") == "not_found":
+        parts.append("  ディレクトリが存在しません")
+    else:
+        parts.append(f"  総ファイル数: {converted_store_data.get('total_files', 0):,}")
+        parts.append(f"  総サイズ: {_format_cli_size(int(str(converted_store_data.get('total_size', 0))))}")
+
+    parts.append("")
+    parts.append("■ インデックス")
+    if "error" in index_data:
+        parts.append(f"  エラー: {index_data['error']}")
+    else:
+        parts.append(f"  総チャンク数: {index_data.get('total_chunks', 0):,}")
+        parts.append(f"  ソース数: {index_data.get('source_count', 0):,}")
+
+    parts.append("")
+    parts.append("■ パイプライン")
+    if pipeline_data.get("status") == "unconfigured":
+        parts.append("  未設定")
+    elif pipeline_data.get("status") == "uninitialized":
+        parts.append("  未初期化")
+    else:
+        last_at = pipeline_data.get("last_processed_at") or "（未実行）"
+        parts.append(f"  最終処理: {last_at}")
+        parts.append(f"  実行回数: {pipeline_data.get('run_count', 0)}")
+        lci = pipeline_data.get("last_commit_id")
+        parts.append(f"  last_commit_id: {lci if lci else '（未実行）'}")
+        parts.append(f"  論理削除: {pipeline_data.get('deleted_count', 0)} 件")
 
     print("\n".join(parts))
 
@@ -1500,11 +1561,58 @@ def run_list_recent(args: argparse.Namespace) -> None:
         args: コマンドライン引数
     """
     from .config import get_settings
-    from .rag_knowledge import list_recent_sources
 
+    json_out = _is_json_output(args)
     settings = get_settings()
     limit: int = args.limit if args.limit is not None else settings.rag_list_recent_limit
-    print(list_recent_sources(settings.source_store_dir, args.source_type, limit))
+
+    if json_out:
+        from .store.metadata_db import MetadataDB
+        from .store.models import SourceType
+        from typing import cast
+
+        if not settings.source_store_dir:
+            _output_result({
+                "source_type": args.source_type,
+                "sources": [],
+                "count": 0,
+                "total": 0,
+            })
+            return
+        db_path = Path(settings.source_store_dir) / "metadata.db"
+        if not db_path.exists():
+            _output_result({
+                "source_type": args.source_type,
+                "sources": [],
+                "count": 0,
+                "total": 0,
+            })
+            return
+        db = MetadataDB(db_path)
+        try:
+            db.initialize()
+            st = cast(SourceType, args.source_type)
+            sources = db.list_sources(source_type=st, limit=limit)
+            total = db.count_sources_by_type(source_type=st)
+        finally:
+            db.close()
+        _output_result({
+            "source_type": args.source_type,
+            "sources": [
+                {
+                    "source_id": s.source_id,
+                    "title": s.title,
+                    "collected_at": s.collected_at,
+                    "file_size": s.file_size,
+                }
+                for s in sources
+            ],
+            "count": len(sources),
+            "total": total,
+        })
+    else:
+        from .rag_knowledge import list_recent_sources
+        print(list_recent_sources(settings.source_store_dir, args.source_type, limit))
 
 
 def run_search(args: argparse.Namespace) -> None:
@@ -1525,6 +1633,7 @@ def run_search(args: argparse.Namespace) -> None:
     from .rag_knowledge import RAGKnowledgeService
     from .vector_store import VectorStore
 
+    json_out = _is_json_output(args)
     settings = get_settings()
     embedding_provider = get_embedding_provider(settings, settings.embedding_provider)
 
@@ -1565,8 +1674,11 @@ def run_search(args: argparse.Namespace) -> None:
         try:
             parsed_filters = parse_filters(args.filters)
         except ValueError as e:
-            print(f"エラー: {e}")
-            return
+            if json_out:
+                _output_error(str(e))  # sys.exit(1) で終了
+            else:
+                logger.error("エラー: %s", e)
+                sys.exit(1)
 
     raw = _asyncio.run(
         service.retrieve_raw_results(
@@ -1575,9 +1687,15 @@ def run_search(args: argparse.Namespace) -> None:
         )
     )
 
-    from .rag_knowledge import format_raw_search_results
-
-    print(format_raw_search_results(raw))
+    if json_out:
+        _output_result({
+            "query": args.query,
+            "vector_results": [r.to_dict() for r in raw.vector_results],
+            "bm25_results": [r.to_dict() for r in raw.bm25_results],
+        })
+    else:
+        from .rag_knowledge import format_raw_search_results
+        print(format_raw_search_results(raw))
 
 
 def run_delete(args: argparse.Namespace) -> None:
@@ -1969,10 +2087,13 @@ async def run_ingest_youtube_playlist(args: argparse.Namespace) -> None:
         max_duration=settings.rag_youtube_max_duration,
     )
 
+    progress_cb = _output_progress if json_out else None
+
     try:
         ingest_result = await youtube_ingester.crawl_playlist(
             args.playlist_url,
             max_videos=max_videos,
+            progress_callback=progress_cb,
         )
     except (ValueError, TypeError) as e:
         if json_out:
@@ -2027,6 +2148,8 @@ async def run_crawl_bluesky(args: argparse.Namespace) -> None:
         include_reposts=include_reposts,
     )
 
+    progress_cb = _output_progress if json_out else None
+
     try:
         async with ConstrainedClient(
             request_timeout=settings.rag_bluesky_request_timeout,
@@ -2037,6 +2160,7 @@ async def run_crawl_bluesky(args: argparse.Namespace) -> None:
                 max_posts=max_posts,
                 include_reposts=include_reposts,
                 client=client,
+                progress_callback=progress_cb,
             )
 
             # 投稿内 URL の自動取り込み
@@ -2094,6 +2218,8 @@ async def run_crawl_zenn(args: argparse.Namespace) -> None:
         max_articles=max_articles,
     )
 
+    progress_cb = _output_progress if json_out else None
+
     try:
         async with ConstrainedClient(
             request_timeout=settings.rag_zenn_request_timeout,
@@ -2105,6 +2231,7 @@ async def run_crawl_zenn(args: argparse.Namespace) -> None:
                 content_type=args.content_type,
                 force=args.force,
                 client=client,
+                progress_callback=progress_cb,
             )
     except (ValueError, TypeError) as e:
         if json_out:
@@ -2279,8 +2406,11 @@ async def run_crawl_documents(args: argparse.Namespace) -> None:
         allowed_dirs=None,
     )
 
+    progress_cb = _output_progress if json_out else None
+
     ingest_result = local_ingester.crawl_documents(
         args.dir_path, args.pattern, upload_mode=args.upload_mode,
+        progress_callback=progress_cb,
     )
 
     if ingest_result.placed == 0 and ingest_result.errors == 0:
@@ -2308,6 +2438,8 @@ async def run_site_ingest(args: argparse.Namespace) -> None:
     from .scrapy.runner import ScrapyRunner
     from .utils.url import check_ssrf, validate_url
 
+    json_out = _is_json_output(args)
+
     urls: list[str] = args.url  # nargs='+' なのでリスト
     multi_url_mode = len(urls) >= 2
 
@@ -2319,6 +2451,8 @@ async def run_site_ingest(args: argparse.Namespace) -> None:
             check_ssrf(validated)
             validated_urls.append(validated)
         except ValueError as e:
+            if json_out:
+                _output_error(str(e))
             logger.error("エラー: %s", e)
             sys.exit(1)
 
@@ -2327,6 +2461,8 @@ async def run_site_ingest(args: argparse.Namespace) -> None:
         try:
             re.compile(args.url_pattern)
         except re.error as e:
+            if json_out:
+                _output_error(f"無効な正規表現パターン: {e}")
             logger.error("無効な正規表現パターン: %s", e)
             sys.exit(1)
 
@@ -2390,10 +2526,21 @@ async def run_site_ingest(args: argparse.Namespace) -> None:
 
     if not crawl_result.jsonl_path.exists():
         elapsed = time_mod.monotonic() - start_time
-        print(
-            f"クロールが完了しましたが、メタデータが出力されませんでした。"
-            f" exit_code={crawl_result.exit_code}, 所要時間={elapsed:.1f}秒",
-        )
+        if json_out:
+            _output_result({
+                "placed": 0,
+                "overwritten": 0,
+                "skipped": 0,
+                "errors": 0,
+                "elapsed": round(elapsed, 1),
+                "scrapy_exit_code": crawl_result.exit_code,
+                "no_output": True,
+            })
+        else:
+            print(
+                f"クロールが完了しましたが、メタデータが出力されませんでした。"
+                f" exit_code={crawl_result.exit_code}, 所要時間={elapsed:.1f}秒",
+            )
         return
 
     # Bridge: JSONL + HTML → source_store
@@ -2418,22 +2565,30 @@ async def run_site_ingest(args: argparse.Namespace) -> None:
     # 操作全体の所要時間（クロール + Bridge + パイプライン）
     elapsed = time_mod.monotonic() - start_time
 
-    # 結果表示
-    print(
-        f"サイト取り込み完了: {bridge_result.ingest.placed}件新規配置"
-        f", {bridge_result.ingest.overwritten}件上書き"
-        f", {bridge_result.ingest.skipped}件スキップ"
-        f", {bridge_result.ingest.errors}件エラー"
-    )
-    print(f"所要時間: {elapsed:.1f}秒")
-    if args.download_only:
-        print("パイプライン処理: スキップ（download_only）")
-    elif pipeline_summary is not None:
-        print(f"パイプライン: {pipeline_summary.processed}件処理")
-        if pipeline_summary.errors:
-            print(f"パイプラインエラー: {len(pipeline_summary.errors)}件")
-    if not crawl_result.success:
-        print(f"Scrapy exit_code={crawl_result.exit_code}（部分的な結果）")
+    if json_out:
+        data: dict[str, object] = _ingest_result_to_dict(bridge_result.ingest, pipeline_summary)
+        data["elapsed"] = round(elapsed, 1)
+        data["download_only"] = args.download_only
+        if not crawl_result.success:
+            data["scrapy_exit_code"] = crawl_result.exit_code
+        _output_result(data)
+    else:
+        # text 出力
+        print(
+            f"サイト取り込み完了: {bridge_result.ingest.placed}件新規配置"
+            f", {bridge_result.ingest.overwritten}件上書き"
+            f", {bridge_result.ingest.skipped}件スキップ"
+            f", {bridge_result.ingest.errors}件エラー"
+        )
+        print(f"所要時間: {elapsed:.1f}秒")
+        if args.download_only:
+            print("パイプライン処理: スキップ（download_only）")
+        elif pipeline_summary is not None:
+            print(f"パイプライン: {pipeline_summary.processed}件処理")
+            if pipeline_summary.errors:
+                print(f"パイプラインエラー: {len(pipeline_summary.errors)}件")
+        if not crawl_result.success:
+            print(f"Scrapy exit_code={crawl_result.exit_code}（部分的な結果）")
 
 
 async def run_update_aozora_catalog(args: argparse.Namespace) -> None:
@@ -2476,6 +2631,8 @@ def run_search_aozora(args: argparse.Namespace) -> None:
     """青空文庫カタログ検索."""
     from .pipeline.ingesters.aozora import AozoraIngester
 
+    json_out = _is_json_output(args)
+
     controller, settings = _build_cli_pipeline_controller()
 
     aozora_ingester = AozoraIngester(
@@ -2490,8 +2647,26 @@ def run_search_aozora(args: argparse.Namespace) -> None:
             limit=args.limit,
         )
     except (ValueError, TypeError) as e:
+        if json_out:
+            _output_error(str(e))
         logger.error("エラー: %s", e)
         sys.exit(1)
+
+    if json_out:
+        _output_result({
+            "results": [
+                {
+                    "book_id": r["book_id"],
+                    "title": r["title"],
+                    "person_id": r["person_id"],
+                    "author": r["author"],
+                    "copyright": r["copyright"],
+                }
+                for r in results
+            ],
+            "count": len(results),
+        })
+        return
 
     if not results:
         print("検索結果: 0件")
@@ -2555,6 +2730,8 @@ async def run_ingest_aozora_author(args: argparse.Namespace) -> None:
         max_works=max_works,
     )
 
+    progress_cb = _output_progress if json_out else None
+
     try:
         async with ConstrainedClient(
             request_timeout=settings.rag_aozora_request_timeout,
@@ -2564,6 +2741,7 @@ async def run_ingest_aozora_author(args: argparse.Namespace) -> None:
                 args.person_id,
                 max_works=max_works,
                 client=client,
+                progress_callback=progress_cb,
             )
     except (ValueError, TypeError) as e:
         if json_out:

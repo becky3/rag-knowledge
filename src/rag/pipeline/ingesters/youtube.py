@@ -19,7 +19,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 from urllib.parse import parse_qs, urlparse
 
-from rag.pipeline.ingesters._common import IngestResult, now_iso
+from rag.pipeline.ingesters._common import IngestResult, ProgressCallback, now_iso
 
 if TYPE_CHECKING:
     from rag.store.source_store import SourceStore
@@ -279,12 +279,14 @@ class YoutubeIngester:
         playlist_url: str,
         *,
         max_videos: int | None = None,
+        progress_callback: ProgressCallback | None = None,
     ) -> IngestResult:
         """プレイリスト内の動画を一括取り込みする.
 
         Args:
             playlist_url: YouTube プレイリスト URL
             max_videos: 取得する最大動画数（None の場合はインスタンス設定を使用）
+            progress_callback: 進捗コールバック (processed, total, current)
 
         Returns:
             配置結果
@@ -357,6 +359,9 @@ class YoutubeIngester:
                     CIRCUIT_BREAKER_THRESHOLD,
                 )
                 break
+
+            if progress_callback is not None:
+                progress_callback(i + 1, len(entries_to_process), video_url)
 
             # リクエスト間隔待機（次の動画がある場合のみ）
             if i < len(entries_to_process) - 1:

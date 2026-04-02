@@ -15,7 +15,7 @@ import re
 import sys
 from datetime import datetime
 
-from rag.pipeline.ingesters._common import IngestResult, now_iso
+from rag.pipeline.ingesters._common import IngestResult, ProgressCallback, now_iso
 from typing import TYPE_CHECKING, Any, Literal
 
 if TYPE_CHECKING:
@@ -200,6 +200,7 @@ class BlueskyIngester:
         max_posts: int | None = None,
         include_reposts: bool | None = None,
         client: ConstrainedClient | None = None,
+        progress_callback: ProgressCallback | None = None,
     ) -> tuple[IngestResult, list[dict[str, Any]]]:
         """BlueSky 投稿を取得し source_store に配置する.
 
@@ -208,6 +209,7 @@ class BlueskyIngester:
             max_posts: 取得する最大投稿数（None の場合はインスタンス設定を使用）
             include_reposts: リポストを含めるか（None の場合はインスタンス設定を使用）
             client: ConstrainedClient インスタンス
+            progress_callback: 進捗コールバック (processed, total, current)
 
         Returns:
             (配置結果, 配置済みフィードアイテムのリスト)
@@ -377,6 +379,9 @@ class BlueskyIngester:
                     logger.exception("投稿の配置に失敗しました: %s", rel_path)
                     result.errors += 1
                     result.error_details.append(rel_path)
+
+                if progress_callback is not None:
+                    progress_callback(total_processed, effective_max, bsky_url)
 
             # 次ページの確認
             cursor = data.get("cursor")
