@@ -18,8 +18,6 @@ import pytest
 
 from rag.server import (
     _check_api_key_registered,
-    _reset_pipeline_controller,
-    _reset_rag_service,
     _validate_bind_address,
     mcp,
 )
@@ -33,13 +31,6 @@ def _default_mock_settings(**overrides: object) -> MagicMock:
     }
     defaults.update(overrides)
     return MagicMock(**defaults)
-
-
-@pytest.fixture(autouse=True)
-def _reset_global_state() -> None:
-    """各テスト前にグローバル状態をリセットする."""
-    _reset_rag_service()
-    _reset_pipeline_controller()
 
 
 @pytest.fixture(autouse=True)

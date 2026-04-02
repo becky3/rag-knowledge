@@ -19,8 +19,6 @@ import pytest
 from rag.server import (
     CLISubprocessError,
     _decode_form_value,
-    _reset_pipeline_controller,
-    _reset_rag_service,
     mcp,
 )
 
@@ -33,13 +31,6 @@ def _default_mock_settings(**overrides: object) -> MagicMock:
     }
     defaults.update(overrides)
     return MagicMock(**defaults)
-
-
-@pytest.fixture(autouse=True)
-def _reset_global_state() -> None:
-    """各テスト前にグローバル状態をリセットする."""
-    _reset_rag_service()
-    _reset_pipeline_controller()
 
 
 @pytest.fixture(autouse=True)

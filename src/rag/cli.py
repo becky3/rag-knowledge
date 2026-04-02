@@ -365,10 +365,11 @@ def main() -> None:
         help="取得形式（text: 変換済みテキスト、original: オリジナル、デフォルト: text）",
     )
     doc_parser.add_argument(
-        "--output",
+        "--output-file",
         default=None,
         help="出力先ファイルパス（未指定時は標準出力）",
     )
+    _add_output_option(doc_parser)
 
     # rebuild サブコマンド
     rebuild_parser = subparsers.add_parser(
@@ -1113,6 +1114,7 @@ def run_get_document(args: argparse.Namespace) -> None:
     from .config import get_settings
     from .rag_knowledge import format_document_response, get_document
 
+    json_out = _is_json_output(args)
     settings = get_settings()
 
     result = get_document(
@@ -1123,16 +1125,32 @@ def run_get_document(args: argparse.Namespace) -> None:
     )
 
     if result.error:
-        print(f"エラー: {result.error}", file=sys.stderr)
-        sys.exit(1)
+        if json_out:
+            _output_error(result.error)
+        else:
+            print(f"エラー: {result.error}", file=sys.stderr)
+            sys.exit(1)
+
+    if json_out:
+        _output_result({
+            "source_id": result.source_id,
+            "title": result.title,
+            "source_type": result.source_type,
+            "format": result.format,
+            "content": result.content,
+            "is_binary": result.is_binary,
+            "collected_at": result.collected_at,
+            "extra": result.extra,
+        })
+        return
 
     response = format_document_response(result)
 
-    if args.output:
-        output_path = Path(args.output)
+    if args.output_file:
+        output_path = Path(args.output_file)
         output_path.parent.mkdir(parents=True, exist_ok=True)
         output_path.write_text(response, encoding="utf-8")
-        print(f"出力しました: {args.output}")
+        print(f"出力しました: {args.output_file}")
     else:
         print(response)
 
