@@ -1571,6 +1571,14 @@ def run_list_recent(args: argparse.Namespace) -> None:
         from .store.models import SourceType
         from typing import cast
 
+        if not settings.source_store_dir:
+            _output_result({
+                "source_type": args.source_type,
+                "sources": [],
+                "count": 0,
+                "total": 0,
+            })
+            return
         db_path = Path(settings.source_store_dir) / "metadata.db"
         if not db_path.exists():
             _output_result({
@@ -1667,9 +1675,10 @@ def run_search(args: argparse.Namespace) -> None:
             parsed_filters = parse_filters(args.filters)
         except ValueError as e:
             if json_out:
-                _output_error(str(e))
-            logger.error("エラー: %s", e)
-            sys.exit(1)
+                _output_error(str(e))  # sys.exit(1) で終了
+            else:
+                logger.error("エラー: %s", e)
+                sys.exit(1)
 
     raw = _asyncio.run(
         service.retrieve_raw_results(
