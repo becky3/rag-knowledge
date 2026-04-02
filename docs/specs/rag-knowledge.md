@@ -95,6 +95,15 @@ MCP サーバーとして独立動作し、18 個のツールを提供する。
 | HNSW search_ef（検索時探索幅） | 設定値 | 許容範囲 10〜2000、デフォルト 300 | 範囲内で変更可 |
 | 生 HTTP クライアント利用禁止 | CI チェック | `src/` 全体を grep で走査（httpx / aiohttp / requests / urllib.request）。`# safety:allowed` 行を除外。ConstrainedClient は py-common-lib パッケージで提供（`src/` 外のため検出対象外） | 許可例外の追加は `# safety:allowed` コメントで可 |
 
+### MCP 薄層アダプターパターン
+
+MCP サーバーの全ツールは CLI サブプロセスに委譲する（薄層アダプターパターン）。MCP ツール側にビジネスロジックを持たず、パラメータの組み立て・バリデーション・結果の整形のみを行う。
+
+- CLI が `--output json` で構造化 JSON を返し、MCP ツールはその結果をテキスト応答に整形する
+- 書き込み系ツール: C 拡張（BM25s 等）の SEGFAULT からサーバープロセスを隔離する
+- 読み取り系ツール（検索・統計・一覧）: SEGFAULT リスクは低いが、一貫性のため同一パターンに統一する。サブプロセス起動のオーバーヘッドは許容する
+- ロジックの重複を排除し、CLI と MCP で同一のコードパスを通す
+
 ## インターフェース
 
 ### MCP ツール
@@ -157,8 +166,7 @@ flowchart TB
     CLIENT["MCP クライアント"]
 
     subgraph MCP["MCP サーバー（薄層アダプター）"]
-        SEARCH["検索ツール（インプロセス）"]
-        WRITE["書き込みツール（CLI subprocess）"]
+        TOOLS["全ツール（CLI subprocess 委譲）"]
         CSM["ChromaDB Server Manager"]
     end
 
@@ -200,9 +208,7 @@ flowchart TB
     WEB["対象 Web サイト / API"]
 
     CLIENT -->|stdio / http| MCP
-    SEARCH -->|HttpClient| CHROMA_SRV
-    SEARCH --> BM25
-    WRITE -->|subprocess| CLI_CMD
+    TOOLS -->|subprocess| CLI_CMD
     CSM -->|起動管理| CHROMA_SRV
     CLI_CMD --> PC
     PC --> Stage1
@@ -240,23 +246,19 @@ ChromaDB は `uv run chroma run` によるサーバーモードで動作し、MC
 | `CHROMADB_SERVER_PORT` | ChromaDB サーバーのポート | `8000`（ChromaDB デフォルト） |
 | `CHROMADB_AUTO_START` | MCP サーバー起動時に ChromaDB サーバーを自動起動するか | `true` |
 
-### MCP 薄層アダプターパターン
+### MCP 薄層アダプター実装方式
 
-MCP サーバーは CLI コマンドを呼び出す薄いアダプター層として動作する。書き込み系ツールは CLI サブプロセスとして実行し、C 拡張（BM25s 等）の SEGFAULT からサーバープロセスを隔離する。検索系ツールはパフォーマンスのためインプロセス実行を維持する。
-
-#### ツール分類
-
-| ツール分類 | 実行方式 | 対象 |
-|-----------|---------|------|
-| 検索系 | インプロセス（RAGKnowledgeService 直接呼び出し） | `rag_search`, `rag_get_document`, `rag_stats`, `rag_search_aozora`, `rag_list_recent` |
-| 書き込み系 | CLI サブプロセス（`--output json` で結果をパース） | `rag_crawl_zenn`, `rag_crawl_bluesky`, `rag_add_youtube`, `rag_crawl_youtube`, `rag_add_document`, `rag_crawl_documents`, `rag_add_journal`, `rag_add_aozora`, `rag_crawl_aozora`, `rag_update_aozora_catalog`, `rag_delete`, `rag_rebuild` |
-| Upload HTTP API | CLI サブプロセス（書き込み系と同一方式） | `/upload/document`, `/upload/journal` |
-| 特殊 | Scrapy サブプロセス + Bridge（現行維持） | `rag_site_ingest` |
+MCP サーバーの全ツールは CLI サブプロセスに委譲する。設計方針は「MCP 薄層アダプターパターン」セクション（制約内）を参照。
 
 #### MCP ツール → CLI コマンドマッピング
 
 | MCP ツール / エンドポイント | CLI コマンド | 備考 |
 |---------------------------|------------|------|
+| `rag_search` | `search` | |
+| `rag_get_document` | `get-document` | |
+| `rag_stats` | `stats` | |
+| `rag_list_recent` | `list-recent` | |
+| `rag_search_aozora` | `search-aozora` | |
 | `rag_crawl_zenn` | `crawl-zenn` | |
 | `rag_crawl_bluesky` | `crawl-bluesky` | |
 | `rag_add_youtube` | `ingest-youtube` | |
@@ -264,6 +266,7 @@ MCP サーバーは CLI コマンドを呼び出す薄いアダプター層と�
 | `rag_add_document` | `add-document` | stdin 入力（後述） |
 | `rag_crawl_documents` | `crawl-documents` | |
 | `rag_add_journal` | `add-journal` | stdin 入力（後述） |
+| `rag_site_ingest` | `site-ingest` | |
 | `rag_add_aozora` | `ingest-aozora` | |
 | `rag_crawl_aozora` | `ingest-aozora-author` | |
 | `rag_update_aozora_catalog` | `update-aozora-catalog` | |
@@ -295,7 +298,6 @@ MCP サーバーは `_run_cli_subprocess` で CLI コマンドを実行する:
      - `type: "error"` → エラーとして処理
    - stderr: 全量を読み取り、エラー時の診断に使用
 4. SEGFAULT 検出: exit code が SEGFAULT シグナル（Unix: -11/139、Windows: -1073741819/3221225477）の場合、エラーメッセージを返却
-5. サブプロセス完了後、RAGKnowledgeService と PipelineController のキャッシュをリセットする（サブプロセスが ChromaDB・source_store を更新するため、インプロセスのキャッシュが古くなる）
 
 CLI の JSON 出力は JSON Lines 形式:
 
@@ -305,7 +307,7 @@ CLI の JSON 出力は JSON Lines 形式:
 | `{"type": "result", ...}` | コマンド結果（コマンド固有のフィールドを含む） |
 | `{"type": "error", "error": true, "message": "..."}` | エラー報告（exit code 1） |
 
-全 CLI コマンドが `--output json` オプションに対応している（evaluate, init-test-db, get-document, migrate-journal, generate-api-key を除く。evaluate・init-test-db は評価専用、get-document はテキスト出力がそのまま結果となるため、これらは MCP 経由で使用しないか別の方式で結果を取得する）。
+全 CLI コマンドが `--output json` オプションに対応している（evaluate, init-test-db, migrate-journal, generate-api-key を除く。これらは評価専用・マイグレーション専用であり、MCP 経由では使用しない）。
 
 #### 進捗コールバック
 

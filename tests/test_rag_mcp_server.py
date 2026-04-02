@@ -18,19 +18,12 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from rag.rag_knowledge import (
-    BM25SearchItem,
-    RawSearchResults,
-    VectorSearchItem,
-)
-from rag.server import _configure_and_run, _reset_pipeline_controller, _reset_rag_service, _reset_safe_browsing_client
+from rag.server import _configure_and_run, _reset_safe_browsing_client
 
 
 @pytest.fixture(autouse=True)
 def _reset_rag_global_state() -> None:
     """各テスト前にRAGサービスのグローバル状態をリセットする."""
-    _reset_rag_service()
-    _reset_pipeline_controller()
     _reset_safe_browsing_client()
 
 
@@ -68,82 +61,44 @@ async def test_rag_server_tool_count() -> None:
 
 
 class TestRagSearchOutput:
-    """rag_search ツールのチャンク単位出力フォーマットテスト（#251）."""
+    """rag_search ツールのチャンク単位出力フォーマットテスト（CLI 委譲版）."""
 
-    @pytest.fixture(autouse=True)
-    def _patch_rag_service(self) -> None:
-        """rag_search のテスト用に RAGKnowledgeService をモックする."""
-        self.mock_service = AsyncMock()
-        self.mock_settings = MagicMock()
-        self.mock_settings.rag_retrieval_count = 3
+    def _make_cli_result(
+        self,
+        vector_results: list[dict[str, object]] | None = None,
+        bm25_results: list[dict[str, object]] | None = None,
+    ) -> dict[str, object]:
+        return {
+            "query": "テスト",
+            "vector_results": vector_results or [],
+            "bm25_results": bm25_results or [],
+        }
 
     async def test_output_contains_vector_and_bm25_sections(self) -> None:
         """出力にベクトル検索結果とBM25検索結果のセクションが含まれること."""
-        mod = import_module("rag.server")
+        from rag.server import rag_search
 
-        self.mock_service.retrieve_raw_results = AsyncMock(
-            return_value=RawSearchResults(
-                vector_results=[
-                    VectorSearchItem(
-                        text="ベクトルの結果テキスト",
-                        source_url="https://example.com/vec1",
-                        distance=0.234,
-                        chunk_index=2,
-                        title="ガイドページ",
-                        source_type="web",
-                        total_chunks=15,
-                    ),
-                ],
-                bm25_results=[
-                    BM25SearchItem(
-                        text="BM25の結果テキスト",
-                        source_url="https://example.com/bm25_1",
-                        score=4.521,
-                        doc_id="doc1",
-                        chunk_index=4,
-                        title="サンプル記事",
-                        source_type="zenn",
-                        total_chunks=20,
-                    ),
-                ],
-            )
+        cli_result = self._make_cli_result(
+            vector_results=[{"text": "ベクトルの結果テキスト", "source_url": "https://example.com/vec1", "distance": 0.234, "chunk_index": 2, "title": "ガイドページ", "source_type": "web", "total_chunks": 15, "collected_at": "", "section_path": ""}],
+            bm25_results=[{"text": "BM25の結果テキスト", "source_url": "https://example.com/bm25_1", "score": 4.521, "doc_id": "doc1", "chunk_index": 4, "title": "サンプル記事", "source_type": "zenn", "total_chunks": 20, "collected_at": "", "section_path": ""}],
         )
 
-        with (
-            patch.object(mod, "_get_rag_service", return_value=self.mock_service),
-            patch.object(mod, "get_settings", return_value=self.mock_settings),
-        ):
-            result = await mod.rag_search("テストクエリ")
+        with patch("rag.server._run_cli_subprocess", new_callable=AsyncMock, return_value=cli_result):
+            result = await rag_search("テストクエリ")
 
         assert "## ベクトル検索結果 (意味的類似度)" in result
         assert "## BM25 検索結果 (キーワード一致)" in result
 
     async def test_output_contains_chunk_metadata(self) -> None:
         """各結果にSource/Title/Chunk/Typeメタデータが含まれること."""
-        mod = import_module("rag.server")
+        from rag.server import rag_search
 
-        self.mock_service.retrieve_raw_results = AsyncMock(
-            return_value=RawSearchResults(
-                vector_results=[
-                    VectorSearchItem(
-                        text="チャンクテキスト",
-                        source_url="https://example.com/docs/guide",
-                        distance=0.234,
-                        chunk_index=2,
-                        title="ガイドページ",
-                        source_type="web",
-                        total_chunks=15,
-                    ),
-                ],
-                bm25_results=[],
-            )
+        cli_result = self._make_cli_result(
+            vector_results=[{"text": "チャンクテキスト", "source_url": "https://example.com/docs/guide", "distance": 0.234, "chunk_index": 2, "title": "ガイドページ", "source_type": "web", "total_chunks": 15, "collected_at": "", "section_path": ""}],
         )
 
-        with (
-            patch.object(mod, "_get_rag_service", return_value=self.mock_service),
-            patch.object(mod, "get_settings", return_value=self.mock_settings),
-        ):
-            result = await mod.rag_search("テスト")
+        with patch("rag.server._run_cli_subprocess", new_callable=AsyncMock, return_value=cli_result):
+            result = await rag_search("テスト")
 
         assert "Source: https://example.com/docs/guide" in result
         assert "Title: ガイドページ" in result
@@ -153,148 +108,69 @@ class TestRagSearchOutput:
 
     async def test_chunk_position_with_unknown_total(self) -> None:
         """total_chunks=0（レガシーデータ）のとき Chunk: N/? と表示されること."""
-        mod = import_module("rag.server")
+        from rag.server import rag_search
 
-        self.mock_service.retrieve_raw_results = AsyncMock(
-            return_value=RawSearchResults(
-                vector_results=[
-                    VectorSearchItem(
-                        text="テキスト",
-                        source_url="https://example.com/page1",
-                        distance=0.1,
-                        chunk_index=4,
-                        total_chunks=0,
-                    ),
-                ],
-                bm25_results=[],
-            )
+        cli_result = self._make_cli_result(
+            vector_results=[{"text": "テキスト", "source_url": "https://example.com/page1", "distance": 0.1, "chunk_index": 4, "total_chunks": 0, "title": "", "source_type": "", "collected_at": "", "section_path": ""}],
         )
 
-        with (
-            patch.object(mod, "_get_rag_service", return_value=self.mock_service),
-            patch.object(mod, "get_settings", return_value=self.mock_settings),
-        ):
-            result = await mod.rag_search("テスト")
+        with patch("rag.server._run_cli_subprocess", new_callable=AsyncMock, return_value=cli_result):
+            result = await rag_search("テスト")
 
         assert "Chunk: 5/?" in result
 
     async def test_output_contains_raw_scores(self) -> None:
         """出力に生スコアが含まれること."""
-        mod = import_module("rag.server")
+        from rag.server import rag_search
 
-        self.mock_service.retrieve_raw_results = AsyncMock(
-            return_value=RawSearchResults(
-                vector_results=[
-                    VectorSearchItem(
-                        text="テキスト",
-                        source_url="https://example.com/v",
-                        distance=0.567,
-                        chunk_index=0,
-                    ),
-                ],
-                bm25_results=[
-                    BM25SearchItem(
-                        text="テキスト",
-                        source_url="https://example.com/b",
-                        score=3.456,
-                        doc_id="d1",
-                    ),
-                ],
-            )
+        cli_result = self._make_cli_result(
+            vector_results=[{"text": "テキスト", "source_url": "https://example.com/v", "distance": 0.567, "chunk_index": 0, "total_chunks": 0, "title": "", "source_type": "", "collected_at": "", "section_path": ""}],
+            bm25_results=[{"text": "テキスト", "source_url": "https://example.com/b", "score": 3.456, "doc_id": "d1", "chunk_index": 0, "total_chunks": 0, "title": "", "source_type": "", "collected_at": "", "section_path": ""}],
         )
 
-        with (
-            patch.object(mod, "_get_rag_service", return_value=self.mock_service),
-            patch.object(mod, "get_settings", return_value=self.mock_settings),
-        ):
-            result = await mod.rag_search("テスト")
+        with patch("rag.server._run_cli_subprocess", new_callable=AsyncMock, return_value=cli_result):
+            result = await rag_search("テスト")
 
         assert "[distance=0.567]" in result
         assert "[score=3.456]" in result
 
     async def test_empty_results_returns_not_found_message(self) -> None:
         """0件時に「該当する情報が見つかりませんでした」が返ること."""
-        mod = import_module("rag.server")
+        from rag.server import rag_search
 
-        self.mock_service.retrieve_raw_results = AsyncMock(
-            return_value=RawSearchResults(
-                vector_results=[],
-                bm25_results=[],
-            )
-        )
+        cli_result = self._make_cli_result()
 
-        with (
-            patch.object(mod, "_get_rag_service", return_value=self.mock_service),
-            patch.object(mod, "get_settings", return_value=self.mock_settings),
-        ):
-            result = await mod.rag_search("存在しないクエリ")
+        with patch("rag.server._run_cli_subprocess", new_callable=AsyncMock, return_value=cli_result):
+            result = await rag_search("存在しないクエリ")
 
         assert result == "該当する情報が見つかりませんでした"
 
     async def test_chunk_text_returned_directly(self) -> None:
         """チャンクテキストがそのまま返却されること（ページ全文ではない）."""
-        mod = import_module("rag.server")
+        from rag.server import rag_search
 
-        self.mock_service.retrieve_raw_results = AsyncMock(
-            return_value=RawSearchResults(
-                vector_results=[
-                    VectorSearchItem(
-                        text="これはチャンクテキストです",
-                        source_url="https://example.com/page1",
-                        distance=0.1,
-                        chunk_index=0,
-                        title="ページ1",
-                        source_type="web",
-                        total_chunks=5,
-                    ),
-                ],
-                bm25_results=[],
-            )
+        cli_result = self._make_cli_result(
+            vector_results=[{"text": "これはチャンクテキストです", "source_url": "https://example.com/page1", "distance": 0.1, "chunk_index": 0, "title": "ページ1", "source_type": "web", "total_chunks": 5, "collected_at": "", "section_path": ""}],
         )
 
-        with (
-            patch.object(mod, "_get_rag_service", return_value=self.mock_service),
-            patch.object(mod, "get_settings", return_value=self.mock_settings),
-        ):
-            result = await mod.rag_search("テスト")
+        with patch("rag.server._run_cli_subprocess", new_callable=AsyncMock, return_value=cli_result):
+            result = await rag_search("テスト")
 
         assert "これはチャンクテキストです" in result
 
     async def test_same_source_different_chunks_shown_individually(self) -> None:
         """同一ソースの異なるチャンクが個別に表示されること."""
-        mod = import_module("rag.server")
+        from rag.server import rag_search
 
-        self.mock_service.retrieve_raw_results = AsyncMock(
-            return_value=RawSearchResults(
-                vector_results=[
-                    VectorSearchItem(
-                        text="チャンク1のテキスト",
-                        source_url="https://example.com/page",
-                        distance=0.1,
-                        chunk_index=0,
-                        title="ページ",
-                        source_type="web",
-                        total_chunks=3,
-                    ),
-                    VectorSearchItem(
-                        text="チャンク2のテキスト",
-                        source_url="https://example.com/page",
-                        distance=0.2,
-                        chunk_index=2,
-                        title="ページ",
-                        source_type="web",
-                        total_chunks=3,
-                    ),
-                ],
-                bm25_results=[],
-            )
+        cli_result = self._make_cli_result(
+            vector_results=[
+                {"text": "チャンク1のテキスト", "source_url": "https://example.com/page", "distance": 0.1, "chunk_index": 0, "title": "ページ", "source_type": "web", "total_chunks": 3, "collected_at": "", "section_path": ""},
+                {"text": "チャンク2のテキスト", "source_url": "https://example.com/page", "distance": 0.2, "chunk_index": 2, "title": "ページ", "source_type": "web", "total_chunks": 3, "collected_at": "", "section_path": ""},
+            ],
         )
 
-        with (
-            patch.object(mod, "_get_rag_service", return_value=self.mock_service),
-            patch.object(mod, "get_settings", return_value=self.mock_settings),
-        ):
-            result = await mod.rag_search("テスト")
+        with patch("rag.server._run_cli_subprocess", new_callable=AsyncMock, return_value=cli_result):
+            result = await rag_search("テスト")
 
         assert "チャンク1のテキスト" in result
         assert "チャンク2のテキスト" in result
@@ -394,34 +270,31 @@ class TestConfigureAndRun:
 
 
 class TestRagGetDocumentTool:
-    """rag_get_document ツールのテスト（#251）."""
-
-    @pytest.fixture(autouse=True)
-    def _patch_settings(self) -> None:
-        """テスト用の設定をモックする."""
-        self.mock_settings = MagicMock()
-        self.mock_settings.source_store_dir = "/tmp/source_store"
-        self.mock_settings.converted_store_dir = "/tmp/converted_store"
-        self.mock_settings.rag_max_response_chars = None
+    """rag_get_document ツールのテスト（CLI 委譲版）."""
 
     async def test_format_text_returns_document(self) -> None:
         """format=text でドキュメントが返ること."""
-        from rag.rag_knowledge import DocumentResult
+        from rag.server import rag_get_document
 
-        mod = import_module("rag.server")
-        mock_result = DocumentResult(
-            source_id="https://example.com/docs/guide",
-            title="ガイドページ",
-            source_type="web",
-            format="text",
-            content="これはドキュメント全文です。",
-        )
+        cli_result: dict[str, object] = {
+            "source_id": "https://example.com/docs/guide",
+            "title": "ガイドページ",
+            "source_type": "web",
+            "format": "text",
+            "content": "これはドキュメント全文です。",
+            "is_binary": False,
+            "collected_at": "",
+            "extra": {},
+        }
+
+        mock_settings = MagicMock()
+        mock_settings.rag_max_response_chars = None
 
         with (
-            patch.object(mod, "get_settings", return_value=self.mock_settings),
-            patch.object(mod, "get_document", return_value=mock_result),
+            patch("rag.server._run_cli_subprocess", new_callable=AsyncMock, return_value=cli_result),
+            patch("rag.server.get_settings", return_value=mock_settings),
         ):
-            result = await mod.rag_get_document("https://example.com/docs/guide")
+            result = await rag_get_document("https://example.com/docs/guide")
 
         assert "Source: https://example.com/docs/guide" in result
         assert "Title: ガイドページ" in result
@@ -431,276 +304,163 @@ class TestRagGetDocumentTool:
 
     async def test_format_original_returns_document(self) -> None:
         """format=original でドキュメントが返ること."""
-        from rag.rag_knowledge import DocumentResult
+        from rag.server import rag_get_document
 
-        mod = import_module("rag.server")
-        mock_result = DocumentResult(
-            source_id="https://example.com/page.html",
-            title="HTMLページ",
-            source_type="web",
-            format="original",
-            content="<html>...</html>",
-        )
+        cli_result: dict[str, object] = {
+            "source_id": "https://example.com/page.html",
+            "title": "HTMLページ",
+            "source_type": "web",
+            "format": "original",
+            "content": "<html>...</html>",
+            "is_binary": False,
+            "collected_at": "",
+            "extra": {},
+        }
+
+        mock_settings = MagicMock()
+        mock_settings.rag_max_response_chars = None
 
         with (
-            patch.object(mod, "get_settings", return_value=self.mock_settings),
-            patch.object(mod, "get_document", return_value=mock_result),
+            patch("rag.server._run_cli_subprocess", new_callable=AsyncMock, return_value=cli_result),
+            patch("rag.server.get_settings", return_value=mock_settings),
         ):
-            result = await mod.rag_get_document(
-                "https://example.com/page.html", format="original"
-            )
+            result = await rag_get_document("https://example.com/page.html", format="original")
 
         assert "Format: original" in result
         assert "<html>...</html>" in result
 
-    async def test_missing_source_returns_error(self) -> None:
-        """存在しない source_id でエラーが返ること."""
-        from rag.rag_knowledge import DocumentResult
+    async def test_cli_error_returns_error(self) -> None:
+        """CLI サブプロセスエラー時にエラーメッセージを返すこと."""
+        from rag.server import CLISubprocessError, rag_get_document
 
-        mod = import_module("rag.server")
-        mock_result = DocumentResult(
-            source_id="nonexistent",
-            title="",
-            source_type="",
-            format="text",
-            content="",
-            error="ソースが見つかりません: nonexistent",
-        )
-
-        with (
-            patch.object(mod, "get_settings", return_value=self.mock_settings),
-            patch.object(mod, "get_document", return_value=mock_result),
+        with patch(
+            "rag.server._run_cli_subprocess",
+            new_callable=AsyncMock,
+            side_effect=CLISubprocessError("ソースが見つかりません"),
         ):
-            result = await mod.rag_get_document("nonexistent")
+            result = await rag_get_document("nonexistent")
 
-        assert "エラー:" in result
-        assert "ソースが見つかりません" in result
+        assert "エラー" in result
 
     async def test_truncation_with_max_response_chars(self) -> None:
         """rag_max_response_chars でトランケーションされ、通知文込みで上限内に収まること."""
-        from rag.rag_knowledge import DocumentResult
+        from rag.server import rag_get_document
 
-        mod = import_module("rag.server")
         max_chars = 200
-        self.mock_settings.rag_max_response_chars = max_chars
-
         long_content = "あ" * 1000
-        mock_result = DocumentResult(
-            source_id="https://example.com/long",
-            title="Long Page",
-            source_type="web",
-            format="text",
-            content=long_content,
-        )
+        cli_result: dict[str, object] = {
+            "source_id": "https://example.com/long",
+            "title": "Long Page",
+            "source_type": "web",
+            "format": "text",
+            "content": long_content,
+            "is_binary": False,
+            "collected_at": "",
+            "extra": {},
+        }
+
+        mock_settings = MagicMock()
+        mock_settings.rag_max_response_chars = max_chars
 
         with (
-            patch.object(mod, "get_settings", return_value=self.mock_settings),
-            patch.object(mod, "get_document", return_value=mock_result),
+            patch("rag.server._run_cli_subprocess", new_callable=AsyncMock, return_value=cli_result),
+            patch("rag.server.get_settings", return_value=mock_settings),
         ):
-            result = await mod.rag_get_document("https://example.com/long")
+            result = await rag_get_document("https://example.com/long")
 
         assert "トランケートされました" in result
         assert "--output" in result
-        # 通知文込みで上限以内に収まること
         assert len(result) <= max_chars
 
     async def test_no_truncation_when_limit_is_none(self) -> None:
         """rag_max_response_chars=None のときトランケーションされないこと."""
-        from rag.rag_knowledge import DocumentResult
-
-        mod = import_module("rag.server")
-        self.mock_settings.rag_max_response_chars = None
+        from rag.server import rag_get_document
 
         long_content = "あ" * 1000
-        mock_result = DocumentResult(
-            source_id="https://example.com/long",
-            title="Long Page",
-            source_type="web",
-            format="text",
-            content=long_content,
-        )
+        cli_result: dict[str, object] = {
+            "source_id": "https://example.com/long",
+            "title": "Long Page",
+            "source_type": "web",
+            "format": "text",
+            "content": long_content,
+            "is_binary": False,
+            "collected_at": "",
+            "extra": {},
+        }
+
+        mock_settings = MagicMock()
+        mock_settings.rag_max_response_chars = None
 
         with (
-            patch.object(mod, "get_settings", return_value=self.mock_settings),
-            patch.object(mod, "get_document", return_value=mock_result),
+            patch("rag.server._run_cli_subprocess", new_callable=AsyncMock, return_value=cli_result),
+            patch("rag.server.get_settings", return_value=mock_settings),
         ):
-            result = await mod.rag_get_document("https://example.com/long")
+            result = await rag_get_document("https://example.com/long")
 
         assert "トランケートされました" not in result
         assert long_content in result
 
-    async def test_binary_file_returns_info(self) -> None:
-        """format=original でバイナリファイルの場合、MIME情報が返ること."""
-        from rag.rag_knowledge import DocumentResult
-
-        mod = import_module("rag.server")
-        mock_result = DocumentResult(
-            source_id="https://example.com/doc.pdf",
-            title="PDF Doc",
-            source_type="web",
-            format="original",
-            content="バイナリファイルです（MIME: application/pdf, サイズ: 1,234 bytes）。\nテキスト形式で取得するには format=text を指定してください。",
-            is_binary=True,
-        )
-
-        with (
-            patch.object(mod, "get_settings", return_value=self.mock_settings),
-            patch.object(mod, "get_document", return_value=mock_result),
-        ):
-            result = await mod.rag_get_document(
-                "https://example.com/doc.pdf", format="original"
-            )
-
-        assert "application/pdf" in result
-        assert "format=text" in result
-
     async def test_invalid_format_returns_error(self) -> None:
         """無効な format 値でエラーが返ること."""
-        mod = import_module("rag.server")
+        from rag.server import rag_get_document
 
-        result = await mod.rag_get_document("source", format="invalid")
+        result = await rag_get_document("source", format="invalid")
 
         assert "無効な format" in result
 
 
 class TestRagStatsOutput:
-    """rag_stats ツールの出力フォーマットテスト（Issue #25）."""
+    """rag_stats ツールの出力フォーマットテスト（CLI 委譲版）."""
 
-    @pytest.fixture(autouse=True)
-    def _patch_rag_service(self) -> None:
-        """rag_stats のテスト用に RAGKnowledgeService をモックする."""
-        self.mock_service = AsyncMock()
-        self.mock_settings = MagicMock()
-        self.mock_settings.rag_stats_max_sources = 100
-        self.mock_settings.source_store_dir = ""
-        self.mock_settings.converted_store_dir = ""
+    def _make_cli_result(self, **overrides: object) -> dict[str, object]:
+        base: dict[str, object] = {
+            "source_store": {"total_files": 0, "total_size": 0},
+            "converted_store": {"total_files": 0, "total_size": 0},
+            "index": {"total_chunks": 0, "source_count": 0},
+            "pipeline": {"status": "unconfigured"},
+        }
+        base.update(overrides)
+        return base
 
-    async def test_stats_contains_domain_summary(self) -> None:
-        """インデックスセクションにドメイン別サマリが含まれること."""
-        mod = import_module("rag.server")
+    async def test_stats_contains_index_data(self) -> None:
+        """インデックスセクションの統計が表示されること."""
+        from rag.server import rag_stats
 
-        self.mock_service.get_stats = AsyncMock(
-            return_value={
-                "total_chunks": 150,
-                "source_count": 3,
-                "sources": [
-                    {
-                        "domain": "example.com",
-                        "pages": [
-                            {
-                                "url": "https://example.com/page1",
-                                "title": "Page1",
-                                "chunks": 5,
-                            },
-                            {
-                                "url": "https://example.com/page2",
-                                "title": "Page2",
-                                "chunks": 3,
-                            },
-                        ],
-                    },
-                    {
-                        "domain": "other.com",
-                        "pages": [
-                            {
-                                "url": "https://other.com/doc",
-                                "title": "Doc",
-                                "chunks": 10,
-                            },
-                        ],
-                    },
-                ],
-            }
+        cli_result = self._make_cli_result(
+            index={"total_chunks": 150, "source_count": 3},
         )
 
-        with (
-            patch.object(mod, "_get_rag_service", return_value=self.mock_service),
-            patch.object(mod, "get_settings", return_value=self.mock_settings),
-        ):
-            result = await mod.rag_stats()
+        with patch("rag.server._run_cli_subprocess", new_callable=AsyncMock, return_value=cli_result):
+            result = await rag_stats()
 
         assert "📊 RAG Knowledge 統計" in result
         assert "総チャンク数: 150" in result
         assert "ソース数: 3" in result
-        assert "example.com: 2 pages (8 chunks)" in result
-        assert "other.com: 1 pages (10 chunks)" in result
 
     async def test_stats_empty_sources(self) -> None:
-        """ソースが空の場合はドメイン別が含まれないこと."""
-        mod = import_module("rag.server")
+        """ソースが空の場合."""
+        from rag.server import rag_stats
 
-        self.mock_service.get_stats = AsyncMock(
-            return_value={
-                "total_chunks": 0,
-                "source_count": 0,
-                "sources": [],
-            }
+        cli_result = self._make_cli_result(
+            index={"total_chunks": 0, "source_count": 0},
         )
 
-        with (
-            patch.object(mod, "_get_rag_service", return_value=self.mock_service),
-            patch.object(mod, "get_settings", return_value=self.mock_settings),
-        ):
-            result = await mod.rag_stats()
+        with patch("rag.server._run_cli_subprocess", new_callable=AsyncMock, return_value=cli_result):
+            result = await rag_stats()
 
         assert "📊 RAG Knowledge 統計" in result
         assert "総チャンク数: 0" in result
-        assert "ドメイン別:" not in result
-
-    async def test_stats_domain_truncation_when_exceeds_limit(self) -> None:
-        """ドメイン表示上限を超える場合に省略メッセージが出ること."""
-        mod = import_module("rag.server")
-
-        # 3ドメイン分のデータを用意し、上限を2に設定
-        self.mock_settings.rag_stats_max_sources = 2
-        self.mock_service.get_stats = AsyncMock(
-            return_value={
-                "total_chunks": 30,
-                "source_count": 3,
-                "sources": [
-                    {
-                        "domain": f"domain{i}.com",
-                        "pages": [
-                            {
-                                "url": f"https://domain{i}.com/p",
-                                "title": "P",
-                                "chunks": 10,
-                            },
-                        ],
-                    }
-                    for i in range(3)
-                ],
-            }
-        )
-
-        with (
-            patch.object(mod, "_get_rag_service", return_value=self.mock_service),
-            patch.object(mod, "get_settings", return_value=self.mock_settings),
-        ):
-            result = await mod.rag_stats()
-
-        assert "domain0.com" in result
-        assert "domain1.com" in result
-        assert "domain2.com" not in result
-        assert "以下省略" in result
 
     async def test_stats_four_sections(self) -> None:
         """4セクション構成の出力フォーマット."""
-        mod = import_module("rag.server")
+        from rag.server import rag_stats
 
-        self.mock_service.get_stats = AsyncMock(
-            return_value={
-                "total_chunks": 5,
-                "source_count": 1,
-                "sources": [],
-            }
+        cli_result = self._make_cli_result(
+            index={"total_chunks": 5, "source_count": 1},
         )
 
-        with (
-            patch.object(mod, "_get_rag_service", return_value=self.mock_service),
-            patch.object(mod, "get_settings", return_value=self.mock_settings),
-        ):
-            result = await mod.rag_stats()
+        with patch("rag.server._run_cli_subprocess", new_callable=AsyncMock, return_value=cli_result):
+            result = await rag_stats()
 
         assert "■ source_store" in result
         assert "■ converted_store" in result

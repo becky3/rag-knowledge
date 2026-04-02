@@ -40,37 +40,20 @@ from typing import Any
 # ChromaDB テレメトリを無効化（import 前に設定する必要がある）
 os.environ.setdefault("ANONYMIZED_TELEMETRY", "False")
 
-# RAG モジュールをモジュールレベルで import する。
-# 重要: asyncio.to_thread のワーカースレッド内で import すると、
-# anyio イベントループの import lock とデッドロックするため、
-# サーバー起動時（メインスレッド）に全て import しておく。
 # bm25s が "resource module not available on Windows" を stdout に print する
 # 問題への対策として、import 時に stdout を抑制する。
 from .config import ensure_utf8_streams
-from .filter_parser import parse_filters
-from .rag_knowledge import format_file_size, format_raw_search_results
+from .rag_knowledge import format_file_size
 
 with contextlib.redirect_stdout(io.StringIO()):
-    from .bm25_index import BM25Index
     from .config import UPLOAD_API_KEY_NAME, UPLOAD_API_KEY_SERVICE, get_settings
-    from .embedding.factory import get_embedding_provider
-    from .rag_knowledge import (
-        RAGKnowledgeService,
-        format_document_response,
-        get_document,
-    )
-    from .vector_store import VectorStore
 
     # パイプライン関連
-    from .pipeline.controller import PipelineController
     from .pipeline.ingesters._common import IngestResult
     from .upload import sanitize_filename as sanitize_upload_filename
-    from .pipeline.ingesters.aozora import AozoraIngester as PipelineAozoraIngester
     from .pipeline.ingesters.local import _UPLOAD_DIR as _LOCAL_UPLOAD_DIR
 
-    from .pipeline.models import PipelineMode, PipelineSummary, detect_source_type
-    from .store.metadata_db import MetadataDB
-    from .store.models import NULL_COMMIT_HASH
+    from .pipeline.models import PipelineMode, PipelineSummary
 from .safe_browsing import (
     SafeBrowsingClient,
     SafeBrowsingConfigError,
@@ -92,121 +75,6 @@ ensure_utf8_streams()
 logger = logging.getLogger(__name__)
 
 mcp = FastMCP("rag")
-
-# --- 遅延初期化: RAGKnowledgeService（検索用） ---
-
-_rag_service: RAGKnowledgeService | None = None
-_init_lock = asyncio.Lock()
-
-
-def _reset_rag_service() -> None:
-    """グローバルな RAGKnowledgeService をリセットする.
-
-    CLI サブプロセスが BM25 インデックスをディスク上で更新した後、
-    MCP プロセス内のインメモリ BM25 キャッシュが陳腐化するためリセットが必要。
-    ChromaDB は HttpClient 経由のためクライアント側キャッシュの問題はない。
-    """
-    global _rag_service
-    if _rag_service is not None:
-        try:
-            _rag_service.close()
-        except Exception:
-            logger.warning("Failed to close RAG service", exc_info=True)
-    _rag_service = None
-
-
-async def _get_rag_service() -> RAGKnowledgeService:
-    """RAGKnowledgeService を遅延初期化して返す."""
-    global _rag_service
-    if _rag_service is not None:
-        return _rag_service
-
-    async with _init_lock:
-        if _rag_service is not None:
-            return _rag_service
-
-        _rag_service = await asyncio.to_thread(_build_rag_service)
-        logger.info("RAG service initialized")
-        return _rag_service
-
-
-def _build_rag_service() -> RAGKnowledgeService:
-    """RAGKnowledgeService を構築する（ワーカースレッド用、import なし）."""
-    settings = get_settings()
-
-    embedding_provider = get_embedding_provider(settings, settings.embedding_provider)
-
-    with contextlib.redirect_stdout(io.StringIO()):
-        # HttpClient で ChromaDB サーバーに接続。
-        # ChromaDB サーバーの起動確保は _configure_and_run() の
-        # ChromaDBServerManager.ensure_server_running() で実施済み。
-        vector_store = VectorStore.create_http(
-            embedding_provider=embedding_provider,
-            host=settings.chromadb_server_host,
-            port=settings.chromadb_server_port,
-            collection_name=settings.chromadb_collection_name,
-            hnsw_m=settings.hnsw_m,
-            hnsw_construction_ef=settings.hnsw_construction_ef,
-            hnsw_search_ef=settings.hnsw_search_ef,
-        )
-        bm25_index = BM25Index(
-            k1=settings.rag_bm25_k1,
-            b=settings.rag_bm25_b,
-            persist_dir=settings.bm25_persist_dir,
-        )
-
-    return RAGKnowledgeService(
-        vector_store=vector_store,
-        chunk_size=settings.rag_chunk_size,
-        chunk_overlap=settings.rag_chunk_overlap,
-        similarity_threshold=settings.rag_similarity_threshold,
-        bm25_index=bm25_index,
-        hybrid_search_enabled=settings.rag_hybrid_search_enabled,
-        vector_weight=settings.rag_vector_weight,
-        min_combined_score=settings.rag_min_combined_score,
-        debug_log_enabled=settings.rag_debug_log_enabled,
-    )
-
-
-# --- 遅延初期化: PipelineController（取り込み・再構築用） ---
-
-_pipeline_controller: PipelineController | None = None
-_pipeline_lock = asyncio.Lock()
-
-
-def _reset_pipeline_controller() -> None:
-    """グローバルな PipelineController をリセットする.
-
-    既存インスタンスが保持する SQLite 接続等を解放してから破棄する。
-    """
-    global _pipeline_controller
-    if _pipeline_controller is not None:
-        with contextlib.suppress(Exception):
-            _pipeline_controller.source_store.close()
-    _pipeline_controller = None
-
-
-async def _get_pipeline_controller() -> PipelineController:
-    """PipelineController を遅延初期化して返す."""
-    global _pipeline_controller
-    if _pipeline_controller is not None:
-        return _pipeline_controller
-
-    async with _pipeline_lock:
-        if _pipeline_controller is not None:
-            return _pipeline_controller
-
-        _pipeline_controller = await asyncio.to_thread(_build_pipeline_controller)
-        logger.info("Pipeline controller initialized")
-        return _pipeline_controller
-
-
-def _build_pipeline_controller() -> PipelineController:
-    """パイプライン制御コントローラを構築する（ワーカースレッド用）."""
-    from .pipeline.factory import build_pipeline_controller
-
-    return build_pipeline_controller()
-
 
 _safe_browsing_client_cache: SafeBrowsingClient | None = None
 _safe_browsing_client_initialized = False
@@ -310,24 +178,19 @@ async def rag_search(
         valid = ", ".join(sorted(_VALID_SOURCE_TYPES))
         return f"無効な source_type: {source_type!r}（有効値: {valid}）"
 
-    # filters パラメータのパース
-    parsed_filters: dict[str, str] | None = None
+    args: list[str] = [query]
+    if n_results is not None:
+        args.extend(["--n-results", str(n_results)])
+    if source_type is not None:
+        args.extend(["--source-type", source_type])
     if filters is not None:
-        try:
-            parsed_filters = parse_filters(filters)
-        except ValueError as e:
-            return f"エラー: {e}"
+        args.extend(["--filters", filters])
 
-    service = await _get_rag_service()
-    if n_results is None:
-        n_results = get_settings().rag_retrieval_count
-
-    raw = await service.retrieve_raw_results(
-        query, n_results=n_results, source_type=source_type,
-        filters=parsed_filters,
-    )
-
-    return format_raw_search_results(raw)
+    try:
+        result = await _run_cli_subprocess("search", args)
+        return _format_cli_search_result(result)
+    except CLISubprocessError as e:
+        return f"エラー: 検索に失敗しました ({e})"
 
 
 _VALID_DOCUMENT_FORMATS: frozenset[str] = frozenset({"text", "original"})
@@ -357,28 +220,15 @@ async def rag_get_document(
         valid = ", ".join(sorted(_VALID_DOCUMENT_FORMATS))
         return f"無効な format: {format!r}（有効値: {valid}）"
 
-    settings = get_settings()
-    result = await asyncio.to_thread(
-        get_document,
-        source_id=source_id,
-        format=format,
-        source_store_dir=settings.source_store_dir,
-        converted_store_dir=settings.converted_store_dir,
-    )
+    args: list[str] = [source_id]
+    if format != "text":
+        args.extend(["--format", format])
 
-    response = format_document_response(result)
-
-    # MCP 経由の場合、rag_max_response_chars でトランケーション（通知文込みで上限内に収める）
-    max_chars = settings.rag_max_response_chars
-    if max_chars is not None and not result.error and len(response) > max_chars:
-        truncation_notice = (
-            "\n\n…（レスポンスが上限の{:,}文字を超えたためトランケートされました。"
-            "CLI の --output オプションで全文取得できます）"
-        ).format(max_chars)
-        truncate_at = max(0, max_chars - len(truncation_notice))
-        response = response[:truncate_at] + truncation_notice
-
-    return response
+    try:
+        result = await _run_cli_subprocess("get-document", args)
+        return _format_cli_document_result(result)
+    except CLISubprocessError as e:
+        return f"エラー: ドキュメント取得に失敗しました ({e})"
 
 
 _VALID_ZENN_CONTENT_TYPES: frozenset[str] = frozenset({"articles", "scraps", "all"})
@@ -838,37 +688,19 @@ async def rag_search_aozora(
     Returns:
         検索結果リスト（作品 ID、タイトル、著者名、著作権フラグ）
     """
-    controller = await _get_pipeline_controller()
-    settings = get_settings()
-    aozora_ingester = PipelineAozoraIngester(
-        controller.source_store,
-        max_works=settings.rag_aozora_max_works,
-    )
+    args: list[str] = []
+    if author is not None:
+        args.extend(["--author", author])
+    if title is not None:
+        args.extend(["--title", title])
+    if limit != 20:
+        args.extend(["--limit", str(limit)])
 
     try:
-        results = aozora_ingester.search(
-            author=author,
-            title=title,
-            limit=limit,
-        )
-    except (ValueError, TypeError) as e:
-        return f"エラー: {e}"
-
-    if not results:
-        parts = []
-        if author:
-            parts.append(f"著者: {author}")
-        if title:
-            parts.append(f"タイトル: {title}")
-        return f"検索結果: 0件（{', '.join(parts)}）"
-
-    lines = [f"検索結果: {len(results)}件", ""]
-    for r in results:
-        lines.append(
-            f"- [{r['book_id']}] {r['title']} / {r['author']} "
-            f"({r['copyright']})"
-        )
-    return "\n".join(lines)
+        result = await _run_cli_subprocess("search-aozora", args)
+        return _format_cli_search_aozora_result(result)
+    except CLISubprocessError as e:
+        return f"エラー: 青空文庫カタログ検索に失敗しました ({e})"
 
 
 @mcp.tool()
@@ -982,9 +814,6 @@ _VALID_PIPELINE_SOURCE_TYPES: frozenset[str] = frozenset({
 })
 
 
-_format_size = format_file_size
-
-
 def _format_rebuild_summary(summary: PipelineSummary, elapsed: float) -> str:
     """PipelineSummary をテキストに変換する."""
     mode_names = {
@@ -1016,93 +845,6 @@ def _format_rebuild_summary(summary: PipelineSummary, elapsed: float) -> str:
 # Windows: 0xC0000005 は signed (-1073741819) / unsigned (3221225477) 両方で返りうる
 # Unix: SIGSEGV=11, shell: 128+11=139
 _SEGFAULT_EXIT_CODES: frozenset[int] = frozenset({-1073741819, 3221225477, -11, 139})
-
-
-def _collect_source_store_stats(
-    source_store_dir: Path,
-) -> dict[str, Any]:
-    """source_store のファイル統計を収集する."""
-    if not source_store_dir.exists():
-        return {"total_files": 0, "total_size": 0, "by_type": {}}
-
-    total_files = 0
-    total_size = 0
-    by_type: dict[str, dict[str, int]] = {}
-
-    for file in source_store_dir.rglob("*"):
-        if not file.is_file():
-            continue
-
-        rel = file.relative_to(source_store_dir)
-        rel_posix = rel.as_posix()
-
-        # 除外: .git (ディレクトリ/ファイル), .meta, metadata.db*, .gitignore
-        if (
-            rel_posix == ".git"
-            or rel_posix.startswith(".git/")
-            or rel_posix == ".gitignore"
-        ):
-            continue
-        name = file.name
-        if name.endswith(".meta") or name.startswith("metadata.db"):
-            continue
-
-        size = file.stat().st_size
-        total_files += 1
-        total_size += size
-
-        st = detect_source_type(rel_posix)
-        if st not in by_type:
-            by_type[st] = {"files": 0, "size": 0}
-        by_type[st]["files"] += 1
-        by_type[st]["size"] += size
-
-    return {"total_files": total_files, "total_size": total_size, "by_type": by_type}
-
-
-def _collect_converted_store_stats(
-    converted_store_dir: Path,
-) -> dict[str, Any]:
-    """converted_store のファイル統計を収集する."""
-    if not converted_store_dir.exists():
-        return {"total_files": 0, "total_size": 0}
-
-    total_files = 0
-    total_size = 0
-
-    for file in converted_store_dir.rglob("*"):
-        if not file.is_file():
-            continue
-        total_files += 1
-        total_size += file.stat().st_size
-
-    return {"total_files": total_files, "total_size": total_size}
-
-
-def _collect_pipeline_stats(
-    source_store_dir: Path,
-) -> dict[str, Any] | None:
-    """metadata.db からパイプライン統計を収集する."""
-    db_path = source_store_dir / "metadata.db"
-    if not db_path.exists():
-        return None
-
-    db = MetadataDB(db_path)
-    try:
-        db.initialize()
-        history = db.get_pipeline_history()
-        last_commit_id = db.get_last_commit_id()
-        deleted_count = db.source_count(status="deleted")
-        last_processed_at = history[-1].processed_at if history else None
-
-        return {
-            "last_processed_at": last_processed_at,
-            "execution_count": len(history),
-            "last_commit_id": last_commit_id,
-            "deleted_count": deleted_count,
-        }
-    finally:
-        db.close()
 
 
 @mcp.tool()
@@ -1290,10 +1032,6 @@ async def _run_cli_subprocess(
     stderr_lines = stderr_text.rstrip().splitlines()
     stderr_tail = "\n".join(stderr_lines[-10:])
 
-    # キャッシュリセット（サブプロセスが DB を更新するため）
-    _reset_pipeline_controller()
-    _reset_rag_service()
-
     # SEGFAULT 検出
     if exit_code in _SEGFAULT_EXIT_CODES:
         raise CLISubprocessError(
@@ -1372,6 +1110,194 @@ def _parse_pipeline_summary(data: dict[str, Any]) -> PipelineSummary | None:
         return None
 
 
+def _format_chunk_position(chunk_index: int, total_chunks: int) -> str:
+    """チャンク位置を表示用文字列にフォーマットする."""
+    pos = chunk_index + 1
+    if total_chunks > 0:
+        return f"{pos}/{total_chunks}"
+    return f"{pos}/?"
+
+
+def _format_cli_search_result(result: dict[str, Any]) -> str:
+    """CLI search の JSON 結果を MCP レスポンス文字列に変換する."""
+    vector_results = result.get("vector_results", [])
+    bm25_results = result.get("bm25_results", [])
+
+    if not vector_results and not bm25_results:
+        return "該当する情報が見つかりませんでした"
+
+    sections: list[tuple[str, list[dict[str, Any]], str]] = []
+    if vector_results:
+        sections.append(("## ベクトル検索結果 (意味的類似度)\n", vector_results, "distance"))
+    if bm25_results:
+        sections.append(("## BM25 検索結果 (キーワード一致)\n", bm25_results, "score"))
+
+    parts: list[str] = []
+    for header, items, score_key in sections:
+        parts.append(header)
+        for i, item in enumerate(items, start=1):
+            score_val = item.get(score_key, 0.0)
+            parts.append(f"### Result {i} [{score_key}={score_val:.3f}]")
+
+            chunk_pos = _format_chunk_position(
+                item.get("chunk_index", 0), item.get("total_chunks", 0),
+            )
+            parts.append(f"Source: {item.get('source_url', '')}")
+            parts.append(f"Title: {item.get('title', '')}")
+            parts.append(f"Chunk: {chunk_pos}")
+            parts.append(f"Type: {item.get('source_type', '')}")
+            section_path = item.get("section_path", "")
+            if section_path:
+                parts.append(f"Section: {section_path}")
+            collected_at = item.get("collected_at", "")
+            if collected_at:
+                parts.append(f"Collected: {collected_at}")
+            parts.append("")
+            parts.append(item.get("text", ""))
+            parts.append("")
+
+    return "\n".join(parts).rstrip()
+
+
+def _format_cli_document_result(result: dict[str, Any]) -> str:
+    """CLI get-document の JSON 結果を MCP レスポンス文字列に変換する."""
+    parts: list[str] = []
+    parts.append(f"Source: {result.get('source_id', '')}")
+    if result.get("title"):
+        parts.append(f"Title: {result['title']}")
+    if result.get("source_type"):
+        parts.append(f"Type: {result['source_type']}")
+    if result.get("collected_at"):
+        parts.append(f"Collected: {result['collected_at']}")
+    fmt = result.get("format", "text")
+    parts.append(f"Format: {fmt}")
+    parts.append("")
+    content = result.get("content", "")
+    parts.append(content)
+
+    response = "\n".join(parts)
+
+    # MCP 経由の場合、rag_max_response_chars でトランケーション
+    settings = get_settings()
+    max_chars = settings.rag_max_response_chars
+    if max_chars is not None and len(response) > max_chars:
+        truncation_notice = (
+            "\n\n…（レスポンスが上限の{:,}文字を超えたためトランケートされました。"
+            "CLI の --output オプションで全文取得できます）"
+        ).format(max_chars)
+        truncate_at = max(0, max_chars - len(truncation_notice))
+        response = response[:truncate_at] + truncation_notice
+
+    return response
+
+
+def _format_cli_search_aozora_result(result: dict[str, Any]) -> str:
+    """CLI search-aozora の JSON 結果を MCP レスポンス文字列に変換する."""
+    results = result.get("results", [])
+    count = result.get("count", len(results))
+
+    if not results:
+        return f"検索結果: {count}件"
+
+    lines = [f"検索結果: {count}件", ""]
+    for r in results:
+        lines.append(
+            f"- [{r.get('book_id', '')}] {r.get('title', '')} / {r.get('author', '')} "
+            f"({r.get('copyright', '')})"
+        )
+    return "\n".join(lines)
+
+
+def _format_cli_list_recent_result(result: dict[str, Any]) -> str:
+    """CLI list-recent の JSON 結果を MCP レスポンス文字列に変換する."""
+    sources = result.get("sources", [])
+    source_type = result.get("source_type", "")
+    count = result.get("count", len(sources))
+    total = result.get("total", count)
+
+    if not sources:
+        return f"{source_type}: 0 件"
+
+    lines = [f"{source_type}: {count} 件（全 {total} 件中）", ""]
+    for s in sources:
+        title = s.get("title", "(無題)")
+        source_id = s.get("source_id", "")
+        collected_at = s.get("collected_at", "")
+        file_size = s.get("file_size", 0)
+        size_str = format_file_size(file_size) if file_size else ""
+        line = f"- {title}"
+        if collected_at:
+            line += f"  [{collected_at}]"
+        if size_str:
+            line += f"  ({size_str})"
+        lines.append(line)
+        lines.append(f"  {source_id}")
+
+    return "\n".join(lines)
+
+
+def _format_cli_stats_result(result: dict[str, Any]) -> str:
+    """CLI stats の JSON 結果を MCP レスポンス文字列に変換する."""
+    parts: list[str] = ["📊 RAG Knowledge 統計"]
+
+    # source_store
+    ss = result.get("source_store", {})
+    parts.append("")
+    parts.append("■ source_store")
+    if ss.get("status") in {"unconfigured", "not_found"}:
+        parts.append("  未設定" if ss.get("status") == "unconfigured" else "  ディレクトリが存在しません")
+    else:
+        parts.append(f"  総ファイル数: {ss.get('total_files', 0):,}")
+        parts.append(f"  総サイズ: {format_file_size(int(str(ss.get('total_size', 0))))}")
+        by_type = ss.get("by_type")
+        if by_type and isinstance(by_type, dict):
+            parts.append("  媒体別:")
+            for st_key in sorted(by_type.keys()):
+                info = by_type[st_key]
+                parts.append(
+                    f"    {st_key}: {info['files']} files"
+                    f" ({format_file_size(info['size'])})"
+                )
+
+    # converted_store
+    cs = result.get("converted_store", {})
+    parts.append("")
+    parts.append("■ converted_store")
+    if cs.get("status") in {"unconfigured", "not_found"}:
+        parts.append("  未設定" if cs.get("status") == "unconfigured" else "  ディレクトリが存在しません")
+    else:
+        parts.append(f"  総ファイル数: {cs.get('total_files', 0):,}")
+        parts.append(f"  総サイズ: {format_file_size(int(str(cs.get('total_size', 0))))}")
+
+    # インデックス
+    idx = result.get("index", {})
+    parts.append("")
+    parts.append("■ インデックス")
+    if "error" in idx:
+        parts.append(f"  エラー: {idx['error']}")
+    else:
+        parts.append(f"  総チャンク数: {idx.get('total_chunks', 0):,}")
+        parts.append(f"  ソース数: {idx.get('source_count', 0):,}")
+
+    # パイプライン
+    pl = result.get("pipeline", {})
+    parts.append("")
+    parts.append("■ パイプライン")
+    if pl.get("status") == "unconfigured":
+        parts.append("  未設定")
+    elif pl.get("status") == "uninitialized":
+        parts.append("  未初期化")
+    else:
+        last_at = pl.get("last_processed_at") or "（未実行）"
+        parts.append(f"  最終処理: {last_at}")
+        parts.append(f"  実行回数: {pl.get('run_count', 0)}")
+        lci = pl.get("last_commit_id")
+        parts.append(f"  last_commit_id: {lci if lci else '（未実行）'}")
+        parts.append(f"  論理削除: {pl.get('deleted_count', 0)} 件")
+
+    return "\n".join(parts)
+
+
 @mcp.tool()
 async def rag_list_recent(
     source_type: str,
@@ -1394,20 +1320,18 @@ async def rag_list_recent(
         valid = ", ".join(sorted(_VALID_SOURCE_TYPES))
         return f"無効な source_type: {source_type!r}（有効値: {valid}）"
 
-    settings = get_settings()
-    if limit is None:
-        limit = settings.rag_list_recent_limit
-    if limit < 1 or limit > 100:
+    if limit is not None and (limit < 1 or limit > 100):
         return "エラー: limit は 1〜100 の範囲で指定してください"
 
-    from .rag_knowledge import list_recent_sources
+    args: list[str] = [source_type]
+    if limit is not None:
+        args.extend(["--limit", str(limit)])
 
-    return await asyncio.to_thread(
-        list_recent_sources,
-        settings.source_store_dir,
-        source_type,
-        limit,
-    )
+    try:
+        result = await _run_cli_subprocess("list-recent", args)
+        return _format_cli_list_recent_result(result)
+    except CLISubprocessError as e:
+        return f"エラー: ソース一覧の取得に失敗しました ({e})"
 
 
 @mcp.tool()
@@ -1423,129 +1347,11 @@ async def rag_stats() -> str:
     Returns:
         統計情報のテキスト
     """
-    settings = get_settings()
-
-    parts: list[str] = ["📊 RAG Knowledge 統計"]
-
-    # --- source_store セクション ---
-    parts.append("")
-    parts.append("■ source_store")
-    if not settings.source_store_dir:
-        parts.append("  未設定")
-    else:
-        try:
-            ss_stats = await asyncio.to_thread(
-                _collect_source_store_stats, Path(settings.source_store_dir),
-            )
-            parts.append(f"  総ファイル数: {ss_stats['total_files']:,}")
-            parts.append(f"  総サイズ: {_format_size(ss_stats['total_size'])}")
-            by_type = ss_stats.get("by_type", {})
-            if by_type:
-                parts.append("  媒体別:")
-                for st in sorted(by_type.keys()):
-                    info = by_type[st]
-                    parts.append(
-                        f"    {st}: {info['files']} files"
-                        f" ({_format_size(info['size'])})"
-                    )
-        except Exception:
-            logger.exception("source_store 統計の取得に失敗")
-            parts.append("  エラー: 統計の取得に失敗しました")
-
-    # --- converted_store セクション ---
-    parts.append("")
-    parts.append("■ converted_store")
-    if not settings.converted_store_dir:
-        parts.append("  未設定")
-    else:
-        try:
-            cs_stats = await asyncio.to_thread(
-                _collect_converted_store_stats,
-                Path(settings.converted_store_dir),
-            )
-            parts.append(f"  総ファイル数: {cs_stats['total_files']:,}")
-            parts.append(f"  総サイズ: {_format_size(cs_stats['total_size'])}")
-        except Exception:
-            logger.exception("converted_store 統計の取得に失敗")
-            parts.append("  エラー: 統計の取得に失敗しました")
-
-    # --- インデックスセクション ---
-    parts.append("")
-    parts.append("■ インデックス")
     try:
-        service = await _get_rag_service()
-        index_stats = await service.get_stats()
-        total_chunks = index_stats.get("total_chunks", 0)
-        source_count = index_stats.get("source_count", 0)
-        sources = index_stats.get("sources", [])
-
-        parts.append(f"  総チャンク数: {total_chunks:,}")
-        parts.append(f"  ソース数: {source_count:,}")
-
-        if sources and isinstance(sources, list):
-            max_sources = settings.rag_stats_max_sources
-            parts.append("  ドメイン別:")
-
-            displayed = 0
-            truncated = False
-            for group in sources:
-                if displayed >= max_sources:
-                    truncated = True
-                    break
-                if not isinstance(group, dict):
-                    continue
-                domain = group.get("domain", "unknown")
-                pages = group.get("pages", [])
-                if not isinstance(pages, list):
-                    continue
-
-                page_count = len(pages)
-                domain_chunks = sum(
-                    int(p.get("chunks", 0))
-                    for p in pages
-                    if isinstance(p, dict)
-                )
-                parts.append(
-                    f"    {domain}: {page_count} pages"
-                    f" ({domain_chunks:,} chunks)"
-                )
-                displayed += 1
-
-            if truncated:
-                parts.append(
-                    f"  (以下省略、{max_sources}件まで表示)"
-                )
-    except Exception:
-        logger.exception("インデックス統計の取得に失敗")
-        parts.append("  エラー: 統計の取得に失敗しました")
-
-    # --- パイプラインセクション ---
-    parts.append("")
-    parts.append("■ パイプライン")
-    if not settings.source_store_dir:
-        parts.append("  未設定")
-    else:
-        try:
-            pl_stats = await asyncio.to_thread(
-                _collect_pipeline_stats, Path(settings.source_store_dir),
-            )
-            if pl_stats is None:
-                parts.append("  未初期化")
-            else:
-                last_at = pl_stats["last_processed_at"] or "（未実行）"
-                parts.append(f"  最終処理: {last_at}")
-                parts.append(f"  実行回数: {pl_stats['execution_count']}")
-                commit_id = str(pl_stats["last_commit_id"])
-                if commit_id == NULL_COMMIT_HASH:
-                    parts.append("  last_commit_id: （未実行）")
-                else:
-                    parts.append(f"  last_commit_id: {commit_id[:7]}")
-                parts.append(f"  論理削除: {pl_stats['deleted_count']} 件")
-        except Exception:
-            logger.exception("パイプライン統計の取得に失敗")
-            parts.append("  エラー: 統計の取得に失敗しました")
-
-    return "\n".join(parts)
+        result = await _run_cli_subprocess("stats")
+        return _format_cli_stats_result(result)
+    except CLISubprocessError as e:
+        return f"エラー: 統計情報の取得に失敗しました ({e})"
 
 
 # --- Upload HTTP API ---
