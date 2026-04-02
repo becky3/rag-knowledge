@@ -178,7 +178,7 @@ async def rag_search(
         valid = ", ".join(sorted(_VALID_SOURCE_TYPES))
         return f"無効な source_type: {source_type!r}（有効値: {valid}）"
 
-    args: list[str] = [query]
+    args: list[str] = ["--query", query]
     if n_results is not None:
         args.extend(["--n-results", str(n_results)])
     if source_type is not None:
@@ -1183,7 +1183,7 @@ def _format_cli_document_result(result: dict[str, Any]) -> str:
     if max_chars is not None and len(response) > max_chars:
         truncation_notice = (
             "\n\n…（レスポンスが上限の{:,}文字を超えたためトランケートされました。"
-            "CLI の --output オプションで全文取得できます）"
+            "CLI の get-document コマンド（--output-file オプション）で全文を取得できます）"
         ).format(max_chars)
         truncate_at = max(0, max_chars - len(truncation_notice))
         response = response[:truncate_at] + truncation_notice
@@ -1323,7 +1323,7 @@ async def rag_list_recent(
     if limit is not None and (limit < 1 or limit > 100):
         return "エラー: limit は 1〜100 の範囲で指定してください"
 
-    args: list[str] = [source_type]
+    args: list[str] = ["--source-type", source_type]
     if limit is not None:
         args.extend(["--limit", str(limit)])
 

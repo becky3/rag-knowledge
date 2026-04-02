@@ -83,9 +83,10 @@ class TestRagSearchOutput:
             bm25_results=[{"text": "BM25の結果テキスト", "source_url": "https://example.com/bm25_1", "score": 4.521, "doc_id": "doc1", "chunk_index": 4, "title": "サンプル記事", "source_type": "zenn", "total_chunks": 20, "collected_at": "", "section_path": ""}],
         )
 
-        with patch("rag.server._run_cli_subprocess", new_callable=AsyncMock, return_value=cli_result):
+        with patch("rag.server._run_cli_subprocess", new_callable=AsyncMock, return_value=cli_result) as mock_subprocess:
             result = await rag_search("テストクエリ")
 
+        mock_subprocess.assert_called_once_with("search", ["--query", "テストクエリ"])
         assert "## ベクトル検索結果 (意味的類似度)" in result
         assert "## BM25 検索結果 (キーワード一致)" in result
 
