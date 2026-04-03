@@ -114,15 +114,11 @@ flowchart TD
     ERROR_LOG --> ERROR_DIALOG
 ```
 
-### `pipeline_history` テーブルの拡張
+### `pipeline_history` テーブルの `mode` 列
 
-`mode` 列を追加し、rebuild 実行時のモードを記録する。
+`pipeline_history` テーブルの `mode` 列（[source-store.md](../source-store.md) で定義済み）を使用して、rebuild 実行時のモードを記録する。
 
-| カラム | 型 | 制約 | 内容 |
-|--------|-----|------|------|
-| `mode` | TEXT | NOT NULL | 実行モード: `full`, `convert`, `index`, `incremental` |
-
-既存レコード（`mode` 列追加前）のマイグレーション: `ALTER TABLE pipeline_history ADD COLUMN mode TEXT NOT NULL DEFAULT 'incremental'`。既存レコードは `incremental` として扱う（安全側に倒す: index rebuild が必要と判定される）。
+マイグレーション: `mode` 列が存在しない既存 DB に対しては `ALTER TABLE pipeline_history ADD COLUMN mode TEXT NOT NULL DEFAULT 'incremental'` を実行する。既存レコードは `incremental` として扱う（安全側に倒す: index rebuild が必要と判定される）。
 
 最後の index/full rebuild の取得:
 

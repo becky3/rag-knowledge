@@ -107,7 +107,7 @@ class TestRagRebuild:
 
         mock_cli_result: dict[str, object] = {
             "type": "result",
-            "mode": "full_rebuild",
+            "mode": "full",
             "total_files": 5,
             "processed": 5,
             "skipped": 0,
@@ -129,7 +129,7 @@ class TestRagRebuild:
 
         mock_cli_result: dict[str, object] = {
             "type": "result",
-            "mode": "convert_only",
+            "mode": "convert",
             "total_files": 3,
             "processed": 3,
             "skipped": 0,

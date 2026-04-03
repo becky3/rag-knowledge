@@ -19,7 +19,7 @@ FastMCP を使用して 18 個の RAG ツールを公開する:
 - rag_add_aozora: 青空文庫作品の単一取り込み
 - rag_crawl_aozora: 青空文庫著者作品の一括取り込み
 - rag_list_recent: 指定 source_type のソースを新しい順で一覧取得
-- rag_delete: ソースURL指定でナレッジから論理削除
+- rag_delete: ソース識別子指定でナレッジから論理削除
 - rag_rebuild: ナレッジベースの再構築
 - rag_stats: ナレッジベースの統計情報を表示
 """
@@ -773,8 +773,8 @@ async def rag_crawl_aozora(
 
 
 @mcp.tool()
-async def rag_delete(url: str, ctx: MCPContext | None = None) -> str:
-    """[rag-knowledge] RAG delete - ソースURL指定でナレッジから削除.
+async def rag_delete(source_id: str, ctx: MCPContext | None = None) -> str:
+    """[rag-knowledge] RAG delete - ソース識別子指定でナレッジから削除.
 
     knowledge base, remove source, delete document.
     source_store からファイルを物理削除し、パイプライン経由で
@@ -782,31 +782,31 @@ async def rag_delete(url: str, ctx: MCPContext | None = None) -> str:
     git 管理下のため、削除後も git checkout で復旧可能。
 
     Args:
-        url: 削除するソースURL（source_id）
+        source_id: 削除するソース識別子（source_id）
 
     Returns:
         削除結果のメッセージ
     """
     try:
-        result = await _run_cli_subprocess("delete", [url], ctx=ctx)
+        result = await _run_cli_subprocess("delete", [source_id], ctx=ctx)
 
         if result.get("not_found"):
-            return f"該当するソースが見つかりませんでした: {url}"
+            return f"該当するソースが見つかりませんでした: {source_id}"
 
         pipeline_data = result.get("pipeline")
         if pipeline_data:
             pipeline_summary = _parse_pipeline_summary(pipeline_data)
             if pipeline_summary and pipeline_summary.errors:
                 errors_text = "; ".join(pipeline_summary.errors)
-                return f"削除しましたが、パイプラインでエラーが発生しました: {url} ({errors_text})"
-        return f"削除しました: {url}"
+                return f"削除しましたが、パイプラインでエラーが発生しました: {source_id} ({errors_text})"
+        return f"削除しました: {source_id}"
     except CLISubprocessError as e:
         if e.lock_conflict:
             return "エラー: 別の操作が実行中です。しばらく待ってから再試行してください"
-        return f"エラー: 削除に失敗しました。URL: {url} ({e})"
+        return f"エラー: 削除に失敗しました。source_id: {source_id} ({e})"
     except Exception:
-        logger.exception("Failed to delete: %s", url)
-        return f"エラー: 削除に失敗しました。URL: {url}"
+        logger.exception("Failed to delete: %s", source_id)
+        return f"エラー: 削除に失敗しました。source_id: {source_id}"
 
 
 # --- 再構築 ---

@@ -268,6 +268,17 @@ flowchart LR
 
 .meta サイドカーファイルの媒体別フィールド（[source-store.md](source-store.md) 参照）のうち、共通フィールドに含まれないものを `custom:{キー名}` として格納する。
 
+媒体ごとのカスタムフィールド例:
+
+| 媒体 | カスタムフィールド |
+|------|-----------------|
+| web | `custom:url` |
+| bluesky | `custom:handle`, `custom:did`, `custom:rkey`, `custom:url`, `custom:created_at`, `custom:has_images`, `custom:has_video`, `custom:has_external_link`, `custom:is_reply`, `custom:is_repost` |
+| zenn | `custom:slug`, `custom:content_type`, `custom:article_type`, `custom:published_at`, `custom:liked_count`, `custom:topics`, `custom:comments_count`, `custom:closed`, `custom:username` |
+| youtube | `custom:video_id`, `custom:channel_id`, `custom:uploader`, `custom:upload_date`, `custom:duration`, `custom:transcript_source`, `custom:playlist_id`（任意） |
+| aozora | `custom:book_id`, `custom:person_id`, `custom:author`, `custom:author_kana`, `custom:copyright_expired` |
+| journal | `custom:repository` |
+
 #### 型変換ルール
 
 ChromaDB のメタデータ値は `str | int | float | bool` のみ許容される。許容型でない値は以下のルールで変換する。
@@ -322,26 +333,26 @@ BM25 のトークナイズには日本語形態素解析（fugashi）を使用�
 
 #### `config.toml`（共通設定値）
 
-| 設定項目 | 型 | 内容 | デフォルト |
-|---------|-----|------|-----------|
-| `rag_chunk_size` | int | チャンクの最大文字数 | 200 |
-| `rag_chunk_overlap` | int | チャンク間のオーバーラップ文字数 | 30 |
-| `rag_embedding_context_length` | int | Embedding モデルのコンテキスト長（トークン数） | 512 |
-| `rag_worst_token_char_ratio` | float | 最悪ケーストークン/文字比率。導出手順は「トークン/文字比率の導出手順」を参照 | 0.7 |
-| `embedding_model_local` | str | ローカル Embedding モデル名 | `text-embedding-nomic-embed-text-v2-moe` |
-| `embedding_model_online` | str | オンライン Embedding モデル名 | `text-embedding-3-small` |
-| `embedding_prefix_enabled` | bool | Embedding プレフィックスの付与 | `true` |
-| `rag_bm25_k1` | float | BM25 の用語頻度飽和パラメータ | 2.5 |
-| `rag_bm25_b` | float | BM25 の文書長正規化パラメータ | 0.50 |
+| 設定項目 | 型 | 保管先 | デフォルト | 許容範囲 | 説明 |
+|---------|-----|--------|-----------|---------|------|
+| `rag_chunk_size` | int | `config.toml` | 200 | — | チャンクの最大文字数 |
+| `rag_chunk_overlap` | int | `config.toml` | 30 | — | チャンク間のオーバーラップ文字数 |
+| `rag_embedding_context_length` | int | `config.toml` | 512 | — | Embedding モデルのコンテキスト長（トークン数） |
+| `rag_worst_token_char_ratio` | float | `config.toml` | 0.7 | — | 最悪ケーストークン/文字比率。導出手順は「トークン/文字比率の導出手順」を参照 |
+| `embedding_model_local` | str | `config.toml` | `text-embedding-nomic-embed-text-v2-moe` | — | ローカル Embedding モデル名 |
+| `embedding_model_online` | str | `config.toml` | `text-embedding-3-small` | — | オンライン Embedding モデル名 |
+| `embedding_prefix_enabled` | bool | `config.toml` | `true` | — | Embedding プレフィックスの付与 |
+| `rag_bm25_k1` | float | `config.toml` | 2.5 | — | BM25 の用語頻度飽和パラメータ |
+| `rag_bm25_b` | float | `config.toml` | 0.50 | — | BM25 の文書長正規化パラメータ |
 
 #### `.env`（環境依存値）
 
-| 設定項目 | 型 | 内容 |
-|---------|-----|------|
-| `EMBEDDING_PROVIDER` | str | Embedding プロバイダー（`local` または `online`） |
-| `LMSTUDIO_BASE_URL` | str | LM Studio の接続先 URL |
-| `CHROMADB_PERSIST_DIR` | str | ChromaDB の永続化ディレクトリパス |
-| `BM25_PERSIST_DIR` | str | BM25 インデックスの永続化ディレクトリパス |
+| 設定項目 | 型 | 保管先 | デフォルト | 許容範囲 | 説明 |
+|---------|-----|--------|-----------|---------|------|
+| `EMBEDDING_PROVIDER` | str | `.env` | `local` | `local`, `online` | Embedding プロバイダー |
+| `LMSTUDIO_BASE_URL` | str | `.env` | `http://localhost:1234/v1` | — | LM Studio の接続先 URL |
+| `CHROMADB_PERSIST_DIR` | str | `.env` | `./chroma_db` | — | ChromaDB の永続化ディレクトリパス |
+| `BM25_PERSIST_DIR` | str | `.env` | `./bm25_index` | — | BM25 インデックスの永続化ディレクトリパス |
 
 ## 外部連携
 

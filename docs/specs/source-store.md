@@ -58,6 +58,7 @@ metadata.db、converted_store、検索インデックスは全て source_store �
   - `content_hash`: ファイル内容から算出
   - `file_size`: ファイルシステムから取得
 - `.meta` ファイルの形式は YAML とする
+- `.meta` ファイルはメタデータの原本である。metadata.db はパフォーマンス向上のための索引であり、`.meta` から再構築可能。コンバーター等のパイプラインコンポーネントが `.meta` を直接読み取ってメタデータを取得することを許容する（metadata.db 経由を強制しない）
 
 ### metadata.db
 
@@ -134,8 +135,11 @@ flowchart TD
     ZENN --> Z_USER["username/"]
     Z_USER --> Z_ART["articles/"]
     Z_USER --> Z_SCR["scraps/"]
-    Z_ART --> Z_SLUG["slug.html"]
-    Z_ART --> Z_SLUG_META["slug.html.meta"]
+    Z_ART --> Z_SLUG["slug.json"]
+    Z_ART --> Z_SLUG_META["slug.json.meta"]
+    YT --> YT_CH["{channel_id}/"]
+    YT_CH --> YT_VID["{video_id}.json"]
+    YT_CH --> YT_VID_META["{video_id}.json.meta"]
     AZ --> AZ_CAT["catalog.csv"]
     AZ --> AZ_CAT_META["catalog.csv.meta"]
     AZ --> AZ_PERSON["{person_id}/"]
@@ -278,6 +282,18 @@ URL: `http://localhost:8080/api/docs`
 | `closed` | bool | クローズ状態（スクラップのみ。記事では `false`） |
 | `username` | str | 著者のユーザー名 |
 
+**youtube:**
+
+| フィールド | 型 | 内容 |
+|-----------|-----|------|
+| `video_id` | str | YouTube 動画 ID |
+| `channel_id` | str | チャンネル ID |
+| `uploader` | str | 投稿者名 |
+| `upload_date` | str | アップロード日（`YYYYMMDD` 形式） |
+| `duration` | int | 動画の長さ（秒） |
+| `transcript_source` | str | 字幕ソース（`manual`, `auto`, `whisper`） |
+| `playlist_id` | str | プレイリスト ID（プレイリスト経由の取り込み時のみ） |
+
 **aozora:**
 
 | フィールド | 型 | 内容 |
@@ -363,6 +379,21 @@ closed: false
 username: "alice"
 ```
 
+**youtube:**
+
+```yaml
+source_id: "https://www.youtube.com/watch?v=xxxxxxxxxxx"
+source_type: youtube
+title: "Sample Video Title"
+collected_at: "2026-03-25T10:00:00+09:00"
+video_id: "xxxxxxxxxxx"
+channel_id: "UCxxxxxxxxxxxxxxxxxxxxxxxx"
+uploader: "Alice Channel"
+upload_date: "20260320"
+duration: 600
+transcript_source: "auto"
+```
+
 **aozora:**
 
 ```yaml
@@ -403,7 +434,7 @@ source_store 内の全ファイルのメタデータ索引。
 | `content_hash` | TEXT | NOT NULL | ファイル内容の SHA-256 ハッシュ |
 | `file_size` | INTEGER | NOT NULL | ファイルサイズ（バイト） |
 | `collected_at` | TEXT | NOT NULL | 初回取り込み日時（ISO 8601） |
-| `updated_at` | TEXT | NOT NULL | 最終更新日時（ISO 8601） |
+| `updated_at` | TEXT | NOT NULL | 最終更新日時（ISO 8601）。`register_source` の呼び出し時に現在時刻で設定される（新規登録・再取り込み時の上書きの両方） |
 
 #### pipeline_history テーブル
 
@@ -423,9 +454,9 @@ source_store 内の全ファイルのメタデータ索引。
 
 ### 設定項目
 
-| 設定項目 | 型 | 保管先 | 内容 | デフォルト |
-|---------|-----|--------|------|-----------|
-| `SOURCE_STORE_DIR` | str | `.env` | source_store のディレクトリパス | なし（必須） |
+| 設定項目 | 型 | 保管先 | デフォルト | 許容範囲 | 説明 |
+|---------|-----|--------|-----------|---------|------|
+| `SOURCE_STORE_DIR` | str | `.env` | なし（必須） | — | source_store のディレクトリパス |
 
 ## エッジケース
 

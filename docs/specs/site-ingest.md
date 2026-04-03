@@ -113,8 +113,8 @@ MCP ツール `rag_site_ingest` と CLI コマンド `site-ingest` の 2 つの�
 
 | 項目 | 内容 |
 |------|------|
-| 最悪ケースリクエスト数 | `site_ingest_max_pages`（デフォルト 10,000）+ robots.txt 取得 1 件。Scrapy の重複フィルタにより実際のリクエスト数は対象サイトのユニーク URL 数に依存する |
-| 最悪ケース所要時間 | 10,000 × 0.1 秒（最小間隔）= 1,000 秒（約 17 分）。`site_ingest_download_timeout`（デフォルト 30 秒）× リクエスト数分の接続待ち時間が加算される可能性あり。Scrapy プロセスの終了で操作が完了する |
+| 最悪ケースリクエスト数 | `site_ingest_max_pages`（デフォルト 500、許容上限 1,000）+ robots.txt 取得 1 件。Scrapy の重複フィルタにより実際のリクエスト数は対象サイトのユニーク URL 数に依存する |
+| 最悪ケース所要時間 | 1,000 × 0.1 秒（最小間隔）= 100 秒。`site_ingest_download_timeout`（デフォルト 30 秒）× リクエスト数分の接続待ち時間が加算される可能性あり。Scrapy プロセスの終了で操作が完了する |
 | 想定エラー率 | サイト依存。Scrapy のリトライミドルウェア（デフォルト: 2 回リトライ）が対象ステータスコード（500, 502, 503, 504, 522, 524, 408, 429）に適用される |
 
 ## 安全制約
@@ -423,21 +423,14 @@ sequenceDiagram
 
 ### 設定項目
 
-#### `.env`（環境依存値）
-
-| 設定項目 | 型 | デフォルト | 説明 |
-|---------|-----|-----------|------|
-| `SITE_INGEST_TEMP_DIR` | str | `.tmp/site_ingest` | 一時保存ディレクトリ |
-
-#### `config.toml`（共通設定値）
-
-| 設定項目 | 型 | デフォルト | 許容範囲 | 説明 |
-|---------|-----|-----------|---------|------|
-| `site_ingest_delay_sec` | float | `0.1` | 0.05〜60 | リクエスト間隔（秒） |
-| `site_ingest_max_pages` | int | `500` | 1〜1,000 | ページ数上限 |
-| `site_ingest_download_timeout` | int | `30` | 1〜300 | 1 リクエストのタイムアウト（秒） |
-| `site_ingest_timeout_sec` | float | `7200` | 60〜86,400 | 操作全体タイムアウト（秒） |
-| `site_ingest_error_count` | int | `10` | 1〜1,000 | エラー停止閾値 |
+| 設定項目 | 型 | 保管先 | デフォルト | 許容範囲 | 説明 |
+|---------|-----|--------|-----------|---------|------|
+| `SITE_INGEST_TEMP_DIR` | str | `.env` | `.tmp/site_ingest` | — | 一時保存ディレクトリ |
+| `site_ingest_delay_sec` | float | `config.toml` | `0.1` | 0.05〜60 | リクエスト間隔（秒） |
+| `site_ingest_max_pages` | int | `config.toml` | `500` | 1〜1,000 | ページ数上限 |
+| `site_ingest_download_timeout` | int | `config.toml` | `30` | 1〜300 | 1 リクエストのタイムアウト（秒） |
+| `site_ingest_timeout_sec` | float | `config.toml` | `7200` | 60〜86,400 | 操作全体タイムアウト（秒） |
+| `site_ingest_error_count` | int | `config.toml` | `10` | 1〜1,000 | エラー停止閾値 |
 
 ## 外部連携
 

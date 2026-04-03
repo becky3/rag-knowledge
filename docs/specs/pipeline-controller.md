@@ -56,7 +56,7 @@
 
 | フィールド | 型 | 説明 |
 |-----------|-----|------|
-| `mode` | str | 実行モード（`incremental`, `full_rebuild`, `convert_only`, `index_only`） |
+| `mode` | str | 実行モード（`incremental`, `full`, `convert`, `index`） |
 | `total_files` | int | 処理対象ファイル総数 |
 | `processed` | int | 正常処理されたファイル数 |
 | `skipped` | int | スキップされたファイル数（warnings + errors の合計） |
@@ -112,7 +112,7 @@
 | 操作 | 入力 | 出力 | 振る舞い |
 |------|------|------|---------|
 | リポジトリ初期化 | source_store パス | なし | source_store ディレクトリで `git init` を実行する。既に初期化済みの場合は何もしない |
-| ステージング＋コミット | コミットメッセージ、対象パス（任意） | コミット ID | source_store 内の変更をステージング＋コミットする。対象パス指定時は `git add {対象パス}/` でそのパス配下のみをステージングする。未指定時は `git add -A` で全体をステージングする。変更がない場合はスキップする |
+| ステージング＋コミット | コミットメッセージ、対象パス（任意） | コミット ID | source_store 内の変更をステージング＋コミットする。対象パス指定時は `git add {対象パス}/` でそのパス配下のみをステージングする。未指定時は `git add -A` で全体をステージングする。変更がない場合はスキップする。CLI `rebuild --commit-message` 指定時は再構築前にこの操作を実行する |
 | 差分取得 | 基準コミット ID | 変更ファイルリスト | `git diff --name-status <基準ID>..HEAD` で変更ファイル（追加・変更・削除・リネーム）を取得する |
 
 ### 変更ファイルリストの構造
@@ -263,7 +263,7 @@ source_store 内の以下のファイルは、git diff で検出されてもパ�
 | 手動ファイル配置後（local） | `ingest(local): manual update` |
 | 差分更新時の自動コミット | `auto-commit: incremental` |
 
-`source_type` の取りうる値は [source-store.md](source-store.md) の「source_id の決定方式」を参照（`web`, `bluesky`, `zenn`, `local`）。
+`source_type` の取りうる値は [source-store.md](source-store.md) の「source_id の決定方式」を参照（`web`, `bluesky`, `zenn`, `youtube`, `aozora`, `local`, `journal`）。
 
 ## エッジケース
 
@@ -285,9 +285,9 @@ source_store 内の以下のファイルは、git diff で検出されてもパ�
 
 ### 設定項目
 
-| 設定項目 | 型 | 保管先 | 内容 | デフォルト |
-|---------|-----|--------|------|-----------|
-| `CONVERTED_STORE_DIR` | str | `.env` | converted_store のディレクトリパス | なし（必須） |
+| 設定項目 | 型 | 保管先 | デフォルト | 許容範囲 | 説明 |
+|---------|-----|--------|-----------|---------|------|
+| `CONVERTED_STORE_DIR` | str | `.env` | なし（必須） | — | converted_store のディレクトリパス |
 
 source_store のパスや metadata.db の参照は [source-store.md](source-store.md) の設定項目を使用する。
 

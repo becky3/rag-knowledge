@@ -20,21 +20,27 @@
 
 | ディレクトリ | 責務 |
 |---|---|
+| `src/rag/converter/` | source_store のファイルを converted_store のテキストに変換（HTML→Markdown、PDF テキスト抽出等） |
 | `src/rag/embedding/` | Embedding プロバイダー抽象化（ローカル / OpenAI）とファクトリ |
-| `src/rag/ingesters/` | インジェスタープラグイン（BaseIngester 抽象基底・IngestedContent 共通モデル・ZennIngester・DocumentIngester・BlueskyIngester） |
+| `src/rag/indexer/` | converted_store からチャンキング・Embedding 生成・ChromaDB/BM25 インデックス構築 |
+| `src/rag/ingesters/` | レガシーインジェスタープラグイン（BaseIngester 抽象基底・IngestedContent 共通モデル） |
 | `src/rag/infrastructure/` | インフラ基盤（ChromaDB サーバーのライフサイクル管理・ファイルベースロック） |
 | `src/rag/pipeline/` | パイプライン制御（git 操作・差分検知・ステージ間連携・4モード実行） |
 | `src/rag/pipeline/factory.py` | PipelineController のファクトリ関数（server/cli 共通） |
-| `src/rag/pipeline/ingesters/` | 新アーキテクチャ用インジェスター（source_store へのファイル配置 + .meta 生成） |
+| `src/rag/pipeline/ingesters/` | パイプラインアーキテクチャ用インジェスター（source_store へのファイル配置 + .meta 生成） |
+| `src/rag/scrapy/` | Scrapy subprocess によるサイト一括取り込み（スパイダー・ミドルウェア・ブリッジ） |
 | `src/rag/store/` | source_store 管理（ファイル配置・.meta 読み書き・metadata.db 操作・URL パス変換） |
+| `src/rag/utils/` | ユーティリティ（URL 正規化・パス変換） |
 
 ### ルートレベルファイル
 
 | ファイル | 責務 |
 |---|---|
-| `src/rag/server.py` | MCP 薄層アダプター（書き込み系は CLI サブプロセス委譲、検索系はインプロセス） |
+| `src/rag/server.py` | MCP 薄層アダプター（全ツール CLI サブプロセス委譲） |
 | `src/rag/cli.py` | CLI エントリーポイント（取り込み・検索・評価・DB 初期化、JSON 出力モード対応） |
 | `src/rag/config.py` | pydantic-settings による環境変数・設定管理 |
+| `src/rag/filter_parser.py` | 検索フィルター式のパーサー |
+| `src/rag/upload.py` | Upload HTTP API のファイルアップロード処理 |
 | `src/rag/rag_knowledge.py` | ナレッジサービス（取り込み・検索・削除のオーケストレーション） |
 | `src/rag/markdown.py` | RAG 用 Markdown コンバーター（リンク・画像 URL 除去） |
 | `src/rag/vector_store.py` | ベクトルストア（ChromaDB による Embedding 格納・検索） |
@@ -52,8 +58,17 @@
 | 仕様書 | 実装モジュール |
 |---|---|
 | `rag-knowledge.md` | `src/rag/` 全体 |
+| `search-response.md` | `src/rag/server.py`, `src/rag/rag_knowledge.py` |
 | `source-store.md` | `src/rag/store/` |
 | `pipeline-controller.md` | `src/rag/pipeline/` |
+| `converter.md` | `src/rag/converter/` |
+| `indexer.md` | `src/rag/indexer/` |
+| `site-ingest.md` | `src/rag/scrapy/` |
+| `rebuild-stats.md` | `src/rag/cli.py`, `src/rag/server.py` |
+| `infrastructure/content-listing.md` | `src/rag/cli.py`, `src/rag/server.py` |
+| `infrastructure/content-upload.md` | `src/rag/upload.py`, `src/rag/server.py` |
+| `infrastructure/upload-auth.md` | `src/rag/server.py`, `src/rag/config.py` |
+| `infrastructure/scheduled-rebuild.md` | `src/rag/server.py` |
 | `ingesters/common.md` | `src/rag/pipeline/ingesters/_common.py` |
 | `ingesters/bluesky.md` | `src/rag/pipeline/ingesters/bluesky.py` |
 | `ingesters/youtube.md` | `src/rag/pipeline/ingesters/youtube.py` |

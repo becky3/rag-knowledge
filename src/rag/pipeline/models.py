@@ -34,9 +34,9 @@ class PipelineMode(Enum):
     """パイプライン実行モード."""
 
     INCREMENTAL = "incremental"
-    FULL_REBUILD = "full_rebuild"
-    CONVERT_ONLY = "convert_only"
-    INDEX_ONLY = "index_only"
+    FULL_REBUILD = "full"
+    CONVERT_ONLY = "convert"
+    INDEX_ONLY = "index"
 
 
 @dataclass
