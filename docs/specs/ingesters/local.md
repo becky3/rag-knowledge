@@ -228,7 +228,7 @@ flowchart TD
 
 ```mermaid
 flowchart TD
-    START["rag_crawl_documents(dir_path, pattern)"]
+    START["rag_crawl_documents(dir_path, pattern, upload_mode)"]
     VALIDATE["入力バリデーション（パターン含む）"]
     RESOLVE["パス正規化（resolve）"]
     GLOB["glob パターンでファイル検索"]

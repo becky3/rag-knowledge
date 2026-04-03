@@ -4,6 +4,7 @@
 # Embedding モデル
 embedding_model_local = "text-embedding-nomic-embed-text-v2-moe"
 embedding_model_online = "text-embedding-3-small"
+# Embedding 入力にタスク種別プレフィックス（search_query: / search_document:）を付与
 embedding_prefix_enabled = true
 
 # チャンキング
@@ -49,10 +50,13 @@ rag_zenn_request_interval = 0.1
 
 # ドキュメントインジェスター
 rag_document_supported_extensions = ".md,.txt,.pdf,.adoc"
+# HTTP モードでのドキュメント取り込みを許可するか
 rag_document_http_mode_enabled = false
+# ドキュメント取り込みで許可するディレクトリ（カンマ区切り、空 = 制限なし）
 rag_document_allowed_dirs = ""
 
 # Upload HTTP API
+# Upload HTTP API の最大ファイルサイズ（MB）
 rag_upload_max_file_size_mb = 500
 
 # PDF バックエンド (auto / mineru / pymupdf4llm)
@@ -93,8 +97,10 @@ hnsw_construction_ef = 400
 hnsw_search_ef = 300
 
 # サイト一括取り込み（Scrapy subprocess）
+# Scrapy リクエスト間の遅延（秒）
 site_ingest_delay_sec = 0.1
 site_ingest_max_pages = 500
 site_ingest_download_timeout = 30
 site_ingest_timeout_sec = 7200
+# エラー件数がこの値を超えるとクロールを中断
 site_ingest_error_count = 10

@@ -56,37 +56,88 @@
 
 ## セットアップ
 
-### CUDA 環境（開発用、デフォルト）
+以下の順序でセットアップする:
 
-NVIDIA GPU + CUDA 12.4 環境向け。MinerU + PyTorch (CUDA 12.4) を含む全依存が自動インストールされる。
+1. **uv sync** — 依存パッケージのインストール
+2. **.env コピー・編集** — 環境依存値の設定
+3. **LM Studio 起動** — Embedding モデルの準備
+4. **keyring 登録** — API キーの登録
+5. **サーバー起動** — ChromaDB + MCP サーバー
+
+HTTP モードで運用する場合は、ステップ 5 の後に「HTTP モードセットアップ」も参照。
+
+### 1. 依存パッケージのインストール
+
+CUDA 環境と CPU 環境のどちらかを選択する。CUDA 環境は MinerU（高精度 PDF テキスト抽出）を含む。PDF 取り込みで高精度抽出が不要な場合は CPU 環境で十分。
+
+#### CUDA 環境（NVIDIA GPU + CUDA 12.4）
 
 ```bash
 uv sync
-cp .env.example .env  # 環境依存値を編集
 ```
 
-### CPU 環境（GPU なし / AMD GPU）
+#### CPU 環境（GPU なし / AMD GPU）
 
-MinerU + PyTorch を除外してセットアップする。PDF 抽出は pymupdf4llm にフォールバックする。
+MinerU + PyTorch を除外する。PDF 抽出は pymupdf4llm にフォールバック。
 
 ```bash
 uv sync --no-group with-mineru
-cp .env.example .env  # 環境依存値を編集
 ```
 
-### API キー
+### 2. 環境設定
+
+```bash
+cp .env.example .env
+```
+
+`.env` を編集し、ストレージパス等を環境に合わせて設定する。主要な設定項目:
+
+| 項目 | 説明 | デフォルト |
+|------|------|-----------|
+| `EMBEDDING_PROVIDER` | Embedding プロバイダー（`local` or `online`） | `local` |
+| `LMSTUDIO_BASE_URL` | LM Studio の API エンドポイント | `http://localhost:1234/v1` |
+| `CHROMADB_PERSIST_DIR` | ChromaDB データディレクトリ | `./chroma_db` |
+| `RAG_TRANSPORT` | MCP トランスポート（`stdio` or `http`） | `stdio` |
+
+### 3. LM Studio
+
+`EMBEDDING_PROVIDER=local` の場合、LM Studio が必要:
+
+1. [LM Studio](https://lmstudio.ai/) をインストール
+2. Embedding モデル（config.toml の `embedding_model_local` に対応するモデル）を読み込み
+3. LM Studio のサーバーを起動（デフォルト: `http://localhost:1234`）
+
+### 4. API キー（keyring）
 
 API キーは py-common-lib の `get_secret` で OS セキュアストレージから取得する（サービス名: `rag-knowledge`）。
 登録方法は [py-common-lib の仕様書](https://github.com/becky3/py-common-lib/blob/main/docs/specs/infrastructure/secret-store.md) を参照。
 
-HTTP モード（`RAG_TRANSPORT=http`）で MCP サーバーを起動する場合、Upload HTTP API 用の API キーの事前登録が必要:
+| キー名 | 用途 | 必須条件 |
+|--------|------|----------|
+| `OPENAI_API_KEY` | OpenAI Embedding API | `EMBEDDING_PROVIDER=online` の場合 |
+| `GOOGLE_SAFE_BROWSING_API_KEY` | URL 安全性チェック | config.toml の `rag_url_safety_check=true` の場合 |
+| `UPLOAD_API_KEY` | Upload HTTP API 認証 | `RAG_TRANSPORT=http` の場合 |
+
+`UPLOAD_API_KEY` は専用コマンドで生成・登録する:
 
 ```bash
-# キーを生成して keyring に保存
 uv run python -m rag.cli generate-api-key --save
 ```
 
 クライアント側では `X-API-Key` ヘッダーに生成したキーを設定する。
+
+### HTTP モードセットアップ（任意）
+
+HTTP モード（`RAG_TRANSPORT=http`）で MCP サーバーを起動する場合の追加設定:
+
+| 項目 | 説明 | デフォルト |
+|------|------|-----------|
+| `RAG_TRANSPORT` | `http` に設定 | `stdio` |
+| `RAG_HTTP_HOST` | バインドアドレス | `127.0.0.1` |
+| `RAG_HTTP_PORT` | リッスンポート | `8081` |
+| `RAG_DNS_REBINDING_PROTECTION` | DNS リバインディング保護 | `true` |
+
+API キー（`UPLOAD_API_KEY`）の事前登録が必要（上記「API キー」セクション参照）。
 
 ## 設定管理
 
@@ -110,6 +161,13 @@ MCP サーバー起動時に ChromaDB サーバーが自動起動される（`CH
 uv run chroma run --path <CHROMADB_PERSIST_DIR>
 ```
 
+起動確認（heartbeat チェック）:
+
+```bash
+curl http://localhost:8000/api/v1/heartbeat
+# 正常時: {"nanosecond heartbeat":<timestamp>}
+```
+
 ### MCP サーバー / CLI
 
 ```bash
@@ -123,6 +181,63 @@ uv run python -m rag.server
 # CLI
 uv run python -m rag.cli --help
 ```
+
+### MCP クライアント設定（.mcp.json）
+
+stdio モード:
+
+```json
+{
+  "mcpServers": {
+    "rag-knowledge": {
+      "command": "uv",
+      "args": ["run", "python", "-m", "rag.server"],
+      "cwd": "<rag-knowledge リポジトリのパス>"
+    }
+  }
+}
+```
+
+HTTP モード（`/mcp` パスが必要）:
+
+```json
+{
+  "mcpServers": {
+    "rag-knowledge": {
+      "url": "http://localhost:8081/mcp"
+    }
+  }
+}
+```
+
+## CLI コマンド一覧
+
+| コマンド | 概要 |
+|---------|------|
+| `search` | ナレッジベースを検索 |
+| `get-document` | ソースの全文を取得 |
+| `crawl-zenn` | Zenn コンテンツを一括取り込み |
+| `crawl-bluesky` | BlueSky 投稿を一括取り込み |
+| `ingest-youtube` | YouTube 動画を取り込み |
+| `ingest-youtube-playlist` | YouTube プレイリストを一括取り込み |
+| `add-document` | ドキュメントファイルを取り込み |
+| `crawl-documents` | ディレクトリ内ドキュメントを一括取り込み |
+| `site-ingest` | Scrapy でサイトを一括取り込み（大規模サイト向け） |
+| `update-aozora-catalog` | 青空文庫カタログを更新 |
+| `search-aozora` | 青空文庫カタログを検索 |
+| `ingest-aozora` | 青空文庫の作品を取り込み |
+| `ingest-aozora-author` | 青空文庫の著者作品を一括取り込み |
+| `add-journal` | ジャーナルエントリを登録 |
+| `migrate-journal` | 既存ジャーナルファイルを一括配置 |
+| `stats` | ナレッジベースの統計情報を表示 |
+| `list-recent` | 指定 source_type のソースを新しい順で一覧取得 |
+| `delete` | ソースをナレッジベースから論理削除 |
+| `rebuild` | ナレッジベースを再構築 |
+| `evaluate` | RAG 検索精度を評価 |
+| `init-test-db` | テスト用 ChromaDB・BM25 初期化 |
+| `generate-api-key` | Upload HTTP API 用の API キーを生成 |
+
+各コマンドの詳細は `uv run python -m rag.cli <command> --help` を参照。MCP ツール一覧は [rag-knowledge.md](docs/specs/rag-knowledge.md) を参照。
 
 ## Journal CLI
 
@@ -216,6 +331,7 @@ git-flow ベースのブランチ戦略を採用。詳細は `~/.claude/docs/spe
 - [コンバーター](docs/specs/converter.md)
 - [インデクサー](docs/specs/indexer.md)
 - [サイト一括取り込み（Scrapy）](docs/specs/site-ingest.md)
+- [再構築・統計・バックアップ](docs/specs/rebuild-stats.md)
 - [コンテンツ一覧取得](docs/specs/infrastructure/content-listing.md)
 - [コンテンツアップロード](docs/specs/infrastructure/content-upload.md)
 - [Upload HTTP API 認証](docs/specs/infrastructure/upload-auth.md)

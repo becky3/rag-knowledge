@@ -9,7 +9,7 @@ MCP サーバーとして独立動作し、18 個のツールを提供する。
 
 スコープ:
 
-- 知識の取り込み（サイト一括取り込み・Zenn 記事取り込み・BlueSky 投稿取り込み・ドキュメントファイル取り込み）
+- 知識の取り込み（サイト一括取り込み・Zenn 記事取り込み・BlueSky 投稿取り込み・YouTube 動画取り込み・ドキュメントファイル取り込み・ジャーナル取り込み・青空文庫作品取り込み）
 - 知識の検索（ベクトル検索・BM25 キーワード検索）
 - 知識の管理（統計表示・削除）
 - 検索精度の評価（評価 CLI）
@@ -43,6 +43,7 @@ MCP サーバーとして独立動作し、18 個のツールを提供する。
 | ChromaDB サーバー | `CHROMADB_SERVER_HOST`, `CHROMADB_SERVER_PORT`, `CHROMADB_AUTO_START` |
 | トランスポート | `RAG_TRANSPORT`, `RAG_HTTP_HOST`, `RAG_HTTP_PORT`, `RAG_DNS_REBINDING_PROTECTION` |
 | デバッグ | `RAG_DEBUG_LOG_ENABLED` |
+| YouTube Whisper | `RAG_YOUTUBE_WHISPER_MODEL`, `RAG_YOUTUBE_WHISPER_DEVICE` |
 | サイト一括取り込み | `SITE_INGEST_TEMP_DIR` |
 
 #### `config.toml`（共通設定値）
@@ -54,15 +55,16 @@ MCP サーバーとして独立動作し、18 個のツールを提供する。
 | 検索 | `rag_retrieval_count`, `rag_similarity_threshold` |
 | ハイブリッド検索 | `rag_hybrid_search_enabled`, `rag_vector_weight`, `rag_bm25_k1`, `rag_bm25_b`, `rag_min_combined_score` |
 | ChromaDB | `chromadb_collection_name` |
-| クロール | `rag_max_crawl_pages` |
-| robots.txt | `rag_respect_robots_txt`, `rag_robots_txt_cache_ttl` |
 | URL 安全性 | `rag_url_safety_check`, `rag_url_safety_cache_ttl`, `rag_url_safety_timeout` |
-| レスポンス制御 | `rag_max_response_chars`（rag_get_document のトランケーション）, `rag_stats_max_sources` |
+| レスポンス制御 | `rag_max_response_chars`（rag_get_document のトランケーション）, `rag_stats_max_sources`, `rag_list_recent_limit` |
 | Zenn インジェスター | `rag_zenn_max_articles`, `rag_zenn_request_timeout`, `rag_zenn_request_interval` |
 | BlueSky インジェスター | `rag_bluesky_appview_url`, `rag_bluesky_max_posts`, `rag_bluesky_request_timeout`, `rag_bluesky_request_interval`, `rag_bluesky_include_reposts` |
-| ドキュメントインジェスター | `rag_document_supported_extensions` |
+| ドキュメントインジェスター | `rag_document_supported_extensions`, `rag_document_http_mode_enabled`, `rag_document_allowed_dirs` |
 | PDF バックエンド | `rag_pdf_backend`, `rag_pdf_mineru_mfd_conf_thres`, `rag_pdf_quality_ufffd_threshold`, `rag_pdf_quality_greek_threshold`, `rag_pdf_quality_cjk_min_threshold`, `rag_pdf_quality_min_chars_per_page`, `rag_pdf_quality_sample_pages` |
 | HNSW パラメータ | `hnsw_m`, `hnsw_construction_ef`, `hnsw_search_ef` |
+| Upload HTTP API | `rag_upload_max_file_size_mb` |
+| YouTube インジェスター | `rag_youtube_max_videos`, `rag_youtube_request_interval`, `rag_youtube_request_timeout`, `rag_youtube_transcript_languages`, `rag_youtube_merge_gap_sec`, `rag_youtube_merge_max_chars`, `rag_youtube_max_duration` |
+| 青空文庫インジェスター | `rag_aozora_max_works`, `rag_aozora_request_interval`, `rag_aozora_request_timeout` |
 | サイト一括取り込み | `site_ingest_delay_sec`, `site_ingest_max_pages`, `site_ingest_download_timeout`, `site_ingest_timeout_sec`, `site_ingest_error_count` |
 
 - `hnsw_m` と `hnsw_construction_ef` はコレクション作成時のみ適用される（不変）。既存コレクションへの反映には `rebuild --mode full`（コレクション削除 → 再作成）が必要。`hnsw_search_ef` は起動時に `collection.modify()` で既存コレクションにも自動適用される
@@ -72,28 +74,27 @@ MCP サーバーとして独立動作し、18 個のツールを提供する。
 - トランスポートは stdio（デフォルト）と http（Streamable HTTP）を切替可能。`.env` でトランスポート種別・ホスト・ポート・DNS リバインディング保護を設定する。HTTP モードはローカル／信頼済みネットワーク向けを想定しており、デフォルトではループバックアドレスにバインドする。外部ネットワークへ公開する場合は、ファイアウォールやリバースプロキシでの認証付与などによりアクセス制御を行うこと
 - `src/` 配下の外部 HTTP リクエストは ConstrainedClient（py-common-lib パッケージで提供）経由で実行する。`httpx.AsyncClient`/`httpx.Client`・`aiohttp.ClientSession`・`requests`・`urllib.request` の直接利用は禁止
 - CI（`check-raw-http` ワークフロー）で ConstrainedClient を経由しない直接 HTTP クライアント利用を検出し、違反があればマージをブロックする。ConstrainedClient は `src/` 外のパッケージのため検出対象外。許可例外: `# safety:allowed` コメントが付与された行
-- ハードリミット（コード内定数。設定・引数・環境変数で緩和不可。厳格化は可能）:
-  - 操作あたりリクエスト総数上限: 500
-  - 最低リクエスト間隔: 0.1 秒
-  - 操作全体タイムアウト: 600 秒（許容範囲 1〜600 秒）
-- サーキットブレーカー: 5 回連続失敗で操作全体を中断する
 - 設定値がハードリミットの許容範囲外の場合は範囲内にクランプする（エラーにはしない。警告ログを出力する）
 
 ## 安全制約
 
-| 制約名 | 種別 | 値 | 解除可否 |
-|--------|------|-----|---------|
-| 操作あたりリクエスト総数上限 | ハードリミット | 500 | 引き上げ不可（引き下げ可） |
-| 最低リクエスト間隔 | ハードリミット | 0.1 秒 | 引き下げ不可（引き上げ可） |
-| 操作全体タイムアウト | ハードリミット | 600 秒、許容範囲 1〜600 秒 | 引き上げ不可（引き下げ可、下限 1 秒） |
-| サーキットブレーカー閾値 | ハードリミット | 5 回連続失敗 | 引き上げ不可（引き下げ可） |
-| クロール対象ページ数上限 | 設定値 | 許容範囲 1〜500、デフォルト 50 | 範囲内で変更可 |
-| クロール遅延 | 設定値 | 許容範囲 0.1〜60 秒、デフォルト 1.0 秒 | 範囲内で変更可 |
-| リクエストタイムアウト | 設定値 | 許容範囲 1〜120 秒、デフォルト 30 秒 | 範囲内で変更可 |
-| HNSW M（グラフ接続数） | 設定値 | 許容範囲 2〜100、デフォルト 48 | 範囲内で変更可 |
-| HNSW construction_ef（構築時探索幅） | 設定値 | 許容範囲 10〜2000、デフォルト 400 | 範囲内で変更可 |
-| HNSW search_ef（検索時探索幅） | 設定値 | 許容範囲 10〜2000、デフォルト 300 | 範囲内で変更可 |
-| 生 HTTP クライアント利用禁止 | CI チェック | `src/` 全体を grep で走査（httpx / aiohttp / requests / urllib.request）。`# safety:allowed` 行を除外。ConstrainedClient は py-common-lib パッケージで提供（`src/` 外のため検出対象外） | 許可例外の追加は `# safety:allowed` コメントで可 |
+| 制約名 | 種別 | 値 | 対応設定項目 | 解除可否 |
+|--------|------|-----|-------------|---------|
+| 操作あたりリクエスト総数上限 | ハードリミット | 500 | — | 引き上げ不可（引き下げ可） |
+| 最低リクエスト間隔 | ハードリミット | 0.1 秒 | — | 引き下げ不可（引き上げ可） |
+| 操作全体タイムアウト | ハードリミット | 600 秒、許容範囲 1〜600 秒 | — | 引き上げ不可（引き下げ可、下限 1 秒） |
+| サーキットブレーカー閾値 | ハードリミット | 5 回連続失敗 | — | 引き上げ不可（引き下げ可） |
+| サイト一括取り込みページ数上限 | 設定値 | 許容範囲 1〜1,000、デフォルト 500 | `site_ingest_max_pages` | 範囲内で変更可 |
+| サイト一括取り込みリクエスト間隔 | 設定値 | 許容範囲 0.05〜60 秒、デフォルト 0.1 秒 | `site_ingest_delay_sec` | 範囲内で変更可 |
+| サイト一括取り込みダウンロードタイムアウト | 設定値 | 許容範囲 1〜300 秒、デフォルト 30 秒 | `site_ingest_download_timeout` | 範囲内で変更可 |
+| サイト一括取り込み操作全体タイムアウト | 設定値 | 許容範囲 60〜86,400 秒、デフォルト 7,200 秒 | `site_ingest_timeout_sec` | 範囲内で変更可 |
+| サイト一括取り込みエラー停止閾値 | 設定値 | 許容範囲 1〜1,000、デフォルト 10 | `site_ingest_error_count` | 範囲内で変更可 |
+| インジェスターリクエストタイムアウト | 設定値 | 許容範囲 1〜120 秒、デフォルト 30 秒 | `rag_*_request_timeout` | 範囲内で変更可 |
+| インジェスターリクエスト間隔 | 設定値 | 許容範囲 0.1〜60 秒 | `rag_*_request_interval` | 範囲内で変更可 |
+| HNSW M（グラフ接続数） | 設定値 | 許容範囲 2〜100、デフォルト 48 | `hnsw_m` | 範囲内で変更可 |
+| HNSW construction_ef（構築時探索幅） | 設定値 | 許容範囲 10〜2000、デフォルト 400 | `hnsw_construction_ef` | 範囲内で変更可 |
+| HNSW search_ef（検索時探索幅） | 設定値 | 許容範囲 10〜2000、デフォルト 300 | `hnsw_search_ef` | 範囲内で変更可 |
+| 生 HTTP クライアント利用禁止 | CI チェック | `src/` 全体を grep で走査（httpx / aiohttp / requests / urllib.request）。`# safety:allowed` 行を除外。ConstrainedClient は py-common-lib パッケージで提供（`src/` 外のため検出対象外） | — | 許可例外の追加は `# safety:allowed` コメントで可 |
 
 ### MCP 薄層アダプターパターン
 
@@ -110,26 +111,176 @@ MCP サーバーの全ツールは CLI サブプロセスに委譲する（薄�
 
 MCP サーバーが公開する 18 個のツール。
 
-| ツール | 入力 | 振る舞い |
-| --- | --- | --- |
-| rag_search | クエリ、件数、source_type（任意）、filters（任意） | ベクトル検索と BM25 の生結果をチャンク単位で返す。各結果にスコア・Source・Title・Chunk位置・Typeのメタデータを含める。`source_type` 指定時はそのソース種別のチャンクのみを検索対象とする。`filters` 指定時はカスタムメタデータで絞り込む（JSON オブジェクト、完全一致）。詳細は [search-response.md](search-response.md) を参照 |
-| rag_get_document | source_id、format（任意） | ソース全文を取得する。`format=text` で変換済みテキスト（converted_store）、`format=original` でオリジナル（source_store）を返す。MCP 経由では `rag_max_response_chars` でトランケーションを行う。詳細は [search-response.md](search-response.md) を参照 |
-| rag_crawl_zenn | username、max_articles（任意） | 指定ユーザーの Zenn 記事を API 経由で取得し、ナレッジベースに取り込む。同一記事の再取り込み時は `source_id`（記事の公開 URL）の一致で検出し、既存の知識を最新に置き換える |
-| rag_crawl_bluesky | handle、max_posts（任意）、include_reposts（任意） | 指定ユーザーの BlueSky 投稿を AT Protocol API 経由で取得し、ナレッジベースに取り込む。max_posts はタイムライン全体（リポスト含む）に適用。BlueSky は投稿編集不可のため、既存 `source_id` と一致する投稿はスキップする（上書き不要） |
-| rag_add_youtube | video_url | 単一 YouTube 動画の字幕/文字起こしを取得し、ナレッジベースに取り込む。詳細は [ingesters/youtube.md](ingesters/youtube.md) を参照 |
-| rag_crawl_youtube | playlist_url、max_videos（任意） | YouTube プレイリスト内の動画を一括取り込みする。詳細は [ingesters/youtube.md](ingesters/youtube.md) を参照 |
-| rag_add_document | content、filename、encoding（任意）、upload_mode（任意） | 単一ドキュメントファイルを読み取り、ナレッジベースに取り込む。同一ファイルの再取り込み時は `source_id`（file URI）の一致で検出し、既存の知識を最新に置き換える |
-| rag_crawl_documents | dir_path、pattern（任意） | 指定ディレクトリ内のドキュメントファイルを glob パターンで検索し、一括でナレッジベースに取り込む。同一ファイルの再取り込み時は `source_id`（file URI）の一致で検出し、既存の知識を最新に置き換える |
-| rag_add_journal | title、body、repository、entry_id（任意） | ジャーナルエントリを source_store に配置し、パイプライン処理でインデックスに取り込む。詳細は [ingesters/journal.md](ingesters/journal.md) を参照 |
-| rag_site_ingest | url、url_pattern（任意）、max_pages（任意）、force（任意） | Scrapy subprocess で対象サイトをクロールし、source_store に配置後、パイプライン処理を実行する。上限 1,000 ページ。詳細は [site-ingest.md](site-ingest.md) を参照 |
-| rag_delete | URL | ソース URL 指定でナレッジを論理削除する。metadata.db のステータスを `deleted` に変更し、検索インデックスから該当チャンクを削除する。source_store 内のファイルは削除しない |
-| rag_rebuild | mode、source_type（任意） | パイプラインの再構築を実行する。mode: `full`（全再構築）、`convert`（コンバートのみ再実行）、`index`（インデックスのみ再構築）、`incremental`（差分更新）。source_type 指定時はその媒体のみ対象。詳細は [rebuild-stats.md](rebuild-stats.md) を参照 |
-| rag_stats | なし | 統計情報（総チャンク数、ソース URL 数）と蓄積データ概要（ドメイン別ソース URL 一覧・タイトル）を返す。表示件数上限は `RAG_STATS_MAX_SOURCES` で制御する |
+#### rag_search
+
+ベクトル検索と BM25 の生結果をチャンク単位で返す。各結果にスコア・Source・Title・Chunk位置・Typeのメタデータを含める。詳細は [search-response.md](search-response.md) を参照。
+
+| 引数 | 型 | 必須 | デフォルト | 説明 |
+|------|-----|------|-----------|------|
+| `query` | str | Yes | — | 検索クエリ |
+| `n_results` | int \| None | No | None（設定値を使用） | 各エンジンから取得する結果数 |
+| `source_type` | str \| None | No | None（全種別） | ソース種別フィルタ（`web`, `zenn`, `bluesky`, `youtube`, `aozora`, `local`, `journal`） |
+| `filters` | str \| None | No | None（フィルタなし） | メタデータフィルタ（`key=value` 形式、カンマ区切りで複数指定可。完全一致） |
+
+#### rag_get_document
+
+ソース全文を取得する。MCP 経由では `rag_max_response_chars` でトランケーションを行う。詳細は [search-response.md](search-response.md) を参照。
+
+| 引数 | 型 | 必須 | デフォルト | 説明 |
+|------|-----|------|-----------|------|
+| `source_id` | str | Yes | — | ソース識別子（rag_search の Source 値） |
+| `format` | str | No | `"text"` | 取得形式。`"text"`（変換済みテキスト）または `"original"`（オリジナル） |
+
+#### rag_crawl_zenn
+
+指定ユーザーの Zenn 記事・スクラップを API 経由で取得し、ナレッジベースに取り込む。同一記事の再取り込み時は `source_id`（記事の公開 URL）の一致で検出し、既存の知識を最新に置き換える。
+
+| 引数 | 型 | 必須 | デフォルト | 説明 |
+|------|-----|------|-----------|------|
+| `username` | str | Yes | — | Zenn ユーザー名 |
+| `max_articles` | int \| None | No | None（設定値を使用） | 取得する最大コンテンツ数（許容範囲: 1〜100） |
+| `content_type` | str | No | `"all"` | 取得対象。`"articles"`（記事のみ）、`"scraps"`（スクラップのみ）、`"all"`（両方） |
+| `force` | bool | No | `false` | 既存ファイルを上書きするか |
+
+#### rag_crawl_bluesky
+
+指定ユーザーの BlueSky 投稿を AT Protocol API 経由で取得し、ナレッジベースに取り込む。max_posts はタイムライン全体（リポスト含む）に適用。既存投稿はスキップする（BlueSky は投稿編集不可のため上書き不要）。
+
+| 引数 | 型 | 必須 | デフォルト | 説明 |
+|------|-----|------|-----------|------|
+| `handle` | str | Yes | — | BlueSky ハンドル（例: user.bsky.social）。DID 形式は不可 |
+| `max_posts` | int \| None | No | None（設定値を使用） | 取得する最大投稿数（許容範囲: 1〜1000） |
+| `include_reposts` | bool \| None | No | None（設定値を使用） | タイムラインにリポストを含めるか |
+
+#### rag_add_youtube
+
+単一 YouTube 動画の字幕/文字起こしを取得し、ナレッジベースに取り込む。詳細は [ingesters/youtube.md](ingesters/youtube.md) を参照。
+
+| 引数 | 型 | 必須 | デフォルト | 説明 |
+|------|-----|------|-----------|------|
+| `video_url` | str | Yes | — | YouTube 動画 URL（`youtube.com/watch?v=` または `youtu.be/` 形式） |
+
+#### rag_crawl_youtube
+
+YouTube プレイリスト内の動画を一括取り込みする。詳細は [ingesters/youtube.md](ingesters/youtube.md) を参照。
+
+| 引数 | 型 | 必須 | デフォルト | 説明 |
+|------|-----|------|-----------|------|
+| `playlist_url` | str | Yes | — | YouTube プレイリスト URL（`youtube.com/playlist?list=` 形式） |
+| `max_videos` | int \| None | No | None（設定値を使用） | 取得する最大動画数（許容範囲: 1〜500） |
+
+#### rag_add_document
+
+単一ドキュメントファイルのコンテンツを受け取り、ナレッジベースに取り込む。同一ファイルの再取り込み時は `source_id`（file URI）の一致で検出し、既存の知識を最新に置き換える。
+
+| 引数 | 型 | 必須 | デフォルト | 説明 |
+|------|-----|------|-----------|------|
+| `content` | str | Yes | — | ファイルのコンテンツ。`encoding=text` の場合は UTF-8 文字列、`encoding=base64` の場合は base64 文字列 |
+| `filename` | str | Yes | — | 元ファイルのファイル名（例: `resume.pdf`）。拡張子バリデーションに使用 |
+| `encoding` | str | No | `"text"` | コンテンツのエンコーディング。`"text"` または `"base64"` |
+| `upload_mode` | str | No | `"fail"` | 同名ファイル存在時の動作。`"fail"`（エラー）または `"replace"`（上書き） |
+
+#### rag_crawl_documents
+
+指定ディレクトリ内のドキュメントファイルを glob パターンで検索し、一括でナレッジベースに取り込む。stdio モード専用。
+
+| 引数 | 型 | 必須 | デフォルト | 説明 |
+|------|-----|------|-----------|------|
+| `dir_path` | str | Yes | — | 取り込み対象ディレクトリのパス |
+| `pattern` | str | No | `"**/*"` | glob パターン（再帰的に全対応ファイルを検索） |
+| `upload_mode` | str | No | `"fail"` | 同名ファイル存在時の動作。`"fail"`（スキップ）または `"replace"`（上書き） |
+
+#### rag_add_journal
+
+ジャーナルエントリを source_store に配置し、パイプライン処理でインデックスに取り込む。詳細は [ingesters/journal.md](ingesters/journal.md) を参照。
+
+| 引数 | 型 | 必須 | デフォルト | 説明 |
+|------|-----|------|-----------|------|
+| `title` | str | Yes | — | エントリタイトル |
+| `content` | str | Yes | — | ジャーナル本文（Markdown） |
+| `filename` | str | Yes | — | 元ファイルのファイル名（`.md` 拡張子必須） |
+| `repository` | str | Yes | — | リポジトリ名（例: `rag-knowledge`） |
+| `entry_id` | str \| None | No | None（自動生成） | エントリ識別子（命名規則: `YYYYMMDD-HHMMSS-topic`） |
+
+#### rag_site_ingest
+
+Scrapy subprocess で対象サイトをクロールし、source_store に配置後、パイプライン処理を実行する。単一 URL はリンク追従クロール、複数 URL は指定 URL のみ取得。詳細は [site-ingest.md](site-ingest.md) を参照。
+
+| 引数 | 型 | 必須 | デフォルト | 説明 |
+|------|-----|------|-----------|------|
+| `url` | str | No | `""` | クロール開始 URL（クロールモード、`urls` と排他） |
+| `urls` | list[str] \| None | No | None | 取得対象 URL のリスト（複数 URL モード、`url` と排他） |
+| `url_pattern` | str | No | `""` | URL フィルタパターン（正規表現、クロールモードのみ） |
+| `max_pages` | int \| None | No | None（設定値を使用） | ページ数上限（クロールモードのみ、上限 1,000） |
+| `force` | bool | No | `false` | JOBDIR を削除して最初からクロール（クロールモードのみ） |
+| `download_only` | bool | No | `false` | パイプライン処理をスキップし、Scrapy クロール + Bridge のみ実行 |
+
+#### rag_delete
+
+ソース識別子指定で source_store からファイルを物理削除し、パイプライン経由でインデックス・metadata.db を更新する。git 管理下のため、削除後も git checkout で復旧可能。
+
+| 引数 | 型 | 必須 | デフォルト | 説明 |
+|------|-----|------|-----------|------|
+| `source_id` | str | Yes | — | 削除するソース識別子 |
+
+#### rag_rebuild
+
+パイプラインの再構築を実行する。詳細は [rebuild-stats.md](rebuild-stats.md) を参照。
+
+| 引数 | 型 | 必須 | デフォルト | 説明 |
+|------|-----|------|-----------|------|
+| `mode` | str | Yes | — | 再構築モード。`"full"`（全再構築）、`"convert"`（コンバートのみ）、`"index"`（インデックスのみ）、`"incremental"`（差分更新） |
+| `source_type` | str \| None | No | None（全媒体） | 対象媒体フィルタ（`web`, `bluesky`, `zenn`, `youtube`, `aozora`, `local`, `journal`）。`incremental` では指定不可 |
+
+#### rag_update_aozora_catalog
+
+青空文庫の作品カタログ CSV をダウンロードし、source_store に配置する。前回カタログとの差分から新着・更新作品を検出して結果を返す。引数なし。
+
+#### rag_search_aozora
+
+ローカルカタログ CSV を著者名・作品名で部分一致検索する。ネットワークアクセス不要。
+
+| 引数 | 型 | 必須 | デフォルト | 説明 |
+|------|-----|------|-----------|------|
+| `author` | str \| None | No | None | 著者名（部分一致検索） |
+| `title` | str \| None | No | None | 作品タイトル（部分一致検索） |
+| `limit` | int | No | `20` | 最大表示件数（許容範囲: 1〜2000） |
+
+#### rag_add_aozora
+
+指定作品の XHTML を取得し、ナレッジベースに取り込む。著作権フリーの作品のみ対応。
+
+| 引数 | 型 | 必須 | デフォルト | 説明 |
+|------|-----|------|-----------|------|
+| `book_id` | str | Yes | — | 青空文庫の作品 ID（カタログ検索で取得） |
+
+#### rag_crawl_aozora
+
+指定著者（人物 ID）の著作権フリー作品を一括取り込みする。
+
+| 引数 | 型 | 必須 | デフォルト | 説明 |
+|------|-----|------|-----------|------|
+| `person_id` | str | Yes | — | 著者の人物 ID（rag_search_aozora で確認可能） |
+| `max_works` | int \| None | No | None（設定値を使用） | 取得する最大作品数（許容範囲: 1〜500） |
+
+#### rag_list_recent
+
+指定 source_type のソースを新しい順で一覧取得する。ナレッジベースの内容把握に使用する。
+
+| 引数 | 型 | 必須 | デフォルト | 説明 |
+|------|-----|------|-----------|------|
+| `source_type` | str | Yes | — | ソース種別（`web`, `bluesky`, `zenn`, `youtube`, `aozora`, `local`, `journal`） |
+| `limit` | int \| None | No | None（設定値を使用） | 取得件数（許容範囲: 1〜100） |
+
+#### rag_stats
+
+統計情報（総チャンク数、ソース URL 数）と蓄積データ概要（ドメイン別ソース URL 一覧・タイトル）を返す。表示件数上限は `rag_stats_max_sources` で制御する。引数なし。
 
 ### 取り込みツールの出力形式
 
 取り込みツール（rag_crawl_zenn、rag_crawl_bluesky、rag_add_youtube、rag_crawl_youtube、
-rag_add_document、rag_crawl_documents、rag_add_journal、rag_site_ingest）は、
+rag_add_document、rag_crawl_documents、rag_add_journal、rag_site_ingest、
+rag_add_aozora、rag_crawl_aozora）は、
 source_store への配置結果とパイプライン処理結果を統合したサマリーを返す。
 配置結果には配置ファイル数・スキップ数・エラー数を含み、
 パイプライン処理結果にはコンバート・インデックス構築の処理件数を含む。
@@ -153,7 +304,7 @@ rag_search はベクトル検索と BM25 検索の生結果をチャンク単位
 | --- | --- |
 | evaluate | 評価データセットで検索精度を計測しレポートを出力する。ベースライン比較でリグレッションを検出できる |
 | init-test-db | テスト用のベクトル DB と BM25 インデックスを初期化する |
-| get-document | ソース全文を取得する。`--format text\|original`、`--output` でファイル出力（トランケーションなし） |
+| get-document | ソース全文を取得する。`--format text\|original`、`--output-file` でファイル出力（トランケーションなし） |
 
 評価指標: Precision、Recall、F1、NDCG@K、MRR
 
@@ -181,8 +332,11 @@ flowchart TB
             ING_WEB["Web"]
             ING_ZENN["Zenn"]
             ING_BS["BlueSky"]
+            ING_YT["YouTube"]
             ING_LOCAL["Local"]
+            ING_JOURNAL["Journal"]
             ING_SITE["Scrapy"]
+            ING_AOZORA["青空文庫"]
         end
 
         SS["source_store (git管理)"]
@@ -287,7 +441,7 @@ MCP サーバーの全ツールは CLI サブプロセスに委譲する。設�
 
 #### CLI サブプロセス実行方式
 
-MCP サーバーは `_run_cli_subprocess` で CLI コマンドを実行する:
+MCP サーバーは CLI サブプロセス実行ヘルパーで CLI コマンドを実行する:
 
 1. コマンド構築: `python -m rag.cli <command> --output json [args...]`
 2. `asyncio.create_subprocess_exec` でサブプロセスを起動
@@ -329,16 +483,16 @@ CLI の JSON 出力は JSON Lines 形式:
 | MCP ツール | CLI コマンド | stdin の内容 | 追加引数 |
 |-----------|------------|------------|---------|
 | `rag_add_journal` | `add-journal --stdin --title T --repository R` | UTF-8 テキスト（Markdown 本文） | `--title`, `--repository`, `--entry-id`（任意） |
-| `rag_add_document` | `add-document --stdin --filename F --encoding E` | encoding に応じたデータ（`text`: UTF-8 テキスト、`base64`: base64 文字列） | `--filename`, `--encoding`（デフォルト: `text`）、`--upload-mode` |
+| `rag_add_document` | `add-document --stdin --filename F --encoding E` | encoding に応じたデータ（`text`: UTF-8 テキスト、`base64`: base64 文字列） | `--filename`, `--encoding`（デフォルト: `text`）、`--upload-mode`（`fail`: 同名存在時エラー（デフォルト）、`replace`: 上書き） |
 
 MCP 側の処理フロー:
 
 1. MCP ツールが `content` パラメータを受け取る
-2. `_run_cli_subprocess` でサブプロセスを起動し、stdin パイプを確保する
+2. CLI サブプロセス実行ヘルパーでサブプロセスを起動し、stdin パイプを確保する
 3. `content` を subprocess の stdin に書き込み、stdin をクローズする
 4. CLI が stdin からコンテンツを読み取り、通常のファイル読み取りと同様に処理する
 
-Upload HTTP API（`/upload/document`, `/upload/journal`）はリクエストボディからファイルを受信し、一時ファイルに書き出した上で CLI の `--file` オプション経由で渡す。stdin は使用しない。
+Upload HTTP API（`/upload/document`, `/upload/journal`）はリクエストボディからファイルを受信し、一時ファイルに書き出した上で CLI の `--file` オプション経由で渡す。stdin は使用しない。一時ファイルは `finally` ブロックで確実に削除する（正常完了・エラー・SEGFAULT 後のいずれでも削除される）。
 
 ### 取り込みフロー（3段パイプライン）
 
@@ -466,7 +620,7 @@ flowchart LR
 | コンポーネント | 役割 |
 | --- | --- |
 | PipelineController | 3段パイプラインのオーケストレーション。source_store の git 操作、差分検知、ステージ間連携を一元管理する |
-| インジェスター群 | データソースからファイルを取得し source_store に配置する（Web / Zenn / BlueSky / Local / Scrapy） |
+| インジェスター群 | データソースからファイルを取得し source_store に配置する（Web / Zenn / BlueSky / YouTube / Local / Journal / Scrapy / 青空文庫） |
 | コンバーター | source_store のファイルを converted_store のテキスト（Markdown）に変換する |
 | インデクサー | converted_store のテキストからチャンキング・Embedding・インデックス構築を行う |
 | Web クローラー | ページの取得と本文テキスト抽出。SSRF 対策・robots.txt 遵守を含む |
@@ -494,6 +648,10 @@ flowchart LR
 | OpenAI Embeddings API | オンライン Embedding 生成 | REST API |
 | Google Safe Browsing API | URL 安全性チェック | REST API（オプション） |
 | 対象 Web サイト | クロール対象 | HTTP/HTTPS |
+| YouTube | 動画字幕・音声文字起こしの取得 | youtube-transcript-api / yt-dlp / faster-whisper |
+| Zenn API | Zenn 記事・スクラップの取得 | REST API |
+| BlueSky (AT Protocol) | BlueSky 投稿の取得 | AT Protocol API |
+| 青空文庫 | 著作権切れ作品の取得 | HTTP（カタログ CSV / XHTML） |
 
 ## エッジケース
 
@@ -509,7 +667,7 @@ flowchart LR
 | Embedding プロバイダー接続不可 | 疎通確認で検出し、エラーを返す |
 | `OPENAI_API_KEY` が未登録 | オンライン Embedding プロバイダーの初期化に失敗し、エラーを返す |
 | `GOOGLE_SAFE_BROWSING_API_KEY` が未登録・空・不正 | 設定エラー（`SafeBrowsingConfigError`）として即時中断する |
-| rag_get_document レスポンスサイズ超過 | MCP 経由で `RAG_MAX_RESPONSE_CHARS` 超過時はトランケーションし、末尾に CLI `--output` オプションでの全文取得を案内する。CLI の `--output` 指定時はトランケーションなし |
+| rag_get_document レスポンスサイズ超過 | MCP 経由で `rag_max_response_chars` 超過時はトランケーションし、末尾に CLI `--output-file` オプションでの全文取得を案内する。CLI の `--output-file` 指定時はトランケーションなし |
 | バジェット上限到達 | 取得済みデータを返し、上限到達の旨をログ出力する |
 | サーキットブレーカー発動 | 操作を中断し、取得済みデータを返す。エラーの詳細をログ出力する |
 | 操作全体タイムアウト | 操作を中断し、取得済みデータを返す |
@@ -526,6 +684,9 @@ flowchart LR
 - [converter.md](converter.md) — コンバーター仕様
 - [indexer.md](indexer.md) — インデクサー仕様
 - [ingesters/common.md](ingesters/common.md) — インジェスター共通仕様
+- [ingesters/youtube.md](ingesters/youtube.md) — YouTube インジェスター仕様
+- [ingesters/journal.md](ingesters/journal.md) — Journal インジェスター仕様
+- [ingesters/aozora.md](ingesters/aozora.md) — 青空文庫インジェスター仕様
 - [search-response.md](search-response.md) — 検索レスポンス + 全文取得仕様
 - [rebuild-stats.md](rebuild-stats.md) — 再構築・統計・バックアップ仕様
 - [site-ingest.md](site-ingest.md) — サイト一括取り込み仕様

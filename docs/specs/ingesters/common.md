@@ -55,7 +55,7 @@
   - 操作全体タイムアウト: 600 秒（許容範囲 1〜600 秒）
   - サーキットブレーカー: 5 回連続失敗で操作全体を中断
 - 媒体固有のリクエスト設定（間隔、タイムアウト等）は各媒体仕様書で定義する
-- local 媒体は外部 HTTP リクエストを行わない
+- ConstrainedClient 非対応の媒体: YouTube（youtube-transcript-api / yt-dlp が独自 HTTP クライアントを内包）、local（外部 HTTP リクエストなし）、journal（外部 HTTP リクエストなし）。YouTube はインジェスター側で安全制約を独自実装する（詳細は [youtube.md](youtube.md) を参照）
 
 ### 重複検出
 
@@ -139,9 +139,11 @@ flowchart TB
     subgraph Ingesters["インジェスター"]
         ZING["ZennIngester"]
         BING["BlueskyIngester"]
+        YING["YouTubeIngester"]
         AING["AozoraIngester"]
         DING["LocalIngester"]
         JING["JournalIngester"]
+        SITE["SiteIngestCommand"]
     end
 
     subgraph Safety["制約付き中間ライブラリ (py-common-lib)"]
@@ -157,7 +159,9 @@ flowchart TB
     WEB["対象 Web サイト"]
     AT_API["AT Protocol API"]
     ZENN_API["Zenn API"]
+    YT_API["YouTube（youtube-transcript-api / yt-dlp）"]
     FS["ローカルファイルシステム"]
+    JNL_INPUT["ジャーナルコンテンツ（CLI / MCP 入力）"]
 
     CLIENT -->|stdio / http| TOOLS
     TOOLS -->|取り込み指示| Ingesters
@@ -168,7 +172,10 @@ flowchart TB
     CC --> ZENN_API
     AING --> CC
     CC --> AOZORA["aozora.gr.jp / GitHub Raw"]
+    SITE --> WEB
+    YING --> YT_API
     DING --> FS
+    JING --> JNL_INPUT
 
     Ingesters -->|ファイル配置 + .meta| SS
     Ingesters -->|取り込み完了通知| PC
@@ -207,7 +214,7 @@ flowchart TB
 | zenn | Zenn URL | username + slug で一意に決定 | スキップ（force 指定時は上書き） |
 | youtube | YouTube 動画 URL | channel_id + video_id で一意に決定 | 上書き |
 | aozora | 青空文庫 URL | person_id + book_id で一意に決定 | スキップ |
-| local | 相対パス | ユーザー指定パスで一意に決定 | 上書き |
+| local | 相対パス | ユーザー指定パスで一意に決定 | `upload_mode` による分岐（`fail`: エラー/スキップ、`replace`: 上書き） |
 | journal | 相対パス | リポジトリ名 + entry_id で一意に決定 | 上書き |
 
 重複検出の手順:

@@ -117,7 +117,7 @@ BlueSky（AT Protocol）の投稿を API 経由で取得し、source_store に�
 
 ### 設定項目
 
-| 設定項目 | 型 | 保管先 | デフォルト | 許容範囲 | 内容 |
+| 設定項目 | 型 | 保管先 | デフォルト | 許容範囲 | 説明 |
 |---------|-----|--------|-----------|---------|------|
 | `rag_bluesky_appview_url` | 文字列 | `config.toml` | `https://public.api.bsky.app` | 有効な HTTPS URL | AppView のベース URL |
 | `rag_bluesky_max_posts` | 整数 | `config.toml` | 200 | 1〜1000 | 取得する最大投稿数（タイムライン全体に適用） |
@@ -154,11 +154,15 @@ flowchart TB
     end
 
     AT_API["AT Protocol API"]
+    SITE["SiteIngestCommand"]
+    YT_ING["YouTubeIngester"]
 
     CLIENT -->|stdio / http| TOOLS
     TOOLS -->|取り込み指示| BING
     BING --> CC
     CC --> AT_API
+    BING -->|URL 自動取り込み委譲| SITE
+    BING -->|URL 自動取り込み委譲| YT_ING
     BING -->|JSON ファイル配置 + .meta| SS
     BING -->|取り込み完了通知| PC
     PC -->|git add + commit + diff| SS

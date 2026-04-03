@@ -28,8 +28,8 @@
 
 ## 制約
 
-- **ファイル形式の判定は拡張子ベース**: source_store 内のファイル拡張子で変換方式を決定する。拡張子が同一であれば source_type（web, bluesky, zenn, youtube, local）に関わらず同じ変換方式を適用する。ただし、source_type 固有の前処理が必要な場合は source_type に応じた分岐を許容する
-- **source_type の判定**: ファイルの source_store 内トップレベルディレクトリから判定する（`web/`, `bluesky/`, `zenn/`, `youtube/`, `local/`）
+- **ファイル形式の判定は拡張子ベース**: source_store 内のファイル拡張子で変換方式を決定する。拡張子が同一であれば source_type（web, bluesky, zenn, youtube, aozora, local, journal）に関わらず同じ変換方式を適用する。ただし、source_type 固有の前処理が必要な場合は source_type に応じた分岐を許容する
+- **source_type の判定**: ファイルの source_store 内トップレベルディレクトリから判定する（`web/`, `bluesky/`, `zenn/`, `youtube/`, `aozora/`, `local/`, `journal/`）
 - **変換対象外ファイル**: `.meta` サイドカーファイルおよび `metadata.db` は変換対象外とする（スキップする）
 - **変換結果は UTF-8 テキスト**: 変換処理（HTML → Markdown、PDF テキスト抽出、JSON → テキスト）の出力は UTF-8 エンコーディングとする。パススルーファイルはバイト列コピーであり、この制約の対象外（元のエンコーディングをそのまま保持する）
 - **converted_store は git 管理しない**: 再生成可能な派生データであるため、git 管理対象外とする
@@ -118,9 +118,12 @@ source_store のディレクトリ構成をミラーする。source_store 内の
 | `web/https/example.com/docs/report.pdf` | `web/https/example.com/docs/report.md` |
 | `bluesky/did：plc：xxx/2026/03/rkey.json` | `bluesky/did：plc：xxx/2026/03/rkey.md` |
 | `zenn/alice/articles/slug.json` | `zenn/alice/articles/slug.md` |
+| `youtube/UCxxx/video_id.json` | `youtube/UCxxx/video_id.md` |
+| `aozora/000035/001567.html` | `aozora/000035/001567.md` |
 | `local/my-notes/memo.md` | `local/my-notes/memo.md` |
 | `local/my-notes/note.txt` | `local/my-notes/note.txt` |
 | `local/docs/guide.adoc` | `local/docs/guide.adoc` |
+| `journal/rag-knowledge/entry.md` | `journal/rag-knowledge/entry.md` |
 
 ### HTML → Markdown 変換
 
@@ -261,7 +264,7 @@ PDF の特性を 3 段階で評価し、バックエンドと処理モードを�
 
 ### JSON → テキスト抽出
 
-JSON ファイルから構造化テキストを抽出する。source_store に JSON 形式で保存されるのは BlueSky 投稿、Zenn 記事、Zenn スクラップ。source_type とファイルパスに応じたハンドラを選択する。
+JSON ファイルから構造化テキストを抽出する。source_store に JSON 形式で保存されるのは BlueSky 投稿、YouTube 動画、Zenn 記事、Zenn スクラップ。source_type とファイルパスに応じたハンドラを選択する。
 
 #### BlueSky 投稿（source_type: bluesky）
 
@@ -329,6 +332,16 @@ Description: 外部リンクの説明文
 - 投稿テキストを先頭に配置する（検索ヒット時に最も重要な情報が先頭に来る）
 - セクションラベルは英語表記とする（LLM による検索・解釈の精度向上のため）
 
+#### YouTube 動画（source_type: youtube）
+
+YouTube 動画の JSON（字幕スニペット + メタデータ）からテキストを抽出し、Markdown 形式で出力する。
+
+1. `title`、`uploader`、`upload_date`、`video_id`、`duration` フィールドからヘッダーを構築する
+2. `snippets` 配列（タイムスタンプ + テキスト）を時系列で結合する
+3. スニペット間の間隔が `rag_youtube_merge_gap_sec`（デフォルト: 2.0 秒）以上の場合、段落を分割する
+4. 結合後のテキストが `rag_youtube_merge_max_chars`（デフォルト: 300 文字）を超えた場合、次の区切りポイントで分割する
+5. ヘッダー + 結合テキストを Markdown として出力する
+
 #### Zenn 記事（source_type: zenn、articles/ 配下の JSON）
 
 Zenn 記事の JSON（`article` オブジェクト）から `body_html` を抽出し、HTML → Markdown 変換を適用する。
@@ -365,17 +378,17 @@ Zenn スクラップの JSON（`scrap` オブジェクト）から `comments` �
 
 ### 設定項目
 
-| 設定項目 | 型 | 保管先 | 内容 | デフォルト |
-|---------|-----|--------|------|-----------|
-| `rag_pdf_backend` | str | `config.toml` | PDF バックエンド選択（`auto`, `pymupdf4llm`, `mineru`） | `auto` |
-| `rag_pdf_mineru_mfd_conf_thres` | float | `config.toml` | MinerU MFD 信頼度閾値 | `0.6` |
-| `rag_pdf_quality_ufffd_threshold` | float | `config.toml` | Unicode 置換文字率の閾値 | `0.10` |
-| `rag_pdf_quality_greek_threshold` | float | `config.toml` | ギリシャ文字率の閾値 | `0.15` |
-| `rag_pdf_quality_cjk_min_threshold` | float | `config.toml` | CJK 文字率の下限閾値 | `0.05` |
-| `rag_pdf_quality_min_chars_per_page` | int | `config.toml` | ページあたり最低文字数 | `10` |
-| `rag_pdf_quality_sample_pages` | int | `config.toml` | 品質サンプリングページ数 | `10` |
-| `rag_youtube_merge_gap_sec` | float | `config.toml` | YouTube スニペット結合の間隔閾値（秒）。この秒数以上の間隔があるスニペット間で段落を分割する | `2.0` |
-| `rag_youtube_merge_max_chars` | int | `config.toml` | YouTube スニペット結合の最大文字数。超過時は次の区切りポイントで分割する | `300` |
+| 設定項目 | 型 | 保管先 | デフォルト | 許容範囲 | 説明 |
+|---------|-----|--------|-----------|---------|------|
+| `rag_pdf_backend` | str | `config.toml` | `auto` | `auto`, `pymupdf4llm`, `mineru` | PDF バックエンド選択 |
+| `rag_pdf_mineru_mfd_conf_thres` | float | `config.toml` | `0.6` | — | MinerU MFD 信頼度閾値 |
+| `rag_pdf_quality_ufffd_threshold` | float | `config.toml` | `0.10` | — | Unicode 置換文字率の閾値 |
+| `rag_pdf_quality_greek_threshold` | float | `config.toml` | `0.15` | — | ギリシャ文字率の閾値 |
+| `rag_pdf_quality_cjk_min_threshold` | float | `config.toml` | `0.05` | — | CJK 文字率の下限閾値 |
+| `rag_pdf_quality_min_chars_per_page` | int | `config.toml` | `10` | — | ページあたり最低文字数 |
+| `rag_pdf_quality_sample_pages` | int | `config.toml` | `10` | — | 品質サンプリングページ数 |
+| `rag_youtube_merge_gap_sec` | float | `config.toml` | `2.0` | — | YouTube スニペット結合の間隔閾値（秒） |
+| `rag_youtube_merge_max_chars` | int | `config.toml` | `300` | — | YouTube スニペット結合の最大文字数 |
 
 `CONVERTED_STORE_DIR` は [pipeline-controller.md](pipeline-controller.md) の設定項目で定義済み。
 
@@ -401,4 +414,5 @@ Zenn スクラップの JSON（`scrap` オブジェクト）から `comments` �
 - [source-store.md](source-store.md) — source_store 仕様
 - [pipeline-controller.md](pipeline-controller.md) — パイプライン制御仕様
 - [ingesters/bluesky.md](ingesters/bluesky.md) — BlueSky インジェスター仕様（JSON 保存形式の定義元）
+- [ingesters/youtube.md](ingesters/youtube.md) — YouTube インジェスター仕様（JSON 保存形式の定義元）
 - [ingesters/zenn.md](ingesters/zenn.md) — Zenn インジェスター仕様（JSON 保存形式の定義元）

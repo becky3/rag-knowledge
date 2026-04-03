@@ -54,7 +54,7 @@
 | パラメータ | 型 | 必須 | 内容 |
 |-----------|-----|------|------|
 | `mode` | str | はい | 再構築モード（下表参照） |
-| `source_type` | str | いいえ | 対象媒体フィルタ: `web`、`bluesky`、`zenn`、`local`。未指定時は全媒体 |
+| `source_type` | str | いいえ | 対象媒体フィルタ: `web`、`bluesky`、`zenn`、`youtube`、`aozora`、`local`、`journal`。未指定時は全媒体 |
 
 再構築モード:
 
@@ -86,7 +86,7 @@ uv run python -m rag.cli rebuild --mode <MODE> [--source-type <TYPE>]
 | オプション | 型 | 必須 | 内容 |
 |-----------|-----|------|------|
 | `--mode` | str | はい | 再構築モード: `full`、`convert`、`index`、`incremental` |
-| `--source-type` | str | いいえ | 対象媒体フィルタ: `web`、`bluesky`、`zenn`、`local` |
+| `--source-type` | str | いいえ | 対象媒体フィルタ: `web`、`bluesky`、`zenn`、`youtube`、`aozora`、`local`、`journal` |
 | `--if-needed` | flag | いいえ | 前回の index/full rebuild 以降に更新がなければスキップする。`--mode` が `index` または `full` の場合のみ有効 |
 
 MCP ツール `rag_rebuild` と同じバリデーション・振る舞いを適用する。`--if-needed` の詳細は [infrastructure/scheduled-rebuild.md](infrastructure/scheduled-rebuild.md) を参照。
@@ -235,7 +235,10 @@ CLI は `--output json` 指定時にこの callback 内で進捗 JSON を stdout
     web: 80 files (30.2 MB)
     bluesky: 25 files (5.1 MB)
     zenn: 10 files (8.0 MB)
+    youtube: 5 files (1.2 MB)
+    aozora: 3 files (0.8 MB)
     local: 8 files (2.3 MB)
+    journal: 2 files (0.1 MB)
 
 ■ converted_store
   総ファイル数: 120

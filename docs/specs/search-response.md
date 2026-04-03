@@ -52,8 +52,8 @@ MCP クライアントからの rag_search ツール呼び出し。
 | パラメータ | 型 | 必須 | 内容 |
 |-----------|-----|------|------|
 | `query` | str | Yes | 検索キーワード |
-| `n_results` | int | No | エンジンあたりの結果件数 |
-| `source_type` | str | No | ソース種別フィルタ（`"web"`, `"zenn"`, `"bluesky"`, `"youtube"`, `"local"`, `"journal"`） |
+| `n_results` | int | No | エンジンあたりの結果件数（未指定時は `rag_retrieval_count` 設定値を使用、1 以上） |
+| `source_type` | str | No | ソース種別フィルタ（`"web"`, `"zenn"`, `"bluesky"`, `"youtube"`, `"aozora"`, `"local"`, `"journal"`） |
 | `filters` | str | No | カスタムメタデータフィルタ（`key=value` 形式、複数指定時はカンマ区切り）。`.meta` の extra フィールドで検索結果を絞り込む。完全一致。例: `repository=rag-knowledge` / `repository=rag-knowledge,tag=dev` |
 
 #### フィルタの動作
@@ -205,10 +205,11 @@ Collected: 2025-01-15T10:30:00Z
 #### CLI サブコマンド
 
 ```
-uv run python -m rag.cli get-document <source_id> [--format text|original] [--output <file_path>]
+uv run python -m rag.cli get-document <source_id> [--format text|original] [--output-file <file_path>]
 ```
 
-- `--output` 指定時はファイルに出力する。未指定時は標準出力に出力する
+- `source_id` は位置引数（`--` プレフィックスなし）
+- `--output-file` 指定時はファイルに出力する。未指定時は標準出力に出力する
 - `--format` のデフォルトは `text`
 
 ## エッジケース

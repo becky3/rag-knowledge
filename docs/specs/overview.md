@@ -22,7 +22,7 @@ RAG Knowledge は、外部 Web ページから収集した知識をベクトル 
 | 12 | インジェスター共通仕様 | インジェスターの共通制約・重複検出・パイプライン通知 | [ingesters/common.md](ingesters/common.md) |
 | 13 | BlueSky インジェスター | AT Protocol API 経由の投稿取得 | [ingesters/bluesky.md](ingesters/bluesky.md) |
 | 14 | Zenn インジェスター | Zenn API 経由の記事・スクラップ取得 | [ingesters/zenn.md](ingesters/zenn.md) |
-| 15 | Local インジェスター | ローカルファイルの配置 | [ingesters/local.md](ingesters/local.md) |
+| 15 | ドキュメントインジェスター | テキストドキュメント（Markdown、テキスト、PDF、AsciiDoc）の取り込み | [ingesters/local.md](ingesters/local.md) |
 | 16 | 検索レスポンス + 全文取得 | チャンク単位検索レスポンスと全文取得ツール | [search-response.md](search-response.md) |
 | 17 | 再構築・統計・バックアップ | パイプライン再構築の MCP/CLI 公開・統計拡張・バックアップ手順 | [rebuild-stats.md](rebuild-stats.md) |
 | 18 | サイト一括取り込み（Scrapy subprocess） | Scrapy subprocess による大規模サイトの一括取り込み | [site-ingest.md](site-ingest.md) |
@@ -49,6 +49,12 @@ RAG Knowledge は、外部 Web ページから収集した知識をベクトル 
 | HTML 解析 | BeautifulSoup4 |
 | HTML→Markdown 変換 | markdownify |
 | PDF テキスト抽出 | pymupdf4llm / MinerU（CUDA 環境、未インストール時は pymupdf4llm にフォールバック） |
+| YouTube 字幕取得 | youtube-transcript-api |
+| YouTube メタデータ・音声DL | yt-dlp |
+| 音声文字起こし | faster-whisper |
+| Web クローラー（大規模サイト） | Scrapy |
+| multipart フォーム解析 | python-multipart |
+| YAML パーサー | PyYAML |
 | プロセス間排他制御 | ファイルベースロック（fcntl/msvcrt） |
 | 設定管理 | pydantic-settings (.env + config.toml) |
 
