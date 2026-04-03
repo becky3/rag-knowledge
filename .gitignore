@@ -137,6 +137,7 @@ celerybeat.pid
 # Environments
 .env
 .envrc
+.mcp.json
 .venv
 env/
 venv/
