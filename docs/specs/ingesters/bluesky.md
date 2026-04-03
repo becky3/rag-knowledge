@@ -433,7 +433,7 @@ BlueSky 投稿内に含まれる URL を抽出し、URL の種別に応じて si
 2. 抽出した URL を重複排除する（同一 URL が複数投稿に出現する場合）
 3. URL 種別を判定し、Web / YouTube / スキップに分類する
 4. Web URL を全てバッチ収集し、CLI の `site-ingest` コマンド（複数 URL モード）で 1 回の Scrapy subprocess として取り込む。`--download-only` を指定し、パイプライン処理は BlueSky 側で一括実行する
-5. YouTube インジェスターで動画を取り込む（個別処理）
+5. YouTube インジェスターで動画を取り込む（個別処理、URL 間に `rag_youtube_request_interval` に基づくスリープを挿入）
 6. 全 URL の処理が完了した後、パイプライン制御に取り込み完了を通知する
 
 #### エラーハンドリング
@@ -442,11 +442,12 @@ BlueSky 投稿内に含まれる URL を抽出し、URL の種別に応じて si
 - BlueSky 投稿自体の取り込みは URL 先の失敗に影響されない
 - URL 先の取り込み結果は別途ログ出力する（BlueSky 投稿の IngestResult とは分離）
 
-#### site_ingest との連携
+#### 外部インジェスターとの連携
 
 - Web URL の取り込みは CLI の `site-ingest` コマンドを subprocess で呼び出す。Scrapy が独自に HTTP リクエストを管理するため、ConstrainedClient のバジェットは消費しない
 - BlueSky API 呼び出しのみ ConstrainedClient のバジェットを消費する
 - YouTube インジェスターは内部で `youtube-transcript-api` / `yt-dlp` を使用しており、ConstrainedClient は適用外
+- YouTube URL を複数処理する場合、URL 間に YouTube インジェスターの `request_interval`（デフォルト 5.0 秒）のスリープを挿入する。最後の URL の後はスリープしない。これはプレイリスト処理と同様のレート制御であり、連続リクエストによる IP ブロックを防止する
 
 ## 外部連携
 

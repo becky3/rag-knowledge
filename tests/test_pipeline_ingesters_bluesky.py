@@ -510,6 +510,57 @@ class TestFollowUrls:
         )
         assert stats["youtube_placed"] == 1
 
+    async def test_youtube_url_sleep_between_urls(
+        self, source_store: SourceStore
+    ) -> None:
+        """複数 YouTube URL の処理時に URL 間でスリープが挿入されること."""
+        item = _make_feed_item()
+        item["post"]["record"]["facets"] = [
+            {
+                "features": [
+                    {
+                        "$type": "app.bsky.richtext.facet#link",
+                        "uri": "https://www.youtube.com/watch?v=vid1",
+                    }
+                ]
+            },
+            {
+                "features": [
+                    {
+                        "$type": "app.bsky.richtext.facet#link",
+                        "uri": "https://www.youtube.com/watch?v=vid2",
+                    }
+                ]
+            },
+            {
+                "features": [
+                    {
+                        "$type": "app.bsky.richtext.facet#link",
+                        "uri": "https://www.youtube.com/watch?v=vid3",
+                    }
+                ]
+            },
+        ]
+
+        mock_yt = AsyncMock()
+        mock_yt.ingest_video = AsyncMock(
+            return_value=MagicMock(placed=1, errors=0)
+        )
+        mock_yt.request_interval = 5.0
+
+        ingester = make_bluesky_ingester(source_store)
+        with patch("asyncio.sleep", new_callable=AsyncMock) as mock_sleep:
+            stats = await ingester.follow_urls(
+                [item],
+                youtube_ingester=mock_yt,
+            )
+
+        assert mock_yt.ingest_video.call_count == 3
+        assert stats["youtube_placed"] == 3
+        # 最後の URL の後はスリープしない → 3 - 1 = 2 回
+        assert mock_sleep.call_count == 2
+        mock_sleep.assert_any_call(5.0)
+
     async def test_bsky_url_skipped(self, source_store: SourceStore) -> None:
         """BlueSky URL がスキップされること."""
         item = _make_feed_item()
