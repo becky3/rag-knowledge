@@ -449,8 +449,8 @@ class BlueskyIngester:
             stats["web_placed"] = web_placed
             stats["errors"] += web_errors
 
-        # YouTube URL を個別取り込み
-        for url in youtube_urls:
+        # YouTube URL を個別取り込み（URL 間にレート制限スリープを挿入）
+        for i, url in enumerate(youtube_urls):
             if youtube_ingester is not None:
                 try:
                     yt_result = await youtube_ingester.ingest_video(video_url=url)
@@ -460,6 +460,9 @@ class BlueskyIngester:
                 except Exception:
                     logger.exception("YouTube URL の取り込みに失敗: %s", url)
                     stats["errors"] += 1
+                # リクエスト間隔待機（次の URL がある場合のみ）
+                if i < len(youtube_urls) - 1:
+                    await asyncio.sleep(youtube_ingester.request_interval)
             else:
                 logger.warning("YouTube インジェスターが未指定: %s", url)
                 stats["skipped"] += 1

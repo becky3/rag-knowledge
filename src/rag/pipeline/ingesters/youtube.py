@@ -133,6 +133,11 @@ class YoutubeIngester:
         self._whisper_model_instance: Any = None  # 遅延初期化キャッシュ
         self._whisper_lock = threading.Lock()  # スレッドセーフなモデルアクセス
 
+    @property
+    def request_interval(self) -> float:
+        """リクエスト間隔（秒）."""
+        return self._request_interval
+
     async def ingest_video(
         self,
         video_url: str,
