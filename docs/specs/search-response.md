@@ -205,11 +205,11 @@ Collected: 2025-01-15T10:30:00Z
 #### CLI サブコマンド
 
 ```
-uv run python -m rag.cli get-document <source_id> [--format text|original] [--output <file_path>]
+uv run python -m rag.cli get-document <source_id> [--format text|original] [--output-file <file_path>]
 ```
 
 - `source_id` は位置引数（`--` プレフィックスなし）
-- `--output` 指定時はファイルに出力する。未指定時は標準出力に出力する
+- `--output-file` 指定時はファイルに出力する。未指定時は標準出力に出力する
 - `--format` のデフォルトは `text`
 
 ## エッジケース

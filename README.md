@@ -64,6 +64,8 @@
 4. **keyring 登録** — API キーの登録
 5. **サーバー起動** — ChromaDB + MCP サーバー
 
+HTTP モードで運用する場合は、ステップ 5 の後に「HTTP モードセットアップ」も参照。
+
 ### 1. 依存パッケージのインストール
 
 CUDA 環境と CPU 環境のどちらかを選択する。CUDA 環境は MinerU（高精度 PDF テキスト抽出）を含む。PDF 取り込みで高精度抽出が不要な場合は CPU 環境で十分。
@@ -124,7 +126,7 @@ uv run python -m rag.cli generate-api-key --save
 
 クライアント側では `X-API-Key` ヘッダーに生成したキーを設定する。
 
-### 5. HTTP モードセットアップ
+### HTTP モードセットアップ（任意）
 
 HTTP モード（`RAG_TRANSPORT=http`）で MCP サーバーを起動する場合の追加設定:
 

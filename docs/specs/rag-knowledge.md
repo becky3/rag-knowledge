@@ -304,7 +304,7 @@ rag_search はベクトル検索と BM25 検索の生結果をチャンク単位
 | --- | --- |
 | evaluate | 評価データセットで検索精度を計測しレポートを出力する。ベースライン比較でリグレッションを検出できる |
 | init-test-db | テスト用のベクトル DB と BM25 インデックスを初期化する |
-| get-document | ソース全文を取得する。`--format text\|original`、`--output` でファイル出力（トランケーションなし） |
+| get-document | ソース全文を取得する。`--format text\|original`、`--output-file` でファイル出力（トランケーションなし） |
 
 評価指標: Precision、Recall、F1、NDCG@K、MRR
 
@@ -667,7 +667,7 @@ flowchart LR
 | Embedding プロバイダー接続不可 | 疎通確認で検出し、エラーを返す |
 | `OPENAI_API_KEY` が未登録 | オンライン Embedding プロバイダーの初期化に失敗し、エラーを返す |
 | `GOOGLE_SAFE_BROWSING_API_KEY` が未登録・空・不正 | 設定エラー（`SafeBrowsingConfigError`）として即時中断する |
-| rag_get_document レスポンスサイズ超過 | MCP 経由で `rag_max_response_chars` 超過時はトランケーションし、末尾に CLI `--output` オプションでの全文取得を案内する。CLI の `--output` 指定時はトランケーションなし |
+| rag_get_document レスポンスサイズ超過 | MCP 経由で `rag_max_response_chars` 超過時はトランケーションし、末尾に CLI `--output-file` オプションでの全文取得を案内する。CLI の `--output-file` 指定時はトランケーションなし |
 | バジェット上限到達 | 取得済みデータを返し、上限到達の旨をログ出力する |
 | サーキットブレーカー発動 | 操作を中断し、取得済みデータを返す。エラーの詳細をログ出力する |
 | 操作全体タイムアウト | 操作を中断し、取得済みデータを返す |
