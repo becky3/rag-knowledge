@@ -1,7 +1,0 @@
-{
-  "mcpServers": {
-    "rag-knowledge": {
-      "url": "http://localhost:8081/mcp"
-    }
-  }
-}
