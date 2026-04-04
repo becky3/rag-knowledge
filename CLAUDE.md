@@ -5,6 +5,10 @@
 @README.md
 @docs/specs/overview.md
 
+## SSoT（Single Source of Truth）
+
+設定制約（min/max/default）は `src/rag/config.py` の pydantic Field が SSoT であり、仕様書には設計意図（Why）のみ記載する。横断列挙値（`source_type` 等）は `_schema/enums.yml` が SSoT であり、仕様書では参照リンクで示す。詳細は overview.md の「SSoT 階層」セクションを参照。
+
 ## MCP サーバー運用ルール
 
 本リポジトリは MCP サーバーの実装リポジトリであり、`.mcp.json` で Claude Code の MCP サーバーとして登録されている。MCP サーバーは HTTP モード（`RAG_TRANSPORT=http`）で運用し、`.mcp.json` は `url` ベースで接続する。サーバーは別プロセスで起動しておく必要がある。
