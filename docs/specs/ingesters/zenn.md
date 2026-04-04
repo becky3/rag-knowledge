@@ -67,7 +67,7 @@ Zenn（zenn.dev）の記事およびスクラップを API 経由で取得し、
 | 項目 | 内容 |
 |------|------|
 | 最悪ケースリクエスト数 | `content_type=all` 時: 記事走査 + 記事詳細 + スクラップ走査 + スクラップ詳細。設定上限は pydantic Field、ハードリミットはコード内定数。バジェット上限は ConstrainedClient を参照 |
-| 最悪ケース所要時間 | リクエスト数 x デフォルト間隔（pydantic Field 参照）。ConstrainedClient の操作全体タイムアウトの範囲内 |
+| 最悪ケース所要時間 | リクエスト数 x リクエスト間隔（デフォルト・許容範囲は pydantic Field で定義）。ConstrainedClient の操作全体タイムアウトの範囲内 |
 | 想定エラー率 | Zenn API 依存。リトライ機構なし（失敗記事はスキップし処理を続行）。ConstrainedClient のサーキットブレーカー閾値で操作中断 |
 
 ## インターフェース

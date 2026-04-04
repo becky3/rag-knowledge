@@ -86,7 +86,7 @@
 | 項目 | 内容 |
 |------|------|
 | 最悪ケースリクエスト数 | 作品取得上限（コード内定数）。ConstrainedClient のバジェット上限の範囲内 |
-| 最悪ケース所要時間 | 作品取得上限 x デフォルト間隔（pydantic Field 参照）+ ダウンロード・処理時間。ConstrainedClient の操作全体タイムアウトの範囲内 |
+| 最悪ケース所要時間 | 作品取得上限 x リクエスト間隔（デフォルト・許容範囲は pydantic Field で定義）+ ダウンロード・処理時間。ConstrainedClient の操作全体タイムアウトの範囲内 |
 | 想定エラー率 | GitHub Raw URL 依存。個別作品の失敗はスキップして続行。ConstrainedClient のサーキットブレーカー閾値で操作中断 |
 
 ### rag_add_aozora（単一作品取り込み）

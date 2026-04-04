@@ -113,8 +113,8 @@ MCP ツール `rag_site_ingest` と CLI コマンド `site-ingest` の 2 つの�
 
 | 項目 | 内容 |
 |------|------|
-| 最悪ケースリクエスト数 | `site_ingest_max_pages`（pydantic Field 参照）+ robots.txt 取得 1 件。Scrapy の重複フィルタにより実際のリクエスト数は対象サイトのユニーク URL 数に依存する |
-| 最悪ケース所要時間 | ページ数上限 x デフォルト間隔（pydantic Field 参照）+ ダウンロードタイムアウト分の接続待ち。Scrapy プロセスの終了で操作が完了する |
+| 最悪ケースリクエスト数 | `site_ingest_max_pages` 設定値（デフォルト・許容範囲は pydantic Field で定義）+ robots.txt 取得 1 件。Scrapy の重複フィルタにより実際のリクエスト数は対象サイトのユニーク URL 数に依存する |
+| 最悪ケース所要時間 | ページ数上限 x リクエスト間隔（デフォルト・許容範囲は pydantic Field で定義）+ ダウンロードタイムアウト分の接続待ち。Scrapy プロセスの終了で操作が完了する |
 | 想定エラー率 | サイト依存。Scrapy のリトライミドルウェア（デフォルト: 2 回リトライ）が対象ステータスコード（500, 502, 503, 504, 522, 524, 408, 429）に適用される |
 
 ## インターフェース
@@ -223,7 +223,7 @@ flowchart TD
 | `allowed_domains` | ドメイン制約（URL から自動導出） |
 | `url_pattern` | URL フィルタ（正規表現、任意。クロールモードのみ） |
 | `output_dir` | HTML ファイルの保存先ディレクトリ |
-| `max_pages` | ページ数上限（200 OK カウント）。外部インターフェースでは pydantic Field の制約でクランプされる。Spider 内部では 0 を無制限として扱うが、CLI/MCP からは入力されない |
+| `max_pages` | ページ数上限（200 OK カウント）。外部インターフェースでは pydantic Field の許容範囲でクランプされる（CLI で明示的にクランプ処理を実施）。Spider 内部では 0 を無制限として扱うが、CLI/MCP からは入力されない |
 | `no_follow` | リンク辿りを無効化するフラグ（複数 URL モード時に `true`） |
 
 Spider の振る舞い:

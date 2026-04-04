@@ -61,7 +61,7 @@ BlueSky（AT Protocol）の投稿を API 経由で取得し、source_store に�
 | 項目 | 内容 |
 |------|------|
 | 最悪ケースリクエスト数 | BlueSky API: ceil(投稿取得上限/ページサイズ) 回（ConstrainedClient バジェット消費）。URL 先取り込み: site_ingest（Scrapy subprocess）が独立して HTTP リクエストを管理するため、ConstrainedClient バジェットを消費しない |
-| 最悪ケース所要時間 | BlueSky API: リクエスト数 x リクエスト間隔（pydantic Field 参照）。URL 先取り込み: Scrapy subprocess の所要時間。直列実行のため合計時間 |
+| 最悪ケース所要時間 | BlueSky API: リクエスト数 x リクエスト間隔（デフォルト・許容範囲は pydantic Field で定義）。URL 先取り込み: Scrapy subprocess の所要時間。直列実行のため合計時間 |
 | 想定エラー率 | AT Protocol API 依存。リトライ機構なし。ConstrainedClient のサーキットブレーカー閾値で操作中断。中断時は取得済みデータを処理する |
 
 ## インターフェース
