@@ -49,19 +49,6 @@ Local インジェスターは、ローカルファイルシステム上のテ�
 
 本コンポーネントは外部 API 通信を行わないため、想定プロファイル・ConstrainedClient 関連の安全制約セクションは省略する。
 
-## 安全制約
-
-| 制約名 | 種別 | 値 | 解除可否 |
-|--------|------|-----|---------|
-| ディレクトリ一括取り込みファイル数上限 | ハードリミット | 100 件 | 引き上げ不可（引き下げ可） |
-| パストラバーサル対策 | ハードリミット | `Path.resolve()` による正規化 | 無効化不可 |
-| HTTP モードでのローカルパスアクセス制限 | ハードリミット | `rag_crawl_documents`: HTTP モード時はデフォルト無効。`rag_document_http_mode_enabled=true` かつ `rag_document_allowed_dirs` 指定で有効化。許可ディレクトリ外のパスはエラー。`rag_add_document`: コンテンツアップロード型のため制限なし | `rag_crawl_documents`: opt-in で有効化可。`rag_add_document`: 制限なし |
-| metadata.db 直接アクセス禁止 | ハードリミット | インジェスターから metadata.db への読み書きを禁止 | 不可 |
-| git 操作禁止 | ハードリミット | インジェスターから git コマンドの直接呼び出しを禁止 | 不可 |
-| ファイル物理削除禁止 | ハードリミット | source_store 内のファイル削除を禁止 | 不可 |
-
-テスト実行時の安全な値: ファイル数上限 5 件で実行する。異常値テスト（空パス、存在しないファイル、未対応拡張子、ハードリミット超過）を含めること。
-
 ## インターフェース
 
 ### MCP ツール
@@ -149,13 +136,11 @@ source_store 内の相対パスを source_id として使用する。
 
 ### 設定項目
 
-#### `config.toml`（共通設定値）
-
-| 設定キー | 型 | デフォルト | 許容範囲 | 説明 |
-|---------|-----|-----------|---------|------|
-| `rag_document_supported_extensions` | 文字列 | `".md,.txt,.pdf,.adoc"` | ドット始まりのカンマ区切り文字列 | 対応ファイル拡張子のカンマ区切りリスト |
-| `rag_document_http_mode_enabled` | bool | `false` | `true` / `false` | HTTP モード時のローカルファイルアクセスツールの有効化 |
-| `rag_document_allowed_dirs` | 文字列 | `""` | カンマ区切りのディレクトリパス | HTTP モード時にアクセスを許可するディレクトリ。空の場合は全パスを拒否 |
+| 設定項目 | 層 | 設計意図 |
+|---------|-----|---------|
+| `rag_document_supported_extensions` | 共通設定値 | 対応ファイル拡張子。取り込み対象を制限 |
+| `rag_document_http_mode_enabled` | 共通設定値 | HTTP モード時のローカルファイルアクセスの有効化制御 |
+| `rag_document_allowed_dirs` | 共通設定値 | HTTP モード時のアクセス許可ディレクトリ。セキュリティ境界を定義 |
 
 source_store のパスは [source-store.md](../source-store.md) の `SOURCE_STORE_DIR` を使用する。
 
