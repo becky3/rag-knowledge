@@ -225,7 +225,7 @@ class PipelineController:
         self._check_uncommitted_changes(source_type)
 
         # 1. metadata.db 再構築
-        self._source_store.rebuild_db()
+        self._source_store.rebuild_db(source_type)
 
         # 2. converted_store クリア
         self._converter.clear(self._converted_store_dir, source_type)

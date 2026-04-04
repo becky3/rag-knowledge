@@ -678,6 +678,11 @@ class TestRunFullRebuild:
         assert converter.cleared == ["local"]
         assert indexer.cleared == ["local"]
 
+        # web のレコードは metadata.db に保持されている
+        web_record = ctrl.db.get_source("web/example.com/page.html")
+        assert web_record is not None
+        assert web_record.source_type == "web"
+
     def test_no_files_returns_empty(
         self,
         controller: tuple[PipelineController, StubConverter, StubIndexer],

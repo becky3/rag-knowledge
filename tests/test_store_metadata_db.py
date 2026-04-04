@@ -429,3 +429,48 @@ class TestDeleteAllSources:
 
         db.delete_all_sources()
         assert db.source_count() == 0
+
+
+class TestDeleteSourcesByType:
+    """delete_sources_by_type のテスト."""
+
+    def test_delete_by_type(self, db: MetadataDB) -> None:
+        """指定 type のみ削除し、他 type は保持する."""
+        db.register_source(
+            source_id="s1",
+            source_type="local",
+            file_path="local/s1.md",
+            title="S1",
+            content_hash="h",
+            file_size=1,
+            collected_at="2026-01-01T00:00:00Z",
+            updated_at="2026-01-01T00:00:00Z",
+        )
+        db.register_source(
+            source_id="s2",
+            source_type="web",
+            file_path="web/https/s2.html",
+            title="S2",
+            content_hash="h",
+            file_size=1,
+            collected_at="2026-01-01T00:00:00Z",
+            updated_at="2026-01-01T00:00:00Z",
+        )
+        db.register_source(
+            source_id="s3",
+            source_type="web",
+            file_path="web/https/s3.html",
+            title="S3",
+            content_hash="h",
+            file_size=1,
+            collected_at="2026-01-01T00:00:00Z",
+            updated_at="2026-01-01T00:00:00Z",
+        )
+
+        db.delete_sources_by_type("web")
+
+        # web の 2 件が削除され、local の 1 件が残る
+        assert db.source_count() == 1
+        assert db.get_source("s1") is not None
+        assert db.get_source("s2") is None
+        assert db.get_source("s3") is None

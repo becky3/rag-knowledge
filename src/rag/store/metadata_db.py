@@ -285,6 +285,14 @@ class MetadataDB:
         self._connection.execute("DELETE FROM sources")
         self._connection.commit()
 
+    def delete_sources_by_type(self, source_type: SourceType) -> None:
+        """指定 source_type のソースレコードを削除する（DB 部分再構築用）."""
+        self._connection.execute(
+            "DELETE FROM sources WHERE source_type = ?",
+            (source_type,),
+        )
+        self._connection.commit()
+
     # --- pipeline_history ---
 
     def add_pipeline_history(
