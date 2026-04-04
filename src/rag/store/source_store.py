@@ -361,15 +361,22 @@ class SourceStore:
 
     # --- DB 再構築 ---
 
-    def rebuild_db(self) -> int:
+    def rebuild_db(self, source_type: SourceType | None = None) -> int:
         """source_store のファイルと .meta から metadata.db を再構築する.
+
+        Args:
+            source_type: 対象媒体フィルタ。指定時は対象 type のみ
+                DELETE → INSERT する。None で全件再構築。
 
         Returns:
             登録されたソース数
         """
-        self._db.delete_all_sources()
+        if source_type is not None:
+            self._db.delete_sources_by_type(source_type)
+        else:
+            self._db.delete_all_sources()
 
-        files = self.list_files()
+        files = self.list_files(source_type=source_type)
         count = 0
         now = datetime.now(timezone.utc).isoformat()
 
@@ -379,10 +386,10 @@ class SourceStore:
             data = full_path.read_bytes()
             content_hash = hashlib.sha256(data).hexdigest()
 
-            source_type = self._detect_source_type(rel_str)
+            detected_type = self._detect_source_type(rel_str)
             meta_dict: dict[str, Any] = {}
 
-            if source_type not in _NO_META_TYPES:
+            if detected_type not in _NO_META_TYPES:
                 meta_file = meta_path_for(full_path)
                 if meta_file.exists():
                     meta_dict = read_meta(full_path)
@@ -391,16 +398,16 @@ class SourceStore:
                         ".meta ファイルが欠落しています: %s", full_path
                     )
 
-            source_id = self._resolve_source_id(source_type, rel_str, meta_dict or None)
-            title = self._resolve_title(source_type, rel_str, meta_dict or None)
+            source_id = self._resolve_source_id(detected_type, rel_str, meta_dict or None)
+            title = self._resolve_title(detected_type, rel_str, meta_dict or None)
             collected_at = meta_dict.get("collected_at", now)
             published_at = resolve_published_at(
-                source_type, meta_dict or None, collected_at,
+                detected_type, meta_dict or None, collected_at,
             )
 
             self._db.register_source(
                 source_id=source_id,
-                source_type=source_type,
+                source_type=detected_type,
                 file_path=rel_str,
                 title=title,
                 content_hash=content_hash,

@@ -345,6 +345,40 @@ class TestRebuildDb:
         assert web_record.source_type == "web"
         assert web_record.title == "Test Page"
 
+    def test_rebuild_with_source_type_filter(self, store: SourceStore) -> None:
+        """source_type フィルタ指定時は対象 type のみ再構築し、他は保持する."""
+        # local と web の 2 種類を配置
+        store.place_file(source_type="local", data=b"local data", rel_path="local/doc.md")
+        store.place_file(
+            source_type="web",
+            data=b"<html>page</html>",
+            rel_path="web/https/example.com/page.html",
+            metadata={
+                "source_id": "https://example.com/page",
+                "source_type": "web",
+                "title": "Test Page",
+                "collected_at": "2026-01-15T10:30:00+09:00",
+            },
+        )
+
+        # 初回は全件再構築
+        count = store.rebuild_db()
+        assert count == 2
+
+        # web のみ再構築
+        count = store.rebuild_db(source_type="web")
+        assert count == 1
+
+        # local レコードは保持されている
+        local_record = store.db.get_source("local/doc.md")
+        assert local_record is not None
+        assert local_record.source_type == "local"
+
+        # web レコードも再登録されている
+        web_record = store.db.get_source("https://example.com/page")
+        assert web_record is not None
+        assert web_record.source_type == "web"
+
     def test_rebuild_with_missing_meta(self, store: SourceStore) -> None:
         """非 local 媒体で .meta が欠落している場合、パスベースのフォールバックで登録される."""
         # .meta なしで直接ファイルを配置
