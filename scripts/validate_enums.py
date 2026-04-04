@@ -9,18 +9,26 @@ from __future__ import annotations
 import sys
 from enum import Enum
 from pathlib import Path
-from typing import get_args
+from typing import Any, get_args
 
 import yaml
 
 
-def _load_enums_yml(path: Path) -> dict:
+def _load_enums_yml(path: Path) -> dict[str, Any]:
     """enums.yml を読み込んで返す."""
     with path.open(encoding="utf-8") as f:
-        return yaml.safe_load(f)
+        try:
+            data = yaml.safe_load(f)
+        except yaml.YAMLError as e:
+            print(f"ERROR: enums.yml の YAML パースに失敗しました: {e}")
+            sys.exit(1)
+    if not isinstance(data, dict):
+        print(f"ERROR: enums.yml のトップレベルが dict ではありません: {type(data)}")
+        sys.exit(1)
+    return data
 
 
-def _extract_yml_values(data: dict, key: str) -> set[str]:
+def _extract_yml_values(data: dict[str, Any], key: str) -> set[str]:
     """enums.yml の指定キーから値の集合を取得する."""
     entry = data.get(key)
     if entry is None:
@@ -30,7 +38,13 @@ def _extract_yml_values(data: dict, key: str) -> set[str]:
     if not values:
         print(f"ERROR: enums.yml の '{key}.values' が空です")
         sys.exit(1)
-    return {item["value"] for item in values}
+    result: set[str] = set()
+    for i, item in enumerate(values):
+        if not isinstance(item, dict) or "value" not in item:
+            print(f"ERROR: enums.yml の '{key}.values[{i}]' に 'value' キーがありません: {item}")
+            sys.exit(1)
+        result.add(item["value"])
+    return result
 
 
 def _extract_literal_values(literal_type: type) -> set[str]:
@@ -71,8 +85,8 @@ def main() -> None:
     data = _load_enums_yml(enums_path)
 
     # Python 定義をインポート
-    from rag.pipeline.models import PipelineMode
-    from rag.store.models import SourceType
+    from rag.pipeline.models import PipelineMode  # type: ignore[import-untyped]
+    from rag.store.models import SourceType  # type: ignore[import-untyped]
 
     ok = True
 
