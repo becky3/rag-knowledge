@@ -76,26 +76,6 @@ MCP サーバーとして独立動作し、18 個のツールを提供する。
 - CI（`check-raw-http` ワークフロー）で ConstrainedClient を経由しない直接 HTTP クライアント利用を検出し、違反があればマージをブロックする。ConstrainedClient は `src/` 外のパッケージのため検出対象外。許可例外: `# safety:allowed` コメントが付与された行
 - 設定値がハードリミットの許容範囲外の場合は範囲内にクランプする（エラーにはしない。警告ログを出力する）
 
-## 安全制約
-
-| 制約名 | 種別 | 値 | 対応設定項目 | 解除可否 |
-|--------|------|-----|-------------|---------|
-| 操作あたりリクエスト総数上限 | ハードリミット | 500 | — | 引き上げ不可（引き下げ可） |
-| 最低リクエスト間隔 | ハードリミット | 0.1 秒 | — | 引き下げ不可（引き上げ可） |
-| 操作全体タイムアウト | ハードリミット | 600 秒、許容範囲 1〜600 秒 | — | 引き上げ不可（引き下げ可、下限 1 秒） |
-| サーキットブレーカー閾値 | ハードリミット | 5 回連続失敗 | — | 引き上げ不可（引き下げ可） |
-| サイト一括取り込みページ数上限 | 設定値 | 許容範囲 1〜1,000、デフォルト 500 | `site_ingest_max_pages` | 範囲内で変更可 |
-| サイト一括取り込みリクエスト間隔 | 設定値 | 許容範囲 0.05〜60 秒、デフォルト 0.1 秒 | `site_ingest_delay_sec` | 範囲内で変更可 |
-| サイト一括取り込みダウンロードタイムアウト | 設定値 | 許容範囲 1〜300 秒、デフォルト 30 秒 | `site_ingest_download_timeout` | 範囲内で変更可 |
-| サイト一括取り込み操作全体タイムアウト | 設定値 | 許容範囲 60〜86,400 秒、デフォルト 7,200 秒 | `site_ingest_timeout_sec` | 範囲内で変更可 |
-| サイト一括取り込みエラー停止閾値 | 設定値 | 許容範囲 1〜1,000、デフォルト 10 | `site_ingest_error_count` | 範囲内で変更可 |
-| インジェスターリクエストタイムアウト | 設定値 | 許容範囲 1〜120 秒、デフォルト 30 秒 | `rag_*_request_timeout` | 範囲内で変更可 |
-| インジェスターリクエスト間隔 | 設定値 | 許容範囲 0.1〜60 秒 | `rag_*_request_interval` | 範囲内で変更可 |
-| HNSW M（グラフ接続数） | 設定値 | 許容範囲 2〜100、デフォルト 48 | `hnsw_m` | 範囲内で変更可 |
-| HNSW construction_ef（構築時探索幅） | 設定値 | 許容範囲 10〜2000、デフォルト 400 | `hnsw_construction_ef` | 範囲内で変更可 |
-| HNSW search_ef（検索時探索幅） | 設定値 | 許容範囲 10〜2000、デフォルト 300 | `hnsw_search_ef` | 範囲内で変更可 |
-| 生 HTTP クライアント利用禁止 | CI チェック | `src/` 全体を grep で走査（httpx / aiohttp / requests / urllib.request）。`# safety:allowed` 行を除外。ConstrainedClient は py-common-lib パッケージで提供（`src/` 外のため検出対象外） | — | 許可例外の追加は `# safety:allowed` コメントで可 |
-
 ### MCP 薄層アダプターパターン
 
 MCP サーバーの全ツールは CLI サブプロセスに委譲する（薄層アダプターパターン）。MCP ツール側にビジネスロジックを持たず、パラメータの組み立て・バリデーション・結果の整形のみを行う。
@@ -119,7 +99,7 @@ MCP サーバーが公開する 18 個のツール。
 |------|-----|------|-----------|------|
 | `query` | str | Yes | — | 検索クエリ |
 | `n_results` | int \| None | No | None（設定値を使用） | 各エンジンから取得する結果数 |
-| `source_type` | str \| None | No | None（全種別） | ソース種別フィルタ（`web`, `zenn`, `bluesky`, `youtube`, `aozora`, `local`, `journal`） |
+| `source_type` | str \| None | No | None（全種別） | ソース種別フィルタ（値は [`_schema/enums.yml`](../../_schema/enums.yml) の `source_type` を参照） |
 | `filters` | str \| None | No | None（フィルタなし） | メタデータフィルタ（`key=value` 形式、カンマ区切りで複数指定可。完全一致） |
 
 #### rag_get_document
@@ -138,7 +118,7 @@ MCP サーバーが公開する 18 個のツール。
 | 引数 | 型 | 必須 | デフォルト | 説明 |
 |------|-----|------|-----------|------|
 | `username` | str | Yes | — | Zenn ユーザー名 |
-| `max_articles` | int \| None | No | None（設定値を使用） | 取得する最大コンテンツ数（許容範囲: 1〜100） |
+| `max_articles` | int \| None | No | None（設定値を使用） | 取得する最大コンテンツ数 |
 | `content_type` | str | No | `"all"` | 取得対象。`"articles"`（記事のみ）、`"scraps"`（スクラップのみ）、`"all"`（両方） |
 | `force` | bool | No | `false` | 既存ファイルを上書きするか |
 
@@ -149,7 +129,7 @@ MCP サーバーが公開する 18 個のツール。
 | 引数 | 型 | 必須 | デフォルト | 説明 |
 |------|-----|------|-----------|------|
 | `handle` | str | Yes | — | BlueSky ハンドル（例: user.bsky.social）。DID 形式は不可 |
-| `max_posts` | int \| None | No | None（設定値を使用） | 取得する最大投稿数（許容範囲: 1〜1000） |
+| `max_posts` | int \| None | No | None（設定値を使用） | 取得する最大投稿数 |
 | `include_reposts` | bool \| None | No | None（設定値を使用） | タイムラインにリポストを含めるか |
 
 #### rag_add_youtube
@@ -167,7 +147,7 @@ YouTube プレイリスト内の動画を一括取り込みする。詳細は [i
 | 引数 | 型 | 必須 | デフォルト | 説明 |
 |------|-----|------|-----------|------|
 | `playlist_url` | str | Yes | — | YouTube プレイリスト URL（`youtube.com/playlist?list=` 形式） |
-| `max_videos` | int \| None | No | None（設定値を使用） | 取得する最大動画数（許容範囲: 1〜500） |
+| `max_videos` | int \| None | No | None（設定値を使用） | 取得する最大動画数 |
 
 #### rag_add_document
 
@@ -211,7 +191,7 @@ Scrapy subprocess で対象サイトをクロールし、source_store に配置�
 | `url` | str | No | `""` | クロール開始 URL（クロールモード、`urls` と排他） |
 | `urls` | list[str] \| None | No | None | 取得対象 URL のリスト（複数 URL モード、`url` と排他） |
 | `url_pattern` | str | No | `""` | URL フィルタパターン（正規表現、クロールモードのみ） |
-| `max_pages` | int \| None | No | None（設定値を使用） | ページ数上限（クロールモードのみ、上限 1,000） |
+| `max_pages` | int \| None | No | None（設定値を使用） | ページ数上限（クロールモードのみ） |
 | `force` | bool | No | `false` | JOBDIR を削除して最初からクロール（クロールモードのみ） |
 | `download_only` | bool | No | `false` | パイプライン処理をスキップし、Scrapy クロール + Bridge のみ実行 |
 
@@ -230,7 +210,7 @@ Scrapy subprocess で対象サイトをクロールし、source_store に配置�
 | 引数 | 型 | 必須 | デフォルト | 説明 |
 |------|-----|------|-----------|------|
 | `mode` | str | Yes | — | 再構築モード。`"full"`（全再構築）、`"convert"`（コンバートのみ）、`"index"`（インデックスのみ）、`"incremental"`（差分更新） |
-| `source_type` | str \| None | No | None（全媒体） | 対象媒体フィルタ（`web`, `bluesky`, `zenn`, `youtube`, `aozora`, `local`, `journal`）。`incremental` では指定不可 |
+| `source_type` | str \| None | No | None（全媒体） | 対象媒体フィルタ（値は [`_schema/enums.yml`](../../_schema/enums.yml) の `source_type` を参照）。`incremental` では指定不可 |
 
 #### rag_update_aozora_catalog
 
@@ -261,7 +241,7 @@ Scrapy subprocess で対象サイトをクロールし、source_store に配置�
 | 引数 | 型 | 必須 | デフォルト | 説明 |
 |------|-----|------|-----------|------|
 | `person_id` | str | Yes | — | 著者の人物 ID（rag_search_aozora で確認可能） |
-| `max_works` | int \| None | No | None（設定値を使用） | 取得する最大作品数（許容範囲: 1〜500） |
+| `max_works` | int \| None | No | None（設定値を使用） | 取得する最大作品数 |
 
 #### rag_list_recent
 
@@ -269,8 +249,8 @@ Scrapy subprocess で対象サイトをクロールし、source_store に配置�
 
 | 引数 | 型 | 必須 | デフォルト | 説明 |
 |------|-----|------|-----------|------|
-| `source_type` | str | Yes | — | ソース種別（`web`, `bluesky`, `zenn`, `youtube`, `aozora`, `local`, `journal`） |
-| `limit` | int \| None | No | None（設定値を使用） | 取得件数（許容範囲: 1〜100） |
+| `source_type` | str | Yes | — | ソース種別（値は [`_schema/enums.yml`](../../_schema/enums.yml) の `source_type` を参照） |
+| `limit` | int \| None | No | None（設定値を使用） | 取得件数 |
 
 #### rag_stats
 
@@ -394,11 +374,11 @@ ChromaDB は `uv run chroma run` によるサーバーモードで動作し、MC
 
 #### ChromaDB サーバー設定（`.env`）
 
-| 設定項目 | 意味 | デフォルト値 |
-|---------|------|------------|
-| `CHROMADB_SERVER_HOST` | ChromaDB サーバーのホスト | `localhost` |
-| `CHROMADB_SERVER_PORT` | ChromaDB サーバーのポート | `8000`（ChromaDB デフォルト） |
-| `CHROMADB_AUTO_START` | MCP サーバー起動時に ChromaDB サーバーを自動起動するか | `true` |
+| 設定項目 | 層 | 設計意図 |
+|---------|-----|---------|
+| `CHROMADB_SERVER_HOST` | 環境依存値 | ChromaDB サーバーの接続先ホスト。デプロイ環境に応じて変更する |
+| `CHROMADB_SERVER_PORT` | 環境依存値 | ChromaDB サーバーのポート。他サービスとのポート競合を回避するために変更可能 |
+| `CHROMADB_AUTO_START` | 環境依存値 | MCP サーバー起動時に ChromaDB サーバーを自動起動するか。CLI 単体利用時は手動起動が必要 |
 
 ### MCP 薄層アダプター実装方式
 
@@ -496,6 +476,11 @@ Upload HTTP API（`/upload/document`, `/upload/journal`）はリクエストボ�
 
 ### 取り込みフロー（3段パイプライン）
 
+1. **Stage 1（インジェスター）**: データソースからファイルを取得し、source_store に配置する
+2. **Stage 2（コンバーター）**: PipelineController が git diff で変更を検知し、コンバーターが source_store のファイルを converted_store のテキスト（Markdown）に変換する
+3. **Stage 3（インデクサー）**: converted_store のテキストをチャンキング → Embedding 生成 → ベクトルストア（ChromaDB）と BM25 インデックスに格納する
+   - コンテンツタイプ検出で種類を判定し、適切なチャンカーに振り分ける（テキスト / テーブル / 見出し付きテキスト）
+
 ```mermaid
 flowchart LR
     ING["インジェスター"] -->|ファイル配置| SS["source_store"]
@@ -526,7 +511,7 @@ flowchart LR
 | `title` | str | コンテンツのタイトル |
 | `chunk_index` | int | チャンクの連番（0 始まり） |
 | `collected_at` | str | 取り込みタイムスタンプ（ISO 8601） |
-| `source_type` | str | データソース種別（`"web"`, `"zenn"`, `"bluesky"`, `"youtube"`, `"local"`, `"journal"`, `"aozora"`） |
+| `source_type` | str | データソース種別（値は [`_schema/enums.yml`](../../_schema/enums.yml) の `source_type` を参照） |
 | `section_path` | str | 見出し階層（`>` 区切り、現セクションを含む）。見出しチャンカーが生成する。テーブルチャンカー・テキストチャンカーでは空文字列 |
 
 #### カスタムフィールド
@@ -600,6 +585,13 @@ ChromaDB のメタデータ値は `str | int | float | bool` のみ許容され�
 - 各チャンクにヘッダー行を付加する方式は Markdown モードと同じ
 
 ### 検索フロー（準 Agentic Search）
+
+1. LLM がユーザーの質問に対して検索の要否を判断する
+2. 検索が必要な場合、rag_search を呼び出す
+3. rag_search がベクトル検索と BM25 検索の両方を実行し、チャンク単位の結果を返す
+4. LLM が両エンジンの結果を総合判断する
+5. 詳細が必要な場合は rag_get_document で全文を取得し、応答を生成する
+6. 検索結果で十分な場合はそのまま応答を生成する
 
 ```mermaid
 flowchart LR
