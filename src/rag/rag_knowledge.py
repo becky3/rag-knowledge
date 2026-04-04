@@ -983,8 +983,9 @@ def list_recent_sources(
     source_store_dir: str,
     source_type: str,
     limit: int,
+    ascending: bool = False,
 ) -> str:
-    """指定 source_type のソースを新しい順で一覧取得する（MCP/CLI 共通ロジック）.
+    """指定 source_type のソースを published_at でソートして一覧取得する（MCP/CLI 共通ロジック）.
 
     仕様: docs/specs/infrastructure/content-listing.md
 
@@ -992,6 +993,7 @@ def list_recent_sources(
         source_store_dir: source_store のルートディレクトリパス
         source_type: ソース種別
         limit: 取得件数
+        ascending: True で昇順（古い順）、False で降順（新しい順、デフォルト）
 
     Returns:
         フォーマット済みテキスト
@@ -1008,20 +1010,24 @@ def list_recent_sources(
         from .store.models import SourceType
 
         st = cast(SourceType, source_type)
-        sources = db.list_sources(source_type=st, limit=limit)
+        sources = db.list_sources(source_type=st, limit=limit, ascending=ascending)
         total = db.count_sources_by_type(source_type=st)
     finally:
         db.close()
 
+    if not sources:
+        return f"source_type: {source_type}（0件 / 全0件）"
+
+    order_label = "古い順" if ascending else "新しい順"
     lines: list[str] = [
-        f"source_type: {source_type}（{len(sources)}件 / 全{total}件）",
+        f"source_type: {source_type}（{len(sources)}件 / 全{total}件, {order_label}）",
     ]
 
     for i, src in enumerate(sources, 1):
         lines.append("")
         lines.append(f"{i}. {src.title}")
         lines.append(f"   Source: {src.source_id}")
-        lines.append(f"   Collected: {src.collected_at}")
+        lines.append(f"   Published: {src.published_at}")
         lines.append(f"   Size: {format_file_size(src.file_size)}")
 
     return "\n".join(lines)

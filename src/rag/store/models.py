@@ -28,6 +28,7 @@ class SourceRecord:
     file_size: int
     collected_at: str
     updated_at: str
+    published_at: str = ""
 
 
 @dataclass(frozen=True)

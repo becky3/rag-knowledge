@@ -33,7 +33,8 @@ CREATE TABLE IF NOT EXISTS sources (
     content_hash TEXT NOT NULL,
     file_size    INTEGER NOT NULL,
     collected_at TEXT NOT NULL,
-    updated_at   TEXT NOT NULL
+    updated_at   TEXT NOT NULL,
+    published_at TEXT NOT NULL DEFAULT ''
 );
 
 CREATE TABLE IF NOT EXISTS pipeline_history (
@@ -79,14 +80,29 @@ class MetadataDB:
         """既存テーブルのスキーマをマイグレーションする."""
         # pipeline_history に mode 列を追加（既存レコードは incremental 扱い）
         cursor = self._connection.execute("PRAGMA table_info(pipeline_history)")
-        columns = {row["name"] for row in cursor.fetchall()}
-        if "mode" not in columns:
+        ph_columns = {row["name"] for row in cursor.fetchall()}
+        if "mode" not in ph_columns:
             self._connection.execute(
                 "ALTER TABLE pipeline_history"
                 " ADD COLUMN mode TEXT NOT NULL DEFAULT 'incremental'"
             )
             self._connection.commit()
             logger.info("pipeline_history に mode 列を追加しました")
+
+        # sources に published_at 列を追加（既存レコードは collected_at で埋める）
+        cursor = self._connection.execute("PRAGMA table_info(sources)")
+        src_columns = {row["name"] for row in cursor.fetchall()}
+        if "published_at" not in src_columns:
+            self._connection.execute(
+                "ALTER TABLE sources"
+                " ADD COLUMN published_at TEXT NOT NULL DEFAULT ''"
+            )
+            self._connection.execute(
+                "UPDATE sources SET published_at = collected_at"
+                " WHERE published_at = ''"
+            )
+            self._connection.commit()
+            logger.info("sources に published_at 列を追加しました")
 
     def __enter__(self) -> MetadataDB:
         return self
@@ -107,6 +123,7 @@ class MetadataDB:
         file_size: int,
         collected_at: str,
         updated_at: str,
+        published_at: str = "",
     ) -> None:
         """ソースを登録する.
 
@@ -118,9 +135,14 @@ class MetadataDB:
         Note:
             collected_at は新規 INSERT 時のみ使用される。既存レコードの
             更新時は元の collected_at が保持される（ON CONFLICT で更新対象外）。
+            published_at も同様に INSERT 時のみ使用される。
             local 媒体の git 由来時刻への補正は、パイプライン制御層が
             update_source() で後から実施する。
         """
+        # published_at 未指定時は collected_at を使用
+        if not published_at:
+            published_at = collected_at
+
         # file_path UNIQUE 競合の防止: 異なる source_id で同じ file_path を持つ旧レコードを削除
         self._connection.execute(
             "DELETE FROM sources WHERE file_path = ? AND source_id != ?",
@@ -130,8 +152,8 @@ class MetadataDB:
             """\
             INSERT INTO sources
                 (source_id, source_type, file_path, title, status,
-                 content_hash, file_size, collected_at, updated_at)
-            VALUES (?, ?, ?, ?, 'active', ?, ?, ?, ?)
+                 content_hash, file_size, collected_at, updated_at, published_at)
+            VALUES (?, ?, ?, ?, 'active', ?, ?, ?, ?, ?)
             ON CONFLICT(source_id) DO UPDATE SET
                 source_type = excluded.source_type,
                 file_path = excluded.file_path,
@@ -150,6 +172,7 @@ class MetadataDB:
                 file_size,
                 collected_at,
                 updated_at,
+                published_at,
             ),
         )
         self._connection.commit()
@@ -178,6 +201,7 @@ class MetadataDB:
             "file_size",
             "collected_at",
             "updated_at",
+            "published_at",
         }
         invalid = set(fields.keys()) - allowed
         if invalid:
@@ -364,12 +388,14 @@ class MetadataDB:
         *,
         source_type: SourceType,
         limit: int,
+        ascending: bool = False,
     ) -> list[SourceRecord]:
-        """指定 source_type の active ソースを collected_at 降順で取得する."""
+        """指定 source_type の active ソースを published_at でソートして取得する."""
+        direction = "ASC" if ascending else "DESC"
         rows = self._connection.execute(
             "SELECT * FROM sources"
             " WHERE source_type = ? AND status = 'active'"
-            " ORDER BY collected_at DESC"
+            f" ORDER BY published_at {direction}"
             " LIMIT ?",
             (source_type, limit),
         ).fetchall()
@@ -397,4 +423,5 @@ def _row_to_source_record(row: sqlite3.Row) -> SourceRecord:
         file_size=row["file_size"],
         collected_at=row["collected_at"],
         updated_at=row["updated_at"],
+        published_at=row["published_at"],
     )

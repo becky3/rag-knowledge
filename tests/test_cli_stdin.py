@@ -376,6 +376,7 @@ class TestAddDocumentFilenamePriority:
         mock.processed = 1
         mock.skipped = 0
         mock.errors = []
+        mock.warnings = []
         return mock
 
     def test_filename_overrides_file_path_name(self, tmp_path: Path) -> None:

@@ -5,7 +5,7 @@
 テスト方針:
 - MetadataDB の list_sources / count_sources_by_type メソッドの単体テスト
 - list_recent_sources 共通関数のフォーマット・統合テスト
-- エッジケース: 0件、limit > 該当件数、論理削除除外、ソート順
+- エッジケース: 0件、limit > 該当件数、論理削除除外、ソート順、昇順/降順
 """
 
 from __future__ import annotations
@@ -31,6 +31,7 @@ def _register(
     source_type: str = "web",
     title: str = "Test",
     collected_at: str = "2026-01-01T00:00:00Z",
+    published_at: str = "",
     file_size: int = 1024,
     status: str = "active",
 ) -> None:
@@ -44,6 +45,7 @@ def _register(
         file_size=file_size,
         collected_at=collected_at,
         updated_at=collected_at,
+        published_at=published_at,
     )
     if status == "deleted":
         db.set_status(source_id, "deleted")
@@ -66,19 +68,55 @@ class TestListSources:
         assert len(result) == 1
         assert result[0].source_id == "web1"
 
-    def test_order_by_collected_at_desc(self, db: MetadataDB) -> None:
-        """collected_at 降順でソートされる."""
-        _register(db, "old", collected_at="2026-01-01T00:00:00Z")
-        _register(db, "mid", collected_at="2026-01-15T00:00:00Z")
-        _register(db, "new", collected_at="2026-02-01T00:00:00Z")
+    def test_order_by_published_at_desc(self, db: MetadataDB) -> None:
+        """published_at 降順でソートされる（デフォルト）."""
+        _register(db, "old", published_at="2026-01-01T00:00:00Z")
+        _register(db, "mid", published_at="2026-01-15T00:00:00Z")
+        _register(db, "new", published_at="2026-02-01T00:00:00Z")
 
         result = db.list_sources(source_type="web", limit=10)
         assert [r.source_id for r in result] == ["new", "mid", "old"]
 
+    def test_order_by_published_at_asc(self, db: MetadataDB) -> None:
+        """ascending=True で昇順ソート."""
+        _register(db, "old", published_at="2026-01-01T00:00:00Z")
+        _register(db, "mid", published_at="2026-01-15T00:00:00Z")
+        _register(db, "new", published_at="2026-02-01T00:00:00Z")
+
+        result = db.list_sources(source_type="web", limit=10, ascending=True)
+        assert [r.source_id for r in result] == ["old", "mid", "new"]
+
+    def test_published_at_differs_from_collected_at(self, db: MetadataDB) -> None:
+        """published_at が collected_at と異なる場合、published_at でソートされる."""
+        _register(
+            db, "early_pub_late_collect",
+            collected_at="2026-03-01T00:00:00Z",
+            published_at="2026-01-01T00:00:00Z",
+        )
+        _register(
+            db, "late_pub_early_collect",
+            collected_at="2026-01-01T00:00:00Z",
+            published_at="2026-03-01T00:00:00Z",
+        )
+
+        result = db.list_sources(source_type="web", limit=10)
+        assert result[0].source_id == "late_pub_early_collect"
+        assert result[1].source_id == "early_pub_late_collect"
+
+    def test_published_at_fallback_to_collected_at(self, db: MetadataDB) -> None:
+        """published_at 未指定時は collected_at が使われる."""
+        _register(db, "no_pub", collected_at="2026-02-01T00:00:00Z")
+
+        result = db.list_sources(source_type="web", limit=10)
+        assert result[0].published_at == "2026-02-01T00:00:00Z"
+
     def test_limit(self, db: MetadataDB) -> None:
         """limit で取得件数が制限される."""
         for i in range(5):
-            _register(db, f"web{i}", collected_at=f"2026-01-{i+1:02d}T00:00:00Z")
+            _register(
+                db, f"web{i}",
+                published_at=f"2026-01-{i+1:02d}T00:00:00Z",
+            )
 
         result = db.list_sources(source_type="web", limit=2)
         assert len(result) == 2
@@ -142,17 +180,32 @@ class TestListRecentSources:
         db.initialize()
         _register(
             db, "https://example.com/page", title="Sample Page",
-            collected_at="2026-06-15T10:30:00+09:00", file_size=46285,
+            collected_at="2026-06-15T10:30:00+09:00",
+            published_at="2026-06-15T10:30:00+09:00",
+            file_size=46285,
         )
         db.close()
 
         result = list_recent_sources(str(source_store_dir), "web", 10)
 
-        assert "source_type: web（1件 / 全1件）" in result
+        assert "source_type: web（1件 / 全1件" in result
         assert "1. Sample Page" in result
         assert "Source: https://example.com/page" in result
-        assert "Collected: 2026-06-15T10:30:00+09:00" in result
+        assert "Published: 2026-06-15T10:30:00+09:00" in result
         assert "Size: 45.2 KB" in result
+
+    def test_format_output_ascending(self, tmp_path: Path) -> None:
+        """昇順指定時のヘッダー表示."""
+        from rag.rag_knowledge import list_recent_sources
+
+        source_store_dir = self._setup_db(tmp_path)
+        db = MetadataDB(source_store_dir / "metadata.db")
+        db.initialize()
+        _register(db, "web1", collected_at="2026-01-01T00:00:00Z")
+        db.close()
+
+        result = list_recent_sources(str(source_store_dir), "web", 10, ascending=True)
+        assert "古い順" in result
 
     def test_zero_results(self, tmp_path: Path) -> None:
         """0件の場合のフォーマット."""
@@ -179,12 +232,12 @@ class TestListRecentSources:
         for i in range(5):
             _register(
                 db, f"https://example.com/p{i}", title=f"Page {i}",
-                collected_at=f"2026-01-{i+1:02d}T00:00:00Z",
+                published_at=f"2026-01-{i+1:02d}T00:00:00Z",
             )
         db.close()
 
         result = list_recent_sources(str(source_store_dir), "web", 2)
-        assert "source_type: web（2件 / 全5件）" in result
+        assert "source_type: web（2件 / 全5件" in result
         assert "1. Page 4" in result
         assert "2. Page 3" in result
         assert "3." not in result
