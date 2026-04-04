@@ -369,7 +369,7 @@ class MetadataDB:
         rows = self._connection.execute(
             "SELECT * FROM sources"
             " WHERE source_type = ? AND status = 'active'"
-            " ORDER BY datetime(collected_at) DESC"
+            " ORDER BY collected_at DESC"
             " LIMIT ?",
             (source_type, limit),
         ).fetchall()
