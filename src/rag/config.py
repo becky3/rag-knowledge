@@ -55,33 +55,34 @@ class _EnvLoader(BaseSettings):
     embedding_provider: Literal["local", "online"]
     lmstudio_base_url: str
 
-    # ストレージ（MCP サーバー起動 cwd からの相対パス）
+    # ストレージパス（デプロイ先により異なるため .env 管理）
     chromadb_persist_dir: str
     bm25_persist_dir: str
+    # .meta サイドカーファイルがメタデータの原本。metadata.db は索引であり .meta から再構築可能
     source_store_dir: str
     converted_store_dir: str
 
     # ChromaDB サーバー接続
     chromadb_server_host: str = "localhost"
     chromadb_server_port: int = Field(default=8000, ge=1, le=65535)
-    # MCP サーバー起動時に ChromaDB サーバーを自動起動するか。
-    # ChromaDBServerManager (infrastructure/chromadb_manager.py) が参照する。
+    # MCP サーバー起動時に ChromaDB を自動起動するか（手動管理環境では無効化）
     chromadb_auto_start: bool = True
 
     # トランスポート
     rag_transport: Literal["stdio", "http"]
     rag_http_host: str
     rag_http_port: int = Field(ge=1, le=65535)
+    # ローカル専用想定のため DNS リバインディング攻撃を防止
     rag_dns_rebinding_protection: bool
 
     # デバッグ
     rag_debug_log_enabled: bool
 
-    # YouTube インジェスター（Whisper）
+    # YouTube インジェスター（Whisper）— GPU 有無で選択が変わるため .env 管理
     rag_youtube_whisper_model: str = "base"
     rag_youtube_whisper_device: Literal["cuda", "cpu"] = "cuda"
 
-    # サイト一括取り込み
+    # サイト一括取り込み一時ディレクトリ（Scrapy クロール結果の一時保管）
     site_ingest_temp_dir: str = ".tmp/site_ingest"
 
 
@@ -107,11 +108,11 @@ class RAGSettings(BaseModel):
     lmstudio_base_url: str
     chromadb_persist_dir: str
     bm25_persist_dir: str
+    # .meta サイドカーファイルがメタデータの原本。metadata.db は索引であり .meta から再構築可能
     source_store_dir: str
     converted_store_dir: str
     chromadb_server_host: str
     chromadb_server_port: int = Field(ge=1, le=65535)
-    # MCP サーバー起動時に ChromaDB サーバーを自動起動するか
     chromadb_auto_start: bool
     rag_transport: Literal["stdio", "http"]
     rag_http_host: str
@@ -127,24 +128,33 @@ class RAGSettings(BaseModel):
     # Embedding モデル
     embedding_model_local: str
     embedding_model_online: str
+    # 検索クエリに prefix を付与して検索精度を向上させる（モデル依存）
     embedding_prefix_enabled: bool
 
     # チャンキング
     rag_chunk_size: int = Field(ge=1)
     rag_chunk_overlap: int = Field(ge=0)
+    # ローカル Embedding モデルのコンテキスト長制限に基づく文字数制御
     rag_embedding_context_length: int = Field(default=512, ge=1)
+    # トークン数推定の安全マージン（文字→トークン変換の最悪ケース比率）
     rag_worst_token_char_ratio: float = Field(default=0.7, gt=0.0, le=1.0)
+
     # 検索
     rag_retrieval_count: int = Field(ge=1)
+    # None = 閾値フィルタ無効（全結果を返す）
     rag_similarity_threshold: float | None = Field(
         default=None, ge=0.0, le=2.0
     )
 
     # ハイブリッド検索
     rag_hybrid_search_enabled: bool
+    # ベクトル検索とBM25のスコア配分（残りがBM25の重み）
     rag_vector_weight: float = Field(ge=0.0, le=1.0)
+    # BM25 の単語頻度飽和パラメータ
     rag_bm25_k1: float = Field(gt=0.0)
+    # BM25 の文書長正規化パラメータ
     rag_bm25_b: float = Field(ge=0.0, le=1.0)
+    # None = スコア下限フィルタ無効（全結果を返す）
     rag_min_combined_score: float | None = Field(
         default=None, ge=0.0, le=1.0
     )
@@ -154,71 +164,84 @@ class RAGSettings(BaseModel):
 
     # URL安全性チェック (Google Safe Browsing API)
     rag_url_safety_check: bool
+    # キャッシュで API 呼び出し頻度を抑制（秒単位）
     rag_url_safety_cache_ttl: int = Field(ge=0)
     rag_url_safety_timeout: float = Field(gt=0)
 
-    # レスポンスサイズ制限
+    # None = トランケーション無効（全文返却）
     rag_max_response_chars: int | None = Field(default=None, ge=1)
 
-    # rag_stats ソース一覧の最大表示件数
+    # MCP レスポンスの情報量を制御
     rag_stats_max_sources: int = Field(ge=1)
-
-    # rag_list_recent デフォルト取得件数
     rag_list_recent_limit: int = Field(ge=1, le=100)
 
-    # Zenn インジェスター
+    # Zenn インジェスター — API BAN 回避のためのレート制限
     rag_zenn_max_articles: int = Field(ge=1, le=100)
     rag_zenn_request_timeout: int = Field(ge=1, le=120)
     rag_zenn_request_interval: float = Field(ge=0.1, le=60.0)
 
     # ドキュメントインジェスター
     rag_document_supported_extensions: str
+    # HTTP Upload API 経由の取り込みを許可するか
     rag_document_http_mode_enabled: bool
+    # ローカルファイル取り込みの許可ディレクトリ（パストラバーサル防止）
     rag_document_allowed_dirs: str
 
     # Upload HTTP API
     rag_upload_max_file_size_mb: int = Field(ge=1, le=500)
 
     # PDF バックエンド
+    # auto: MinerU 利用可能なら優先、未インストール時は pymupdf4llm にフォールバック
     rag_pdf_backend: Literal["auto", "mineru", "pymupdf4llm"]
+    # MinerU の数式検出信頼度閾値
     rag_pdf_mineru_mfd_conf_thres: float = Field(ge=0.0, le=1.0)
+    # PDF 抽出品質の自動判定閾値（低品質時にバックエンド切替を行う）
     rag_pdf_quality_ufffd_threshold: float = Field(ge=0.0, le=1.0)
     rag_pdf_quality_greek_threshold: float = Field(ge=0.0, le=1.0)
     rag_pdf_quality_cjk_min_threshold: float = Field(ge=0.0, le=1.0)
     rag_pdf_quality_min_chars_per_page: int = Field(ge=1, le=10000)
+    # 全ページ走査のコスト回避（先頭 N ページで品質を推定）
     rag_pdf_quality_sample_pages: int = Field(ge=1, le=100)
 
-    # YouTube インジェスター
+    # YouTube インジェスター — API BAN 回避のためのレート制限
     rag_youtube_max_videos: int = Field(ge=1, le=500)
     rag_youtube_request_interval: float = Field(ge=0.1, le=60.0)
     rag_youtube_request_timeout: int = Field(ge=1, le=120)
+    # 字幕取得の優先言語順（先頭が最優先）
     rag_youtube_transcript_languages: list[str] = Field(min_length=1)
+    # 短い字幕セグメントを統合して検索単位の粒度を改善
     rag_youtube_merge_gap_sec: float = Field(ge=0.1, le=60.0)
     rag_youtube_merge_max_chars: int = Field(ge=50, le=2000)
+    # 長時間動画の処理コスト・ストレージ消費を制限
     rag_youtube_max_duration: int = Field(ge=60, le=86400)
 
-    # 青空文庫インジェスター
+    # 青空文庫インジェスター — サーバー負荷軽減のためのレート制限
     rag_aozora_max_works: int = Field(ge=1, le=500)
     rag_aozora_request_interval: float = Field(ge=0.1, le=60.0)
     rag_aozora_request_timeout: int = Field(ge=1, le=120)
 
-    # BlueSky インジェスター
+    # BlueSky インジェスター — AT Protocol API のレート制限準拠
     rag_bluesky_appview_url: str
     rag_bluesky_max_posts: int = Field(ge=1, le=1000)
     rag_bluesky_request_timeout: int = Field(ge=1, le=120)
     rag_bluesky_request_interval: float = Field(ge=0.1, le=60.0)
+    # リポストを含めるとノイズが増えるため選択可能
     rag_bluesky_include_reposts: bool
 
     # HNSW パラメータ（ChromaDB ベクトルインデックス）
+    # m, construction_ef はコレクション作成時のみ適用（変更には rebuild --mode full が必要）
     hnsw_m: int = Field(ge=2, le=100)
     hnsw_construction_ef: int = Field(ge=10, le=2000)
+    # search_ef は起動時に collection.modify() で既存コレクションにも自動適用
     hnsw_search_ef: int = Field(ge=10, le=2000)
 
     # サイト一括取り込み（Scrapy subprocess）
+    # download_only 指定時も source_store への git commit は実行される（後から rebuild で差分処理可能）
     site_ingest_delay_sec: float = Field(ge=0.05, le=60.0)
     site_ingest_max_pages: int = Field(ge=1, le=1000)
     site_ingest_download_timeout: int = Field(ge=1, le=300)
     site_ingest_timeout_sec: float = Field(ge=60.0, le=86400.0)
+    # 連続エラーで早期停止し、対象サーバーへの過剰な負荷を防止
     site_ingest_error_count: int = Field(ge=1, le=1000)
 
     @model_validator(mode="after")
