@@ -33,8 +33,6 @@
 - **MCP + CLI 両提供**: MCP ツールと CLI サブコマンドの両方で提供する。内部ロジックは共通関数とする
 - **レスポンス形式**: MCP ツールのレスポンスはプレーンテキスト形式とする（既存ツールと統一）
 
-本コンポーネントは外部 API 通信を行わないため、想定プロファイル・安全制約セクションは省略する。
-
 ## インターフェース
 
 ### 操作一覧
@@ -58,13 +56,13 @@
 
 | パラメータ | 型 | 必須 | 内容 |
 |-----------|-----|------|------|
-| `source_type` | str | はい | ソース種別: `web`、`bluesky`、`zenn`、`youtube`、`aozora`、`local`、`journal` |
+| `source_type` | str | はい | ソース種別（値は [`_schema/enums.yml`](../../../_schema/enums.yml) の `source_type` を参照） |
 | `limit` | int | いいえ | 取得件数。デフォルト: `rag_list_recent_limit`（config.toml） |
 
 バリデーション:
 
 - `source_type` が有効値でない場合、エラーメッセージを返す（有効値の一覧を含める）
-- `limit` が 1 未満または 100 を超える場合、エラーメッセージを返す
+- `limit` が許容範囲外の場合、エラーメッセージを返す
 
 出力:
 
@@ -102,16 +100,16 @@ uv run python -m rag.cli list-recent --source-type <TYPE> [--limit <N>]
 
 | オプション | 型 | 必須 | 内容 |
 |-----------|-----|------|------|
-| `--source-type` | str | はい | ソース種別: `web`、`bluesky`、`zenn`、`youtube`、`aozora`、`local`、`journal` |
+| `--source-type` | str | はい | ソース種別（値は [`_schema/enums.yml`](../../../_schema/enums.yml) の `source_type` を参照） |
 | `--limit` | int | いいえ | 取得件数。デフォルト: `rag_list_recent_limit`（config.toml） |
 
 MCP ツール `rag_list_recent` と同じバリデーション・振る舞いを適用する。出力形式も同一。
 
 ### 設定項目
 
-| 設定項目 | 型 | 保管先 | デフォルト | 許容範囲 | 説明 |
-|---------|-----|--------|-----------|---------|------|
-| `rag_list_recent_limit` | 整数 | `config.toml` | 20 | 1〜100 | `rag_list_recent` / `list-recent` のデフォルト取得件数 |
+| 設定項目 | 層 | 設計意図 |
+|---------|-----|---------|
+| `rag_list_recent_limit` | 共通設定値 | `rag_list_recent` / `list-recent` のデフォルト取得件数。運用規模に応じて調整する |
 
 ## コンポーネント構成
 
@@ -138,7 +136,7 @@ flowchart TD
 ### データ取得フロー
 
 1. MCP ツールまたは CLI からパラメータを受け取る
-2. `source_type` と `limit` のバリデーションを実行する（1〜100 の範囲チェック含む）
+2. `source_type` と `limit` のバリデーションを実行する
 3. `rag_knowledge.py` の共通関数 `list_recent_sources` を呼び出す
 4. `MetadataDB` から以下の 2 クエリを発行する:
    - 一覧取得: `source_type` + `status = 'active'` でフィルタし、`collected_at` 降順で `limit` 件取得
@@ -163,7 +161,7 @@ flowchart TD
 | 指定 source_type のソースが0件 | `source_type: {type}（0件 / 全0件）` を返す |
 | limit が該当ソース件数より大きい | 全件返却する（エラーにはしない） |
 | 無効な source_type を指定 | エラーメッセージを返す（有効値の一覧を含める） |
-| limit に 0 以下または 101 以上を指定 | エラーメッセージを返す |
+| limit が許容範囲外 | エラーメッセージを返す |
 | 論理削除済みソースが存在 | 一覧に含めない（`status = 'active'` のみ対象） |
 | `collected_at` が同一の複数ソース | ソート順序は不定（同一タイムスタンプ内の順序は保証しない） |
 
