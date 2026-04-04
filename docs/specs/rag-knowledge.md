@@ -476,15 +476,10 @@ Upload HTTP API（`/upload/document`, `/upload/journal`）はリクエストボ�
 
 ### 取り込みフロー（3段パイプライン）
 
-1. インジェスターがデータソースからファイルを取得し、source_store に配置する
-2. PipelineController が source_store の git diff で変更を検知する
-3. コンバーターが source_store のファイルを converted_store のテキスト（Markdown）に変換する
-4. インデクサーが converted_store のテキストをチャンキングする:
-   - コンテンツタイプ検出で種類を判定し、適切なチャンカーに振り分ける
-   - 通常テキスト → テキストチャンカー
-   - テーブル → テーブルチャンカー
-   - 見出し付きテキスト → 見出しチャンカー
-5. チャンクに Embedding を生成し、ベクトルストア（ChromaDB）と BM25 インデックスに格納する
+1. **Stage 1（インジェスター）**: データソースからファイルを取得し、source_store に配置する
+2. **Stage 2（コンバーター）**: PipelineController が git diff で変更を検知し、コンバーターが source_store のファイルを converted_store のテキスト（Markdown）に変換する
+3. **Stage 3（インデクサー）**: converted_store のテキストをチャンキング → Embedding 生成 → ベクトルストア（ChromaDB）と BM25 インデックスに格納する
+   - コンテンツタイプ検出で種類を判定し、適切なチャンカーに振り分ける（テキスト / テーブル / 見出し付きテキスト）
 
 ```mermaid
 flowchart LR
@@ -593,7 +588,7 @@ ChromaDB のメタデータ値は `str | int | float | bool` のみ許容され�
 
 1. LLM がユーザーの質問に対して検索の要否を判断する
 2. 検索が必要な場合、rag_search を呼び出す
-3. rag_search がベクトル検索と BM25 検索を並行実行し、チャンク単位の結果を返す
+3. rag_search がベクトル検索と BM25 検索の両方を実行し、チャンク単位の結果を返す
 4. LLM が両エンジンの結果を総合判断する
 5. 詳細が必要な場合は rag_get_document で全文を取得し、応答を生成する
 6. 検索結果で十分な場合はそのまま応答を生成する

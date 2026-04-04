@@ -74,7 +74,7 @@ RAG Knowledge は、外部 Web ページから収集した知識をベクトル 
 |------|------|-------------|
 | 設定制約（min/max/default） | pydantic Field（`src/rag/config.py`） | 設計意図（Why）のみ |
 | 横断列挙値（source_type 等） | [`_schema/enums.yml`](../../_schema/enums.yml) | 参照リンク |
-| ConstrainedClient 定数 | py-common-lib コード | 参照リンク + Why |
+| ConstrainedClient 定数 | [py-common-lib `constrained_client`](https://github.com/becky3/py-common-lib/blob/main/src/py_common_lib/httpx/constrained_client.py) | 参照リンク + Why |
 | 振る舞い/設計制約 | 仕様書「制約」セクション | 正規の定義 |
 
 SSoT 階層の詳細は `~/.claude/rules/spec-driven.md` を参照。
