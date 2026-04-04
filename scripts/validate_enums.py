@@ -34,16 +34,32 @@ def _extract_yml_values(data: dict[str, Any], key: str) -> set[str]:
     if entry is None:
         print(f"ERROR: enums.yml に '{key}' が定義されていません")
         sys.exit(1)
+    if not isinstance(entry, dict):
+        print(f"ERROR: enums.yml の '{key}' は dict ではありません: {type(entry)}")
+        sys.exit(1)
     values = entry.get("values")
-    if not values:
-        print(f"ERROR: enums.yml の '{key}.values' が空です")
+    if not isinstance(values, list) or not values:
+        print(f"ERROR: enums.yml の '{key}.values' が空、または list ではありません: {values}")
         sys.exit(1)
     result: set[str] = set()
+    duplicates: set[str] = set()
     for i, item in enumerate(values):
         if not isinstance(item, dict) or "value" not in item:
             print(f"ERROR: enums.yml の '{key}.values[{i}]' に 'value' キーがありません: {item}")
             sys.exit(1)
-        result.add(item["value"])
+        value = item["value"]
+        if not isinstance(value, str):
+            print(
+                f"ERROR: enums.yml の '{key}.values[{i}].value' は str ではありません: "
+                f"{value!r} ({type(value)})"
+            )
+            sys.exit(1)
+        if value in result:
+            duplicates.add(value)
+        result.add(value)
+    if duplicates:
+        print(f"ERROR: enums.yml の '{key}.values' に重複値があります: {sorted(duplicates)}")
+        sys.exit(1)
     return result
 
 

@@ -27,6 +27,8 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: astral-sh/setup-uv@v6
+        with:
+          python-version-file: ".python-version"
       - name: Install dependencies
         run: uv sync --no-group with-mineru
       - name: Validate enums.yml against Python definitions
