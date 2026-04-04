@@ -150,15 +150,6 @@ Embedding に渡る最終テキストは「Embedding プレフィックス + チ
 | 最悪ケース所要時間 | Embedding プロバイダーの応答時間 × active ファイル総数。参考値: 1,000 ファイル × 1 秒/コール = 約 17 分 |
 | 想定エラー率 | 同上 |
 
-## 安全制約
-
-| 制約名 | 種別 | 値 | 解除可否 |
-|--------|------|-----|---------|
-| Embedding API レート制限 | 設定値 | OpenAI SDK の組み込みリトライ・バックオフ機構で制御（SDK のランタイム機構による L2 制御） | SDK 設定に依存 |
-| Embedding プロバイダー疎通確認 | ハードリミット | インデックス処理開始前にプロバイダーの疎通を確認し、接続不可の場合は即座にエラーを返す | 不可 |
-| チャンクサイズのトークン安全上限 | ハードリミット | Embedding に渡る最終テキストを 731 文字以内に制限する。各チャンカーにはオーバーヘッド差し引き済みの実効サイズを渡す。算出方法は「チャンキング制約」セクションを参照 | 不可 |
-| BM25 永続化のアトミック性 | ハードリミット | 一時ディレクトリ + リネームによるアトミックスワップ。中間状態でのインデックス破損を防止する | 不可 |
-
 ## インターフェース
 
 ### インデックス操作
@@ -198,6 +189,14 @@ Embedding に渡る最終テキストは「Embedding プレフィックス + チ
 
 ### インデックス構築フロー
 
+1. converted_store からファイルを読み込む
+2. metadata.db からメタデータを取得する
+3. コンテンツタイプを検出する（テーブル / 見出し付き・混在 / 散文）
+4. コンテンツタイプに応じたチャンカーでチャンキングする
+5. チャンクメタデータ（`section_path` 等）を付与する
+6. Embedding を生成し ChromaDB に upsert する（本文のみ）
+7. BM25 インデックスに追加する（`section_path` + 本文）
+
 ```mermaid
 flowchart TD
     INPUT["converted_store のファイル"]
@@ -229,6 +228,11 @@ flowchart TD
 
 インデックス更新時、チャンク数が減少した場合に旧チャンクを削除する。
 
+1. 新チャンクを upsert する
+2. source_id で既存チャンク ID を取得する
+3. 新チャンク ID に含まれない ID を特定する
+4. stale チャンクを削除する
+
 ```mermaid
 flowchart LR
     UPSERT["新チャンクを upsert"] --> GET["source_id で既存チャンク ID 取得"]
@@ -255,7 +259,7 @@ flowchart LR
 | フィールド | 型 | 内容 |
 |-----------|-----|------|
 | `source_id` | str | ソース識別子。[source-store.md](source-store.md) の source_id 決定方式に準拠 |
-| `source_type` | str | 媒体種別（`web`, `zenn`, `bluesky`, `youtube`, `local`, `journal`, `aozora`） |
+| `source_type` | str | 媒体種別（値は [`_schema/enums.yml`](../../_schema/enums.yml) の `source_type` を参照） |
 | `title` | str | コンテンツのタイトル。metadata.db の `title` から取得 |
 | `chunk_index` | int | チャンクの連番（0 始まり） |
 | `total_chunks` | int | 当該ソースのチャンク総数（新規フィールド。既存の rag-knowledge.md には未定義） |
@@ -333,26 +337,26 @@ BM25 のトークナイズには日本語形態素解析（fugashi）を使用�
 
 #### `config.toml`（共通設定値）
 
-| 設定項目 | 型 | 保管先 | デフォルト | 許容範囲 | 説明 |
-|---------|-----|--------|-----------|---------|------|
-| `rag_chunk_size` | int | `config.toml` | 200 | — | チャンクの最大文字数 |
-| `rag_chunk_overlap` | int | `config.toml` | 30 | — | チャンク間のオーバーラップ文字数 |
-| `rag_embedding_context_length` | int | `config.toml` | 512 | — | Embedding モデルのコンテキスト長（トークン数） |
-| `rag_worst_token_char_ratio` | float | `config.toml` | 0.7 | — | 最悪ケーストークン/文字比率。導出手順は「トークン/文字比率の導出手順」を参照 |
-| `embedding_model_local` | str | `config.toml` | `text-embedding-nomic-embed-text-v2-moe` | — | ローカル Embedding モデル名 |
-| `embedding_model_online` | str | `config.toml` | `text-embedding-3-small` | — | オンライン Embedding モデル名 |
-| `embedding_prefix_enabled` | bool | `config.toml` | `true` | — | Embedding プレフィックスの付与 |
-| `rag_bm25_k1` | float | `config.toml` | 2.5 | — | BM25 の用語頻度飽和パラメータ |
-| `rag_bm25_b` | float | `config.toml` | 0.50 | — | BM25 の文書長正規化パラメータ |
+| 設定項目 | 層 | 設計意図 |
+|---------|-----|---------|
+| `rag_chunk_size` | 共通設定値 | チャンクの最大文字数。検索精度とコンテキスト量のバランスを制御する |
+| `rag_chunk_overlap` | 共通設定値 | チャンク間のオーバーラップ文字数。文脈の断絶を防ぐ |
+| `rag_embedding_context_length` | 共通設定値 | Embedding モデルのコンテキスト長（トークン数）。トークン安全上限の算出基準 |
+| `rag_worst_token_char_ratio` | 共通設定値 | 最悪ケーストークン/文字比率。導出手順は「トークン/文字比率の導出手順」を参照 |
+| `embedding_model_local` | 共通設定値 | ローカル Embedding モデル名 |
+| `embedding_model_online` | 共通設定値 | オンライン Embedding モデル名 |
+| `embedding_prefix_enabled` | 共通設定値 | Embedding プレフィックス付与の有無。モデルの推奨設定に従う |
+| `rag_bm25_k1` | 共通設定値 | BM25 の用語頻度飽和パラメータ。検索精度チューニング用 |
+| `rag_bm25_b` | 共通設定値 | BM25 の文書長正規化パラメータ。検索精度チューニング用 |
 
 #### `.env`（環境依存値）
 
-| 設定項目 | 型 | 保管先 | デフォルト | 許容範囲 | 説明 |
-|---------|-----|--------|-----------|---------|------|
-| `EMBEDDING_PROVIDER` | str | `.env` | `local` | `local`, `online` | Embedding プロバイダー |
-| `LMSTUDIO_BASE_URL` | str | `.env` | `http://localhost:1234/v1` | — | LM Studio の接続先 URL |
-| `CHROMADB_PERSIST_DIR` | str | `.env` | `./chroma_db` | — | ChromaDB の永続化ディレクトリパス |
-| `BM25_PERSIST_DIR` | str | `.env` | `./bm25_index` | — | BM25 インデックスの永続化ディレクトリパス |
+| 設定項目 | 層 | 設計意図 |
+|---------|-----|---------|
+| `EMBEDDING_PROVIDER` | 環境依存値 | Embedding プロバイダーの選択。デプロイ環境に応じてローカル/オンラインを切り替える |
+| `LMSTUDIO_BASE_URL` | 環境依存値 | LM Studio の接続先 URL。ホスト・ポートが環境により異なる |
+| `CHROMADB_PERSIST_DIR` | 環境依存値 | ChromaDB の永続化ディレクトリパス。環境ごとにストレージ配置が異なる |
+| `BM25_PERSIST_DIR` | 環境依存値 | BM25 インデックスの永続化ディレクトリパス。環境ごとにストレージ配置が異なる |
 
 ## 外部連携
 
