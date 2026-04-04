@@ -138,11 +138,13 @@ class JournalIngester:
                 title = self._parse_title_from_filename(entry_id)
                 data = fp.read_bytes()
 
-                # collected_at はファイルの更新日時を使用
-                mtime = fp.stat().st_mtime
-                collected_at = datetime.fromtimestamp(
-                    mtime, tz=timezone.utc,
-                ).isoformat()
+                # collected_at: ファイル名の日時 > mtime のフォールバック
+                collected_at = _parse_datetime_from_entry_id(entry_id)
+                if collected_at is None:
+                    mtime = fp.stat().st_mtime
+                    collected_at = datetime.fromtimestamp(
+                        mtime, tz=timezone.utc,
+                    ).isoformat()
 
                 rel_path = f"journal/{repository}/{entry_id}.md"
                 metadata = {
@@ -212,6 +214,22 @@ class JournalIngester:
             # YYYYMMDD-HHMMSS- プレフィックスを除去
             return entry_id[16:]
         return entry_id
+
+
+def _parse_datetime_from_entry_id(entry_id: str) -> str | None:
+    """ファイル名の YYYYMMDD-HHMMSS プレフィックスから ISO 8601 日時を生成する.
+
+    Returns:
+        ISO 8601 形式の日時文字列。パースできない場合は None。
+    """
+    if not _ENTRY_ID_PATTERN.match(entry_id):
+        return None
+    try:
+        dt = datetime.strptime(entry_id[:15], "%Y%m%d-%H%M%S")  # noqa: DTZ007
+        dt = dt.replace(tzinfo=timezone.utc)
+        return dt.isoformat()
+    except ValueError:
+        return None
 
 
 def _sanitize_topic(title: str) -> str:

@@ -24,7 +24,7 @@ from rag.store.models import (
     SourceType,
 )
 from rag.store.path_converter import url_to_path
-from rag.store.resolve import resolve_source_id, resolve_title
+from rag.store.resolve import resolve_published_at, resolve_source_id, resolve_title
 
 logger = logging.getLogger(__name__)
 
@@ -132,6 +132,10 @@ class SourceStore:
         else:
             collected_at = now
 
+        published_at = resolve_published_at(
+            source_type, metadata, collected_at,
+        )
+
         self._db.register_source(
             source_id=source_id,
             source_type=source_type,
@@ -141,6 +145,7 @@ class SourceStore:
             file_size=len(data),
             collected_at=collected_at,
             updated_at=now,
+            published_at=published_at,
         )
 
         return dest
@@ -389,6 +394,9 @@ class SourceStore:
             source_id = self._resolve_source_id(source_type, rel_str, meta_dict or None)
             title = self._resolve_title(source_type, rel_str, meta_dict or None)
             collected_at = meta_dict.get("collected_at", now)
+            published_at = resolve_published_at(
+                source_type, meta_dict or None, collected_at,
+            )
 
             self._db.register_source(
                 source_id=source_id,
@@ -399,6 +407,7 @@ class SourceStore:
                 file_size=len(data),
                 collected_at=collected_at,
                 updated_at=now,
+                published_at=published_at,
             )
             count += 1
 
@@ -443,6 +452,10 @@ class SourceStore:
             return "bluesky"
         if rel_path.startswith("zenn/"):
             return "zenn"
+        if rel_path.startswith("youtube/"):
+            return "youtube"
+        if rel_path.startswith("aozora/"):
+            return "aozora"
         if rel_path.startswith("journal/"):
             return "journal"
         return "local"

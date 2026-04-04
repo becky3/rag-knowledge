@@ -1233,16 +1233,18 @@ def _format_cli_list_recent_result(result: dict[str, Any]) -> str:
     if not sources:
         return f"{source_type}: 0 件"
 
-    lines = [f"{source_type}: {count} 件（全 {total} 件中）", ""]
+    order = result.get("order", "desc")
+    order_label = "古い順" if order == "asc" else "新しい順"
+    lines = [f"{source_type}: {count} 件（全 {total} 件中, {order_label}）", ""]
     for s in sources:
         title = s.get("title", "(無題)")
         source_id = s.get("source_id", "")
-        collected_at = s.get("collected_at", "")
+        published_at = s.get("published_at", "")
         file_size = s.get("file_size", 0)
         size_str = format_file_size(file_size) if file_size else ""
         line = f"- {title}"
-        if collected_at:
-            line += f"  [{collected_at}]"
+        if published_at:
+            line += f"  [{published_at}]"
         if size_str:
             line += f"  ({size_str})"
         lines.append(line)
@@ -1317,8 +1319,9 @@ def _format_cli_stats_result(result: dict[str, Any]) -> str:
 async def rag_list_recent(
     source_type: str,
     limit: int | None = None,
+    order: str = "desc",
 ) -> str:
-    """[rag-knowledge] List recent sources - 指定した source_type のソースを新しい順で一覧取得する.
+    """[rag-knowledge] List recent sources - 指定した source_type のソースを公開日時順で一覧取得する.
 
     content listing, recent sources, source list, browse.
     ナレッジベースに取り込んだコンテンツを source_type 別に一覧で確認できる。
@@ -1327,9 +1330,10 @@ async def rag_list_recent(
     Args:
         source_type: ソース種別: "web", "bluesky", "zenn", "youtube", "aozora", "local", "journal"
         limit: 取得件数（1〜100、未指定時は設定値を使用）
+        order: ソート順（"desc": 新しい順（デフォルト）, "asc": 古い順）
 
     Returns:
-        ソース一覧テキスト（タイトル、source_id、collected_at、ファイルサイズ）
+        ソース一覧テキスト（タイトル、source_id、published_at、ファイルサイズ）
     """
     if source_type not in _VALID_SOURCE_TYPES:
         valid = ", ".join(sorted(_VALID_SOURCE_TYPES))
@@ -1338,9 +1342,13 @@ async def rag_list_recent(
     if limit is not None and (limit < 1 or limit > 100):
         return "エラー: limit は 1〜100 の範囲で指定してください"
 
+    if order not in ("asc", "desc"):
+        return f"エラー: order は 'asc' または 'desc' を指定してください（指定値: {order!r}）"
+
     args: list[str] = ["--source-type", source_type]
     if limit is not None:
         args.extend(["--limit", str(limit)])
+    args.extend(["--order", order])
 
     try:
         result = await _run_cli_subprocess("list-recent", args)

@@ -38,7 +38,7 @@ from rag.store.models import (
     SourceRecord,
     SourceType,
 )
-from rag.store.resolve import resolve_source_id, resolve_title
+from rag.store.resolve import resolve_published_at, resolve_source_id, resolve_title
 from rag.store.source_store import SourceStore
 
 from rag.pipeline.ingesters._common import ProgressCallback
@@ -754,6 +754,10 @@ class PipelineController:
         else:
             collected_at = now
 
+        published_at = resolve_published_at(
+            source_type, meta_dict, collected_at,
+        )
+
         self.db.register_source(
             source_id=source_id,
             source_type=source_type,
@@ -763,6 +767,7 @@ class PipelineController:
             file_size=len(data),
             collected_at=collected_at,
             updated_at=now,
+            published_at=published_at,
         )
 
     def _update_in_db(self, file_path: str) -> None:

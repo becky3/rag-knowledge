@@ -445,6 +445,12 @@ def main() -> None:
         default=None,
         help="取得件数（1〜100、未指定時は設定値を使用）",
     )
+    list_recent_parser.add_argument(
+        "--order",
+        choices=["asc", "desc"],
+        default="desc",
+        help="ソート順（asc: 古い順, desc: 新しい順。デフォルト: desc）",
+    )
     _add_output_option(list_recent_parser)
 
     # search サブコマンド
@@ -1594,7 +1600,7 @@ def run_stats(args: argparse.Namespace) -> None:
 
 
 def run_list_recent(args: argparse.Namespace) -> None:
-    """指定 source_type のソースを新しい順で一覧取得する.
+    """指定 source_type のソースを published_at でソートして一覧取得する.
 
     MCP ツール rag_list_recent と同等の一覧取得を CLI で実行する。
 
@@ -1606,6 +1612,7 @@ def run_list_recent(args: argparse.Namespace) -> None:
     json_out = _is_json_output(args)
     settings = get_settings()
     limit: int = args.limit if args.limit is not None else settings.rag_list_recent_limit
+    ascending = args.order == "asc"
 
     if json_out:
         from .store.metadata_db import MetadataDB
@@ -1633,7 +1640,7 @@ def run_list_recent(args: argparse.Namespace) -> None:
         try:
             db.initialize()
             st = cast(SourceType, args.source_type)
-            sources = db.list_sources(source_type=st, limit=limit)
+            sources = db.list_sources(source_type=st, limit=limit, ascending=ascending)
             total = db.count_sources_by_type(source_type=st)
         finally:
             db.close()
@@ -1643,17 +1650,20 @@ def run_list_recent(args: argparse.Namespace) -> None:
                 {
                     "source_id": s.source_id,
                     "title": s.title,
-                    "collected_at": s.collected_at,
+                    "published_at": s.published_at,
                     "file_size": s.file_size,
                 }
                 for s in sources
             ],
             "count": len(sources),
             "total": total,
+            "order": args.order,
         })
     else:
         from .rag_knowledge import list_recent_sources
-        print(list_recent_sources(settings.source_store_dir, args.source_type, limit))
+        print(list_recent_sources(
+            settings.source_store_dir, args.source_type, limit, ascending=ascending,
+        ))
 
 
 def run_search(args: argparse.Namespace) -> None:
