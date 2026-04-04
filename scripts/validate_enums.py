@@ -1,0 +1,129 @@
+"""enums.yml と Python コード（Literal / Enum）の整合性を検証する.
+
+enums.yml を SSoT として、Python 側の定義と値が一致することを確認する。
+不一致時は差分を表示して exit 1 で終了する。
+"""
+
+from __future__ import annotations
+
+import sys
+from enum import Enum
+from pathlib import Path
+from typing import Any, get_args
+
+import yaml
+
+
+def _load_enums_yml(path: Path) -> dict[str, Any]:
+    """enums.yml を読み込んで返す."""
+    with path.open(encoding="utf-8") as f:
+        try:
+            data = yaml.safe_load(f)
+        except yaml.YAMLError as e:
+            print(f"ERROR: enums.yml の YAML パースに失敗しました: {e}")
+            sys.exit(1)
+    if not isinstance(data, dict):
+        print(f"ERROR: enums.yml のトップレベルが dict ではありません: {type(data)}")
+        sys.exit(1)
+    return data
+
+
+def _extract_yml_values(data: dict[str, Any], key: str) -> set[str]:
+    """enums.yml の指定キーから値の集合を取得する."""
+    entry = data.get(key)
+    if entry is None:
+        print(f"ERROR: enums.yml に '{key}' が定義されていません")
+        sys.exit(1)
+    if not isinstance(entry, dict):
+        print(f"ERROR: enums.yml の '{key}' は dict ではありません: {type(entry)}")
+        sys.exit(1)
+    values = entry.get("values")
+    if not isinstance(values, list) or not values:
+        print(f"ERROR: enums.yml の '{key}.values' が空、または list ではありません: {values}")
+        sys.exit(1)
+    result: set[str] = set()
+    duplicates: set[str] = set()
+    for i, item in enumerate(values):
+        if not isinstance(item, dict) or "value" not in item:
+            print(f"ERROR: enums.yml の '{key}.values[{i}]' に 'value' キーがありません: {item}")
+            sys.exit(1)
+        value = item["value"]
+        if not isinstance(value, str):
+            print(
+                f"ERROR: enums.yml の '{key}.values[{i}].value' は str ではありません: "
+                f"{value!r} ({type(value)})"
+            )
+            sys.exit(1)
+        if value in result:
+            duplicates.add(value)
+        result.add(value)
+    if duplicates:
+        print(f"ERROR: enums.yml の '{key}.values' に重複値があります: {sorted(duplicates)}")
+        sys.exit(1)
+    return result
+
+
+def _extract_literal_values(literal_type: type) -> set[str]:
+    """typing.Literal 型から値の集合を取得する."""
+    return set(get_args(literal_type))
+
+
+def _extract_enum_values(enum_class: type[Enum]) -> set[str]:
+    """Enum クラスから値の集合を取得する."""
+    return {member.value for member in enum_class}
+
+
+def _check_match(name: str, yml_values: set[str], python_values: set[str]) -> bool:
+    """値の一致を検証し、不一致があれば差分を表示する."""
+    if yml_values == python_values:
+        print(f"OK: {name} - {len(yml_values)} values match")
+        return True
+
+    print(f"MISMATCH: {name}")
+    only_yml = yml_values - python_values
+    only_python = python_values - yml_values
+    if only_yml:
+        print(f"  enums.yml only: {sorted(only_yml)}")
+    if only_python:
+        print(f"  Python only:    {sorted(only_python)}")
+    return False
+
+
+def main() -> None:
+    """メインエントリポイント."""
+    repo_root = Path(__file__).resolve().parent.parent
+    enums_path = repo_root / "_schema" / "enums.yml"
+
+    if not enums_path.exists():
+        print(f"ERROR: {enums_path} が見つかりません")
+        sys.exit(1)
+
+    data = _load_enums_yml(enums_path)
+
+    # Python 定義をインポート
+    from rag.pipeline.models import PipelineMode  # type: ignore[import-untyped]
+    from rag.store.models import SourceType  # type: ignore[import-untyped]
+
+    ok = True
+
+    # source_type: Literal 型
+    yml_source_types = _extract_yml_values(data, "source_type")
+    python_source_types = _extract_literal_values(SourceType)
+    if not _check_match("source_type (SourceType)", yml_source_types, python_source_types):
+        ok = False
+
+    # pipeline_mode: Enum クラス
+    yml_pipeline_modes = _extract_yml_values(data, "pipeline_mode")
+    python_pipeline_modes = _extract_enum_values(PipelineMode)
+    if not _check_match("pipeline_mode (PipelineMode)", yml_pipeline_modes, python_pipeline_modes):
+        ok = False
+
+    if not ok:
+        print("\nValidation FAILED: enums.yml と Python コードが一致しません")
+        sys.exit(1)
+
+    print("\nValidation PASSED")
+
+
+if __name__ == "__main__":
+    main()

@@ -1,0 +1,34 @@
+# RAG Knowledge - 列挙値定義（SSoT）
+#
+# このファイルはプロジェクト全体の列挙値を一元管理する。
+# Python コード（Literal / Enum）との整合性は CI で自動検証される。
+
+source_type:
+  description: データソースの種別
+  values:
+    - value: web
+      description: 外部 Web ページ
+    - value: zenn
+      description: Zenn 記事・スクラップ
+    - value: bluesky
+      description: BlueSky 投稿
+    - value: youtube
+      description: YouTube 動画（字幕・音声文字起こし）
+    - value: aozora
+      description: 青空文庫の作品
+    - value: local
+      description: ローカルドキュメント（Markdown、テキスト、PDF、AsciiDoc）
+    - value: journal
+      description: 開発ジャーナル（セッション作業記録）
+
+pipeline_mode:
+  description: パイプライン実行モード
+  values:
+    - value: incremental
+      description: 差分更新（git diff ベース）
+    - value: full
+      description: 全件再構築
+    - value: convert
+      description: 変換のみ（インデックス構築なし）
+    - value: index
+      description: インデックス構築のみ（変換なし）
