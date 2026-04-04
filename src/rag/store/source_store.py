@@ -132,6 +132,10 @@ class SourceStore:
         else:
             collected_at = now
 
+        published_at = resolve_published_at(
+            source_type, metadata, collected_at,
+        )
+
         self._db.register_source(
             source_id=source_id,
             source_type=source_type,
@@ -141,6 +145,7 @@ class SourceStore:
             file_size=len(data),
             collected_at=collected_at,
             updated_at=now,
+            published_at=published_at,
         )
 
         return dest

@@ -29,7 +29,7 @@ class TestResolvePublishedAt:
         result = resolve_published_at("youtube", meta, "2026-04-01T00:00:00Z")
         assert result == "2026-01-15T00:00:00+00:00"
 
-    def test_youtube_non_8digit_falls_back(self) -> None:
+    def test_youtube_non_8digit_returns_raw_value(self) -> None:
         """upload_date が 8桁数値でない場合はそのまま返す."""
         meta = {"upload_date": "2026-01-15"}
         result = resolve_published_at("youtube", meta, "2026-04-01T00:00:00Z")
