@@ -1,0 +1,33 @@
+name: Validate Enums
+
+on:
+  pull_request:
+    branches: [develop, main]
+    paths:
+      - "_schema/enums.yml"
+      - "src/rag/store/models.py"
+      - "src/rag/pipeline/models.py"
+      - "scripts/validate_enums.py"
+      - ".github/workflows/validate-enums.yml"
+  push:
+    branches: [develop, main]
+    paths:
+      - "_schema/enums.yml"
+      - "src/rag/store/models.py"
+      - "src/rag/pipeline/models.py"
+      - "scripts/validate_enums.py"
+      - ".github/workflows/validate-enums.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  validate-enums:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+      - name: Install dependencies
+        run: uv sync --no-group with-mineru
+      - name: Validate enums.yml against Python definitions
+        run: uv run python scripts/validate_enums.py
