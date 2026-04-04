@@ -54,7 +54,7 @@
 | パラメータ | 型 | 必須 | 内容 |
 |-----------|-----|------|------|
 | `mode` | str | はい | 再構築モード（下表参照） |
-| `source_type` | str | いいえ | 対象媒体フィルタ: `web`、`bluesky`、`zenn`、`youtube`、`aozora`、`local`、`journal`。未指定時は全媒体 |
+| `source_type` | str | いいえ | 対象媒体フィルタ（値は [`_schema/enums.yml`](../../_schema/enums.yml) の `source_type` を参照）。未指定時は全媒体 |
 
 再構築モード:
 
@@ -86,7 +86,7 @@ uv run python -m rag.cli rebuild --mode <MODE> [--source-type <TYPE>]
 | オプション | 型 | 必須 | 内容 |
 |-----------|-----|------|------|
 | `--mode` | str | はい | 再構築モード: `full`、`convert`、`index`、`incremental` |
-| `--source-type` | str | いいえ | 対象媒体フィルタ: `web`、`bluesky`、`zenn`、`youtube`、`aozora`、`local`、`journal` |
+| `--source-type` | str | いいえ | 対象媒体フィルタ（値は [`_schema/enums.yml`](../../_schema/enums.yml) の `source_type` を参照） |
 | `--if-needed` | flag | いいえ | 前回の index/full rebuild 以降に更新がなければスキップする。`--mode` が `index` または `full` の場合のみ有効 |
 
 MCP ツール `rag_rebuild` と同じバリデーション・振る舞いを適用する。`--if-needed` の詳細は [infrastructure/scheduled-rebuild.md](infrastructure/scheduled-rebuild.md) を参照。
@@ -94,6 +94,12 @@ MCP ツール `rag_rebuild` と同じバリデーション・振る舞いを適�
 ## コンポーネント構成
 
 ### 再構築フロー
+
+1. MCP ツール または CLI からパラメータを受け取る
+2. パラメータを検証する（不正な場合はエラー返却）
+3. 排他ロックを取得する（取得失敗時は「別の再構築が実行中」エラー）
+4. MCP 経由の場合は CLI サブプロセスとして実行する。CLI 直接実行の場合はそのままパイプライン制御に委譲する
+5. 処理結果サマリを返却する（クラッシュ時はエラー返却、サーバーは生存）
 
 ```mermaid
 flowchart TD

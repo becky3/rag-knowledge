@@ -50,7 +50,7 @@ metadata.db、converted_store、検索インデックスは全て source_store �
 
 ### .meta サイドカーファイル
 
-- 自動取り込み媒体（web、bluesky、zenn、youtube、aozora、journal）のファイルには `.meta` サイドカーファイルを同階層に配置する
+- 自動取り込み媒体（[`_schema/enums.yml`](../../_schema/enums.yml) の `source_type` のうち `local` 以外）のファイルには `.meta` サイドカーファイルを同階層に配置する
 - local 媒体は `.meta` 不要。sources テーブルの各フィールドは以下から導出する:
   - `title`: ファイル名（拡張子除去）
   - `collected_at`: git の初回コミット日時
@@ -241,7 +241,7 @@ URL: `http://localhost:8080/api/docs`
 | フィールド | 型 | 内容 |
 |-----------|-----|------|
 | `source_id` | str | ソース識別子 |
-| `source_type` | str | 媒体種別（`web`, `bluesky`, `zenn`, `youtube`, `aozora`, `journal`）。`local` は .meta を持たないため含まない |
+| `source_type` | str | 媒体種別（値は [`_schema/enums.yml`](../../_schema/enums.yml) の `source_type` を参照。`local` は .meta を持たないため含まない） |
 | `title` | str | コンテンツのタイトル |
 | `collected_at` | str | 取り込みタイムスタンプ（ISO 8601） |
 
@@ -427,7 +427,7 @@ source_store 内の全ファイルのメタデータ索引。
 | カラム | 型 | 制約 | 内容 |
 |--------|-----|------|------|
 | `source_id` | TEXT | PRIMARY KEY | ソース識別子 |
-| `source_type` | TEXT | NOT NULL | 媒体種別（`web`, `bluesky`, `zenn`, `youtube`, `aozora`, `local`, `journal`） |
+| `source_type` | TEXT | NOT NULL | 媒体種別（値は [`_schema/enums.yml`](../../_schema/enums.yml) の `source_type` を参照） |
 | `file_path` | TEXT | NOT NULL, UNIQUE | source_store 内の相対パス |
 | `title` | TEXT | NOT NULL | コンテンツのタイトル |
 | `status` | TEXT | NOT NULL, DEFAULT 'active' | `active` または `deleted` |
@@ -454,9 +454,9 @@ source_store 内の全ファイルのメタデータ索引。
 
 ### 設定項目
 
-| 設定項目 | 型 | 保管先 | デフォルト | 許容範囲 | 説明 |
-|---------|-----|--------|-----------|---------|------|
-| `SOURCE_STORE_DIR` | str | `.env` | なし（必須） | — | source_store のディレクトリパス |
+| 設定項目 | 層 | 設計意図 |
+|---------|-----|---------|
+| `SOURCE_STORE_DIR` | 環境依存値 | source_store のディレクトリパス。環境ごとにストレージ配置が異なる |
 
 ## エッジケース
 

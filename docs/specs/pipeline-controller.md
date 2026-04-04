@@ -76,7 +76,9 @@
 | `[Index]` | チャンキング・Embedding・インデックス登録 | `run_index_only` |
 | `[Convert & Index]` | 変換とインデックスの一体処理 | `_process_changes`（差分更新）、`run_full_rebuild` |
 
-> **TODO:#495** MCP 経由の進捗通知では、Claude Code が `report_progress` の `message` パラメータを表示しないため、フェーズ名はユーザーに見えない（Claude Code の MCP クライアント側の制約。上流: anthropics/claude-code#3174）。CLI の `--output json` モードでは `current` フィールドにフェーズ名が含まれる。
+> **TODO:#495** MCP 経由の進捗通知では、Claude Code が `report_progress` の `message` パラメータを表示しないため、フェーズ名はユーザーに見えない
+> （Claude Code の MCP クライアント側の制約。上流: anthropics/claude-code#3174）。
+> CLI の `--output json` モードでは `current` フィールドにフェーズ名が含まれる。
 
 ### 未コミット変更の扱い
 
@@ -129,6 +131,15 @@ git diff から取得する変更ファイルリストの各エントリが持�
 
 ### パイプラインフロー（差分更新）
 
+1. 未コミットの変更がある場合、自動コミットを実行する
+2. `pipeline_history` から `last_commit_id` を取得する
+3. `last_commit_id` が null commit hash（初回）の場合は全ファイルを対象とする。通常のコミット ID の場合は `git diff` で変更ファイルを取得する
+4. 変更ファイルがなければ終了する
+5. 変更ファイルを種別（追加・変更 / 削除）ごとに分類する
+6. 追加・変更ファイルはコンバーターで変換後、インデクサーでインデックスに追加・更新する
+7. 削除ファイルはインデクサーでインデックスから削除し、metadata.db で論理削除する
+8. `pipeline_history` に実行履歴を追加する
+
 ```mermaid
 flowchart TD
     START["パイプライン開始"]
@@ -171,6 +182,15 @@ flowchart TD
 ```
 
 ### パイプラインフロー（全再構築）
+
+1. 未コミットの変更がある場合、エラーとして rebuild を拒否する
+2. source_store スキャンで metadata.db を再構築する
+3. converted_store をクリアする
+4. ChromaDB + BM25 をクリアする
+5. source_store の全ファイルをスキャンし、status が active のファイルを抽出する
+6. コンバーターで全ファイルをテキスト変換する
+7. インデクサーで全ファイルをインデックス構築する
+8. `pipeline_history` に実行履歴を追加する
 
 ```mermaid
 flowchart TD
@@ -263,7 +283,7 @@ source_store 内の以下のファイルは、git diff で検出されてもパ�
 | 手動ファイル配置後（local） | `ingest(local): manual update` |
 | 差分更新時の自動コミット | `auto-commit: incremental` |
 
-`source_type` の取りうる値は [source-store.md](source-store.md) の「source_id の決定方式」を参照（`web`, `bluesky`, `zenn`, `youtube`, `aozora`, `local`, `journal`）。
+`source_type` の取りうる値は [`_schema/enums.yml`](../../_schema/enums.yml) の `source_type` を参照。
 
 ## エッジケース
 
@@ -285,9 +305,9 @@ source_store 内の以下のファイルは、git diff で検出されてもパ�
 
 ### 設定項目
 
-| 設定項目 | 型 | 保管先 | デフォルト | 許容範囲 | 説明 |
-|---------|-----|--------|-----------|---------|------|
-| `CONVERTED_STORE_DIR` | str | `.env` | なし（必須） | — | converted_store のディレクトリパス |
+| 設定項目 | 層 | 設計意図 |
+|---------|-----|---------|
+| `CONVERTED_STORE_DIR` | 環境依存値 | converted_store のディレクトリパス。環境ごとにストレージ配置が異なる |
 
 source_store のパスや metadata.db の参照は [source-store.md](source-store.md) の設定項目を使用する。
 

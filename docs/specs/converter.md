@@ -28,8 +28,8 @@
 
 ## 制約
 
-- **ファイル形式の判定は拡張子ベース**: source_store 内のファイル拡張子で変換方式を決定する。拡張子が同一であれば source_type（web, bluesky, zenn, youtube, aozora, local, journal）に関わらず同じ変換方式を適用する。ただし、source_type 固有の前処理が必要な場合は source_type に応じた分岐を許容する
-- **source_type の判定**: ファイルの source_store 内トップレベルディレクトリから判定する（`web/`, `bluesky/`, `zenn/`, `youtube/`, `aozora/`, `local/`, `journal/`）
+- **ファイル形式の判定は拡張子ベース**: source_store 内のファイル拡張子で変換方式を決定する。拡張子が同一であれば source_type に関わらず同じ変換方式を適用する。ただし、source_type 固有の前処理が必要な場合は source_type に応じた分岐を許容する
+- **source_type の判定**: ファイルの source_store 内トップレベルディレクトリから判定する（値は [`_schema/enums.yml`](../../_schema/enums.yml) の `source_type` を参照）
 - **変換対象外ファイル**: `.meta` サイドカーファイルおよび `metadata.db` は変換対象外とする（スキップする）
 - **変換結果は UTF-8 テキスト**: 変換処理（HTML → Markdown、PDF テキスト抽出、JSON → テキスト）の出力は UTF-8 エンコーディングとする。パススルーファイルはバイト列コピーであり、この制約の対象外（元のエンコーディングをそのまま保持する）
 - **converted_store は git 管理しない**: 再生成可能な派生データであるため、git 管理対象外とする
@@ -78,6 +78,11 @@
 未対応の拡張子のファイルは変換をスキップし、警告ログを出力する。
 
 ### 変換フロー
+
+1. source_store からファイルを読み込む
+2. 拡張子に応じた変換処理を選択する（HTML → Markdown / PDF → テキスト抽出 / JSON → テキスト抽出 / パススルー）
+3. 変換結果にテキスト正規化を適用する（パススルーは正規化なし）
+4. converted_store に配置する
 
 ```mermaid
 flowchart TD
@@ -378,17 +383,17 @@ Zenn スクラップの JSON（`scrap` オブジェクト）から `comments` �
 
 ### 設定項目
 
-| 設定項目 | 型 | 保管先 | デフォルト | 許容範囲 | 説明 |
-|---------|-----|--------|-----------|---------|------|
-| `rag_pdf_backend` | str | `config.toml` | `auto` | `auto`, `pymupdf4llm`, `mineru` | PDF バックエンド選択 |
-| `rag_pdf_mineru_mfd_conf_thres` | float | `config.toml` | `0.6` | — | MinerU MFD 信頼度閾値 |
-| `rag_pdf_quality_ufffd_threshold` | float | `config.toml` | `0.10` | — | Unicode 置換文字率の閾値 |
-| `rag_pdf_quality_greek_threshold` | float | `config.toml` | `0.15` | — | ギリシャ文字率の閾値 |
-| `rag_pdf_quality_cjk_min_threshold` | float | `config.toml` | `0.05` | — | CJK 文字率の下限閾値 |
-| `rag_pdf_quality_min_chars_per_page` | int | `config.toml` | `10` | — | ページあたり最低文字数 |
-| `rag_pdf_quality_sample_pages` | int | `config.toml` | `10` | — | 品質サンプリングページ数 |
-| `rag_youtube_merge_gap_sec` | float | `config.toml` | `2.0` | — | YouTube スニペット結合の間隔閾値（秒） |
-| `rag_youtube_merge_max_chars` | int | `config.toml` | `300` | — | YouTube スニペット結合の最大文字数 |
+| 設定項目 | 層 | 設計意図 |
+|---------|-----|---------|
+| `rag_pdf_backend` | 共通設定値 | PDF バックエンド選択。環境のGPU有無やPDF特性に応じて切り替える |
+| `rag_pdf_mineru_mfd_conf_thres` | 共通設定値 | MinerU MFD 信頼度閾値。数式検出の感度を制御する |
+| `rag_pdf_quality_ufffd_threshold` | 共通設定値 | Unicode 置換文字率の閾値。テキスト抽出品質の判定基準 |
+| `rag_pdf_quality_greek_threshold` | 共通設定値 | ギリシャ文字率の閾値。数式含有の判定基準 |
+| `rag_pdf_quality_cjk_min_threshold` | 共通設定値 | CJK 文字率の下限閾値。CJK テキスト検出の判定基準 |
+| `rag_pdf_quality_min_chars_per_page` | 共通設定値 | ページあたり最低文字数。テキスト抽出品質の判定基準 |
+| `rag_pdf_quality_sample_pages` | 共通設定値 | 品質サンプリングページ数。判定の精度とコストのバランス |
+| `rag_youtube_merge_gap_sec` | 共通設定値 | YouTube スニペット結合の間隔閾値。段落分割の粒度を制御する |
+| `rag_youtube_merge_max_chars` | 共通設定値 | YouTube スニペット結合の最大文字数。段落サイズの上限 |
 
 `CONVERTED_STORE_DIR` は [pipeline-controller.md](pipeline-controller.md) の設定項目で定義済み。
 
