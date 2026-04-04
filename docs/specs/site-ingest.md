@@ -74,7 +74,7 @@ MCP ツール `rag_site_ingest` と CLI コマンド `site-ingest` の 2 つの�
 
 ### ページ数上限
 
-- `site_ingest_max_pages`（config.toml）でクロール対象ページ数を制限する（デフォルト: 500）
+- `site_ingest_max_pages`（config.toml）でクロール対象ページ数を制限する
 - Spider 内で 200 OK レスポンスのみをカウントし、上限に達したら `close_spider` で自前クローズする
 - 404 等の非 200 レスポンスはカウントに含めない（Scrapy の `CLOSESPIDER_PAGECOUNT` は全レスポンスをカウントするため使用しない）
 
@@ -85,18 +85,18 @@ MCP ツール `rag_site_ingest` と CLI コマンド `site-ingest` の 2 つの�
 
 ### リクエスト間隔
 
-- `site_ingest_delay_sec`（config.toml）でリクエスト間隔を制御する（デフォルト: 0.1 秒）
+- `site_ingest_delay_sec`（config.toml）でリクエスト間隔を制御する
 - Scrapy の `DOWNLOAD_DELAY` 設定で制御する
 
 ### 操作全体タイムアウト
 
-- `site_ingest_timeout_sec`（config.toml）でクロール全体のタイムアウトを制御する（デフォルト: 7,200 秒 = 2 時間）
+- `site_ingest_timeout_sec`（config.toml）でクロール全体のタイムアウトを制御する
 - Scrapy の `CLOSESPIDER_TIMEOUT` 設定で制御する
 - タイムアウト後も JOBDIR が残存するため、再実行で続きから取得できる
 
 ### エラー停止閾値
 
-- `site_ingest_error_count`（config.toml）でエラー数による停止閾値を制御する（デフォルト: 10）
+- `site_ingest_error_count`（config.toml）でエラー数による停止閾値を制御する
 - Scrapy の `CLOSESPIDER_ERRORCOUNT` 設定で制御する
 - 閾値到達後も JOBDIR が残存するため、再実行で続きから取得できる
 
@@ -113,25 +113,9 @@ MCP ツール `rag_site_ingest` と CLI コマンド `site-ingest` の 2 つの�
 
 | 項目 | 内容 |
 |------|------|
-| 最悪ケースリクエスト数 | `site_ingest_max_pages`（デフォルト 500、許容上限 1,000）+ robots.txt 取得 1 件。Scrapy の重複フィルタにより実際のリクエスト数は対象サイトのユニーク URL 数に依存する |
-| 最悪ケース所要時間 | 1,000 × 0.1 秒（デフォルト間隔）= 100 秒。`site_ingest_download_timeout`（デフォルト 30 秒）× リクエスト数分の接続待ち時間が加算される可能性あり。Scrapy プロセスの終了で操作が完了する |
+| 最悪ケースリクエスト数 | `site_ingest_max_pages` 設定値（デフォルト・許容範囲は pydantic Field で定義）+ robots.txt 取得 1 件。Scrapy の重複フィルタにより実際のリクエスト数は対象サイトのユニーク URL 数に依存する |
+| 最悪ケース所要時間 | ページ数上限 x リクエスト間隔（デフォルト・許容範囲は pydantic Field で定義）+ ダウンロードタイムアウト分の接続待ち。Scrapy プロセスの終了で操作が完了する |
 | 想定エラー率 | サイト依存。Scrapy のリトライミドルウェア（デフォルト: 2 回リトライ）が対象ステータスコード（500, 502, 503, 504, 522, 524, 408, 429）に適用される |
-
-## 安全制約
-
-| 制約名 | 種別 | 値 | 解除可否 |
-|--------|------|-----|---------|
-| SSRF チェック（初回 URL） | ハードリミット | クロール開始前に開始 URL を検証。プライベート IP・ローカルホストを拒否 | 無効化不可 |
-| SSRF チェック（per-request） | ハードリミット | Downloader Middleware で各リクエストの DNS 解決結果を検証。プライベート IP を拒否 | 無効化不可 |
-| ドメイン制約 | ハードリミット | `allowed_domains` で初回 URL と同一ドメインに制限 | 無効化不可 |
-| robots.txt 遵守 | ハードリミット | `ROBOTSTXT_OBEY = True`（固定） | 無効化不可 |
-| ページ数上限 | 設定値 | 許容範囲 1〜1,000、デフォルト 500 | 範囲内で変更可 |
-| リクエスト間隔 | 設定値 | 許容範囲 0.05〜60 秒、デフォルト 0.1 秒 | 範囲内で変更可 |
-| ダウンロードタイムアウト | 設定値 | 許容範囲 1〜300 秒、デフォルト 30 秒 | 範囲内で変更可 |
-| 操作全体タイムアウト | 設定値 | 許容範囲 60〜86,400 秒、デフォルト 7,200 | 範囲内で変更可 |
-| エラー停止閾値 | 設定値 | 許容範囲 1〜1,000、デフォルト 10 | 範囲内で変更可 |
-
-テスト実行時の安全な値: `max_pages: 3`, `delay_sec: 1.0`
 
 ## インターフェース
 
@@ -239,7 +223,7 @@ flowchart TD
 | `allowed_domains` | ドメイン制約（URL から自動導出） |
 | `url_pattern` | URL フィルタ（正規表現、任意。クロールモードのみ） |
 | `output_dir` | HTML ファイルの保存先ディレクトリ |
-| `max_pages` | ページ数上限（200 OK カウント）。外部インターフェースでは許容範囲 1〜1,000 でクランプされる。Spider 内部では 0 を無制限として扱うが、CLI/MCP からは入力されない |
+| `max_pages` | ページ数上限（200 OK カウント）。外部インターフェースでは pydantic Field の許容範囲でクランプされる（CLI で明示的にクランプ処理を実施）。Spider 内部では 0 を無制限として扱うが、CLI/MCP からは入力されない |
 | `no_follow` | リンク辿りを無効化するフラグ（複数 URL モード時に `true`） |
 
 Spider の振る舞い:
@@ -423,14 +407,14 @@ sequenceDiagram
 
 ### 設定項目
 
-| 設定項目 | 型 | 保管先 | デフォルト | 許容範囲 | 説明 |
-|---------|-----|--------|-----------|---------|------|
-| `SITE_INGEST_TEMP_DIR` | str | `.env` | `.tmp/site_ingest` | — | 一時保存ディレクトリ |
-| `site_ingest_delay_sec` | float | `config.toml` | `0.1` | 0.05〜60 | リクエスト間隔（秒） |
-| `site_ingest_max_pages` | int | `config.toml` | `500` | 1〜1,000 | ページ数上限 |
-| `site_ingest_download_timeout` | int | `config.toml` | `30` | 1〜300 | 1 リクエストのタイムアウト（秒） |
-| `site_ingest_timeout_sec` | float | `config.toml` | `7200` | 60〜86,400 | 操作全体タイムアウト（秒） |
-| `site_ingest_error_count` | int | `config.toml` | `10` | 1〜1,000 | エラー停止閾値 |
+| 設定項目 | 層 | 設計意図 |
+|---------|-----|---------|
+| `SITE_INGEST_TEMP_DIR` | 環境依存値 | 一時保存ディレクトリ。ストレージ配置に応じて変更 |
+| `site_ingest_delay_sec` | 共通設定値 | リクエスト間隔。対象サイトへの負荷を制御 |
+| `site_ingest_max_pages` | 共通設定値 | ページ数上限。大規模サイトでの取り込み量を制限 |
+| `site_ingest_download_timeout` | 共通設定値 | 1 リクエストのタイムアウト |
+| `site_ingest_timeout_sec` | 共通設定値 | 操作全体タイムアウト。長時間クロールの上限 |
+| `site_ingest_error_count` | 共通設定値 | エラー停止閾値。品質の低いサイトでの無駄な取得を防止 |
 
 ## 外部連携
 

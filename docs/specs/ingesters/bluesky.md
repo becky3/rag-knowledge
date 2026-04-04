@@ -41,13 +41,8 @@ BlueSky（AT Protocol）の投稿を API 経由で取得し、source_store に�
 
 ### 外部 HTTP リクエスト
 
-- ConstrainedClient（py-common-lib）経由で実行する
-- ハードリミット（コード内定数。設定・引数・環境変数で緩和不可。厳格化は可能）:
-  - 操作あたりリクエスト総数上限: 500（ConstrainedClient 共通）
-  - 最低リクエスト間隔: 0.1 秒（ConstrainedClient 共通。ページネーション走査中の各リクエスト間を含む全外部リクエスト間に適用）
-  - 操作全体タイムアウト: 600 秒（許容範囲 1〜600 秒、ConstrainedClient 共通）
-  - 投稿取得上限: 1000 件（BlueSky インジェスター固有。タイムライン全体に適用。リポストを含む全アイテムが対象）
-- サーキットブレーカー: 5 回連続失敗で操作全体を中断する（ConstrainedClient 共通）
+- [common.md](common.md) の外部 HTTP リクエスト制約に従う（ConstrainedClient 経由）
+- BlueSky 固有のハードリミット: 投稿取得上限 1000 件（コード内定数、設定不可。タイムライン全体に適用。リポストを含む全アイテムが対象）
 
 ### バリデーション
 
@@ -65,29 +60,9 @@ BlueSky（AT Protocol）の投稿を API 経由で取得し、source_store に�
 
 | 項目 | 内容 |
 |------|------|
-| 最悪ケースリクエスト数 | BlueSky API: ceil(1000/100) = 10（ConstrainedClient バジェット消費）。URL 先取り込み: site_ingest（Scrapy subprocess）が独立して HTTP リクエストを管理するため、ConstrainedClient バジェットを消費しない。Web URL 数はタイムライン内容依存。投稿取得上限 1000 件 × 投稿あたり数 URL 程度のため、実質数千件が上限。Scrapy の `site_ingest_max_pages` は複数 URL モードでは適用されない |
-| 最悪ケース所要時間 | BlueSky API: 10 × 0.1 秒 = 1 秒（最小間隔）/ 10 秒（デフォルト 1.0 秒間隔）。URL 先取り込み: Scrapy subprocess の所要時間（URL 数 × `site_ingest_delay_sec`）。BlueSky API と URL 先取り込みは直列実行のため合計時間 |
-| 想定エラー率 | AT Protocol API 依存。リトライ機構なし（失敗したリクエストは再試行しない）。ConstrainedClient が連続失敗を監視し、5 回連続失敗でサーキットブレーカーが発動して操作を中断する。中断時は取得済みデータを処理する |
-
-## 安全制約
-
-| 制約名 | 種別 | 値 | 解除可否 |
-|--------|------|-----|---------|
-| metadata.db 直接アクセス禁止 | ハードリミット | インジェスターから metadata.db への読み書きを禁止 | 不可 |
-| git 操作禁止 | ハードリミット | インジェスターから git コマンドの直接呼び出しを禁止 | 不可 |
-| ファイル物理削除禁止 | ハードリミット | source_store 内のファイル削除を禁止 | 不可 |
-| 操作あたりリクエスト総数上限 | ハードリミット | 500 | 引き上げ不可（引き下げ可） |
-| 最低リクエスト間隔 | ハードリミット | 0.1 秒 | 引き下げ不可（引き上げ可） |
-| 操作全体タイムアウト | ハードリミット | 600 秒、許容範囲 1〜600 秒 | 引き上げ不可（引き下げ可、下限 1 秒） |
-| サーキットブレーカー閾値 | ハードリミット | 5 回連続失敗 | 引き上げ不可（引き下げ可） |
-| 投稿取得上限 | ハードリミット | 1000 件（タイムライン全体。リポストを含む全アイテムが対象） | 引き上げ不可（引き下げ可） |
-| 取得投稿数 | 設定値 | 許容範囲 1〜1000、デフォルト 200 | 範囲内で変更可 |
-| リクエストタイムアウト | 設定値 | 許容範囲 1〜120 秒、デフォルト 30 秒 | 範囲内で変更可 |
-| リクエスト間隔 | 設定値 | 許容範囲 0.1〜60 秒、デフォルト 1.0 秒 | 範囲内で変更可 |
-| URL 先取り込みのエラー隔離 | ハードリミット | URL 先の取り込み失敗（site_ingest subprocess 失敗含む）が BlueSky 投稿の取り込み結果に影響しない | 不可 |
-| 生 HTTP クライアント利用禁止 | CI チェック | `src/` 全体を grep で走査（httpx / aiohttp / requests / urllib.request）。`# safety:allowed` 行を除外。ConstrainedClient は py-common-lib パッケージで提供（`src/` 外のため検出対象外） | 許可例外は `# safety:allowed` コメントで可 |
-
-テスト実行時の安全な値: 投稿取得上限 3 件で実行する。異常値テスト（0、負数、上限超過）を含めること。
+| 最悪ケースリクエスト数 | BlueSky API: ceil(投稿取得上限/ページサイズ) 回（ConstrainedClient バジェット消費）。URL 先取り込み: site_ingest（Scrapy subprocess）が独立して HTTP リクエストを管理するため、ConstrainedClient バジェットを消費しない |
+| 最悪ケース所要時間 | BlueSky API: リクエスト数 x リクエスト間隔（デフォルト・許容範囲は pydantic Field で定義）。URL 先取り込み: Scrapy subprocess の所要時間。直列実行のため合計時間 |
+| 想定エラー率 | AT Protocol API 依存。リトライ機構なし。ConstrainedClient のサーキットブレーカー閾値で操作中断。中断時は取得済みデータを処理する |
 
 ## インターフェース
 
@@ -102,7 +77,7 @@ BlueSky（AT Protocol）の投稿を API 経由で取得し、source_store に�
 | パラメータ | 型 | 必須 | 説明 |
 |-----------|-----|------|------|
 | `handle` | 文字列 | はい | BlueSky ハンドル（例: `user.bsky.social`）。DID 形式（`did:` 始まり）はバリデーションで拒否する |
-| `max_posts` | 整数 | いいえ | 取得する最大投稿数（タイムライン全体に適用）。デフォルト: 200、許容範囲: 1〜1000 |
+| `max_posts` | 整数 | いいえ | 取得する最大投稿数（タイムライン全体に適用） |
 | `include_reposts` | 真偽値 | いいえ | タイムラインにリポストを含めるか。`false` の場合、リポスト（`reason.$type` が `app.bsky.feed.defs#reasonRepost` のアイテム）を除外する。デフォルト: `true` |
 
 ツール出力: 取り込み結果のサマリーテキスト（配置ファイル数、スキップ数、エラー数）
@@ -117,13 +92,13 @@ BlueSky（AT Protocol）の投稿を API 経由で取得し、source_store に�
 
 ### 設定項目
 
-| 設定項目 | 型 | 保管先 | デフォルト | 許容範囲 | 説明 |
-|---------|-----|--------|-----------|---------|------|
-| `rag_bluesky_appview_url` | 文字列 | `config.toml` | `https://public.api.bsky.app` | 有効な HTTPS URL | AppView のベース URL |
-| `rag_bluesky_max_posts` | 整数 | `config.toml` | 200 | 1〜1000 | 取得する最大投稿数（タイムライン全体に適用） |
-| `rag_bluesky_request_timeout` | 整数 | `config.toml` | 30 | 1〜120 | リクエストタイムアウト（秒） |
-| `rag_bluesky_request_interval` | 小数 | `config.toml` | 1.0 | 0.1〜60 | リクエスト間の最低間隔（秒） |
-| `rag_bluesky_include_reposts` | 真偽値 | `config.toml` | true | true/false | タイムラインにリポストを含めるか |
+| 設定項目 | 層 | 設計意図 |
+|---------|-----|---------|
+| `rag_bluesky_appview_url` | 共通設定値 | AppView のベース URL。代替サーバー利用時に変更 |
+| `rag_bluesky_max_posts` | 共通設定値 | タイムライン全体の取得上限。API 負荷を抑制 |
+| `rag_bluesky_request_timeout` | 共通設定値 | AT Protocol API リクエストのタイムアウト |
+| `rag_bluesky_request_interval` | 共通設定値 | AT Protocol API リクエスト間の最低間隔 |
+| `rag_bluesky_include_reposts` | 共通設定値 | リポストの取り込み制御。不要なコンテンツの除外に使用 |
 
 ## コンポーネント構成
 
