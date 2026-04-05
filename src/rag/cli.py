@@ -1337,6 +1337,12 @@ async def run_rebuild(args: argparse.Namespace) -> None:
             if args.concurrency is not None
             else settings.rag_embedding_concurrency
         )
+        if args.concurrency is not None and args.concurrency < 1:
+            msg = "--concurrency は 1 以上を指定してください"
+            if json_out:
+                _output_error(msg)
+            logger.error(msg)
+            sys.exit(1)
 
         if mode == "full":
             summary = await controller.run_full_rebuild(

@@ -549,6 +549,10 @@ class PipelineController:
         process_fn 内の sync 部分はイベントループをブロックする。
         並列化の効果は process_fn 内の await ポイント（Embedding API 等）に依存する。
         """
+        if concurrency < 1:
+            msg = f"concurrency must be >= 1, got {concurrency}"
+            raise ValueError(msg)
+
         sem = asyncio.Semaphore(concurrency)
         processed = 0
         skipped = 0
@@ -566,6 +570,8 @@ class PipelineController:
                         await result
                     async with lock:
                         processed += 1
+                except asyncio.CancelledError:
+                    raise
                 except ConversionSkippedError as e:
                     logger.warning(
                         "%sスキップ: %s (%s)", log_prefix, file_path, e,
@@ -581,12 +587,13 @@ class PipelineController:
                         errors.append(file_path)
                         skipped += 1
                 if progress_callback is not None:
+                    async with lock:
+                        completed = processed + skipped
                     try:
-                        async with lock:
-                            progress_callback(
-                                processed + skipped, len(items),
-                                f"[{phase}] {file_path}",
-                            )
+                        progress_callback(
+                            completed, len(items),
+                            f"[{phase}] {file_path}",
+                        )
                     except Exception:
                         logger.debug(
                             "progress_callback エラー: %s", file_path,
