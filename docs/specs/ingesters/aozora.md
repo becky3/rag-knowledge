@@ -211,7 +211,6 @@ CSV の URL: https://www.aozora.gr.jp/cards/{person_id}/files/{book_id}_{file_id
 
 | フィールド | 型 | 内容 | 値の取得元 |
 |-----------|-----|------|-----------|
-| `source_id` | str | ソース識別子 | `aozora/catalog.csv` |
 | `source_type` | str | 媒体種別 | 固定値 `aozora` |
 | `title` | str | タイトル | 固定値 `"Aozora Bunko Catalog"` |
 | `collected_at` | str | 取り込みタイムスタンプ（ISO 8601） | 取り込み実行時の現在時刻 |
@@ -222,7 +221,6 @@ CSV の URL: https://www.aozora.gr.jp/cards/{person_id}/files/{book_id}_{file_id
 
 | フィールド | 型 | 内容 | 値の取得元 |
 |-----------|-----|------|-----------|
-| `source_id` | str | ソース識別子 | source_store 内の相対パス（例: `aozora/{person_id}/{book_id}.html`） |
 | `source_type` | str | 媒体種別 | 固定値 `aozora` |
 | `title` | str | 作品タイトル | CSV の「作品名」カラム |
 | `collected_at` | str | 取り込みタイムスタンプ（ISO 8601） | 取り込み実行時の現在時刻 |

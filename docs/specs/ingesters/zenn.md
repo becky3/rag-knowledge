@@ -146,7 +146,6 @@ source_id は source_store 内の相対パスである。コンテンツの公�
 
 | フィールド | 型 | 内容 | 値の取得元 |
 |-----------|-----|------|-----------|
-| `source_id` | str | ソース識別子 | source_store 内の相対パス（例: `zenn/{username}/articles/{slug}.json`） |
 | `source_type` | str | 媒体種別 | 固定値 `zenn` |
 | `title` | str | 記事タイトル | API レスポンスの `title` フィールド |
 | `collected_at` | str | 取り込みタイムスタンプ（ISO 8601） | 取り込み実行時の現在時刻 |

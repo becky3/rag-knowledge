@@ -252,7 +252,6 @@ source_store/
 
 | フィールド | 型 | 内容 | 値の取得元 |
 |-----------|-----|------|-----------|
-| `source_id` | str | ソース識別子 | `https://www.youtube.com/watch?v={video_id}` |
 | `source_type` | str | 媒体種別 | 固定値 `"youtube"` |
 | `title` | str | 動画タイトル | yt-dlp メタデータの `title` フィールド |
 | `collected_at` | str | 取り込みタイムスタンプ（ISO 8601） | 取り込み実行時の現在時刻 |

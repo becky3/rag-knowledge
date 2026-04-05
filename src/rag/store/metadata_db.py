@@ -105,14 +105,10 @@ class MetadataDB:
 
         # source_id = file_path 統合: file_path カラムが残っている旧スキーマを移行
         if "file_path" in src_columns:
-            self._connection.execute(
-                "UPDATE sources SET source_id = file_path"
-                " WHERE source_id != file_path"
-            )
-            self._connection.commit()
-            # SQLite は ALTER TABLE DROP COLUMN 非対応のため、テーブル再作成
+            # file_path を新 source_id として直接 INSERT（UPDATE での PK 衝突を回避）
             self._connection.executescript("""\
-                CREATE TABLE IF NOT EXISTS sources_new (
+                DROP TABLE IF EXISTS sources_new;
+                CREATE TABLE sources_new (
                     source_id    TEXT PRIMARY KEY,
                     source_type  TEXT NOT NULL,
                     title        TEXT NOT NULL,
@@ -126,7 +122,7 @@ class MetadataDB:
                 INSERT OR REPLACE INTO sources_new
                     (source_id, source_type, title, status,
                      content_hash, file_size, collected_at, updated_at, published_at)
-                    SELECT source_id, source_type, title, status,
+                    SELECT file_path, source_type, title, status,
                            content_hash, file_size, collected_at, updated_at, published_at
                     FROM sources;
                 DROP TABLE sources;

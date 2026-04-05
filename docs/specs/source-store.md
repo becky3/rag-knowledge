@@ -180,7 +180,7 @@ source_store 層では `file_path` として、metadata_db 以上の層では `s
 | bluesky | `bluesky/{escaped_did}/{年}/{月}/{rkey}.json` | `bluesky/did：plc：xxx/2026/03/rkey.json` |
 | zenn | `zenn/{username}/{articles\|scraps}/{slug}.json` | `zenn/alice/articles/sample-article.json` |
 | youtube | `youtube/{channel_id}/{video_id}.json` | `youtube/UCxxxxxxxx/xxxxxxxxxxx.json` |
-| aozora | `aozora/{person_id}/{book_id}.html` / `aozora/catalog.csv` | `aozora/000035/1567.html` |
+| aozora | `aozora/{person_id}/{book_id}.html` / `aozora/catalog.csv` | `aozora/000035/001567.html` |
 | journal | `journal/{repository}/{entry_id}.md` | `journal/rag-knowledge/20260323-143000-session-summary.md` |
 
 元 URL は .meta の `url` フィールド（web, zenn, youtube, aozora, bluesky）に保持される。bluesky は追加で `at_uri` フィールド（AT Protocol 識別子）も持つ。検索結果には `custom:url` / `custom:at_uri` として含まれる。
