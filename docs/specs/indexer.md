@@ -266,7 +266,7 @@ flowchart LR
 
 | フィールド | 型 | 内容 |
 |-----------|-----|------|
-| `source_id` | str | ソース識別子。[source-store.md](source-store.md) の source_id 決定方式に準拠 |
+| `source_id` | str | ソース識別子（= source_store 内の相対パス）。[source-store.md](source-store.md) の source_id 決定方式に準拠 |
 | `source_type` | str | 媒体種別（値は [`_schema/enums.yml`](../../_schema/enums.yml) の `source_type` を参照） |
 | `title` | str | コンテンツのタイトル。metadata.db の `title` から取得 |
 | `chunk_index` | int | チャンクの連番（0 始まり） |
@@ -307,7 +307,7 @@ ChromaDB のメタデータ値は `str | int | float | bool` のみ許容され�
 
 生成規則: `SHA-256(source_id)` の先頭 16 文字 + `_` + `chunk_index`
 
-例: source_id が `https://example.com/docs/guide` の場合
+例: source_id が `web/https/example.com/docs/guide.html` の場合
 
 - チャンク 0: `a1b2c3d4e5f67890_0`
 - チャンク 1: `a1b2c3d4e5f67890_1`

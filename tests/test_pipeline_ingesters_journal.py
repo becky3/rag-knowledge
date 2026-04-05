@@ -107,7 +107,6 @@ class TestAddEntry:
             / "20260323-143000-meta-test.md"
         )
         meta = read_meta(data_file)
-        assert meta["source_id"] == "journal/test-repo/20260323-143000-meta-test.md"
         assert meta["source_type"] == "journal"
         assert meta["title"] == "Meta Test"
         assert meta["repository"] == "test-repo"

@@ -47,7 +47,6 @@ class TestPlaceFile:
     def test_place_web_file_with_meta(self, store: SourceStore) -> None:
         data = b"<html><body>Test</body></html>"
         metadata = {
-            "source_id": "https://example.com/page",
             "source_type": "web",
             "title": "Test Page",
             "collected_at": "2026-01-15T10:30:00+09:00",
@@ -66,7 +65,7 @@ class TestPlaceFile:
         meta_file = dest.with_name(dest.name + ".meta")
         assert meta_file.exists()
 
-        record = store.db.get_source("https://example.com/page")
+        record = store.db.get_source("web/https/example.com/page.html")
         assert record is not None
         assert record.title == "Test Page"
 
@@ -123,7 +122,6 @@ class TestPlaceFileFromUrl:
     def test_place_from_url(self, store: SourceStore) -> None:
         data = b"<html>page</html>"
         metadata = {
-            "source_id": "https://example.com/docs/guide",
             "source_type": "web",
             "title": "Guide",
             "collected_at": "2026-01-15T10:30:00+09:00",
@@ -148,7 +146,6 @@ class TestGetFile:
 
     def test_get_existing_file(self, store: SourceStore) -> None:
         metadata = {
-            "source_id": "https://example.com/page",
             "source_type": "web",
             "title": "Test Page",
             "collected_at": "2026-01-15T10:30:00+09:00",
@@ -161,10 +158,10 @@ class TestGetFile:
             metadata=metadata,
         )
 
-        result = store.get_file("https://example.com/page")
+        result = store.get_file("web/https/example.com/page.html")
         assert result is not None
         assert result.content == b"<html>test</html>"
-        assert result.metadata.source_id == "https://example.com/page"
+        assert result.metadata.source_id == "web/https/example.com/page.html"
         assert result.metadata.title == "Test Page"
         assert result.metadata.extra.get("url") == "https://example.com/page"
 
@@ -217,10 +214,10 @@ class TestListFiles:
             data=b"c",
             rel_path="web/https/example.com/c.html",
             metadata={
-                "source_id": "https://example.com/c",
                 "source_type": "web",
                 "title": "C",
                 "collected_at": "2026-01-01T00:00:00Z",
+                "url": "https://example.com/c",
             },
         )
 
@@ -240,10 +237,10 @@ class TestListFiles:
             data=b"b",
             rel_path="web/https/example.com/b.html",
             metadata={
-                "source_id": "https://example.com/b",
                 "source_type": "web",
                 "title": "B",
                 "collected_at": "2026-01-01T00:00:00Z",
+                "url": "https://example.com/b",
             },
         )
 
@@ -322,10 +319,10 @@ class TestRebuildDb:
             data=b"<html>page</html>",
             rel_path="web/https/example.com/page.html",
             metadata={
-                "source_id": "https://example.com/page",
                 "source_type": "web",
                 "title": "Test Page",
                 "collected_at": "2026-01-15T10:30:00+09:00",
+                "url": "https://example.com/page",
             },
         )
 
@@ -339,8 +336,8 @@ class TestRebuildDb:
         assert local_record.source_type == "local"
         assert local_record.title == "doc"
 
-        # web ファイル（.meta から source_id とタイトルを取得）
-        web_record = store.db.get_source("https://example.com/page")
+        # web ファイル（.meta からタイトルを取得）
+        web_record = store.db.get_source("web/https/example.com/page.html")
         assert web_record is not None
         assert web_record.source_type == "web"
         assert web_record.title == "Test Page"
@@ -354,10 +351,10 @@ class TestRebuildDb:
             data=b"<html>page</html>",
             rel_path="web/https/example.com/page.html",
             metadata={
-                "source_id": "https://example.com/page",
                 "source_type": "web",
                 "title": "Test Page",
                 "collected_at": "2026-01-15T10:30:00+09:00",
+                "url": "https://example.com/page",
             },
         )
 
@@ -375,7 +372,7 @@ class TestRebuildDb:
         assert local_record.source_type == "local"
 
         # web レコードも再登録されている
-        web_record = store.db.get_source("https://example.com/page")
+        web_record = store.db.get_source("web/https/example.com/page.html")
         assert web_record is not None
         assert web_record.source_type == "web"
 
@@ -402,10 +399,10 @@ class TestPlaceFileFromUrlExtension:
     def test_no_double_extension(self, store: SourceStore) -> None:
         """URL パスが既に拡張子で終わる場合、二重付加しない."""
         metadata = {
-            "source_id": "https://example.com/page.html",
             "source_type": "web",
             "title": "Page",
             "collected_at": "2026-01-01T00:00:00Z",
+            "url": "https://example.com/page.html",
         }
         dest = store.place_file_from_url(
             url="https://example.com/page.html",

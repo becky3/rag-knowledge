@@ -529,7 +529,6 @@ class TestClear:
         metadata_db.register_source(
             source_id="src-web",
             source_type="web",
-            file_path="web/page.md",
             title="Web Page",
             content_hash="abc",
             file_size=100,
@@ -539,7 +538,6 @@ class TestClear:
         metadata_db.register_source(
             source_id="src-zenn",
             source_type="zenn",
-            file_path="zenn/article.md",
             title="Zenn Article",
             content_hash="def",
             file_size=200,

@@ -38,7 +38,7 @@ class TestGetDocumentFormatText:
         # source_store にファイルを配置
         _setup_source_with_db(
             source_dir,
-            source_id="https://example.com/page",
+            source_id="web/https/example.com/page.html",
             source_type="web",
             file_path="web/https/example.com/page.html",
             title="Test Page",
@@ -51,14 +51,14 @@ class TestGetDocumentFormatText:
         conv_file.write_text("# Converted content", encoding="utf-8")
 
         result = get_document(
-            source_id="https://example.com/page",
+            source_id="web/https/example.com/page.html",
             format="text",
             source_store_dir=str(source_dir),
             converted_store_dir=str(converted_dir),
         )
 
         assert result.error is None
-        assert result.source_id == "https://example.com/page"
+        assert result.source_id == "web/https/example.com/page.html"
         assert result.title == "Test Page"
         assert result.source_type == "web"
         assert result.format == "text"
@@ -73,7 +73,7 @@ class TestGetDocumentFormatText:
 
         _setup_source_with_db(
             source_dir,
-            source_id="https://example.com/page",
+            source_id="web/https/example.com/page.html",
             source_type="web",
             file_path="web/https/example.com/page.html",
             title="Test Page",
@@ -81,7 +81,7 @@ class TestGetDocumentFormatText:
         )
 
         result = get_document(
-            source_id="https://example.com/page",
+            source_id="web/https/example.com/page.html",
             format="text",
             source_store_dir=str(source_dir),
             converted_store_dir=str(converted_dir),
@@ -129,7 +129,7 @@ class TestGetDocumentFormatOriginal:
 
         _setup_source_with_db(
             source_dir,
-            source_id="https://example.com/doc.pdf",
+            source_id="web/https/example.com/doc.pdf",
             source_type="web",
             file_path="web/https/example.com/doc.pdf",
             title="PDF Document",
@@ -137,7 +137,7 @@ class TestGetDocumentFormatOriginal:
         )
 
         result = get_document(
-            source_id="https://example.com/doc.pdf",
+            source_id="web/https/example.com/doc.pdf",
             format="original",
             source_store_dir=str(source_dir),
             converted_store_dir=str(converted_dir),
@@ -226,7 +226,7 @@ class TestFormatDocumentResponse:
     def test_formats_successful_result(self) -> None:
         """正常な結果をフォーマットできること."""
         result = DocumentResult(
-            source_id="https://example.com/page",
+            source_id="web/https/example.com/page.html",
             title="Test Page",
             source_type="web",
             format="text",
@@ -235,7 +235,7 @@ class TestFormatDocumentResponse:
 
         response = format_document_response(result)
 
-        assert "Source: https://example.com/page" in response
+        assert "Source: web/https/example.com/page.html" in response
         assert "Title: Test Page" in response
         assert "Type: web" in response
         assert "Format: text" in response
@@ -290,7 +290,6 @@ def _setup_source_with_db(
         store.db.register_source(
             source_id=source_id,
             source_type=source_type,
-            file_path=file_path,
             title=title,
             content_hash=content_hash,
             file_size=len(content),

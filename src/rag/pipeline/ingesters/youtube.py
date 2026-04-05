@@ -238,9 +238,8 @@ class YoutubeIngester:
         dest = self._store.root_dir / rel_path
         is_overwrite = dest.exists()
 
-        source_id = f"https://www.youtube.com/watch?v={video_id}"
         meta_dict: dict[str, Any] = {
-            "source_id": source_id,
+            "url": f"https://www.youtube.com/watch?v={video_id}",
             "source_type": "youtube",
             "title": metadata.get("title") or "",
             "collected_at": now_iso(),

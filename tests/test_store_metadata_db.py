@@ -26,9 +26,8 @@ class TestSourcesCRUD:
 
     def test_register_and_get(self, db: MetadataDB) -> None:
         db.register_source(
-            source_id="https://example.com/page",
+            source_id="web/https/example.com/page.html",
             source_type="web",
-            file_path="web/https/example.com/page.html",
             title="Test Page",
             content_hash="abc123",
             file_size=1024,
@@ -36,9 +35,9 @@ class TestSourcesCRUD:
             updated_at="2026-01-15T10:00:00Z",
         )
 
-        record = db.get_source("https://example.com/page")
+        record = db.get_source("web/https/example.com/page.html")
         assert record is not None
-        assert record.source_id == "https://example.com/page"
+        assert record.source_id == "web/https/example.com/page.html"
         assert record.source_type == "web"
         assert record.title == "Test Page"
         assert record.status == "active"
@@ -47,9 +46,8 @@ class TestSourcesCRUD:
     def test_register_upsert(self, db: MetadataDB) -> None:
         """同一 source_id の再登録で上書きされる."""
         db.register_source(
-            source_id="https://example.com/page",
+            source_id="web/https/example.com/page.html",
             source_type="web",
-            file_path="web/https/example.com/page.html",
             title="Old Title",
             content_hash="old",
             file_size=100,
@@ -57,9 +55,8 @@ class TestSourcesCRUD:
             updated_at="2026-01-01T00:00:00Z",
         )
         db.register_source(
-            source_id="https://example.com/page",
+            source_id="web/https/example.com/page.html",
             source_type="web",
-            file_path="web/https/example.com/page.html",
             title="New Title",
             content_hash="new",
             file_size=200,
@@ -67,7 +64,7 @@ class TestSourcesCRUD:
             updated_at="2026-01-02T00:00:00Z",
         )
 
-        record = db.get_source("https://example.com/page")
+        record = db.get_source("web/https/example.com/page.html")
         assert record is not None
         assert record.title == "New Title"
         assert record.content_hash == "new"
@@ -76,21 +73,19 @@ class TestSourcesCRUD:
     def test_register_restores_deleted(self, db: MetadataDB) -> None:
         """deleted 状態のソースへの再登録で active に復帰する."""
         db.register_source(
-            source_id="test",
+            source_id="local/test.md",
             source_type="local",
-            file_path="local/test.md",
             title="Test",
             content_hash="hash1",
             file_size=10,
             collected_at="2026-01-01T00:00:00Z",
             updated_at="2026-01-01T00:00:00Z",
         )
-        db.set_status("test", "deleted")
+        db.set_status("local/test.md", "deleted")
 
         db.register_source(
-            source_id="test",
+            source_id="local/test.md",
             source_type="local",
-            file_path="local/test.md",
             title="Test Updated",
             content_hash="hash2",
             file_size=20,
@@ -98,7 +93,7 @@ class TestSourcesCRUD:
             updated_at="2026-01-02T00:00:00Z",
         )
 
-        record = db.get_source("test")
+        record = db.get_source("local/test.md")
         assert record is not None
         assert record.status == "active"
         assert record.title == "Test Updated"
@@ -106,27 +101,10 @@ class TestSourcesCRUD:
     def test_get_nonexistent(self, db: MetadataDB) -> None:
         assert db.get_source("nonexistent") is None
 
-    def test_get_by_path(self, db: MetadataDB) -> None:
-        db.register_source(
-            source_id="test-id",
-            source_type="local",
-            file_path="local/test.md",
-            title="Test",
-            content_hash="hash",
-            file_size=10,
-            collected_at="2026-01-01T00:00:00Z",
-            updated_at="2026-01-01T00:00:00Z",
-        )
-
-        record = db.get_source_by_path("local/test.md")
-        assert record is not None
-        assert record.source_id == "test-id"
-
     def test_update_source(self, db: MetadataDB) -> None:
         db.register_source(
-            source_id="test",
+            source_id="local/test.md",
             source_type="local",
-            file_path="local/test.md",
             title="Old",
             content_hash="hash",
             file_size=10,
@@ -134,8 +112,8 @@ class TestSourcesCRUD:
             updated_at="2026-01-01T00:00:00Z",
         )
 
-        db.update_source("test", title="New Title", file_size=20)
-        record = db.get_source("test")
+        db.update_source("local/test.md", title="New Title", file_size=20)
+        record = db.get_source("local/test.md")
         assert record is not None
         assert record.title == "New Title"
         assert record.file_size == 20
@@ -150,9 +128,8 @@ class TestSourcesCRUD:
 
     def test_update_invalid_field(self, db: MetadataDB) -> None:
         db.register_source(
-            source_id="test",
+            source_id="local/test.md",
             source_type="local",
-            file_path="local/test.md",
             title="Test",
             content_hash="hash",
             file_size=10,
@@ -160,13 +137,12 @@ class TestSourcesCRUD:
             updated_at="2026-01-01T00:00:00Z",
         )
         with pytest.raises(ValueError, match="不正なフィールド"):
-            db.update_source("test", id=999)
+            db.update_source("local/test.md", id=999)
 
     def test_search_by_type(self, db: MetadataDB) -> None:
         db.register_source(
-            source_id="web1",
+            source_id="web/https/a.com/p.html",
             source_type="web",
-            file_path="web/https/a.com/p.html",
             title="Web1",
             content_hash="h1",
             file_size=10,
@@ -174,9 +150,8 @@ class TestSourcesCRUD:
             updated_at="2026-01-01T00:00:00Z",
         )
         db.register_source(
-            source_id="local1",
+            source_id="local/test.md",
             source_type="local",
-            file_path="local/test.md",
             title="Local1",
             content_hash="h2",
             file_size=20,
@@ -186,13 +161,12 @@ class TestSourcesCRUD:
 
         web_results = db.search_sources(source_type="web")
         assert len(web_results) == 1
-        assert web_results[0].source_id == "web1"
+        assert web_results[0].source_id == "web/https/a.com/p.html"
 
     def test_search_by_status(self, db: MetadataDB) -> None:
         db.register_source(
-            source_id="active1",
+            source_id="local/active.md",
             source_type="local",
-            file_path="local/active.md",
             title="Active",
             content_hash="h1",
             file_size=10,
@@ -200,26 +174,24 @@ class TestSourcesCRUD:
             updated_at="2026-01-01T00:00:00Z",
         )
         db.register_source(
-            source_id="deleted1",
+            source_id="local/deleted.md",
             source_type="local",
-            file_path="local/deleted.md",
             title="Deleted",
             content_hash="h2",
             file_size=20,
             collected_at="2026-01-02T00:00:00Z",
             updated_at="2026-01-02T00:00:00Z",
         )
-        db.set_status("deleted1", "deleted")
+        db.set_status("local/deleted.md", "deleted")
 
         active = db.search_sources(status="active")
         assert len(active) == 1
-        assert active[0].source_id == "active1"
+        assert active[0].source_id == "local/active.md"
 
     def test_set_status(self, db: MetadataDB) -> None:
         db.register_source(
-            source_id="test",
+            source_id="local/test.md",
             source_type="local",
-            file_path="local/test.md",
             title="Test",
             content_hash="hash",
             file_size=10,
@@ -227,13 +199,13 @@ class TestSourcesCRUD:
             updated_at="2026-01-01T00:00:00Z",
         )
 
-        db.set_status("test", "deleted")
-        record = db.get_source("test")
+        db.set_status("local/test.md", "deleted")
+        record = db.get_source("local/test.md")
         assert record is not None
         assert record.status == "deleted"
 
-        db.set_status("test", "active")
-        record = db.get_source("test")
+        db.set_status("local/test.md", "active")
+        record = db.get_source("local/test.md")
         assert record is not None
         assert record.status == "active"
 
@@ -245,9 +217,8 @@ class TestSourcesCRUD:
         assert db.source_count() == 0
 
         db.register_source(
-            source_id="s1",
+            source_id="local/s1.md",
             source_type="local",
-            file_path="local/s1.md",
             title="S1",
             content_hash="h",
             file_size=1,
@@ -255,16 +226,15 @@ class TestSourcesCRUD:
             updated_at="2026-01-01T00:00:00Z",
         )
         db.register_source(
-            source_id="s2",
+            source_id="local/s2.md",
             source_type="local",
-            file_path="local/s2.md",
             title="S2",
             content_hash="h",
             file_size=1,
             collected_at="2026-01-01T00:00:00Z",
             updated_at="2026-01-01T00:00:00Z",
         )
-        db.set_status("s2", "deleted")
+        db.set_status("local/s2.md", "deleted")
 
         assert db.source_count() == 2
         assert db.source_count(status="active") == 1
@@ -407,9 +377,8 @@ class TestDeleteAllSources:
 
     def test_delete_all(self, db: MetadataDB) -> None:
         db.register_source(
-            source_id="s1",
+            source_id="local/s1.md",
             source_type="local",
-            file_path="local/s1.md",
             title="S1",
             content_hash="h",
             file_size=1,
@@ -417,9 +386,8 @@ class TestDeleteAllSources:
             updated_at="2026-01-01T00:00:00Z",
         )
         db.register_source(
-            source_id="s2",
+            source_id="web/https/s2.html",
             source_type="web",
-            file_path="web/https/s2.html",
             title="S2",
             content_hash="h",
             file_size=1,
@@ -437,9 +405,8 @@ class TestDeleteSourcesByType:
     def test_delete_by_type(self, db: MetadataDB) -> None:
         """指定 type のみ削除し、他 type は保持する."""
         db.register_source(
-            source_id="s1",
+            source_id="local/s1.md",
             source_type="local",
-            file_path="local/s1.md",
             title="S1",
             content_hash="h",
             file_size=1,
@@ -447,9 +414,8 @@ class TestDeleteSourcesByType:
             updated_at="2026-01-01T00:00:00Z",
         )
         db.register_source(
-            source_id="s2",
+            source_id="web/https/s2.html",
             source_type="web",
-            file_path="web/https/s2.html",
             title="S2",
             content_hash="h",
             file_size=1,
@@ -457,9 +423,8 @@ class TestDeleteSourcesByType:
             updated_at="2026-01-01T00:00:00Z",
         )
         db.register_source(
-            source_id="s3",
+            source_id="web/https/s3.html",
             source_type="web",
-            file_path="web/https/s3.html",
             title="S3",
             content_hash="h",
             file_size=1,
@@ -471,6 +436,6 @@ class TestDeleteSourcesByType:
 
         # web の 2 件が削除され、local の 1 件が残る
         assert db.source_count() == 1
-        assert db.get_source("s1") is not None
-        assert db.get_source("s2") is None
-        assert db.get_source("s3") is None
+        assert db.get_source("local/s1.md") is not None
+        assert db.get_source("web/https/s2.html") is None
+        assert db.get_source("web/https/s3.html") is None

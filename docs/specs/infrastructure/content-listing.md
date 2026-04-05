@@ -106,7 +106,7 @@ source_type: web（5件 / 全80件, 新しい順）
 - 各エントリ: 番号付きリスト。タイトル、source_id、published_at、ファイルサイズを表示
   - ファイルサイズ: MetadataDB の `file_size` カラムから取得する。人間が読みやすい単位（KB / MB）でフォーマットする
 - 該当するソースが0件の場合: `source_type: {type}（0件 / 全0件）`（ソート順は省略する）
-- Source の値形式は source_type によって異なる（URL、AT URI、ファイルパス等。詳細は [source-store.md](../source-store.md) の source_id 決定方式を参照）
+- Source の値は source_store 内の相対パス（全 source_type 共通）
 - クエリコスト: 一覧取得 1 クエリ + 総件数 COUNT 1 クエリの最大 2 クエリで完結する。全データは MetadataDB から取得し、VectorStore への追加クエリは発行しない
 
 ### CLI サブコマンド

@@ -1148,7 +1148,7 @@ class TestConverterConvert:
         )
         # .meta ファイルを配置
         meta_content = (
-            'source_id: "https://zenn.dev/alice/articles/slug"\n'
+            'url: "https://zenn.dev/alice/articles/slug"\n'
             "source_type: zenn\n"
             'title: "Sample Article Title"\n'
             'collected_at: "2026-01-15T10:30:00+09:00"\n'

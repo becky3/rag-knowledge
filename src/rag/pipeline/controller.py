@@ -40,7 +40,7 @@ from rag.store.models import (
     SourceRecord,
     SourceType,
 )
-from rag.store.resolve import resolve_published_at, resolve_source_id, resolve_title
+from rag.store.resolve import resolve_published_at, resolve_title
 from rag.store.source_store import SourceStore
 
 from rag.pipeline.ingesters._common import ProgressCallback
@@ -242,7 +242,7 @@ class PipelineController:
                 source_type=source_type,
                 status="active",
             )
-            if r.file_path not in _PIPELINE_EXCLUDE_FILES
+            if r.source_id not in _PIPELINE_EXCLUDE_FILES
         ]
 
         if not records:
@@ -256,7 +256,7 @@ class PipelineController:
         # 5-6. コンバート + インデックス
         async def _convert_and_index(record: SourceRecord) -> None:
             converted_path = self._converter.convert(
-                record.file_path,
+                record.source_id,
                 self._source_store.root_dir,
                 self._converted_store_dir,
             )
@@ -270,7 +270,7 @@ class PipelineController:
         summary = await self._run_processing_loop(
             records,
             process_fn=_convert_and_index,
-            get_file_path=lambda r: r.file_path,
+            get_file_path=lambda r: r.source_id,
             phase=PHASE_CONVERT_AND_INDEX,
             mode=PipelineMode.FULL_REBUILD,
             log_prefix="全再構築中に",
@@ -351,7 +351,7 @@ class PipelineController:
                 source_type=source_type,
                 status="active",
             )
-            if r.file_path not in _PIPELINE_EXCLUDE_FILES
+            if r.source_id not in _PIPELINE_EXCLUDE_FILES
         ]
 
         if not records:
@@ -365,7 +365,7 @@ class PipelineController:
         # 3. 全ファイルをコンバート
         def _convert_single(record: SourceRecord) -> None:
             self._converter.convert(
-                record.file_path,
+                record.source_id,
                 self._source_store.root_dir,
                 self._converted_store_dir,
             )
@@ -373,7 +373,7 @@ class PipelineController:
         return await self._run_processing_loop(
             records,
             process_fn=_convert_single,
-            get_file_path=lambda r: r.file_path,
+            get_file_path=lambda r: r.source_id,
             phase=PHASE_CONVERT,
             mode=PipelineMode.CONVERT_ONLY,
             log_prefix="コンバート再実行中に",
@@ -410,7 +410,7 @@ class PipelineController:
                 source_type=source_type,
                 status="active",
             )
-            if r.file_path not in _PIPELINE_EXCLUDE_FILES
+            if r.source_id not in _PIPELINE_EXCLUDE_FILES
         ]
 
         if not records:
@@ -423,7 +423,7 @@ class PipelineController:
 
         # 3. converted_store からインデックス再構築
         async def _index_single(record: SourceRecord) -> None:
-            converted_rel = get_converted_rel_path(record.file_path)
+            converted_rel = get_converted_rel_path(record.source_id)
             converted_path = self._converted_store_dir / converted_rel
             if not converted_path.exists():
                 raise ConversionSkippedError(
@@ -439,7 +439,7 @@ class PipelineController:
         summary = await self._run_processing_loop(
             records,
             process_fn=_index_single,
-            get_file_path=lambda r: r.file_path,
+            get_file_path=lambda r: r.source_id,
             phase=PHASE_INDEX,
             mode=PipelineMode.INDEX_ONLY,
             log_prefix="インデックス再構築中に",
@@ -692,7 +692,6 @@ class PipelineController:
     async def _handle_renamed(self, entry: ChangeEntry) -> None:
         """リネームファイルを処理する."""
         old_source_id = self._resolve_source_id(entry.old_path)
-        source_type = detect_source_type(entry.file_path)
 
         # コンバーター: 新パスで変換
         converted_path = self._converter.convert(
@@ -710,29 +709,13 @@ class PipelineController:
         metadata = self._build_metadata(entry.file_path)
         await self._indexer.add(new_source_id, converted_path, metadata)
 
-        # metadata.db 更新
-        if source_type == "local":
-            # local: source_id が変わるため DELETE + INSERT
-            try:
-                self.db.set_status(old_source_id, "deleted")
-            except KeyError:
-                pass
-            self._register_in_db(entry.file_path)
-        else:
-            now = datetime.now(timezone.utc).isoformat()
-            full_path = self._source_store.root_dir / entry.file_path
-            data = full_path.read_bytes()
-            content_hash = hashlib.sha256(data).hexdigest()
-            try:
-                self.db.update_source(
-                    old_source_id,
-                    file_path=entry.file_path,
-                    content_hash=content_hash,
-                    file_size=len(data),
-                    updated_at=now,
-                )
-            except KeyError:
-                self._register_in_db(entry.file_path)
+        # metadata.db 更新: source_id = file_path なのでリネーム = source_id 変更
+        # 全 source_type で DELETE old + INSERT new に統一
+        try:
+            self.db.set_status(old_source_id, "deleted")
+        except KeyError:
+            pass
+        self._register_in_db(entry.file_path)
 
     async def _handle_meta_only(self, entry: ChangeEntry) -> None:
         """.meta のみ変更を処理する."""
@@ -777,9 +760,7 @@ class PipelineController:
         source_type = detect_source_type(file_path)
         meta_dict = self._read_meta_dict(file_path)
 
-        source_id = resolve_source_id(
-            source_type, file_path, meta_dict,
-        )
+        source_id = file_path
         title = resolve_title(
             source_type, file_path, meta_dict,
         )
@@ -799,7 +780,6 @@ class PipelineController:
         self.db.register_source(
             source_id=source_id,
             source_type=source_type,
-            file_path=file_path,
             title=title,
             content_hash=content_hash,
             file_size=len(data),
@@ -829,15 +809,9 @@ class PipelineController:
     def _resolve_source_id(self, file_path: str) -> str:
         """file_path から source_id を解決する.
 
-        1. metadata.db にレコードがあればそちらを使用
-        2. ファイル + .meta から取得
+        source_id = file_path（source_store 内の相対パス）。
         """
-        record = self.db.get_source_by_path(file_path)
-        if record:
-            return record.source_id
-        source_type = detect_source_type(file_path)
-        meta_dict = self._read_meta_dict(file_path)
-        return resolve_source_id(source_type, file_path, meta_dict)
+        return file_path
 
     def _read_meta_dict(self, file_path: str) -> dict[str, str] | None:
         """ファイルの .meta を読み込む."""
@@ -859,9 +833,7 @@ class PipelineController:
         source_type = detect_source_type(file_path)
         meta_dict = self._read_meta_dict(file_path) or {}
 
-        source_id = resolve_source_id(
-            source_type, file_path, meta_dict,
-        )
+        source_id = file_path
         title = resolve_title(
             source_type, file_path, meta_dict,
         )
@@ -887,13 +859,12 @@ class PipelineController:
         record: SourceRecord,
     ) -> SourceMetadata:
         """SourceRecord から SourceMetadata を構築する."""
-        file_path = record.file_path
         source_id = record.source_id
         source_type = record.source_type
         title = record.title
         collected_at_db = record.collected_at
 
-        meta_dict = self._read_meta_dict(file_path) or {}
+        meta_dict = self._read_meta_dict(source_id) or {}
         collected_at = str(meta_dict.get("collected_at", collected_at_db))
 
         extra = dict(meta_dict)
@@ -910,4 +881,5 @@ class PipelineController:
 
 
 # --- モジュールレベルユーティリティ ---
-# resolve_source_id / resolve_title は rag.store.resolve に一元化
+# resolve_title / resolve_published_at は rag.store.resolve に一元化
+# source_id は file_path をそのまま使用（resolve 不要）

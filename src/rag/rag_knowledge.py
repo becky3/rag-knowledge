@@ -114,10 +114,11 @@ class VectorSearchItem:
     total_chunks: int = 0
     collected_at: str = ""
     section_path: str = ""
+    url: str = ""
 
     def to_dict(self) -> dict[str, object]:
         """JSON 出力用 dict に変換する."""
-        return {
+        d: dict[str, object] = {
             "text": self.text,
             "source_url": self.source_url,
             "distance": self.distance,
@@ -128,6 +129,9 @@ class VectorSearchItem:
             "collected_at": self.collected_at,
             "section_path": self.section_path,
         }
+        if self.url:
+            d["url"] = self.url
+        return d
 
 
 @dataclass
@@ -146,6 +150,7 @@ class BM25SearchItem:
         source_type: ソース種別
         total_chunks: 当該ソースのチャンク総数（0はレガシーデータ）
         section_path: 見出し階層（> 区切り）
+        url: 元 URL（取得元の外部 URL。存在する場合のみ）
     """
 
     text: str
@@ -158,10 +163,11 @@ class BM25SearchItem:
     total_chunks: int = 0
     collected_at: str = ""
     section_path: str = ""
+    url: str = ""
 
     def to_dict(self) -> dict[str, object]:
         """JSON 出力用 dict に変換する."""
-        return {
+        d: dict[str, object] = {
             "text": self.text,
             "source_url": self.source_url,
             "score": self.score,
@@ -173,6 +179,9 @@ class BM25SearchItem:
             "collected_at": self.collected_at,
             "section_path": self.section_path,
         }
+        if self.url:
+            d["url"] = self.url
+        return d
 
 
 @dataclass
@@ -223,6 +232,8 @@ def format_raw_search_results(raw: RawSearchResults) -> str:
 
             chunk_pos = _format_chunk_position(item.chunk_index, item.total_chunks)
             parts.append(f"Source: {item.source_url}")
+            if item.url:
+                parts.append(f"URL: {item.url}")
             parts.append(f"Title: {item.title}")
             parts.append(f"Chunk: {chunk_pos}")
             parts.append(f"Type: {item.source_type}")
@@ -571,6 +582,7 @@ class RAGKnowledgeService:
                 or result.metadata.get("crawled_at", "")
             )
             section_path = str(result.metadata.get("section_path", ""))
+            url = str(result.metadata.get("custom:url", ""))
             vector_items.append(
                 VectorSearchItem(
                     text=result.text,
@@ -582,6 +594,7 @@ class RAGKnowledgeService:
                     total_chunks=total_chunks,
                     collected_at=collected_at,
                     section_path=section_path,
+                    url=url,
                 )
             )
 
@@ -614,6 +627,7 @@ class RAGKnowledgeService:
                     meta.get("collected_at") or meta.get("crawled_at", "")
                 )
                 section_path = str(meta.get("section_path", ""))
+                url = str(meta.get("custom:url", ""))
                 bm25_items.append(
                     BM25SearchItem(
                         text=bm25_result.text,
@@ -626,6 +640,7 @@ class RAGKnowledgeService:
                         total_chunks=total_chunks,
                         collected_at=collected_at,
                         section_path=section_path,
+                        url=url,
                     )
                 )
 
@@ -856,7 +871,7 @@ def get_document(
 
         title = record.title
         source_type = record.source_type
-        file_path = record.file_path
+        file_path = record.source_id
 
         # メタデータ取得（collected_at, extra）— record を渡して DB 再問い合わせを回避
         source_meta = store.get_metadata(source_id, record=record)

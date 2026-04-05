@@ -64,7 +64,6 @@ class JournalIngester:
             now_iso = datetime.now(timezone.utc).isoformat()
 
             metadata = {
-                "source_id": rel_path,
                 "source_type": "journal",
                 "title": title,
                 "collected_at": now_iso,
@@ -148,7 +147,6 @@ class JournalIngester:
 
                 rel_path = f"journal/{repository}/{entry_id}.md"
                 metadata = {
-                    "source_id": rel_path,
                     "source_type": "journal",
                     "title": title,
                     "collected_at": collected_at,

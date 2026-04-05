@@ -69,7 +69,7 @@
 
 ### 重複検出
 
-[インジェスター共通仕様](common.md) のファイルシステムベース方式に従う。source_id（青空文庫作品 URL）からファイルパスを導出し、ファイルの存在有無で判定する。既存ファイルが存在する場合はスキップする（青空文庫のテキストは基本的に不変であり、上書きの必要性が低い）。
+[インジェスター共通仕様](common.md) のファイルシステムベース方式に従う。source_id（source_store 内の相対パス）で該当ファイルの存在有無を判定する。既存ファイルが存在する場合はスキップする（青空文庫のテキストは基本的に不変であり、上書きの必要性が低い）。
 
 ## 想定プロファイル
 
@@ -183,16 +183,14 @@ source_store/
 - ファイル名: `{book_id}.html`
 - .meta: データファイルと同階層に配置
 
-### source_id とファイルパスの対応
+### source_id（ファイルパス）
 
-| 対象 | source_id | ファイルパス |
-|------|-----------|------------|
-| カタログ | `aozora:catalog` | `aozora/catalog.csv` |
-| 作品 | `https://www.aozora.gr.jp/cards/{person_id}/files/{book_id}_{file_id}.html` | `aozora/{person_id}/{book_id}.html` |
+| 対象 | source_id | 例 |
+|------|-----------|-----|
+| カタログ | `aozora/catalog.csv` | — |
+| 作品 | `aozora/{person_id}/{book_id}.html` | `aozora/000035/1567.html` |
 
-カタログの source_id は URL ではなく固定文字列 `aozora:catalog` とする。カタログは単一のリソースであり、URL ベースの識別は不要。
-
-作品の source_id は青空文庫の図書カード XHTML URL とする。ファイルパスは `person_id` と `book_id` のみで構成し、`file_id` は含めない（同一作品に対するファイルパスの一意性を `book_id` で担保するため）。
+source_id は source_store 内の相対パスである。作品のファイルパスは `person_id` と `book_id` のみで構成し、`file_id` は含めない（同一作品に対するファイルパスの一意性を `book_id` で担保するため）。作品の元 URL は .meta の `url` フィールドに格納する。
 
 ### URL 変換規則
 
@@ -213,7 +211,7 @@ CSV の URL: https://www.aozora.gr.jp/cards/{person_id}/files/{book_id}_{file_id
 
 | フィールド | 型 | 内容 | 値の取得元 |
 |-----------|-----|------|-----------|
-| `source_id` | str | ソース識別子 | 固定値 `aozora:catalog` |
+| `source_id` | str | ソース識別子 | `aozora/catalog.csv` |
 | `source_type` | str | 媒体種別 | 固定値 `aozora` |
 | `title` | str | タイトル | 固定値 `"Aozora Bunko Catalog"` |
 | `collected_at` | str | 取り込みタイムスタンプ（ISO 8601） | 取り込み実行時の現在時刻 |
@@ -224,7 +222,7 @@ CSV の URL: https://www.aozora.gr.jp/cards/{person_id}/files/{book_id}_{file_id
 
 | フィールド | 型 | 内容 | 値の取得元 |
 |-----------|-----|------|-----------|
-| `source_id` | str | ソース識別子 | `https://www.aozora.gr.jp/cards/{person_id}/files/{book_id}_{file_id}.html` |
+| `source_id` | str | ソース識別子 | source_store 内の相対パス（例: `aozora/{person_id}/{book_id}.html`） |
 | `source_type` | str | 媒体種別 | 固定値 `aozora` |
 | `title` | str | 作品タイトル | CSV の「作品名」カラム |
 | `collected_at` | str | 取り込みタイムスタンプ（ISO 8601） | 取り込み実行時の現在時刻 |
@@ -233,6 +231,7 @@ CSV の URL: https://www.aozora.gr.jp/cards/{person_id}/files/{book_id}_{file_id
 
 | フィールド | 型 | 内容 | 値の取得元 |
 |-----------|-----|------|-----------|
+| `url` | str | 青空文庫作品 URL | `https://www.aozora.gr.jp/cards/{person_id}/files/{book_id}_{file_id}.html` |
 | `book_id` | str | 作品 ID | CSV の「作品ID」カラム |
 | `person_id` | str | 著者 ID | CSV の「人物ID」カラム |
 | `author` | str | 著者名 | CSV の「姓」+「名」カラム |
@@ -242,8 +241,8 @@ CSV の URL: https://www.aozora.gr.jp/cards/{person_id}/files/{book_id}_{file_id
 .meta ファイルの形式例（作品）:
 
 ```yaml
-source_id: "https://www.aozora.gr.jp/cards/000035/files/1567_14913.html"
 source_type: aozora
+url: "https://www.aozora.gr.jp/cards/000035/files/1567_14913.html"
 title: "Sample Title"
 collected_at: "2026-03-23T10:00:00+09:00"
 book_id: "001567"
@@ -408,7 +407,7 @@ flowchart TD
 | CSV の XHTML URL が欠落 | 該当作品をスキップし、エラーログを出力する |
 | GitHub Raw URL からの 404 | 該当作品をスキップし、エラーログを出力して処理を続行する |
 | XHTML の文字コード（Shift_JIS） | 生データのまま source_store に保存。エンコーディング変換はコンバーターが charset_normalizer で自動検出して実施する |
-| 同一作品の再取り込み | source_id からファイルパスを導出し、ファイルが存在する場合はスキップする |
+| 同一作品の再取り込み | source_id（= ファイルパス）に該当するファイルが存在する場合はスキップする |
 | バジェット上限到達 | 取得済みデータを配置し、上限到達の旨をログ出力する |
 | サーキットブレーカー発動 | 操作を中断し、取得済みデータを配置する。エラーの詳細をログ出力する |
 | 操作全体タイムアウト | 操作を中断し、取得済みデータを配置する |

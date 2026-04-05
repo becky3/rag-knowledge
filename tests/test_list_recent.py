@@ -39,7 +39,6 @@ def _register(
     db.register_source(
         source_id=source_id,
         source_type=source_type,
-        file_path=f"{source_type}/{source_id.replace('/', '_')}",
         title=title,
         content_hash="hash",
         file_size=file_size,

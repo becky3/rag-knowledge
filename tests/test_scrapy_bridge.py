@@ -186,14 +186,13 @@ class TestBuildMeta:
         )
         meta = _build_meta(record)
 
-        assert meta["source_id"] == "https://example.com/docs/guide"
         assert meta["source_type"] == "web"
         assert meta["title"] == "Guide Title"
         assert meta["collected_at"] == "2026-01-15T10:30:00+09:00"
         assert meta["url"] == "https://example.com/docs/guide"
 
-    def test_meta_has_exactly_five_fields(self) -> None:
-        """仕様書で定義された5フィールドのみ含むこと."""
+    def test_meta_has_exactly_four_fields(self) -> None:
+        """仕様書で定義された4フィールドのみ含むこと."""
         record = JsonlRecord(
             url="https://example.com/page",
             title="Test",
@@ -204,7 +203,7 @@ class TestBuildMeta:
         )
         meta = _build_meta(record)
         assert set(meta.keys()) == {
-            "source_id", "source_type", "title", "collected_at", "url",
+            "source_type", "title", "collected_at", "url",
         }
 
     def test_empty_title_preserved(self) -> None:
@@ -308,7 +307,7 @@ class TestImportToSourceStore:
         assert result.ingest.errors == 0
 
         # source_store にファイルが配置されている
-        record = source_store.db.get_source("https://example.com/page")
+        record = source_store.db.get_source("web/https/example.com/page.html")
         assert record is not None
         assert record.source_type == "web"
         assert record.title == "Test Page"
@@ -339,7 +338,6 @@ class TestImportToSourceStore:
         assert len(files) == 1
 
         meta = yaml.safe_load(files[0].read_text(encoding="utf-8"))
-        assert meta["source_id"] == "https://example.com/docs/guide"
         assert meta["source_type"] == "web"
         assert meta["title"] == "Guide Title"
         assert meta["collected_at"] == "2026-01-15T10:30:00+09:00"
@@ -598,6 +596,6 @@ class TestImportToSourceStore:
         assert result.ingest.overwritten == 1
 
         # 最後の配置が有効
-        record = source_store.db.get_source("https://example.com/page")
+        record = source_store.db.get_source("web/https/example.com/page.html")
         assert record is not None
         assert record.title == "V2"

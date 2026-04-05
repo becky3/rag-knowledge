@@ -131,7 +131,6 @@ source_store 内の相対パスを source_id として使用する。
 
 | フィールド | 型 | 内容 |
 |-----------|-----|------|
-| `source_id` | str | `journal/{repository}/{entry_id}.md` |
 | `source_type` | str | `"journal"` |
 | `title` | str | エントリタイトル |
 | `collected_at` | str | 登録日時（ISO 8601 UTC） |
@@ -140,7 +139,6 @@ source_store 内の相対パスを source_id として使用する。
 #### 形式例
 
 ```yaml
-source_id: "journal/rag-knowledge/20260323-143000-session-summary.md"
 source_type: journal
 title: "Session Summary: Pipeline Migration"
 collected_at: "2026-03-23T14:30:00+00:00"

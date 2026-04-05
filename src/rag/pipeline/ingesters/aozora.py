@@ -39,9 +39,6 @@ GITHUB_RAW_BASE = (
 # カタログの source_store 内の相対パス
 CATALOG_REL_PATH = "aozora/catalog.csv"
 
-# カタログの source_id
-CATALOG_SOURCE_ID = "aozora:catalog"
-
 # 検索結果の最大表示件数（ハードリミット）
 MAX_SEARCH_LIMIT = 2000
 
@@ -124,7 +121,6 @@ class AozoraIngester:
         # source_store に配置
         csv_bytes = csv_text.encode("utf-8")
         metadata = {
-            "source_id": CATALOG_SOURCE_ID,
             "source_type": "aozora",
             "title": "Aozora Bunko Catalog",
             "collected_at": now_iso(),
@@ -402,14 +398,14 @@ class AozoraIngester:
             return False
         raw_bytes: bytes = resp.content
 
-        # source_id
-        source_id = xhtml_url
-        if source_id.startswith("http://"):
-            source_id = source_id.replace("http://", "https://", 1)
+        # 元 URL の正規化（http → https）
+        url = xhtml_url
+        if url.startswith("http://"):
+            url = url.replace("http://", "https://", 1)
 
         # .meta 生成
         metadata: dict[str, Any] = {
-            "source_id": source_id,
+            "url": url,
             "source_type": "aozora",
             "title": record.get(COL_TITLE, ""),
             "collected_at": now_iso(),

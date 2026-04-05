@@ -93,7 +93,8 @@ MCP クライアントからの rag_search ツール呼び出し。
 | 項目 | 内容 | 出力条件 | 例 |
 |------|------|---------|-----|
 | スコア | ベクトル検索: `distance`、BM25: `score` | 常時 | `[distance=0.234]`、`[score=4.521]` |
-| Source | ソース識別子 | 常時 | `Source: https://example.com/docs/guide` |
+| Source | ソース識別子（source_store 内の相対パス） | 常時 | `Source: web/https/example.com/docs/guide.html` |
+| URL | 元 URL（`.meta` の `url` フィールド。存在する場合のみ） | 値がある場合のみ | `URL: https://example.com/docs/guide` |
 | Title | コンテンツのタイトル | 常時 | `Title: ガイドページ` |
 | Chunk | チャンク位置（現在位置/全体数、1 始まり表示） | 常時 | `Chunk: 3/15` |
 | Type | ソース種別 | 常時 | `Type: web` |
@@ -102,8 +103,7 @@ MCP クライアントからの rag_search ツール呼び出し。
 
 メタデータの後に空行を挟み、チャンクテキストを出力する。
 
-レスポンスの Source 値は、[source-store.md](source-store.md) で定義された `source_id` を使用する。媒体ごとの `source_id` 形式は source-store.md の「source_id の決定方式」テーブルを参照。
-この値をそのまま rag_get_document の `source_id` パラメータとして使用できる。
+レスポンスの Source 値は、[source-store.md](source-store.md) で定義された `source_id`（= source_store 内の相対パス）を使用する。この値をそのまま rag_get_document の `source_id` パラメータとして使用できる。元 URL がある場合は URL 行に表示される。
 
 **レスポンス形式例（ベクトル検索結果 2 件 + BM25 検索結果 1 件）:**
 
@@ -111,7 +111,8 @@ MCP クライアントからの rag_search ツール呼び出し。
 ## ベクトル検索結果 (意味的類似度)
 
 ### Result 1 [distance=0.234]
-Source: https://example.com/docs/guide
+Source: web/https/example.com/docs/guide.html
+URL: https://example.com/docs/guide
 Title: ガイドページ
 Chunk: 3/15
 Type: web
@@ -121,7 +122,8 @@ Collected: 2025-01-15T10:30:00Z
 チャンクテキストがここに入る...
 
 ### Result 2 [distance=0.456]
-Source: at://did:plc:abc123/app.bsky.feed.post/xyz789
+Source: bluesky/did：plc：abc123/2026/01/xyz789.json
+URL: https://bsky.app/profile/alice.bsky.social/post/xyz789
 Title: Sample post
 Chunk: 1/1
 Type: bluesky
@@ -132,7 +134,8 @@ Collected: 2025-01-20T14:00:00Z
 ## BM25 検索結果 (キーワード一致)
 
 ### Result 1 [score=4.521]
-Source: https://zenn.dev/alice/articles/sample
+Source: zenn/alice/articles/sample.json
+URL: https://zenn.dev/alice/articles/sample
 Title: サンプル記事
 Chunk: 5/20
 Type: zenn
@@ -193,7 +196,7 @@ MCP クライアントからの rag_get_document ツール呼び出し、また�
 **レスポンス形式例:**
 
 ```
-Source: https://example.com/docs/guide
+Source: web/https/example.com/docs/guide.html
 Title: ガイドページ
 Type: web
 Format: text

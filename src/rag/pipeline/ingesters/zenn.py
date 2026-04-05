@@ -166,7 +166,7 @@ class ZennIngester:
                 # .meta 生成
                 path = article.get("path", f"/{username}/articles/{slug}")
                 metadata = {
-                    "source_id": f"https://zenn.dev{path}",
+                    "url": f"https://zenn.dev{path}",
                     "source_type": "zenn",
                     "title": article.get("title", ""),
                     "collected_at": now_iso(),
@@ -238,7 +238,7 @@ class ZennIngester:
                 # .meta 生成
                 path = scrap.get("path", f"/{username}/scraps/{slug}")
                 metadata = {
-                    "source_id": f"https://zenn.dev{path}",
+                    "url": f"https://zenn.dev{path}",
                     "source_type": "zenn",
                     "title": scrap.get("title", ""),
                     "collected_at": now_iso(),

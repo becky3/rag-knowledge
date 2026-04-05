@@ -118,7 +118,6 @@ def _build_meta(record: JsonlRecord) -> dict[str, str]:
     仕様: docs/specs/site-ingest.md「.meta 生成」セクション
     """
     return {
-        "source_id": record.url,
         "source_type": "web",
         "title": record.title,
         "collected_at": record.collected_at,

@@ -36,7 +36,6 @@ class TestWriteAndReadMeta:
         data_file.write_text("<html></html>")
 
         metadata = {
-            "source_id": "https://example.com/test",
             "source_type": "web",
             "title": "Test Page",
             "collected_at": "2026-01-15T10:30:00+09:00",
@@ -46,7 +45,6 @@ class TestWriteAndReadMeta:
         write_meta(data_file, metadata)
         result = read_meta(data_file)
 
-        assert result["source_id"] == "https://example.com/test"
         assert result["source_type"] == "web"
         assert result["title"] == "Test Page"
         assert result["url"] == "https://example.com/test"
@@ -57,7 +55,6 @@ class TestWriteAndReadMeta:
         data_file.write_text("<html></html>")
 
         metadata = {
-            "source_id": "https://example.com/article",
             "title": "テスト記事タイトル",
             "source_type": "web",
             "collected_at": "2026-01-15T10:30:00+09:00",
@@ -74,7 +71,7 @@ class TestWriteAndReadMeta:
         data_file.write_text("{}")
 
         metadata = {
-            "source_id": "at://did:plc:abc123/app.bsky.feed.post/xyz789",
+            "at_uri": "at://did:plc:abc123/app.bsky.feed.post/xyz789",
             "source_type": "bluesky",
             "title": "Sample post text",
             "collected_at": "2026-01-15T10:30:00+09:00",
@@ -103,7 +100,7 @@ class TestWriteAndReadMeta:
         data_file.write_text("<html></html>")
 
         metadata = {
-            "source_id": "https://zenn.dev/alice/articles/sample",
+            "url": "https://zenn.dev/alice/articles/sample",
             "source_type": "zenn",
             "title": "Sample Article",
             "collected_at": "2026-01-15T10:30:00+09:00",

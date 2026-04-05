@@ -56,7 +56,7 @@ Zenn（zenn.dev）の記事およびスクラップを API 経由で取得し、
 
 ### 重複検出
 
-[インジェスター共通仕様](common.md) のファイルシステムベース方式に従う。source_id（Zenn 記事 URL）からファイルパスを導出し、ファイルの存在有無で判定する。
+[インジェスター共通仕様](common.md) のファイルシステムベース方式に従う。source_id（source_store 内の相対パス）で該当ファイルの存在有無を判定する。
 
 デフォルト動作はスキップモード（既存ファイルがあれば上書きしない）。明示的に `force` を指定した場合のみ上書きする。定期的な取り込み運用では記事の更新頻度は低く、毎回上書き → 変換 → インデックス再構築の無駄を避ける。
 
@@ -129,14 +129,14 @@ source_store/
 - ファイル名: スラッグに `.json` 拡張子を付与
 - .meta: データファイルと同階層に配置
 
-### source_id とファイルパスの対応
+### source_id（ファイルパス）
 
-| コンテンツ種別 | source_id | ファイルパス |
-|--------------|-----------|------------|
-| 記事 | `https://zenn.dev/{username}/articles/{slug}` | `zenn/{username}/articles/{slug}.json` |
-| スクラップ | `https://zenn.dev/{username}/scraps/{slug}` | `zenn/{username}/scraps/{slug}.json` |
+| コンテンツ種別 | source_id | 例 |
+|--------------|-----------|-----|
+| 記事 | `zenn/{username}/articles/{slug}.json` | `zenn/alice/articles/my-post.json` |
+| スクラップ | `zenn/{username}/scraps/{slug}.json` | `zenn/alice/scraps/my-scrap.json` |
 
-source_id はコンテンツの公開 URL であり、安定した識別子として機能する。
+source_id は source_store 内の相対パスである。コンテンツの公開 URL は .meta の `url` フィールドに格納する。
 
 ### .meta サイドカーファイル
 
@@ -146,7 +146,7 @@ source_id はコンテンツの公開 URL であり、安定した識別子と�
 
 | フィールド | 型 | 内容 | 値の取得元 |
 |-----------|-----|------|-----------|
-| `source_id` | str | ソース識別子 | `https://zenn.dev{path}`（API レスポンスの `path` フィールド） |
+| `source_id` | str | ソース識別子 | source_store 内の相対パス（例: `zenn/{username}/articles/{slug}.json`） |
 | `source_type` | str | 媒体種別 | 固定値 `zenn` |
 | `title` | str | 記事タイトル | API レスポンスの `title` フィールド |
 | `collected_at` | str | 取り込みタイムスタンプ（ISO 8601） | 取り込み実行時の現在時刻 |
@@ -155,6 +155,7 @@ Zenn 固有フィールド:
 
 | フィールド | 型 | 内容 | 値の取得元 |
 |-----------|-----|------|-----------|
+| `url` | str | コンテンツの公開 URL | `https://zenn.dev{path}`（API レスポンスの `path` フィールド） |
 | `slug` | str | コンテンツスラッグ | API レスポンスの `slug` フィールド |
 | `content_type` | str | コンテンツ種別 | `article` または `scrap` |
 | `article_type` | str | 記事種別（記事のみ） | API レスポンスの `article_type` フィールド（`tech`, `idea` 等）。スクラップでは空文字列 |
@@ -168,8 +169,8 @@ Zenn 固有フィールド:
 .meta ファイルの形式例（記事）:
 
 ```yaml
-source_id: "https://zenn.dev/alice/articles/sample-article"
 source_type: zenn
+url: "https://zenn.dev/alice/articles/sample-article"
 title: "Sample Article Title"
 collected_at: "2026-01-15T10:30:00+09:00"
 slug: "sample-article"
@@ -188,8 +189,8 @@ username: "alice"
 .meta ファイルの形式例（スクラップ）:
 
 ```yaml
-source_id: "https://zenn.dev/alice/scraps/f0b53bc3944bb3"
 source_type: zenn
+url: "https://zenn.dev/alice/scraps/f0b53bc3944bb3"
 title: "Sample Scrap Title"
 collected_at: "2026-01-15T10:30:00+09:00"
 slug: "f0b53bc3944bb3"
@@ -404,8 +405,8 @@ Zenn は公式の API ドキュメントを公開していない。以下は観�
 | `article` オブジェクトが空 | 該当記事をスキップする。空の JSON ファイルは source_store に配置しない |
 | 下書き・非公開記事 | API が公開記事のみを返すため、考慮不要 |
 | 大量記事ユーザー（480 件超 = 10 ページ超） | ページネーション走査上限（10 ページ）で打ち切る。取得済み記事を処理し、上限到達の旨を警告ログに出力する |
-| 同一記事の再取り込み（デフォルト） | source_id（記事の公開 URL）からファイルパスを導出し、既存ファイルがあればスキップする |
-| 同一記事の再取り込み（`force` 指定時） | source_id（記事の公開 URL）からファイルパスを導出し、既存ファイルを上書きする |
+| 同一記事の再取り込み（デフォルト） | source_id（ファイルパス）に対応するファイルが存在すればスキップする |
+| 同一記事の再取り込み（`force` 指定時） | source_id（ファイルパス）に対応する既存ファイルを上書きする |
 | バジェット上限到達 | 取得済みデータを配置し、上限到達の旨をログ出力する |
 | サーキットブレーカー発動 | 操作を中断し、取得済みデータを配置する。エラーの詳細をログ出力する |
 | 操作全体タイムアウト | 操作を中断し、取得済みデータを配置する |
@@ -415,8 +416,8 @@ Zenn は公式の API ドキュメントを公開していない。以下は観�
 | `content_type` に無効な値を指定 | バリデーションエラーとして拒否する。有効値: `articles`, `scraps`, `all` |
 | スクラップのコメントが 0 件 | raw JSON をそのまま source_store に保存する（インジェスターは無加工保存）。コンバーターが空テキストとして変換をスキップする |
 | スクラップのコメント `body_html` が全て空 | raw JSON をそのまま source_store に保存する。コンバーターが空テキストとして変換をスキップする |
-| 同一スクラップの再取り込み（デフォルト） | source_id（スクラップの公開 URL）からファイルパスを導出し、既存ファイルがあればスキップする |
-| 同一スクラップの再取り込み（`force` 指定時） | source_id（スクラップの公開 URL）からファイルパスを導出し、既存ファイルを上書きする |
+| 同一スクラップの再取り込み（デフォルト） | source_id（ファイルパス）に対応するファイルが存在すればスキップする |
+| 同一スクラップの再取り込み（`force` 指定時） | source_id（ファイルパス）に対応する既存ファイルを上書きする |
 | Zenn API のレート制限（429） | ConstrainedClient のサーキットブレーカーで検出される。連続失敗として計上し、閾値超過で操作を中断する |
 | .meta ファイルの書き込みに失敗した場合 | ファイル物理削除禁止制約により、配置済みデータファイルのロールバックは行わない。エラーログを出力して処理を続行する |
 

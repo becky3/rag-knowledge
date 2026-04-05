@@ -54,7 +54,7 @@
 
 ### 重複検出
 
-- ファイルシステムベースで行う。source_id からファイルパスを導出し、ファイルの存在有無で判定する
+- ファイルシステムベースで行う。source_id（= ファイルパス）の存在有無で判定する
 - metadata.db には依存しない
 
 ### インジェスター間の委譲
@@ -94,7 +94,7 @@
 既存の MCP ツール名・パラメータを維持する。内部的な処理フローが以下のように変更される:
 
 - **出力形式**: source_store への配置結果（配置ファイル数、スキップ数、エラー数）とパイプライン処理結果（コンバート・インデックス構築の処理件数）を統合して返す
-- **source_id**: 各媒体の source_id 決定方式は [source-store.md](../source-store.md) の定義に従う
+- **source_id**: 全媒体共通で source_store 内の相対パスを使用する。詳細は [source-store.md](../source-store.md) の「source_id の決定方式」を参照
 - **重複検出**: metadata.db / ベクトル DB 照合からファイルシステム存在チェックに変更（本仕様書の「重複検出方式」セクション参照）
 
 ### 設定項目
@@ -188,19 +188,19 @@ flowchart TB
 
 インジェスターは metadata.db に依存せず、ファイルシステムのみで重複を検出する。
 
-| 媒体 | source_id | ファイルパス導出 | 重複時の動作 |
-|------|-----------|----------------|-------------|
-| web | URL | URL パス変換規則で一意に決定 | 上書き |
-| bluesky | AT URI | DID + 年月 + rkey で一意に決定 | スキップ |
-| zenn | Zenn URL | username + slug で一意に決定 | スキップ（force 指定時は上書き） |
-| youtube | YouTube 動画 URL | channel_id + video_id で一意に決定 | 上書き |
-| aozora | 青空文庫 URL | person_id + book_id で一意に決定 | スキップ |
-| local | 相対パス | ユーザー指定パスで一意に決定 | `upload_mode` による分岐（`fail`: エラー/スキップ、`replace`: 上書き） |
-| journal | 相対パス | リポジトリ名 + entry_id で一意に決定 | 上書き |
+| 媒体 | ファイルパス（= source_id）の決定方式 | 重複時の動作 |
+|------|--------------------------------------|-------------|
+| web | URL パス変換規則で一意に決定 | 上書き |
+| bluesky | DID + 年月 + rkey で一意に決定 | スキップ |
+| zenn | username + slug で一意に決定 | スキップ（force 指定時は上書き） |
+| youtube | channel_id + video_id で一意に決定 | 上書き |
+| aozora | person_id + book_id で一意に決定 | スキップ |
+| local | ユーザー指定パスで一意に決定 | `upload_mode` による分岐（`fail`: エラー/スキップ、`replace`: 上書き） |
+| journal | リポジトリ名 + entry_id で一意に決定 | 上書き |
 
 重複検出の手順:
 
-1. source_id からファイルパスを導出する（各媒体の変換規則に基づく）
+1. ファイルパス（= source_id）を決定する（各媒体の変換規則に基づく）
 2. source_store 内の該当パスにファイルが存在するか確認する
 3. 存在する場合: 媒体の方針に従い上書きまたはスキップする
 4. 存在しない場合: 新規ファイルとして配置する

@@ -17,11 +17,14 @@ NULL_COMMIT_HASH = "0" * 40
 
 @dataclass(frozen=True)
 class SourceRecord:
-    """sources テーブルのレコード."""
+    """sources テーブルのレコード.
+
+    source_id は source_store 内の相対パス（file_path）と同一の値。
+    source_store 層では file_path として、それより上位では source_id として扱う。
+    """
 
     source_id: str
     source_type: SourceType
-    file_path: str
     title: str
     status: SourceStatus
     content_hash: str
