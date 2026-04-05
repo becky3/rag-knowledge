@@ -85,6 +85,9 @@ class _EnvLoader(BaseSettings):
     # サイト一括取り込み一時ディレクトリ（Scrapy クロール結果の一時保管）
     site_ingest_temp_dir: str = ".tmp/site_ingest"
 
+    # Embedding プロバイダーの処理能力に応じて並列数を調整する
+    rag_embedding_concurrency: int = Field(default=32, ge=1)
+
 
 # .env 管理フィールド名の集合（重複検出に使用）
 _ENV_FIELD_NAMES = frozenset(_EnvLoader.model_fields.keys())
@@ -122,6 +125,7 @@ class RAGSettings(BaseModel):
     rag_youtube_whisper_model: str
     rag_youtube_whisper_device: Literal["cuda", "cpu"]
     site_ingest_temp_dir: str
+    rag_embedding_concurrency: int = Field(ge=1)
 
     # --- config.toml から取得（共通設定値） ---
 

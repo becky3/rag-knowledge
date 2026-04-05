@@ -694,6 +694,28 @@ class TestRunFullRebuild:
         assert summary.total_files == 0
         assert summary.processed == 0
 
+    async def test_concurrent_full_rebuild(
+        self,
+        controller: tuple[PipelineController, StubConverter, StubIndexer],
+        workspace: dict[str, Path],
+    ) -> None:
+        """concurrency > 1 で全再構築が正常に完了する."""
+        ctrl, converter, indexer = controller
+        for name in ["a.txt", "b.txt", "c.txt"]:
+            _place_local_file(workspace["source"], f"local/{name}")
+        ctrl.commit("initial")
+        await ctrl.run_incremental()
+
+        converter.converted.clear()
+        indexer.added.clear()
+
+        summary = await ctrl.run_full_rebuild(concurrency=3)
+
+        assert summary.mode == PipelineMode.FULL_REBUILD
+        assert summary.processed == 3
+        assert len(converter.converted) == 3
+        assert len(indexer.added) == 3
+
 
 class TestRunConvertOnly:
     """コンバートのみ再実行のテスト."""
@@ -825,6 +847,48 @@ class TestRunIndexOnly:
         summary = await ctrl.run_index_only()
         assert summary.skipped == 1
         assert summary.processed == 0
+
+    async def test_concurrent_index_only(
+        self,
+        controller: tuple[PipelineController, StubConverter, StubIndexer],
+        workspace: dict[str, Path],
+    ) -> None:
+        """concurrency > 1 で複数ソースが並列にインデックスされる."""
+        ctrl, _, indexer = controller
+        for name in ["a.txt", "b.txt", "c.txt"]:
+            _place_local_file(workspace["source"], f"local/{name}")
+        ctrl.commit("initial")
+        await ctrl.run_incremental()
+
+        indexer.added.clear()
+
+        summary = await ctrl.run_index_only(concurrency=2)
+
+        assert summary.mode == PipelineMode.INDEX_ONLY
+        assert summary.processed == 3
+        assert summary.skipped == 0
+        assert len(indexer.added) == 3
+
+    async def test_concurrent_index_handles_errors(
+        self,
+        controller: tuple[PipelineController, StubConverter, StubIndexer],
+        workspace: dict[str, Path],
+    ) -> None:
+        """concurrency > 1 でエラーが発生しても他ソースの処理は継続する."""
+        ctrl, _, indexer = controller
+        for name in ["a.txt", "b.txt", "c.txt"]:
+            _place_local_file(workspace["source"], f"local/{name}")
+        ctrl.commit("initial")
+        await ctrl.run_incremental()
+
+        indexer.added.clear()
+        indexer.fail_on = {"local/b.txt"}
+
+        summary = await ctrl.run_index_only(concurrency=4)
+
+        assert summary.processed == 2
+        assert summary.skipped == 1
+        assert len(summary.errors) == 1
 
 
 class TestPipelineHistory:

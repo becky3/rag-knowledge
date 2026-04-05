@@ -417,6 +417,12 @@ def main() -> None:
         default=False,
         help="前回 index/full rebuild 以降に更新がなければスキップ（index/full のみ有効）",
     )
+    rebuild_parser.add_argument(
+        "--concurrency",
+        type=int,
+        default=None,
+        help="インデックス再構築の並列数（未指定時は .env の RAG_EMBEDDING_CONCURRENCY）",
+    )
     _add_output_option(rebuild_parser)
     # stats サブコマンド
     stats_parser = subparsers.add_parser("stats", help="ナレッジベースの統計情報を表示")
@@ -1326,10 +1332,23 @@ async def run_rebuild(args: argparse.Namespace) -> None:
             else:
                 logger.info("source_store に変更なし（コミットなし）")
 
+        concurrency: int = (
+            args.concurrency
+            if args.concurrency is not None
+            else settings.rag_embedding_concurrency
+        )
+        if args.concurrency is not None and args.concurrency < 1:
+            msg = "--concurrency は 1 以上を指定してください"
+            if json_out:
+                _output_error(msg)
+            logger.error(msg)
+            sys.exit(1)
+
         if mode == "full":
             summary = await controller.run_full_rebuild(
                 source_type=source_type,
                 progress_callback=progress_cb,
+                concurrency=concurrency,
             )
         elif mode == "convert":
             summary = await controller.run_convert_only(
@@ -1340,6 +1359,7 @@ async def run_rebuild(args: argparse.Namespace) -> None:
             summary = await controller.run_index_only(
                 source_type=source_type,
                 progress_callback=progress_cb,
+                concurrency=concurrency,
             )
         else:
             summary = await controller.run_incremental(

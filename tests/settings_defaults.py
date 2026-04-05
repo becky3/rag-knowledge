@@ -23,6 +23,7 @@ TEST_SETTINGS_DEFAULTS: dict[str, object] = {
     "rag_http_port": 8081,
     "rag_dns_rebinding_protection": True,
     "rag_debug_log_enabled": False,
+    "rag_embedding_concurrency": 32,
     # config.toml フィールド
     "embedding_model_local": "nomic-embed-text",
     "embedding_model_online": "text-embedding-3-small",
