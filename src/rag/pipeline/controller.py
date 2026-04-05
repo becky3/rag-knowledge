@@ -538,8 +538,6 @@ class PipelineController:
         ループ + try/except + progress + PipelineSummary 組み立てを一元化する。
         process_fn は sync / async どちらも受け付ける。
         """
-        is_async = inspect.iscoroutinefunction(process_fn)
-
         processed = 0
         skipped = 0
         errors: list[str] = []
@@ -549,8 +547,8 @@ class PipelineController:
             file_path = get_file_path(item)
             try:
                 result = process_fn(item)
-                if is_async:
-                    await result  # type: ignore[misc]
+                if inspect.isawaitable(result):
+                    await result
                 processed += 1
             except ConversionSkippedError as e:
                 logger.warning(
