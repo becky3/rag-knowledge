@@ -49,4 +49,6 @@ def get_embedding_provider(
         base_url=settings.lmstudio_base_url,
         model=settings.embedding_model_local,
         prefix_enabled=settings.embedding_prefix_enabled,
+        retry_count=settings.rag_embedding_retry_count,
+        retry_base_delay=settings.rag_embedding_retry_base_delay,
     )

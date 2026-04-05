@@ -6,6 +6,9 @@ embedding_model_local = "text-embedding-nomic-embed-text-v2-moe"
 embedding_model_online = "text-embedding-3-small"
 # Embedding 入力にタスク種別プレフィックス（search_query: / search_document:）を付与
 embedding_prefix_enabled = true
+# 高並列時の一時的な接続タイムアウトに対応するリトライ（指数バックオフ）
+rag_embedding_retry_count = 3
+rag_embedding_retry_base_delay = 1.0
 
 # チャンキング
 rag_chunk_size = 200

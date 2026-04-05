@@ -45,12 +45,13 @@ MCP サーバーとして独立動作し、18 個のツールを提供する。
 | デバッグ | `RAG_DEBUG_LOG_ENABLED` |
 | YouTube Whisper | `RAG_YOUTUBE_WHISPER_MODEL`, `RAG_YOUTUBE_WHISPER_DEVICE` |
 | サイト一括取り込み | `SITE_INGEST_TEMP_DIR` |
+| Embedding 並列 | `RAG_EMBEDDING_CONCURRENCY` |
 
 #### `config.toml`（共通設定値）
 
 | カテゴリ | 設定項目 |
 |---------|---------|
-| Embedding モデル | `embedding_model_local`, `embedding_model_online`, `embedding_prefix_enabled` |
+| Embedding モデル | `embedding_model_local`, `embedding_model_online`, `embedding_prefix_enabled`, `rag_embedding_retry_count`, `rag_embedding_retry_base_delay` |
 | チャンキング | `rag_chunk_size`, `rag_chunk_overlap`, `rag_embedding_context_length`, `rag_worst_token_char_ratio` |
 | 検索 | `rag_retrieval_count`, `rag_similarity_threshold` |
 | ハイブリッド検索 | `rag_hybrid_search_enabled`, `rag_vector_weight`, `rag_bm25_k1`, `rag_bm25_b`, `rag_min_combined_score` |

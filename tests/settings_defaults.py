@@ -28,6 +28,8 @@ TEST_SETTINGS_DEFAULTS: dict[str, object] = {
     "embedding_model_local": "nomic-embed-text",
     "embedding_model_online": "text-embedding-3-small",
     "embedding_prefix_enabled": True,
+    "rag_embedding_retry_count": 3,
+    "rag_embedding_retry_base_delay": 1.0,
     "rag_chunk_size": 200,
     "rag_chunk_overlap": 30,
     "rag_retrieval_count": 3,
