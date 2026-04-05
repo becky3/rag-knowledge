@@ -224,6 +224,7 @@ MCP 対応コマンド:
 | `migrate-journal --dir <d> --repository <r>` | （CLI のみ） |
 
 **MCP テスト時の注意:**
+
 - A-2 (PDF): 大きい PDF は MCP パラメータサイズ制約で失敗する場合がある。失敗時は CLI で代替実行する
 - A-4 (crawl-documents): HTTP モード非対応のため MCP テスト時はスキップする
 
@@ -366,13 +367,39 @@ QA 完了後、worktree 環境を片付ける。ChromaDB・HTTP サーバー等�
    taskkill //PID <pid> //T //F
    ```
 
-2. worktree ディレクトリを削除する:
+2. worktree 内の未コミット変更を確認する:
 
    ```bash
-   git worktree remove <worktree-path>
+   git -C "<worktree-path>" status --porcelain
    ```
 
-3. worktree の参照をクリーンアップする:
+   - **出力が空の場合**: 未コミット変更なし。ステップ 3 に進む
+   - **出力がある場合**: 未コミット変更あり。以下の警告をユーザーに表示し、確認を取る:
+
+     ```
+     worktree に未コミットの変更があります:
+     <git status --porcelain の出力>
+
+     この worktree を削除すると上記の変更は失われます。
+     削除しますか？ (y/n)
+     ```
+
+     - ユーザーが `n` を選択した場合: worktree の削除をスキップし、パスを表示して手動対応を促す
+     - ユーザーが `y` を選択した場合: ステップ 3 に進む（`--force` の使用を許可）
+
+3. worktree ディレクトリを削除する:
+
+   ```bash
+   # 未コミット変更がない場合
+   git worktree remove "<worktree-path>"
+
+   # 未コミット変更ありでユーザーが削除を承認した場合のみ
+   git worktree remove --force "<worktree-path>"
+   ```
+
+   `--force` はステップ 2 でユーザーが明示的に削除を承認した場合にのみ使用する。未確認の状態で `--force` を使用してはならない。
+
+4. worktree の参照をクリーンアップする:
 
    ```bash
    git worktree prune
