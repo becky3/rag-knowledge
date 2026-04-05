@@ -183,7 +183,7 @@ source_store 層では `file_path` として、metadata_db 以上の層では `s
 | aozora | `aozora/{person_id}/{book_id}.html` / `aozora/catalog.csv` | `aozora/000035/001567.html` |
 | journal | `journal/{repository}/{entry_id}.md` | `journal/rag-knowledge/20260323-143000-session-summary.md` |
 
-元 URL は .meta の `url` フィールド（web, zenn, youtube, aozora, bluesky）に保持される。bluesky は追加で `at_uri` フィールド（AT Protocol 識別子）も持つ。検索結果には `custom:url` / `custom:at_uri` として含まれる。
+元 URL は .meta の `url` フィールド（web, zenn, youtube, aozora, bluesky）に保持される。bluesky は追加で `at_uri` フィールド（AT Protocol 識別子）も持つ。これらは検索インデックスでは `custom:url` / `custom:at_uri` のメタデータキーとして保持される。
 
 ### URL パス変換規則
 

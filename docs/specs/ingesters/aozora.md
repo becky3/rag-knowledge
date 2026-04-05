@@ -188,7 +188,7 @@ source_store/
 | 対象 | source_id | 例 |
 |------|-----------|-----|
 | カタログ | `aozora/catalog.csv` | — |
-| 作品 | `aozora/{person_id}/{book_id}.html` | `aozora/000035/1567.html` |
+| 作品 | `aozora/{person_id}/{book_id}.html` | `aozora/000035/001567.html` |
 
 source_id は source_store 内の相対パスである。作品のファイルパスは `person_id` と `book_id` のみで構成し、`file_id` は含めない（同一作品に対するファイルパスの一意性を `book_id` で担保するため）。作品の元 URL は .meta の `url` フィールドに格納する。
 
