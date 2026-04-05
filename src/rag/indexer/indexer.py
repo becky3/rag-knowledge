@@ -8,11 +8,8 @@ converted_store のテキストファイルからチャンキング・Embedding�
 
 from __future__ import annotations
 
-import asyncio
-import concurrent.futures
 import logging
 from pathlib import Path
-from typing import Any
 
 from rag.bm25_index import BM25Index
 from rag.chunker import chunk_text
@@ -78,7 +75,7 @@ class Indexer:
         # overlap が実効サイズ以上だと chunk_text が ValueError になるためクランプ
         self._effective_overlap = min(chunk_overlap, self._effective_size_prose - 1)
 
-    def add(
+    async def add(
         self,
         source_id: str,
         converted_path: Path,
@@ -96,7 +93,7 @@ class Indexer:
             ConnectionError: Embedding プロバイダーに接続できない場合
         """
         _validate_source_id(source_id, metadata)
-        self._check_embedding_available()
+        await self._check_embedding_available()
         text = self._read_file(converted_path)
         if not text.strip():
             logger.info("空ファイルのためスキップ: %s", converted_path)
@@ -106,12 +103,12 @@ class Indexer:
         if not chunk_texts:
             return
 
-        self._add_to_indices(source_id, chunk_texts, metadata)
+        await self._add_to_indices(source_id, chunk_texts, metadata)
         logger.info(
             "インデックスに追加: %s (%d チャンク)", source_id, len(chunk_texts),
         )
 
-    def update(
+    async def update(
         self,
         source_id: str,
         converted_path: Path,
@@ -132,16 +129,16 @@ class Indexer:
             ConnectionError: Embedding プロバイダーに接続できない場合
         """
         _validate_source_id(source_id, metadata)
-        self._check_embedding_available()
+        await self._check_embedding_available()
         text = self._read_file(converted_path)
 
         if not text.strip():
-            self.delete(source_id)
+            await self.delete(source_id)
             return
 
         chunk_texts = self._chunk_text(text)
         if not chunk_texts:
-            self.delete(source_id)
+            await self.delete(source_id)
             return
 
         # 新チャンク ID を算出
@@ -150,29 +147,27 @@ class Indexer:
         }
 
         # 新チャンクを upsert
-        self._add_to_indices(source_id, chunk_texts, metadata)
+        await self._add_to_indices(source_id, chunk_texts, metadata)
 
         # stale チャンクを削除
-        _run_async(
-            self._vector_store.delete_stale_chunks(source_id, new_chunk_ids),
-        )
+        await self._vector_store.delete_stale_chunks(source_id, new_chunk_ids)
         self._bm25.delete_stale_docs(source_id, new_chunk_ids)
 
         logger.info(
             "インデックスを更新: %s (%d チャンク)", source_id, len(chunk_texts),
         )
 
-    def delete(self, source_id: str) -> None:
+    async def delete(self, source_id: str) -> None:
         """インデックスから削除する.
 
         Args:
             source_id: ソース識別子
         """
-        _run_async(self._vector_store.delete_by_source(source_id))
+        await self._vector_store.delete_by_source(source_id)
         self._bm25.delete_by_source(source_id)
         logger.info("インデックスから削除: %s", source_id)
 
-    def upsert_metadata(
+    async def upsert_metadata(
         self,
         source_id: str,
         metadata: SourceMetadata,
@@ -183,9 +178,7 @@ class Indexer:
             source_id: ソース識別子
             metadata: ソースメタデータ
         """
-        chunk_ids = _run_async(
-            self._vector_store.get_chunk_ids_for_source(source_id),
-        )
+        chunk_ids = await self._vector_store.get_chunk_ids_for_source(source_id)
         if not chunk_ids:
             logger.warning(
                 "メタデータ更新対象のチャンクが存在しません: %s", source_id,
@@ -195,8 +188,8 @@ class Indexer:
         total_chunks = len(chunk_ids)
 
         # 既存チャンクの section_path を保持する（メタデータのみ更新時に消さない）
-        existing_meta_map = _run_async(
-            self._vector_store.get_metadata_by_ids(chunk_ids),
+        existing_meta_map = await self._vector_store.get_metadata_by_ids(
+            chunk_ids,
         )
 
         metadatas = []
@@ -210,26 +203,26 @@ class Indexer:
             )
             metadatas.append(meta)
 
-        _run_async(self._vector_store.update_metadata(chunk_ids, metadatas))
+        await self._vector_store.update_metadata(chunk_ids, metadatas)
 
         logger.info(
             "メタデータを更新: %s (%d チャンク)", source_id, total_chunks,
         )
 
-    def clear(self, source_type: SourceType | None = None) -> None:
+    async def clear(self, source_type: SourceType | None = None) -> None:
         """インデックスをクリアする.
 
         Args:
             source_type: 指定時はその媒体のみクリア
         """
         if source_type is None:
-            self._clear_all()
+            await self._clear_all()
         else:
-            self._clear_by_source_type(source_type)
+            await self._clear_by_source_type(source_type)
 
     # --- 内部メソッド ---
 
-    def _check_embedding_available(self) -> None:
+    async def _check_embedding_available(self) -> None:
         """Embedding プロバイダーの疎通を確認する.
 
         初回呼び出し時のみ実際にチェックし、結果をキャッシュする。
@@ -240,7 +233,7 @@ class Indexer:
         """
         if self._embedding_checked:
             return
-        available = _run_async(self._vector_store.is_embedding_available())
+        available = await self._vector_store.is_embedding_available()
         if not available:
             msg = "Embedding プロバイダーに接続できません"
             raise ConnectionError(msg)
@@ -287,7 +280,7 @@ class Indexer:
         )
         return [(c, "") for c in prose_chunks]
 
-    def _add_to_indices(
+    async def _add_to_indices(
         self,
         source_id: str,
         chunk_texts: list[tuple[str, str]],
@@ -326,23 +319,23 @@ class Indexer:
             ))
             bm25_metadata_list.append(meta)
 
-        # ChromaDB に upsert（async → sync ブリッジ）
-        _run_async(self._vector_store.add_documents(doc_chunks))
+        # ChromaDB に upsert
+        await self._vector_store.add_documents(doc_chunks)
 
         # BM25 に追加
         self._bm25.add_documents(bm25_docs, metadata_list=bm25_metadata_list)
 
-    def _clear_all(self) -> None:
+    async def _clear_all(self) -> None:
         """全インデックスをクリアする."""
-        _run_async(self._vector_store.clear())
+        await self._vector_store.clear()
         self._bm25.clear()
         logger.info("全インデックスをクリアしました")
 
-    def _clear_by_source_type(self, source_type: SourceType) -> None:
+    async def _clear_by_source_type(self, source_type: SourceType) -> None:
         """指定 source_type のインデックスをクリアする."""
         records = self._metadata_db.search_sources(source_type=source_type)
         for record in records:
-            self.delete(record.source_id)
+            await self.delete(record.source_id)
 
         logger.info(
             "source_type=%s のインデックスをクリア (%d 件)",
@@ -358,19 +351,3 @@ def _validate_source_id(source_id: str, metadata: SourceMetadata) -> None:
             f"metadata.source_id={metadata.source_id}"
         )
         raise ValueError(msg)
-
-
-def _run_async(coro: Any) -> Any:
-    """async コルーチンを sync コンテキストから実行する.
-
-    パイプライン制御は sync で呼び出すため通常は asyncio.run() パスを使用する。
-    既存ループ内からの呼び出し時は新スレッドで実行する（MCP サーバー等）。
-    """
-    try:
-        asyncio.get_running_loop()
-    except RuntimeError:
-        return asyncio.run(coro)
-    # 既存ループ内からの呼び出し（MCP サーバー等）
-    with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
-        future = pool.submit(asyncio.run, coro)
-        return future.result()

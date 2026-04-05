@@ -89,7 +89,7 @@ class StubIndexer:
         self.cleared: list[SourceType | None] = []
         self.fail_on: set[str] = set()
 
-    def add(
+    async def add(
         self,
         source_id: str,
         converted_path: Path,
@@ -100,7 +100,7 @@ class StubIndexer:
             raise RuntimeError(msg)
         self.added.append(source_id)
 
-    def update(
+    async def update(
         self,
         source_id: str,
         converted_path: Path,
@@ -108,17 +108,17 @@ class StubIndexer:
     ) -> None:
         self.updated.append(source_id)
 
-    def delete(self, source_id: str) -> None:
+    async def delete(self, source_id: str) -> None:
         self.deleted_ids.append(source_id)
 
-    def upsert_metadata(
+    async def upsert_metadata(
         self,
         source_id: str,
         metadata: SourceMetadata,
     ) -> None:
         self.upserted.append(source_id)
 
-    def clear(self, source_type: SourceType | None = None) -> None:
+    async def clear(self, source_type: SourceType | None = None) -> None:
         self.cleared.append(source_type)
 
 
@@ -219,17 +219,17 @@ class TestCommit:
 class TestRunIncremental:
     """差分更新のテスト."""
 
-    def test_no_commits_returns_empty(
+    async def test_no_commits_returns_empty(
         self,
         controller: tuple[PipelineController, StubConverter, StubIndexer],
     ) -> None:
         ctrl, _, _ = controller
-        summary = ctrl.run_incremental()
+        summary = await ctrl.run_incremental()
         assert summary.mode == PipelineMode.INCREMENTAL
         assert summary.total_files == 0
         assert summary.processed == 0
 
-    def test_first_run_processes_all(
+    async def test_first_run_processes_all(
         self,
         controller: tuple[PipelineController, StubConverter, StubIndexer],
         workspace: dict[str, Path],
@@ -239,7 +239,7 @@ class TestRunIncremental:
         _place_local_file(workspace["source"], "local/b.txt", "content b")
         ctrl.commit("ingest(local): manual update")
 
-        summary = ctrl.run_incremental()
+        summary = await ctrl.run_incremental()
 
         assert summary.mode == PipelineMode.INCREMENTAL
         assert summary.processed == 2
@@ -252,7 +252,7 @@ class TestRunIncremental:
         assert len(history) == 1
         assert history[0].from_commit_id == NULL_COMMIT_HASH
 
-    def test_incremental_detects_added(
+    async def test_incremental_detects_added(
         self,
         controller: tuple[PipelineController, StubConverter, StubIndexer],
         workspace: dict[str, Path],
@@ -260,7 +260,7 @@ class TestRunIncremental:
         ctrl, converter, indexer = controller
         _place_local_file(workspace["source"], "local/a.txt")
         ctrl.commit("first")
-        ctrl.run_incremental()
+        await ctrl.run_incremental()
 
         converter.converted.clear()
         indexer.added.clear()
@@ -268,12 +268,12 @@ class TestRunIncremental:
         _place_local_file(workspace["source"], "local/b.txt")
         ctrl.commit("add b")
 
-        summary = ctrl.run_incremental()
+        summary = await ctrl.run_incremental()
         assert summary.processed == 1
         assert converter.converted == ["local/b.txt"]
         assert "local/b.txt" in indexer.added
 
-    def test_incremental_detects_modified(
+    async def test_incremental_detects_modified(
         self,
         controller: tuple[PipelineController, StubConverter, StubIndexer],
         workspace: dict[str, Path],
@@ -281,19 +281,19 @@ class TestRunIncremental:
         ctrl, converter, indexer = controller
         _place_local_file(workspace["source"], "local/a.txt", "v1")
         ctrl.commit("first")
-        ctrl.run_incremental()
+        await ctrl.run_incremental()
 
         converter.converted.clear()
 
         _place_local_file(workspace["source"], "local/a.txt", "v2")
         ctrl.commit("modify a")
 
-        summary = ctrl.run_incremental()
+        summary = await ctrl.run_incremental()
         assert summary.processed == 1
         assert converter.converted == ["local/a.txt"]
         assert "local/a.txt" in indexer.updated
 
-    def test_incremental_detects_deleted(
+    async def test_incremental_detects_deleted(
         self,
         controller: tuple[PipelineController, StubConverter, StubIndexer],
         workspace: dict[str, Path],
@@ -301,12 +301,12 @@ class TestRunIncremental:
         ctrl, converter, indexer = controller
         _place_local_file(workspace["source"], "local/a.txt")
         ctrl.commit("first")
-        ctrl.run_incremental()
+        await ctrl.run_incremental()
 
         (workspace["source"] / "local" / "a.txt").unlink()
         ctrl.commit("delete a")
 
-        summary = ctrl.run_incremental()
+        summary = await ctrl.run_incremental()
         assert summary.processed == 1
         assert "local/a.txt" in converter.deleted
         assert "local/a.txt" in indexer.deleted_ids
@@ -316,7 +316,7 @@ class TestRunIncremental:
         assert record is not None
         assert record.status == "deleted"
 
-    def test_incremental_detects_renamed(
+    async def test_incremental_detects_renamed(
         self,
         controller: tuple[PipelineController, StubConverter, StubIndexer],
         workspace: dict[str, Path],
@@ -324,20 +324,20 @@ class TestRunIncremental:
         ctrl, converter, indexer = controller
         _place_local_file(workspace["source"], "local/old.txt")
         ctrl.commit("first")
-        ctrl.run_incremental()
+        await ctrl.run_incremental()
 
         src = workspace["source"] / "local" / "old.txt"
         src.rename(workspace["source"] / "local" / "new.txt")
         ctrl.commit("rename")
 
-        summary = ctrl.run_incremental()
+        summary = await ctrl.run_incremental()
         assert summary.processed == 1
         assert "local/new.txt" in converter.converted
         assert "local/old.txt" in converter.deleted
         assert "local/old.txt" in indexer.deleted_ids
         assert "local/new.txt" in indexer.added
 
-    def test_no_changes_returns_empty(
+    async def test_no_changes_returns_empty(
         self,
         controller: tuple[PipelineController, StubConverter, StubIndexer],
         workspace: dict[str, Path],
@@ -345,13 +345,13 @@ class TestRunIncremental:
         ctrl, _, _ = controller
         _place_local_file(workspace["source"], "local/a.txt")
         ctrl.commit("first")
-        ctrl.run_incremental()
+        await ctrl.run_incremental()
 
-        summary = ctrl.run_incremental()
+        summary = await ctrl.run_incremental()
         assert summary.total_files == 0
         assert summary.processed == 0
 
-    def test_meta_only_change(
+    async def test_meta_only_change(
         self,
         controller: tuple[PipelineController, StubConverter, StubIndexer],
         workspace: dict[str, Path],
@@ -364,7 +364,7 @@ class TestRunIncremental:
             source_id="web/example.com/page.html",
         )
         ctrl.commit("first")
-        ctrl.run_incremental()
+        await ctrl.run_incremental()
 
         converter.converted.clear()
         indexer.added.clear()
@@ -386,14 +386,14 @@ class TestRunIncremental:
             yaml.safe_dump(meta, f, allow_unicode=True)
         ctrl.commit("update meta")
 
-        summary = ctrl.run_incremental()
+        summary = await ctrl.run_incremental()
         assert summary.processed == 1
         # コンバーターは呼ばれない
         assert converter.converted == []
         # インデクサーはメタデータ更新のみ
         assert "web/example.com/page.html" in indexer.upserted
 
-    def test_error_skips_file_no_history(
+    async def test_error_skips_file_no_history(
         self,
         controller: tuple[PipelineController, StubConverter, StubIndexer],
         workspace: dict[str, Path],
@@ -404,7 +404,7 @@ class TestRunIncremental:
         converter.fail_on.add("local/bad.txt")
         ctrl.commit("first")
 
-        summary = ctrl.run_incremental()
+        summary = await ctrl.run_incremental()
         assert summary.processed == 1
         assert summary.skipped == 1
         assert len(summary.errors) == 1
@@ -413,7 +413,7 @@ class TestRunIncremental:
         history = ctrl.db.get_pipeline_history()
         assert len(history) == 0
 
-    def test_invalid_last_commit_processes_all(
+    async def test_invalid_last_commit_processes_all(
         self,
         controller: tuple[PipelineController, StubConverter, StubIndexer],
         workspace: dict[str, Path],
@@ -432,7 +432,7 @@ class TestRunIncremental:
         _place_local_file(workspace["source"], "local/b.txt")
         ctrl.commit("second")
 
-        summary = ctrl.run_incremental()
+        summary = await ctrl.run_incremental()
         # 全ファイル処理（a.txt + b.txt）
         assert summary.processed == 2
         assert "local/a.txt" in converter.converted
@@ -442,7 +442,7 @@ class TestRunIncremental:
 class TestDeleteAndReAdd:
     """物理削除 → 再追加フローのテスト."""
 
-    def test_delete_and_readd_same_content(
+    async def test_delete_and_readd_same_content(
         self,
         controller: tuple[PipelineController, StubConverter, StubIndexer],
         workspace: dict[str, Path],
@@ -454,13 +454,13 @@ class TestDeleteAndReAdd:
         # 1. 初回追加
         _place_local_file(workspace["source"], "local/a.txt", content)
         ctrl.commit("add a")
-        ctrl.run_incremental()
+        await ctrl.run_incremental()
         assert "local/a.txt" in indexer.added
 
         # 2. 物理削除（remove_file 相当: ファイル削除 + commit + pipeline）
         (workspace["source"] / "local" / "a.txt").unlink()
         ctrl.commit("delete a")
-        ctrl.run_incremental()
+        await ctrl.run_incremental()
         assert "local/a.txt" in indexer.deleted_ids
         record = ctrl.db.get_source("local/a.txt")
         assert record is not None
@@ -485,7 +485,7 @@ class TestDeleteAndReAdd:
             updated_at="2026-01-01T00:00:00+00:00",
         )
         ctrl.commit("readd a")
-        summary = ctrl.run_incremental()
+        summary = await ctrl.run_incremental()
 
         # git diff は A（追加）として検知し、パイプラインが処理する
         assert summary.processed == 1
@@ -494,7 +494,7 @@ class TestDeleteAndReAdd:
         assert record is not None
         assert record.status == "active"
 
-    def test_delete_and_readd_different_content(
+    async def test_delete_and_readd_different_content(
         self,
         controller: tuple[PipelineController, StubConverter, StubIndexer],
         workspace: dict[str, Path],
@@ -505,12 +505,12 @@ class TestDeleteAndReAdd:
         # 1. 初回追加
         _place_local_file(workspace["source"], "local/b.txt", "original")
         ctrl.commit("add b")
-        ctrl.run_incremental()
+        await ctrl.run_incremental()
 
         # 2. 物理削除
         (workspace["source"] / "local" / "b.txt").unlink()
         ctrl.commit("delete b")
-        ctrl.run_incremental()
+        await ctrl.run_incremental()
 
         indexer.added.clear()
         indexer.deleted_ids.clear()
@@ -529,7 +529,7 @@ class TestDeleteAndReAdd:
             updated_at="2026-01-01T00:00:00+00:00",
         )
         ctrl.commit("readd b with new content")
-        summary = ctrl.run_incremental()
+        summary = await ctrl.run_incremental()
 
         assert summary.processed == 1
         assert "local/b.txt" in indexer.added
@@ -617,7 +617,7 @@ class TestRemoveFile:
 class TestRunFullRebuild:
     """全再構築のテスト."""
 
-    def test_rebuild_rejects_uncommitted_changes(
+    async def test_rebuild_rejects_uncommitted_changes(
         self,
         controller: tuple[PipelineController, StubConverter, StubIndexer],
         workspace: dict[str, Path],
@@ -632,9 +632,9 @@ class TestRunFullRebuild:
         _place_local_file(workspace["source"], "local/uncommitted.txt")
 
         with pytest.raises(RuntimeError, match="未コミットの変更があります"):
-            ctrl.run_full_rebuild()
+            await ctrl.run_full_rebuild()
 
-    def test_rebuilds_all(
+    async def test_rebuilds_all(
         self,
         controller: tuple[PipelineController, StubConverter, StubIndexer],
         workspace: dict[str, Path],
@@ -643,12 +643,12 @@ class TestRunFullRebuild:
         _place_local_file(workspace["source"], "local/a.txt", "content a")
         _place_local_file(workspace["source"], "local/b.txt", "content b")
         ctrl.commit("initial")
-        ctrl.run_incremental()
+        await ctrl.run_incremental()
 
         converter.converted.clear()
         indexer.added.clear()
 
-        summary = ctrl.run_full_rebuild()
+        summary = await ctrl.run_full_rebuild()
 
         assert summary.mode == PipelineMode.FULL_REBUILD
         assert summary.processed == 2
@@ -657,7 +657,7 @@ class TestRunFullRebuild:
         assert converter.cleared == [None]
         assert indexer.cleared == [None]
 
-    def test_source_type_filter(
+    async def test_source_type_filter(
         self,
         controller: tuple[PipelineController, StubConverter, StubIndexer],
         workspace: dict[str, Path],
@@ -666,12 +666,12 @@ class TestRunFullRebuild:
         _place_local_file(workspace["source"], "local/a.txt")
         _place_web_file(workspace["source"], "web/example.com/page.html")
         ctrl.commit("initial")
-        ctrl.run_incremental()
+        await ctrl.run_incremental()
 
         converter.converted.clear()
         indexer.added.clear()
 
-        summary = ctrl.run_full_rebuild(source_type="local")
+        summary = await ctrl.run_full_rebuild(source_type="local")
 
         assert summary.processed == 1
         assert converter.converted == ["local/a.txt"]
@@ -683,14 +683,14 @@ class TestRunFullRebuild:
         assert web_record is not None
         assert web_record.source_type == "web"
 
-    def test_no_files_returns_empty(
+    async def test_no_files_returns_empty(
         self,
         controller: tuple[PipelineController, StubConverter, StubIndexer],
     ) -> None:
         ctrl, _, _ = controller
         ctrl.init_repo()
         ctrl.commit("initial")
-        summary = ctrl.run_full_rebuild()
+        summary = await ctrl.run_full_rebuild()
         assert summary.total_files == 0
         assert summary.processed == 0
 
@@ -698,7 +698,7 @@ class TestRunFullRebuild:
 class TestRunConvertOnly:
     """コンバートのみ再実行のテスト."""
 
-    def test_reconverts_all(
+    async def test_reconverts_all(
         self,
         controller: tuple[PipelineController, StubConverter, StubIndexer],
         workspace: dict[str, Path],
@@ -707,12 +707,12 @@ class TestRunConvertOnly:
         _place_local_file(workspace["source"], "local/a.txt")
         _place_local_file(workspace["source"], "local/b.txt")
         ctrl.commit("initial")
-        ctrl.run_incremental()
+        await ctrl.run_incremental()
 
         converter.converted.clear()
         indexer.added.clear()
 
-        summary = ctrl.run_convert_only()
+        summary = await ctrl.run_convert_only()
 
         assert summary.mode == PipelineMode.CONVERT_ONLY
         assert summary.processed == 2
@@ -724,7 +724,7 @@ class TestRunConvertOnly:
 class TestRunIndexOnly:
     """インデックスのみ再構築のテスト."""
 
-    def test_reindexes_all(
+    async def test_reindexes_all(
         self,
         controller: tuple[PipelineController, StubConverter, StubIndexer],
         workspace: dict[str, Path],
@@ -732,21 +732,21 @@ class TestRunIndexOnly:
         ctrl, converter, indexer = controller
         _place_local_file(workspace["source"], "local/a.txt")
         ctrl.commit("initial")
-        ctrl.run_incremental()
+        await ctrl.run_incremental()
 
         indexer.added.clear()
 
         # converted_store にファイルがあることを確認
         assert (workspace["converted"] / "local" / "a.txt").exists()
 
-        summary = ctrl.run_index_only()
+        summary = await ctrl.run_index_only()
 
         assert summary.mode == PipelineMode.INDEX_ONLY
         assert summary.processed == 1
         assert indexer.cleared == [None]
         assert "local/a.txt" in indexer.added
 
-    def test_html_source_maps_to_md_converted(
+    async def test_html_source_maps_to_md_converted(
         self,
         controller: tuple[PipelineController, StubConverter, StubIndexer],
         workspace: dict[str, Path],
@@ -759,7 +759,7 @@ class TestRunIndexOnly:
             source_id="https://example.com/page",
         )
         ctrl.commit("initial")
-        ctrl.run_incremental()
+        await ctrl.run_incremental()
 
         indexer.added.clear()
 
@@ -768,12 +768,12 @@ class TestRunIndexOnly:
         converted_md.parent.mkdir(parents=True, exist_ok=True)
         converted_md.write_text("converted content", encoding="utf-8")
 
-        summary = ctrl.run_index_only()
+        summary = await ctrl.run_index_only()
 
         assert summary.processed == 1
         assert "https://example.com/page" in indexer.added
 
-    def test_json_source_maps_to_md_converted(
+    async def test_json_source_maps_to_md_converted(
         self,
         controller: tuple[PipelineController, StubConverter, StubIndexer],
         workspace: dict[str, Path],
@@ -794,7 +794,7 @@ class TestRunIndexOnly:
         with open(meta_path, "w", encoding="utf-8") as f:
             yaml.safe_dump(meta, f, allow_unicode=True)
         ctrl.commit("initial")
-        ctrl.run_incremental()
+        await ctrl.run_incremental()
 
         indexer.added.clear()
 
@@ -803,12 +803,12 @@ class TestRunIndexOnly:
         converted_md.parent.mkdir(parents=True, exist_ok=True)
         converted_md.write_text("converted content", encoding="utf-8")
 
-        summary = ctrl.run_index_only()
+        summary = await ctrl.run_index_only()
 
         assert summary.processed == 1
         assert "zenn/articles/article1" in indexer.added
 
-    def test_skips_missing_converted(
+    async def test_skips_missing_converted(
         self,
         controller: tuple[PipelineController, StubConverter, StubIndexer],
         workspace: dict[str, Path],
@@ -816,13 +816,13 @@ class TestRunIndexOnly:
         ctrl, _, indexer = controller
         _place_local_file(workspace["source"], "local/a.txt")
         ctrl.commit("initial")
-        ctrl.run_incremental()
+        await ctrl.run_incremental()
 
         # converted_store をクリアしてからインデックス再構築
         shutil.rmtree(workspace["converted"])
         workspace["converted"].mkdir()
 
-        summary = ctrl.run_index_only()
+        summary = await ctrl.run_index_only()
         assert summary.skipped == 1
         assert summary.processed == 0
 
@@ -830,7 +830,7 @@ class TestRunIndexOnly:
 class TestPipelineHistory:
     """pipeline_history のテスト."""
 
-    def test_history_recorded_on_success(
+    async def test_history_recorded_on_success(
         self,
         controller: tuple[PipelineController, StubConverter, StubIndexer],
         workspace: dict[str, Path],
@@ -838,13 +838,13 @@ class TestPipelineHistory:
         ctrl, _, _ = controller
         _place_local_file(workspace["source"], "local/a.txt")
         ctrl.commit("first")
-        ctrl.run_incremental()
+        await ctrl.run_incremental()
 
         history = ctrl.db.get_pipeline_history()
         assert len(history) == 1
         assert history[0].from_commit_id == NULL_COMMIT_HASH
 
-    def test_history_not_recorded_on_error(
+    async def test_history_not_recorded_on_error(
         self,
         controller: tuple[PipelineController, StubConverter, StubIndexer],
         workspace: dict[str, Path],
@@ -853,12 +853,12 @@ class TestPipelineHistory:
         _place_local_file(workspace["source"], "local/a.txt")
         converter.fail_on.add("local/a.txt")
         ctrl.commit("first")
-        ctrl.run_incremental()
+        await ctrl.run_incremental()
 
         history = ctrl.db.get_pipeline_history()
         assert len(history) == 0
 
-    def test_incremental_uses_last_commit_id(
+    async def test_incremental_uses_last_commit_id(
         self,
         controller: tuple[PipelineController, StubConverter, StubIndexer],
         workspace: dict[str, Path],
@@ -866,13 +866,13 @@ class TestPipelineHistory:
         ctrl, converter, _ = controller
         _place_local_file(workspace["source"], "local/a.txt")
         ctrl.commit("first")
-        ctrl.run_incremental()
+        await ctrl.run_incremental()
 
         converter.converted.clear()
 
         _place_local_file(workspace["source"], "local/b.txt")
         ctrl.commit("second")
-        summary = ctrl.run_incremental()
+        summary = await ctrl.run_incremental()
 
         # 2回目は b.txt のみ処理
         assert summary.processed == 1
@@ -929,7 +929,7 @@ class TestClassifyChanges:
 class TestRenamedLocalSourceId:
     """local リネーム時の source_id 更新テスト."""
 
-    def test_local_rename_deletes_old_inserts_new(
+    async def test_local_rename_deletes_old_inserts_new(
         self,
         controller: tuple[PipelineController, StubConverter, StubIndexer],
         workspace: dict[str, Path],
@@ -937,7 +937,7 @@ class TestRenamedLocalSourceId:
         ctrl, _, indexer = controller
         _place_local_file(workspace["source"], "local/old.txt")
         ctrl.commit("first")
-        ctrl.run_incremental()
+        await ctrl.run_incremental()
 
         old_record = ctrl.db.get_source("local/old.txt")
         assert old_record is not None
@@ -946,7 +946,7 @@ class TestRenamedLocalSourceId:
         src = workspace["source"] / "local" / "old.txt"
         src.rename(workspace["source"] / "local" / "new.txt")
         ctrl.commit("rename")
-        ctrl.run_incremental()
+        await ctrl.run_incremental()
 
         # 旧レコードは論理削除
         old_record = ctrl.db.get_source("local/old.txt")
@@ -966,7 +966,7 @@ class TestRenamedLocalSourceId:
 class TestUncommittedChanges:
     """未コミット変更の扱いのテスト."""
 
-    def test_incremental_auto_commits_uncommitted_changes(
+    async def test_incremental_auto_commits_uncommitted_changes(
         self,
         controller: tuple[PipelineController, StubConverter, StubIndexer],
         workspace: dict[str, Path],
@@ -975,7 +975,7 @@ class TestUncommittedChanges:
         ctrl, converter, indexer = controller
         _place_local_file(workspace["source"], "local/a.txt")
         ctrl.commit("first")
-        ctrl.run_incremental()
+        await ctrl.run_incremental()
 
         # 未コミットのファイルを追加
         _place_local_file(workspace["source"], "local/new.txt")
@@ -984,11 +984,11 @@ class TestUncommittedChanges:
         indexer.added.clear()
 
         # incremental は自動コミットして差分処理する
-        summary = ctrl.run_incremental()
+        summary = await ctrl.run_incremental()
         assert summary.mode == PipelineMode.INCREMENTAL
         assert summary.processed == 1  # new.txt のみ（差分）
 
-    def test_incremental_auto_commit_message_format(
+    async def test_incremental_auto_commit_message_format(
         self,
         controller: tuple[PipelineController, StubConverter, StubIndexer],
         workspace: dict[str, Path],
@@ -997,12 +997,12 @@ class TestUncommittedChanges:
         ctrl, _, _ = controller
         _place_local_file(workspace["source"], "local/a.txt")
         ctrl.commit("first")
-        ctrl.run_incremental()
+        await ctrl.run_incremental()
 
         # 未コミットのファイルを追加
         _place_local_file(workspace["source"], "local/new.txt")
 
-        ctrl.run_incremental()
+        await ctrl.run_incremental()
 
         # git log で最新コミットメッセージを確認
         result = subprocess.run(
@@ -1015,7 +1015,7 @@ class TestUncommittedChanges:
         )
         assert result.stdout.strip() == "auto-commit: incremental"
 
-    def test_incremental_no_uncommitted_changes(
+    async def test_incremental_no_uncommitted_changes(
         self,
         controller: tuple[PipelineController, StubConverter, StubIndexer],
         workspace: dict[str, Path],
@@ -1024,14 +1024,14 @@ class TestUncommittedChanges:
         ctrl, _, _ = controller
         _place_local_file(workspace["source"], "local/a.txt")
         ctrl.commit("first")
-        ctrl.run_incremental()
+        await ctrl.run_incremental()
 
         # 変更なしで再実行 → 差分なしで正常終了
-        summary = ctrl.run_incremental()
+        summary = await ctrl.run_incremental()
         assert summary.mode == PipelineMode.INCREMENTAL
         assert summary.processed == 0
 
-    def test_full_rebuild_with_uncommitted_raises(
+    async def test_full_rebuild_with_uncommitted_raises(
         self,
         controller: tuple[PipelineController, StubConverter, StubIndexer],
         workspace: dict[str, Path],
@@ -1044,9 +1044,9 @@ class TestUncommittedChanges:
         _place_local_file(workspace["source"], "local/uncommitted.txt")
 
         with pytest.raises(RuntimeError, match="未コミットの変更があります"):
-            ctrl.run_full_rebuild()
+            await ctrl.run_full_rebuild()
 
-    def test_convert_only_with_uncommitted_raises(
+    async def test_convert_only_with_uncommitted_raises(
         self,
         controller: tuple[PipelineController, StubConverter, StubIndexer],
         workspace: dict[str, Path],
@@ -1055,14 +1055,14 @@ class TestUncommittedChanges:
         ctrl, _, _ = controller
         _place_local_file(workspace["source"], "local/a.txt")
         ctrl.commit("first")
-        ctrl.run_incremental()
+        await ctrl.run_incremental()
 
         _place_local_file(workspace["source"], "local/a.txt", "updated")
 
         with pytest.raises(RuntimeError, match="未コミットの変更があります"):
-            ctrl.run_convert_only()
+            await ctrl.run_convert_only()
 
-    def test_index_only_with_uncommitted_raises(
+    async def test_index_only_with_uncommitted_raises(
         self,
         controller: tuple[PipelineController, StubConverter, StubIndexer],
         workspace: dict[str, Path],
@@ -1071,14 +1071,14 @@ class TestUncommittedChanges:
         ctrl, _, _ = controller
         _place_local_file(workspace["source"], "local/a.txt")
         ctrl.commit("first")
-        ctrl.run_incremental()
+        await ctrl.run_incremental()
 
         _place_local_file(workspace["source"], "local/a.txt", "updated")
 
         with pytest.raises(RuntimeError, match="未コミットの変更があります"):
-            ctrl.run_index_only()
+            await ctrl.run_index_only()
 
-    def test_uncommitted_check_scoped_by_source_type(
+    async def test_uncommitted_check_scoped_by_source_type(
         self,
         controller: tuple[PipelineController, StubConverter, StubIndexer],
         workspace: dict[str, Path],
@@ -1087,7 +1087,7 @@ class TestUncommittedChanges:
         ctrl, _, _ = controller
         _place_local_file(workspace["source"], "local/a.txt")
         ctrl.commit("first")
-        ctrl.run_incremental()
+        await ctrl.run_incremental()
 
         # web に未コミット変更を追加（local は変更なし）
         _place_web_file(
@@ -1098,5 +1098,5 @@ class TestUncommittedChanges:
         )
 
         # source_type="local" で rebuild → web の変更は無視されるので成功する
-        summary = ctrl.run_full_rebuild(source_type="local")
+        summary = await ctrl.run_full_rebuild(source_type="local")
         assert summary.mode == PipelineMode.FULL_REBUILD

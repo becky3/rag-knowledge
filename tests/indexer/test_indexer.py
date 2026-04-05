@@ -109,13 +109,13 @@ def _write_text_file(tmp_path: Path, filename: str, content: str) -> Path:
 class TestAdd:
     """Indexer.add のテスト."""
 
-    def test_adds_prose_to_chromadb(
+    async def test_adds_prose_to_chromadb(
         self, indexer: Indexer, vector_store: VectorStore, tmp_path: Path,
     ) -> None:
         path = _write_text_file(tmp_path, "doc.txt", "Sample prose text for testing.")
         meta = _make_metadata(source_id="src-1")
 
-        indexer.add("src-1", path, meta)
+        await indexer.add("src-1", path, meta)
 
         # ChromaDB にチャンクが追加されたか確認
         result = vector_store._collection.get(
@@ -123,30 +123,30 @@ class TestAdd:
         )
         assert len(result["ids"]) >= 1
 
-    def test_adds_prose_to_bm25(
+    async def test_adds_prose_to_bm25(
         self, indexer: Indexer, bm25_index: BM25Index, tmp_path: Path,
     ) -> None:
         path = _write_text_file(tmp_path, "doc.txt", "Sample prose text for testing.")
         meta = _make_metadata(source_id="src-1")
 
-        indexer.add("src-1", path, meta)
+        await indexer.add("src-1", path, meta)
 
         assert bm25_index.get_document_count() >= 1
 
-    def test_skips_empty_file(
+    async def test_skips_empty_file(
         self, indexer: Indexer, vector_store: VectorStore, tmp_path: Path,
     ) -> None:
         path = _write_text_file(tmp_path, "empty.txt", "   \n  ")
         meta = _make_metadata(source_id="src-empty")
 
-        indexer.add("src-empty", path, meta)
+        await indexer.add("src-empty", path, meta)
 
         result = vector_store._collection.get(
             where={"source_id": "src-empty"}, include=[],
         )
         assert len(result["ids"]) == 0
 
-    def test_chunk_metadata_has_required_fields(
+    async def test_chunk_metadata_has_required_fields(
         self, indexer: Indexer, vector_store: VectorStore, tmp_path: Path,
     ) -> None:
         path = _write_text_file(tmp_path, "doc.txt", "Short text for metadata check.")
@@ -157,7 +157,7 @@ class TestAdd:
             collected_at="2025-06-01T00:00:00Z",
         )
 
-        indexer.add("src-meta", path, meta)
+        await indexer.add("src-meta", path, meta)
 
         result = vector_store._collection.get(
             where={"source_id": "src-meta"}, include=["metadatas"],
@@ -171,7 +171,7 @@ class TestAdd:
         assert chunk_meta["total_chunks"] >= 1
         assert chunk_meta["collected_at"] == "2025-06-01T00:00:00Z"
 
-    def test_custom_metadata_fields(
+    async def test_custom_metadata_fields(
         self, indexer: Indexer, vector_store: VectorStore, tmp_path: Path,
     ) -> None:
         path = _write_text_file(tmp_path, "doc.txt", "Text with custom metadata.")
@@ -180,7 +180,7 @@ class TestAdd:
             extra={"author": "Alice", "category": "tech"},
         )
 
-        indexer.add("src-custom", path, meta)
+        await indexer.add("src-custom", path, meta)
 
         result = vector_store._collection.get(
             where={"source_id": "src-custom"}, include=["metadatas"],
@@ -189,21 +189,21 @@ class TestAdd:
         assert chunk_meta["custom:author"] == "Alice"
         assert chunk_meta["custom:category"] == "tech"
 
-    def test_heading_text_uses_heading_chunker(
+    async def test_heading_text_uses_heading_chunker(
         self, indexer: Indexer, vector_store: VectorStore, tmp_path: Path,
     ) -> None:
         text = "# Section A\n\nContent of section A.\n\n# Section B\n\nContent of section B."
         path = _write_text_file(tmp_path, "heading.txt", text)
         meta = _make_metadata(source_id="src-heading")
 
-        indexer.add("src-heading", path, meta)
+        await indexer.add("src-heading", path, meta)
 
         result = vector_store._collection.get(
             where={"source_id": "src-heading"}, include=["documents"],
         )
         assert len(result["ids"]) >= 2
 
-    def test_section_path_in_metadata(
+    async def test_section_path_in_metadata(
         self, indexer: Indexer, vector_store: VectorStore, tmp_path: Path,
     ) -> None:
         """section_path がメタデータに含まれること."""
@@ -211,7 +211,7 @@ class TestAdd:
         path = _write_text_file(tmp_path, "heading.txt", text)
         meta = _make_metadata(source_id="src-sp")
 
-        indexer.add("src-sp", path, meta)
+        await indexer.add("src-sp", path, meta)
 
         result = vector_store._collection.get(
             where={"source_id": "src-sp"}, include=["metadatas"],
@@ -220,7 +220,7 @@ class TestAdd:
         section_paths = [m.get("section_path", "") for m in result["metadatas"]]
         assert any("Parent" in sp for sp in section_paths)
 
-    def test_embedding_receives_content_only(
+    async def test_embedding_receives_content_only(
         self, indexer: Indexer, vector_store: VectorStore, tmp_path: Path,
     ) -> None:
         """Embedding（ChromaDB の documents）には本文のみが格納されること."""
@@ -228,7 +228,7 @@ class TestAdd:
         path = _write_text_file(tmp_path, "heading.txt", text)
         meta = _make_metadata(source_id="src-emb")
 
-        indexer.add("src-emb", path, meta)
+        await indexer.add("src-emb", path, meta)
 
         result = vector_store._collection.get(
             where={"source_id": "src-emb"},
@@ -245,7 +245,7 @@ class TestAdd:
             assert "[" not in doc  # 旧形式の breadcrumb
             assert "# " not in doc  # 旧形式の見出しプレフィックス
 
-    def test_bm25_receives_section_path_plus_content(
+    async def test_bm25_receives_section_path_plus_content(
         self, indexer: Indexer, bm25_index: BM25Index, tmp_path: Path,
     ) -> None:
         """BM25 には section_path + 本文が渡されること."""
@@ -253,13 +253,13 @@ class TestAdd:
         path = _write_text_file(tmp_path, "heading.txt", text)
         meta = _make_metadata(source_id="src-bm25-sp")
 
-        indexer.add("src-bm25-sp", path, meta)
+        await indexer.add("src-bm25-sp", path, meta)
 
         # BM25 で見出しキーワードで検索できる
         results = bm25_index.search("MyHeading", n_results=5)
         assert len(results) > 0
 
-    def test_table_text_uses_table_chunker(
+    async def test_table_text_uses_table_chunker(
         self, indexer: Indexer, vector_store: VectorStore, tmp_path: Path,
     ) -> None:
         text = (
@@ -272,20 +272,20 @@ class TestAdd:
         path = _write_text_file(tmp_path, "table.txt", text)
         meta = _make_metadata(source_id="src-table")
 
-        indexer.add("src-table", path, meta)
+        await indexer.add("src-table", path, meta)
 
         result = vector_store._collection.get(
             where={"source_id": "src-table"}, include=[],
         )
         assert len(result["ids"]) >= 1
 
-    def test_chunk_ids_follow_spec_format(
+    async def test_chunk_ids_follow_spec_format(
         self, indexer: Indexer, vector_store: VectorStore, tmp_path: Path,
     ) -> None:
         path = _write_text_file(tmp_path, "doc.txt", "Text for ID format check.")
         meta = _make_metadata(source_id="src-id-fmt")
 
-        indexer.add("src-id-fmt", path, meta)
+        await indexer.add("src-id-fmt", path, meta)
 
         result = vector_store._collection.get(
             where={"source_id": "src-id-fmt"}, include=[],
@@ -300,17 +300,17 @@ class TestAdd:
 class TestUpdate:
     """Indexer.update のテスト."""
 
-    def test_updates_existing_chunks(
+    async def test_updates_existing_chunks(
         self, indexer: Indexer, vector_store: VectorStore, tmp_path: Path,
     ) -> None:
         path = _write_text_file(tmp_path, "doc.txt", "Original content.")
         meta = _make_metadata(source_id="src-upd")
 
-        indexer.add("src-upd", path, meta)
+        await indexer.add("src-upd", path, meta)
 
         # 更新
         path.write_text("Updated content with new information.", encoding="utf-8")
-        indexer.update("src-upd", path, meta)
+        await indexer.update("src-upd", path, meta)
 
         result = vector_store._collection.get(
             where={"source_id": "src-upd"}, include=["documents"],
@@ -318,7 +318,7 @@ class TestUpdate:
         assert len(result["ids"]) >= 1
         assert any("Updated" in doc for doc in result["documents"])
 
-    def test_stale_chunks_deleted_when_count_decreases(
+    async def test_stale_chunks_deleted_when_count_decreases(
         self, indexer: Indexer, vector_store: VectorStore, tmp_path: Path,
     ) -> None:
         """複数チャンク → 少数チャンクで stale チャンクが削除される."""
@@ -327,7 +327,7 @@ class TestUpdate:
         path = _write_text_file(tmp_path, "doc.txt", long_text)
         meta = _make_metadata(source_id="src-stale")
 
-        indexer.add("src-stale", path, meta)
+        await indexer.add("src-stale", path, meta)
         initial_result = vector_store._collection.get(
             where={"source_id": "src-stale"}, include=[],
         )
@@ -336,41 +336,41 @@ class TestUpdate:
 
         # 短いテキスト（1チャンク）に更新
         path.write_text("Short updated text.", encoding="utf-8")
-        indexer.update("src-stale", path, meta)
+        await indexer.update("src-stale", path, meta)
 
         result = vector_store._collection.get(
             where={"source_id": "src-stale"}, include=[],
         )
         assert len(result["ids"]) < initial_count
 
-    def test_stale_chunks_deleted_from_bm25(
+    async def test_stale_chunks_deleted_from_bm25(
         self, indexer: Indexer, bm25_index: BM25Index, tmp_path: Path,
     ) -> None:
         long_text = " ".join(["Long paragraph content."] * 200)
         path = _write_text_file(tmp_path, "doc.txt", long_text)
         meta = _make_metadata(source_id="src-bm25-stale")
 
-        indexer.add("src-bm25-stale", path, meta)
+        await indexer.add("src-bm25-stale", path, meta)
         initial_count = bm25_index.get_document_count()
         assert initial_count > 1
 
         # 短いテキスト
         path.write_text("Short.", encoding="utf-8")
-        indexer.update("src-bm25-stale", path, meta)
+        await indexer.update("src-bm25-stale", path, meta)
 
         assert bm25_index.get_document_count() < initial_count
 
-    def test_update_empty_file_deletes_all(
+    async def test_update_empty_file_deletes_all(
         self, indexer: Indexer, vector_store: VectorStore, tmp_path: Path,
     ) -> None:
         path = _write_text_file(tmp_path, "doc.txt", "Some content.")
         meta = _make_metadata(source_id="src-empty-upd")
 
-        indexer.add("src-empty-upd", path, meta)
+        await indexer.add("src-empty-upd", path, meta)
 
         # 空ファイルに更新
         path.write_text("", encoding="utf-8")
-        indexer.update("src-empty-upd", path, meta)
+        await indexer.update("src-empty-upd", path, meta)
 
         result = vector_store._collection.get(
             where={"source_id": "src-empty-upd"}, include=[],
@@ -384,39 +384,39 @@ class TestUpdate:
 class TestDelete:
     """Indexer.delete のテスト."""
 
-    def test_deletes_from_chromadb(
+    async def test_deletes_from_chromadb(
         self, indexer: Indexer, vector_store: VectorStore, tmp_path: Path,
     ) -> None:
         path = _write_text_file(tmp_path, "doc.txt", "Content to be deleted.")
         meta = _make_metadata(source_id="src-del")
 
-        indexer.add("src-del", path, meta)
-        indexer.delete("src-del")
+        await indexer.add("src-del", path, meta)
+        await indexer.delete("src-del")
 
         result = vector_store._collection.get(
             where={"source_id": "src-del"}, include=[],
         )
         assert len(result["ids"]) == 0
 
-    def test_deletes_from_bm25(
+    async def test_deletes_from_bm25(
         self, indexer: Indexer, bm25_index: BM25Index, tmp_path: Path,
     ) -> None:
         path = _write_text_file(tmp_path, "doc.txt", "Content to be deleted.")
         meta = _make_metadata(source_id="src-del-bm25")
 
-        indexer.add("src-del-bm25", path, meta)
+        await indexer.add("src-del-bm25", path, meta)
         assert bm25_index.get_document_count() >= 1
 
-        indexer.delete("src-del-bm25")
+        await indexer.delete("src-del-bm25")
         assert bm25_index.get_document_count() == 0
 
-    def test_delete_nonexistent_source_no_error(
+    async def test_delete_nonexistent_source_no_error(
         self, indexer: Indexer,
     ) -> None:
         """存在しない source_id の削除はエラーにならない."""
-        indexer.delete("nonexistent-source")
+        await indexer.delete("nonexistent-source")
 
-    def test_delete_only_affects_target_source(
+    async def test_delete_only_affects_target_source(
         self, indexer: Indexer, vector_store: VectorStore, tmp_path: Path,
     ) -> None:
         path_a = _write_text_file(tmp_path, "a.txt", "Content A.")
@@ -424,10 +424,10 @@ class TestDelete:
         meta_a = _make_metadata(source_id="src-a")
         meta_b = _make_metadata(source_id="src-b")
 
-        indexer.add("src-a", path_a, meta_a)
-        indexer.add("src-b", path_b, meta_b)
+        await indexer.add("src-a", path_a, meta_a)
+        await indexer.add("src-b", path_b, meta_b)
 
-        indexer.delete("src-a")
+        await indexer.delete("src-a")
 
         result_a = vector_store._collection.get(
             where={"source_id": "src-a"}, include=[],
@@ -445,17 +445,17 @@ class TestDelete:
 class TestUpsertMetadata:
     """Indexer.upsert_metadata のテスト."""
 
-    def test_updates_metadata_without_changing_text(
+    async def test_updates_metadata_without_changing_text(
         self, indexer: Indexer, vector_store: VectorStore, tmp_path: Path,
     ) -> None:
         path = _write_text_file(tmp_path, "doc.txt", "Content for metadata upsert.")
         original_meta = _make_metadata(source_id="src-meta-up", title="Old Title")
 
-        indexer.add("src-meta-up", path, original_meta)
+        await indexer.add("src-meta-up", path, original_meta)
 
         # メタデータのみ更新
         updated_meta = _make_metadata(source_id="src-meta-up", title="New Title")
-        indexer.upsert_metadata("src-meta-up", updated_meta)
+        await indexer.upsert_metadata("src-meta-up", updated_meta)
 
         result = vector_store._collection.get(
             where={"source_id": "src-meta-up"},
@@ -465,7 +465,7 @@ class TestUpsertMetadata:
         # テキストは維持される
         assert result["documents"][0] is not None
 
-    def test_updates_custom_fields(
+    async def test_updates_custom_fields(
         self, indexer: Indexer, vector_store: VectorStore, tmp_path: Path,
     ) -> None:
         path = _write_text_file(tmp_path, "doc.txt", "Content with custom meta.")
@@ -474,13 +474,13 @@ class TestUpsertMetadata:
             extra={"author": "Alice"},
         )
 
-        indexer.add("src-custom-up", path, original_meta)
+        await indexer.add("src-custom-up", path, original_meta)
 
         updated_meta = _make_metadata(
             source_id="src-custom-up",
             extra={"author": "Bob", "version": 2},
         )
-        indexer.upsert_metadata("src-custom-up", updated_meta)
+        await indexer.upsert_metadata("src-custom-up", updated_meta)
 
         result = vector_store._collection.get(
             where={"source_id": "src-custom-up"},
@@ -490,12 +490,12 @@ class TestUpsertMetadata:
         assert meta["custom:author"] == "Bob"
         assert meta["custom:version"] == 2
 
-    def test_nonexistent_source_logs_warning(
+    async def test_nonexistent_source_logs_warning(
         self, indexer: Indexer,
     ) -> None:
         """存在しない source_id のメタデータ更新はエラーにならない."""
         meta = _make_metadata(source_id="nonexistent")
-        indexer.upsert_metadata("nonexistent", meta)
+        await indexer.upsert_metadata("nonexistent", meta)
 
 
 # --- テスト: clear ---
@@ -504,7 +504,7 @@ class TestUpsertMetadata:
 class TestClear:
     """Indexer.clear のテスト."""
 
-    def test_clear_all(
+    async def test_clear_all(
         self, indexer: Indexer, vector_store: VectorStore,
         bm25_index: BM25Index, tmp_path: Path,
     ) -> None:
@@ -513,15 +513,15 @@ class TestClear:
         meta_a = _make_metadata(source_id="src-a", source_type="web")
         meta_b = _make_metadata(source_id="src-b", source_type="zenn")
 
-        indexer.add("src-a", path_a, meta_a)
-        indexer.add("src-b", path_b, meta_b)
+        await indexer.add("src-a", path_a, meta_a)
+        await indexer.add("src-b", path_b, meta_b)
 
-        indexer.clear()
+        await indexer.clear()
 
         assert vector_store._collection.count() == 0
         assert bm25_index.get_document_count() == 0
 
-    def test_clear_by_source_type(
+    async def test_clear_by_source_type(
         self, indexer: Indexer, vector_store: VectorStore,
         metadata_db: MetadataDB, tmp_path: Path,
     ) -> None:
@@ -552,11 +552,11 @@ class TestClear:
         meta_web = _make_metadata(source_id="src-web", source_type="web")
         meta_zenn = _make_metadata(source_id="src-zenn", source_type="zenn")
 
-        indexer.add("src-web", path_web, meta_web)
-        indexer.add("src-zenn", path_zenn, meta_zenn)
+        await indexer.add("src-web", path_web, meta_web)
+        await indexer.add("src-zenn", path_zenn, meta_zenn)
 
         # web のみクリア
-        indexer.clear("web")
+        await indexer.clear("web")
 
         result_web = vector_store._collection.get(
             where={"source_id": "src-web"}, include=[],
@@ -567,22 +567,22 @@ class TestClear:
         assert len(result_web["ids"]) == 0
         assert len(result_zenn["ids"]) >= 1
 
-    def test_clear_empty_index_no_error(
+    async def test_clear_empty_index_no_error(
         self, indexer: Indexer,
     ) -> None:
         """空インデックスの clear はエラーにならない."""
-        indexer.clear()
+        await indexer.clear()
 
-    def test_clear_all_then_add(
+    async def test_clear_all_then_add(
         self, indexer: Indexer, vector_store: VectorStore, tmp_path: Path,
     ) -> None:
         """clear 後に再追加できる."""
         path = _write_text_file(tmp_path, "doc.txt", "Content.")
         meta = _make_metadata(source_id="src-re")
 
-        indexer.add("src-re", path, meta)
-        indexer.clear()
-        indexer.add("src-re", path, meta)
+        await indexer.add("src-re", path, meta)
+        await indexer.clear()
+        await indexer.add("src-re", path, meta)
 
         result = vector_store._collection.get(
             where={"source_id": "src-re"}, include=[],
@@ -596,30 +596,30 @@ class TestClear:
 class TestSourceIdValidation:
     """source_id と metadata.source_id の一致バリデーションテスト."""
 
-    def test_add_raises_on_mismatch(
+    async def test_add_raises_on_mismatch(
         self, indexer: Indexer, tmp_path: Path,
     ) -> None:
         path = _write_text_file(tmp_path, "doc.txt", "Content.")
         meta = _make_metadata(source_id="different-id")
 
         with pytest.raises(ValueError, match="source_id の不一致"):
-            indexer.add("src-mismatch", path, meta)
+            await indexer.add("src-mismatch", path, meta)
 
-    def test_update_raises_on_mismatch(
+    async def test_update_raises_on_mismatch(
         self, indexer: Indexer, tmp_path: Path,
     ) -> None:
         path = _write_text_file(tmp_path, "doc.txt", "Content.")
         meta = _make_metadata(source_id="different-id")
 
         with pytest.raises(ValueError, match="source_id の不一致"):
-            indexer.update("src-mismatch", path, meta)
+            await indexer.update("src-mismatch", path, meta)
 
-    def test_matching_ids_no_error(
+    async def test_matching_ids_no_error(
         self, indexer: Indexer, tmp_path: Path,
     ) -> None:
         path = _write_text_file(tmp_path, "doc.txt", "Content.")
         meta = _make_metadata(source_id="src-ok")
-        indexer.add("src-ok", path, meta)
+        await indexer.add("src-ok", path, meta)
 
 
 # --- テスト: Embedding 疎通確認 ---
@@ -638,7 +638,7 @@ class UnavailableEmbeddingProvider(EmbeddingProvider):
 class TestEmbeddingAvailability:
     """Embedding プロバイダー疎通確認のテスト."""
 
-    def test_add_raises_when_embedding_unavailable(
+    async def test_add_raises_when_embedding_unavailable(
         self, bm25_index: BM25Index, metadata_db: MetadataDB, tmp_path: Path,
     ) -> None:
         """add 時に Embedding プロバイダーが接続不可ならエラーになること."""
@@ -655,9 +655,9 @@ class TestEmbeddingAvailability:
         meta = _make_metadata(source_id="src-unavail")
 
         with pytest.raises(ConnectionError, match="Embedding"):
-            idx.add("src-unavail", path, meta)
+            await idx.add("src-unavail", path, meta)
 
-    def test_update_raises_when_embedding_unavailable(
+    async def test_update_raises_when_embedding_unavailable(
         self, bm25_index: BM25Index, metadata_db: MetadataDB, tmp_path: Path,
     ) -> None:
         """update 時に Embedding プロバイダーが接続不可ならエラーになること."""
@@ -674,21 +674,21 @@ class TestEmbeddingAvailability:
         meta = _make_metadata(source_id="src-unavail-upd")
 
         with pytest.raises(ConnectionError, match="Embedding"):
-            idx.update("src-unavail-upd", path, meta)
+            await idx.update("src-unavail-upd", path, meta)
 
-    def test_delete_does_not_check_embedding(
+    async def test_delete_does_not_check_embedding(
         self, indexer: Indexer,
     ) -> None:
         """delete は Embedding チェックを行わないこと（エラーにならない）."""
-        indexer.delete("nonexistent-source")
+        await indexer.delete("nonexistent-source")
 
-    def test_clear_does_not_check_embedding(
+    async def test_clear_does_not_check_embedding(
         self, indexer: Indexer,
     ) -> None:
         """clear は Embedding チェックを行わないこと（エラーにならない）."""
-        indexer.clear()
+        await indexer.clear()
 
-    def test_check_cached_after_first_success(
+    async def test_check_cached_after_first_success(
         self, indexer: Indexer, tmp_path: Path,
     ) -> None:
         """疎通確認は初回成功後にキャッシュされ、2回目以降はスキップされること."""
@@ -696,7 +696,7 @@ class TestEmbeddingAvailability:
         path = _write_text_file(tmp_path, "doc.txt", "Content for cache test.")
         meta = _make_metadata(source_id="src-cache")
 
-        indexer.add("src-cache", path, meta)
+        await indexer.add("src-cache", path, meta)
 
         # 初回 add 後にキャッシュされている
         assert indexer._embedding_checked is True
@@ -708,7 +708,7 @@ class TestEmbeddingAvailability:
 class TestProtocolConformance:
     """IndexerProtocol へのプロトコル適合性テスト."""
 
-    def test_conforms_to_protocol(self, indexer: Indexer) -> None:
+    async def test_conforms_to_protocol(self, indexer: Indexer) -> None:
         """Indexer が IndexerProtocol のメソッドシグネチャを満たす."""
         from rag.pipeline.protocols import IndexerProtocol
 

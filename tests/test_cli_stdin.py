@@ -9,7 +9,7 @@ import argparse
 import io
 import json
 from pathlib import Path
-from unittest.mock import MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
@@ -404,7 +404,7 @@ class TestAddDocumentFilenamePriority:
         ):
             mock_controller = MagicMock()
             mock_controller.source_store.root_dir = tmp_path
-            mock_controller.ingest_and_index.return_value = self._make_pipeline_summary_mock()
+            mock_controller.ingest_and_index = AsyncMock(return_value=self._make_pipeline_summary_mock())
             mock_settings = MagicMock()
             mock_settings.rag_document_supported_extensions = ".md,.txt,.pdf,.adoc"
             mock_ctrl.return_value = (mock_controller, mock_settings)
@@ -445,7 +445,7 @@ class TestAddDocumentFilenamePriority:
         ):
             mock_controller = MagicMock()
             mock_controller.source_store.root_dir = tmp_path
-            mock_controller.ingest_and_index.return_value = self._make_pipeline_summary_mock()
+            mock_controller.ingest_and_index = AsyncMock(return_value=self._make_pipeline_summary_mock())
             mock_settings = MagicMock()
             mock_settings.rag_document_supported_extensions = ".md,.txt,.pdf,.adoc"
             mock_ctrl.return_value = (mock_controller, mock_settings)
