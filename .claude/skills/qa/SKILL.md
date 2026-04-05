@@ -370,7 +370,7 @@ QA 完了後、worktree 環境を片付ける。ChromaDB・HTTP サーバー等�
 2. worktree 内の未コミット変更を確認する:
 
    ```bash
-   git -C <worktree-path> status --porcelain
+   git -C "<worktree-path>" status --porcelain
    ```
 
    - **出力が空の場合**: 未コミット変更なし。ステップ 3 に進む
@@ -391,10 +391,10 @@ QA 完了後、worktree 環境を片付ける。ChromaDB・HTTP サーバー等�
 
    ```bash
    # 未コミット変更がない場合
-   git worktree remove <worktree-path>
+   git worktree remove "<worktree-path>"
 
    # 未コミット変更ありでユーザーが削除を承認した場合のみ
-   git worktree remove --force <worktree-path>
+   git worktree remove --force "<worktree-path>"
    ```
 
    `--force` はステップ 2 でユーザーが明示的に削除を承認した場合にのみ使用する。未確認の状態で `--force` を使用してはならない。
