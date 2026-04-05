@@ -437,7 +437,7 @@ class TestCliSiteIngestFlow:
 
         mock_controller = MagicMock()
         mock_controller.source_store = MagicMock()
-        mock_controller.ingest_and_index.return_value = mock_pipeline_summary
+        mock_controller.ingest_and_index = AsyncMock(return_value=mock_pipeline_summary)
 
         args = argparse.Namespace(url=["https://example.com"], url_pattern="", max_pages=10, force=False, download_only=False)
 
@@ -495,7 +495,7 @@ class TestCliSiteIngestFlow:
 
         mock_controller = MagicMock()
         mock_controller.source_store = MagicMock()
-        mock_controller.ingest_and_index.return_value = mock_pipeline_summary
+        mock_controller.ingest_and_index = AsyncMock(return_value=mock_pipeline_summary)
 
         args = argparse.Namespace(url=["https://example.com"], url_pattern="", max_pages=10, force=False, download_only=False)
 

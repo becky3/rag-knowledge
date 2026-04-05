@@ -72,7 +72,7 @@ class IndexerProtocol(Protocol):
     converted_store からチャンキング・Embedding・インデックス構築を行う。
     """
 
-    def add(
+    async def add(
         self,
         source_id: str,
         converted_path: Path,
@@ -87,7 +87,7 @@ class IndexerProtocol(Protocol):
         """
         ...
 
-    def update(
+    async def update(
         self,
         source_id: str,
         converted_path: Path,
@@ -102,7 +102,7 @@ class IndexerProtocol(Protocol):
         """
         ...
 
-    def delete(self, source_id: str) -> None:
+    async def delete(self, source_id: str) -> None:
         """インデックスから削除する.
 
         Args:
@@ -110,7 +110,7 @@ class IndexerProtocol(Protocol):
         """
         ...
 
-    def upsert_metadata(
+    async def upsert_metadata(
         self,
         source_id: str,
         metadata: SourceMetadata,
@@ -123,7 +123,7 @@ class IndexerProtocol(Protocol):
         """
         ...
 
-    def clear(self, source_type: SourceType | None = None) -> None:
+    async def clear(self, source_type: SourceType | None = None) -> None:
         """インデックスをクリアする.
 
         Args:

@@ -616,14 +616,14 @@ def main() -> None:
         "ingest-aozora": run_ingest_aozora,
         "ingest-aozora-author": run_ingest_aozora_author,
         "add-journal": run_add_journal,
+        "rebuild": run_rebuild,
+        "delete": run_delete,
     }
     _SYNC_COMMANDS: dict[str, object] = {
         "get-document": run_get_document,
-        "rebuild": run_rebuild,
         "stats": run_stats,
         "list-recent": run_list_recent,
         "search": run_search,
-        "delete": run_delete,
         "search-aozora": run_search_aozora,
         "migrate-journal": run_migrate_journal,
         "generate-api-key": run_generate_api_key,
@@ -1216,7 +1216,7 @@ def _show_error_dialog(message: str) -> None:
         logger.warning("Windows ダイアログの表示に失敗しました")
 
 
-def run_rebuild(args: argparse.Namespace) -> None:
+async def run_rebuild(args: argparse.Namespace) -> None:
     """再構築を実行する.
 
     仕様: docs/specs/rebuild-stats.md
@@ -1327,22 +1327,22 @@ def run_rebuild(args: argparse.Namespace) -> None:
                 logger.info("source_store に変更なし（コミットなし）")
 
         if mode == "full":
-            summary = controller.run_full_rebuild(
+            summary = await controller.run_full_rebuild(
                 source_type=source_type,
                 progress_callback=progress_cb,
             )
         elif mode == "convert":
-            summary = controller.run_convert_only(
+            summary = await controller.run_convert_only(
                 source_type=source_type,
                 progress_callback=progress_cb,
             )
         elif mode == "index":
-            summary = controller.run_index_only(
+            summary = await controller.run_index_only(
                 source_type=source_type,
                 progress_callback=progress_cb,
             )
         else:
-            summary = controller.run_incremental(
+            summary = await controller.run_incremental(
                 progress_callback=progress_cb,
             )
 
@@ -1749,7 +1749,7 @@ def run_search(args: argparse.Namespace) -> None:
         print(format_raw_search_results(raw))
 
 
-def run_delete(args: argparse.Namespace) -> None:
+async def run_delete(args: argparse.Namespace) -> None:
     """ソースをナレッジベースから削除する.
 
     MCP ツール rag_delete と同等の削除を CLI で実行する。
@@ -1774,7 +1774,7 @@ def run_delete(args: argparse.Namespace) -> None:
         sys.exit(1)
 
     try:
-        summary = controller.ingest_and_index(
+        summary = await controller.ingest_and_index(
             f"delete: {source_id}",
             progress_callback=progress_cb,
         )
@@ -1871,7 +1871,7 @@ async def run_add_journal(args: argparse.Namespace) -> None:
             print(f"エラー: {ingest_result.error_details[0]}", file=sys.stderr)
             raise SystemExit(1)
 
-        pipeline_summary = controller.ingest_and_index(
+        pipeline_summary = await controller.ingest_and_index(
             f"ingest(journal): add {args.title}",
             progress_callback=progress_cb,
         )
@@ -2131,7 +2131,7 @@ async def run_ingest_youtube(args: argparse.Namespace) -> None:
         _print_ingest_result(ingest_result, None, context=f"動画: {args.video_url}", json_output=json_out)
         return
 
-    pipeline_summary = controller.ingest_and_index(
+    pipeline_summary = await controller.ingest_and_index(
         f"ingest(youtube): {args.video_url}",
         progress_callback=progress_cb,
     )
@@ -2177,7 +2177,7 @@ async def run_ingest_youtube_playlist(args: argparse.Namespace) -> None:
         _print_ingest_result(ingest_result, None, context=f"プレイリスト: {args.playlist_url}", json_output=json_out)
         return
 
-    pipeline_summary = controller.ingest_and_index(
+    pipeline_summary = await controller.ingest_and_index(
         f"ingest(youtube-playlist): {args.playlist_url}",
         progress_callback=progress_cb,
     )
@@ -2252,7 +2252,7 @@ async def run_crawl_bluesky(args: argparse.Namespace) -> None:
         logger.error("エラー: %s", e)
         sys.exit(1)
 
-    pipeline_summary = controller.ingest_and_index(
+    pipeline_summary = await controller.ingest_and_index(
         f"ingest(bluesky): {args.handle}",
         progress_callback=progress_cb,
     )
@@ -2327,7 +2327,7 @@ async def run_crawl_zenn(args: argparse.Namespace) -> None:
             print(f"コンテンツが見つかりませんでした（ユーザー: {args.username}）")
         return
 
-    pipeline_summary = controller.ingest_and_index(
+    pipeline_summary = await controller.ingest_and_index(
         f"ingest(zenn): {args.username}",
         progress_callback=progress_cb,
     )
@@ -2462,7 +2462,7 @@ async def run_add_document(args: argparse.Namespace) -> None:
             print(f"エラー: {ingest_result.error_details[0]}", file=sys.stderr)
             raise SystemExit(1)
 
-        pipeline_summary = controller.ingest_and_index(
+        pipeline_summary = await controller.ingest_and_index(
             f"ingest(local): add {filename}",
             progress_callback=progress_cb,
         )
@@ -2510,7 +2510,7 @@ async def run_crawl_documents(args: argparse.Namespace) -> None:
         print(f"エラー: {ingest_result.error_details[0]}", file=sys.stderr)
         raise SystemExit(1)
 
-    pipeline_summary = controller.ingest_and_index(
+    pipeline_summary = await controller.ingest_and_index(
         f"ingest(local): crawl {args.dir_path}",
         progress_callback=progress_cb,
     )
@@ -2643,7 +2643,7 @@ async def run_site_ingest(args: argparse.Namespace) -> None:
     pipeline_summary = None
     has_changes = (bridge_result.ingest.placed + bridge_result.ingest.overwritten) > 0
     if has_changes and not args.download_only:
-        pipeline_summary = controller.ingest_and_index(
+        pipeline_summary = await controller.ingest_and_index(
             f"ingest(web): site-ingest {display_url}",
             progress_callback=progress_cb,
         )
@@ -2802,7 +2802,7 @@ async def run_ingest_aozora(args: argparse.Namespace) -> None:
         logger.error("エラー: %s", e)
         sys.exit(1)
 
-    pipeline_summary = controller.ingest_and_index(
+    pipeline_summary = await controller.ingest_and_index(
         f"ingest(aozora): book_id={args.book_id}",
         progress_callback=progress_cb,
     )
@@ -2845,7 +2845,7 @@ async def run_ingest_aozora_author(args: argparse.Namespace) -> None:
         logger.error("エラー: %s", e)
         sys.exit(1)
 
-    pipeline_summary = controller.ingest_and_index(
+    pipeline_summary = await controller.ingest_and_index(
         f"ingest(aozora): person_id={args.person_id}",
         progress_callback=progress_cb,
     )

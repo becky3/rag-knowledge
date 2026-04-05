@@ -9,9 +9,10 @@
 from __future__ import annotations
 
 import hashlib
+import inspect
 import logging
 import subprocess
-from collections.abc import Callable, Sequence
+from collections.abc import Awaitable, Callable, Sequence
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import TypeVar
@@ -109,7 +110,7 @@ class PipelineController:
         self._git.init_repo()
         return self._git.commit(message)
 
-    def ingest_and_index(
+    async def ingest_and_index(
         self,
         message: str,
         progress_callback: ProgressCallback | None = None,
@@ -126,11 +127,11 @@ class PipelineController:
             パイプライン処理結果サマリ
         """
         self.commit(message)
-        return self.run_incremental(progress_callback=progress_callback)
+        return await self.run_incremental(progress_callback=progress_callback)
 
     # --- パイプライン実行 ---
 
-    def run_incremental(self, progress_callback: ProgressCallback | None = None) -> PipelineSummary:
+    async def run_incremental(self, progress_callback: ProgressCallback | None = None) -> PipelineSummary:
         """差分更新を実行する.
 
         source_store に未コミットの変更がある場合は自動コミットし、
@@ -188,7 +189,7 @@ class PipelineController:
                 to_commit_id=head_commit,
             )
 
-        summary = self._process_changes(
+        summary = await self._process_changes(
             changes, PipelineMode.INCREMENTAL, last_commit_id, head_commit,
             progress_callback=progress_callback,
         )
@@ -204,7 +205,7 @@ class PipelineController:
 
         return summary
 
-    def run_full_rebuild(
+    async def run_full_rebuild(
         self,
         source_type: SourceType | None = None,
         *,
@@ -231,7 +232,7 @@ class PipelineController:
         self._converter.clear(self._converted_store_dir, source_type)
 
         # 3. インデックスクリア
-        self._indexer.clear(source_type)
+        await self._indexer.clear(source_type)
 
         # 4. active ファイルをスキャン（パイプライン対象外ファイルを除外）
         records = [
@@ -251,20 +252,20 @@ class PipelineController:
             )
 
         # 5-6. コンバート + インデックス
-        def _convert_and_index(record: SourceRecord) -> None:
+        async def _convert_and_index(record: SourceRecord) -> None:
             converted_path = self._converter.convert(
                 record.file_path,
                 self._source_store.root_dir,
                 self._converted_store_dir,
             )
             metadata = self._build_metadata_from_record(record)
-            self._indexer.add(record.source_id, converted_path, metadata)
+            await self._indexer.add(record.source_id, converted_path, metadata)
 
         to_commit = ""
         if self._git.has_commits():
             to_commit = self._git.get_head_commit()
 
-        summary = self._run_processing_loop(
+        summary = await self._run_processing_loop(
             records,
             process_fn=_convert_and_index,
             get_file_path=lambda r: r.file_path,
@@ -318,7 +319,7 @@ class PipelineController:
         if commit_id:
             logger.info("自動コミット完了: %s", commit_id)
 
-    def run_convert_only(
+    async def run_convert_only(
         self,
         source_type: SourceType | None = None,
         *,
@@ -366,7 +367,7 @@ class PipelineController:
                 self._converted_store_dir,
             )
 
-        return self._run_processing_loop(
+        return await self._run_processing_loop(
             records,
             process_fn=_convert_single,
             get_file_path=lambda r: r.file_path,
@@ -376,7 +377,7 @@ class PipelineController:
             progress_callback=progress_callback,
         )
 
-    def run_index_only(
+    async def run_index_only(
         self,
         source_type: SourceType | None = None,
         *,
@@ -397,7 +398,7 @@ class PipelineController:
         self._check_uncommitted_changes(source_type)
 
         # 1. インデックスクリア
-        self._indexer.clear(source_type)
+        await self._indexer.clear(source_type)
 
         # 2. active なレコードを取得（パイプライン対象外ファイルを除外）
         records = [
@@ -417,7 +418,7 @@ class PipelineController:
             )
 
         # 3. converted_store からインデックス再構築
-        def _index_single(record: SourceRecord) -> None:
+        async def _index_single(record: SourceRecord) -> None:
             converted_rel = get_converted_rel_path(record.file_path)
             converted_path = self._converted_store_dir / converted_rel
             if not converted_path.exists():
@@ -425,13 +426,13 @@ class PipelineController:
                     f"converted file not found: {converted_path}",
                 )
             metadata = self._build_metadata_from_record(record)
-            self._indexer.add(record.source_id, converted_path, metadata)
+            await self._indexer.add(record.source_id, converted_path, metadata)
 
         to_commit = ""
         if self._git.has_commits():
             to_commit = self._git.get_head_commit()
 
-        summary = self._run_processing_loop(
+        summary = await self._run_processing_loop(
             records,
             process_fn=_index_single,
             get_file_path=lambda r: r.file_path,
@@ -518,11 +519,11 @@ class PipelineController:
 
     # --- 共通処理ループ ---
 
-    def _run_processing_loop(
+    async def _run_processing_loop(
         self,
         items: Sequence[_T],
         *,
-        process_fn: Callable[[_T], None],
+        process_fn: Callable[[_T], Awaitable[None]] | Callable[[_T], None],
         get_file_path: Callable[[_T], str],
         phase: str,
         mode: PipelineMode,
@@ -535,6 +536,7 @@ class PipelineController:
 
         各パイプラインモードで共通する
         ループ + try/except + progress + PipelineSummary 組み立てを一元化する。
+        process_fn は sync / async どちらも受け付ける。
         """
         processed = 0
         skipped = 0
@@ -544,7 +546,9 @@ class PipelineController:
         for item in items:
             file_path = get_file_path(item)
             try:
-                process_fn(item)
+                result = process_fn(item)
+                if inspect.isawaitable(result):
+                    await result
                 processed += 1
             except ConversionSkippedError as e:
                 logger.warning(
@@ -577,7 +581,7 @@ class PipelineController:
 
     # --- 変更処理 ---
 
-    def _process_changes(
+    async def _process_changes(
         self,
         changes: list[ChangeEntry],
         mode: PipelineMode,
@@ -586,7 +590,7 @@ class PipelineController:
         progress_callback: ProgressCallback | None = None,
     ) -> PipelineSummary:
         """変更エントリを処理する."""
-        return self._run_processing_loop(
+        return await self._run_processing_loop(
             changes,
             process_fn=self._process_single_change,
             get_file_path=lambda e: e.file_path,
@@ -598,7 +602,7 @@ class PipelineController:
             to_commit_id=to_commit_id,
         )
 
-    def _process_single_change(self, entry: ChangeEntry) -> None:
+    async def _process_single_change(self, entry: ChangeEntry) -> None:
         """1ファイルの変更を処理する."""
         handler = {
             ChangeStatus.ADDED: self._handle_added,
@@ -607,9 +611,9 @@ class PipelineController:
             ChangeStatus.RENAMED: self._handle_renamed,
             ChangeStatus.META_ONLY: self._handle_meta_only,
         }
-        handler[entry.status](entry)
+        await handler[entry.status](entry)
 
-    def _handle_added(self, entry: ChangeEntry) -> None:
+    async def _handle_added(self, entry: ChangeEntry) -> None:
         """追加ファイルを処理する."""
         # 論理削除済みファイルは処理をスキップ
         # （DB=active / インデックス未登録の不整合を防止）
@@ -625,9 +629,9 @@ class PipelineController:
             self._converted_store_dir,
         )
         metadata = self._build_metadata(entry.file_path)
-        self._indexer.add(source_id, converted_path, metadata)
+        await self._indexer.add(source_id, converted_path, metadata)
 
-    def _handle_modified(self, entry: ChangeEntry) -> None:
+    async def _handle_modified(self, entry: ChangeEntry) -> None:
         """変更ファイルを処理する."""
         self._update_in_db(entry.file_path)
         converted_path = self._converter.convert(
@@ -637,13 +641,13 @@ class PipelineController:
         )
         source_id = self._resolve_source_id(entry.file_path)
         metadata = self._build_metadata(entry.file_path)
-        self._indexer.update(source_id, converted_path, metadata)
+        await self._indexer.update(source_id, converted_path, metadata)
 
-    def _handle_deleted(self, entry: ChangeEntry) -> None:
+    async def _handle_deleted(self, entry: ChangeEntry) -> None:
         """削除ファイルを処理する."""
         source_id = self._resolve_source_id(entry.file_path)
         self._converter.delete(entry.file_path, self._converted_store_dir)
-        self._indexer.delete(source_id)
+        await self._indexer.delete(source_id)
         try:
             self.db.set_status(source_id, "deleted")
         except KeyError:
@@ -651,7 +655,7 @@ class PipelineController:
                 "削除対象が metadata.db に存在しません: %s", source_id,
             )
 
-    def _handle_renamed(self, entry: ChangeEntry) -> None:
+    async def _handle_renamed(self, entry: ChangeEntry) -> None:
         """リネームファイルを処理する."""
         old_source_id = self._resolve_source_id(entry.old_path)
         source_type = detect_source_type(entry.file_path)
@@ -667,10 +671,10 @@ class PipelineController:
         self._converter.delete(entry.old_path, self._converted_store_dir)
 
         # インデクサー: 旧パス削除 + 新パス追加
-        self._indexer.delete(old_source_id)
+        await self._indexer.delete(old_source_id)
         new_source_id = self._resolve_source_id(entry.file_path)
         metadata = self._build_metadata(entry.file_path)
-        self._indexer.add(new_source_id, converted_path, metadata)
+        await self._indexer.add(new_source_id, converted_path, metadata)
 
         # metadata.db 更新
         if source_type == "local":
@@ -696,7 +700,7 @@ class PipelineController:
             except KeyError:
                 self._register_in_db(entry.file_path)
 
-    def _handle_meta_only(self, entry: ChangeEntry) -> None:
+    async def _handle_meta_only(self, entry: ChangeEntry) -> None:
         """.meta のみ変更を処理する."""
         source_id = self._resolve_source_id(entry.file_path)
         source_type = detect_source_type(entry.file_path)
@@ -725,7 +729,7 @@ class PipelineController:
 
         # インデクサー: メタデータのみ更新
         metadata = self._build_metadata(entry.file_path)
-        self._indexer.upsert_metadata(source_id, metadata)
+        await self._indexer.upsert_metadata(source_id, metadata)
 
     # --- metadata 操作ヘルパー ---
 
