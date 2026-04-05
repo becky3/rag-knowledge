@@ -393,8 +393,9 @@ CLI / MCP 対応: `rag_stats` / `rag_list_recent` / `rag_search` / `rag_get_docu
 QA 完了後、worktree 環境を片付ける。ChromaDB・HTTP サーバー等のプロセスがファイルをロックしているため、先にプロセスを停止する必要がある。
 
 1. worktree パスを参照する全プロセスを特定・停止する（`wmic process where "CommandLine like '%<worktree-path>%'" get ProcessId,CommandLine` で特定し、`taskkill //PID <pid> //T //F` でプロセスツリーごと停止）
-2. worktree ディレクトリを削除する: `git worktree remove <worktree-path>`
-3. worktree の参照をクリーンアップする: `git worktree prune`
+2. worktree 内の未コミット変更を確認する（`git -C <worktree-path> status --porcelain`）。未コミット変更がある場合はユーザーに警告し、削除の確認を取る。ユーザーが拒否した場合は worktree の削除をスキップする
+3. worktree ディレクトリを削除する: `git worktree remove <worktree-path>`。未コミット変更ありでユーザーが削除を承認した場合のみ `--force` を使用する。未確認の状態で `--force` を使用してはならない
+4. worktree の参照をクリーンアップする: `git worktree prune`
 
 ## 入出力
 
