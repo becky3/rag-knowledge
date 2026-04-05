@@ -65,9 +65,12 @@ class MetadataDB:
         return self._conn
 
     def initialize(self) -> None:
-        """スキーマを初期化する."""
+        """スキーマを初期化する.
+
+        CREATE TABLE IF NOT EXISTS のみ実行する。
+        スキーマ変更は migrate() で明示的に実行すること。
+        """
         self._connection.executescript(_SCHEMA_SQL)
-        self._migrate()
 
     def close(self) -> None:
         """接続を閉じる."""
@@ -75,8 +78,16 @@ class MetadataDB:
             self._conn.close()
             self._conn = None
 
-    def _migrate(self) -> None:
-        """既存テーブルのスキーマをマイグレーションする."""
+    def migrate(self) -> list[str]:
+        """既存テーブルのスキーマをマイグレーションする.
+
+        CLI の migrate コマンドから明示的に呼び出す。
+        initialize() からは呼び出されない。
+
+        Returns:
+            適用されたマイグレーションの説明リスト（適用なしなら空リスト）
+        """
+        applied: list[str] = []
         # pipeline_history に mode 列を追加（既存レコードは incremental 扱い）
         cursor = self._connection.execute("PRAGMA table_info(pipeline_history)")
         ph_columns = {row["name"] for row in cursor.fetchall()}
@@ -86,6 +97,7 @@ class MetadataDB:
                 " ADD COLUMN mode TEXT NOT NULL DEFAULT 'incremental'"
             )
             self._connection.commit()
+            applied.append("pipeline_history に mode 列を追加")
             logger.info("pipeline_history に mode 列を追加しました")
 
         # sources に published_at 列を追加（既存レコードは collected_at で埋める）
@@ -101,6 +113,7 @@ class MetadataDB:
                 " WHERE published_at = ''"
             )
             self._connection.commit()
+            applied.append("sources に published_at 列を追加")
             logger.info("sources に published_at 列を追加しました")
 
         # source_id = file_path 統合: file_path カラムが残っている旧スキーマを移行
@@ -129,10 +142,13 @@ class MetadataDB:
                 ALTER TABLE sources_new RENAME TO sources;
             """)
             self._connection.commit()
+            applied.append("sources の source_id を file_path ベースに移行")
             logger.info(
                 "sources テーブルから file_path カラムを削除し"
                 " source_id を file_path ベースに移行しました"
             )
+
+        return applied
 
     def __enter__(self) -> MetadataDB:
         return self
