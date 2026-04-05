@@ -83,11 +83,13 @@ class MetadataDB:
 
         CLI の migrate コマンドから明示的に呼び出す。
         initialize() からは呼び出されない。
+        各種機能は最新スキーマを前提とし、旧スキーマへのフォールバックは行わない。
 
         Returns:
             適用されたマイグレーションの説明リスト（適用なしなら空リスト）
         """
         applied: list[str] = []
+
         # pipeline_history に mode 列を追加（既存レコードは incremental 扱い）
         cursor = self._connection.execute("PRAGMA table_info(pipeline_history)")
         ph_columns = {row["name"] for row in cursor.fetchall()}

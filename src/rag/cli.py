@@ -1955,10 +1955,14 @@ def run_migrate(args: argparse.Namespace) -> None:
 
     settings = get_settings()
     source_store_dir = settings.source_store_dir
+    if not source_store_dir:
+        print("エラー: source_store_dir が設定されていません", file=sys.stderr)
+        raise SystemExit(1)
+
     db_path = Path(source_store_dir) / "metadata.db"
     if not db_path.exists():
-        print(f"metadata.db が見つかりません: {db_path}")
-        return
+        print(f"エラー: metadata.db が見つかりません: {db_path}", file=sys.stderr)
+        raise SystemExit(1)
 
     db = MetadataDB(db_path)
     try:
