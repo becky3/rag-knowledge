@@ -377,7 +377,7 @@ def test_factory_passes_prefix_enabled_by_default() -> None:
 async def test_embed_retries_on_connection_error() -> None:
     """接続エラー時にリトライが実行され、成功時に結果を返すこと."""
     provider = LMStudioEmbedding(
-        **make_lmstudio_embedding_args(retry_count=2, retry_base_delay=0.01),
+        **make_lmstudio_embedding_args(retry_count=2, retry_base_delay=1.0),
     )
 
     mock_item = MagicMock()
@@ -392,16 +392,19 @@ async def test_embed_retries_on_connection_error() -> None:
         ],
     )
 
-    result = await provider.embed(["hello"])
+    with patch("rag.embedding.lmstudio_embedding.asyncio.sleep", new_callable=AsyncMock) as mock_sleep:
+        result = await provider.embed(["hello"])
+
     assert result == [[0.1, 0.2, 0.3]]
     assert provider._client.embeddings.create.await_count == 2
+    mock_sleep.assert_awaited_once_with(1.0)  # base_delay * 2^0
 
 
 @pytest.mark.asyncio
 async def test_embed_retries_on_timeout_error() -> None:
     """タイムアウトエラー時にリトライが実行されること."""
     provider = LMStudioEmbedding(
-        **make_lmstudio_embedding_args(retry_count=2, retry_base_delay=0.01),
+        **make_lmstudio_embedding_args(retry_count=2, retry_base_delay=1.0),
     )
 
     mock_item = MagicMock()
@@ -416,27 +419,35 @@ async def test_embed_retries_on_timeout_error() -> None:
         ],
     )
 
-    result = await provider.embed(["world"])
+    with patch("rag.embedding.lmstudio_embedding.asyncio.sleep", new_callable=AsyncMock) as mock_sleep:
+        result = await provider.embed(["world"])
+
     assert result == [[0.4, 0.5, 0.6]]
     assert provider._client.embeddings.create.await_count == 2
+    mock_sleep.assert_awaited_once_with(1.0)  # base_delay * 2^0
 
 
 @pytest.mark.asyncio
 async def test_embed_raises_after_retry_exhaustion() -> None:
-    """リトライ上限到達時にエラーが伝播すること."""
+    """リトライ上限到達時にエラーが伝播し、指数バックオフの delay が正しいこと."""
     provider = LMStudioEmbedding(
-        **make_lmstudio_embedding_args(retry_count=2, retry_base_delay=0.01),
+        **make_lmstudio_embedding_args(retry_count=2, retry_base_delay=1.0),
     )
 
     provider._client.embeddings.create = AsyncMock(  # type: ignore[method-assign]
         side_effect=APIConnectionError(request=MagicMock()),
     )
 
-    with pytest.raises(APIConnectionError):
-        await provider.embed(["fail"])
+    with patch("rag.embedding.lmstudio_embedding.asyncio.sleep", new_callable=AsyncMock) as mock_sleep:
+        with pytest.raises(APIConnectionError):
+            await provider.embed(["fail"])
 
     # 初回 + 2 リトライ = 3 回
     assert provider._client.embeddings.create.await_count == 3
+    # 指数バックオフ: 1.0 * 2^0 = 1.0, 1.0 * 2^1 = 2.0
+    assert mock_sleep.await_count == 2
+    mock_sleep.assert_any_await(1.0)
+    mock_sleep.assert_any_await(2.0)
 
 
 @pytest.mark.asyncio
