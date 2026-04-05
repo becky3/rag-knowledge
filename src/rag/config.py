@@ -134,6 +134,9 @@ class RAGSettings(BaseModel):
     embedding_model_online: str
     # 検索クエリに prefix を付与して検索精度を向上させる（モデル依存）
     embedding_prefix_enabled: bool
+    # 高並列時の一時的な接続タイムアウトに対応するリトライ
+    rag_embedding_retry_count: int = Field(ge=0, le=10)
+    rag_embedding_retry_base_delay: float = Field(ge=0.1, le=30.0)
 
     # チャンキング
     rag_chunk_size: int = Field(ge=1)

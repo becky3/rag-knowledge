@@ -147,6 +147,8 @@ def make_lmstudio_embedding_args(**overrides: Any) -> dict[str, Any]:
         "base_url": "http://localhost:1234",
         "model": "nomic-embed-text",
         "prefix_enabled": False,
+        "retry_count": 0,
+        "retry_base_delay": 0.1,
     }
     defaults.update(overrides)
     return defaults

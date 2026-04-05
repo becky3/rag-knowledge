@@ -1,4 +1,4 @@
-"""Embeddingプロバイダーのテスト (Issue #115).
+"""Embeddingプロバイダーのテスト (Issue #115, #541).
 
 仕様: docs/specs/rag-knowledge.md
 """
@@ -8,6 +8,7 @@ from __future__ import annotations
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
+from openai import APIConnectionError, APITimeoutError
 from py_common_lib.secrets import SecretNotFoundError
 
 from factories import make_lmstudio_embedding_args, make_openai_embedding_args
@@ -367,3 +368,119 @@ def test_factory_passes_prefix_enabled_by_default() -> None:
     provider = get_embedding_provider(settings, "local")
     assert isinstance(provider, LMStudioEmbedding)
     assert provider._prefix_enabled is True
+
+
+# --- Embedding retry tests (Issue #541) ---
+
+
+@pytest.mark.asyncio
+async def test_embed_retries_on_connection_error() -> None:
+    """接続エラー時にリトライが実行され、成功時に結果を返すこと."""
+    provider = LMStudioEmbedding(
+        **make_lmstudio_embedding_args(retry_count=2, retry_base_delay=0.01),
+    )
+
+    mock_item = MagicMock()
+    mock_item.embedding = [0.1, 0.2, 0.3]
+    mock_response = MagicMock()
+    mock_response.data = [mock_item]
+
+    provider._client.embeddings.create = AsyncMock(  # type: ignore[method-assign]
+        side_effect=[
+            APIConnectionError(request=MagicMock()),
+            mock_response,
+        ],
+    )
+
+    result = await provider.embed(["hello"])
+    assert result == [[0.1, 0.2, 0.3]]
+    assert provider._client.embeddings.create.await_count == 2
+
+
+@pytest.mark.asyncio
+async def test_embed_retries_on_timeout_error() -> None:
+    """タイムアウトエラー時にリトライが実行されること."""
+    provider = LMStudioEmbedding(
+        **make_lmstudio_embedding_args(retry_count=2, retry_base_delay=0.01),
+    )
+
+    mock_item = MagicMock()
+    mock_item.embedding = [0.4, 0.5, 0.6]
+    mock_response = MagicMock()
+    mock_response.data = [mock_item]
+
+    provider._client.embeddings.create = AsyncMock(  # type: ignore[method-assign]
+        side_effect=[
+            APITimeoutError(request=MagicMock()),
+            mock_response,
+        ],
+    )
+
+    result = await provider.embed(["world"])
+    assert result == [[0.4, 0.5, 0.6]]
+    assert provider._client.embeddings.create.await_count == 2
+
+
+@pytest.mark.asyncio
+async def test_embed_raises_after_retry_exhaustion() -> None:
+    """リトライ上限到達時にエラーが伝播すること."""
+    provider = LMStudioEmbedding(
+        **make_lmstudio_embedding_args(retry_count=2, retry_base_delay=0.01),
+    )
+
+    provider._client.embeddings.create = AsyncMock(  # type: ignore[method-assign]
+        side_effect=APIConnectionError(request=MagicMock()),
+    )
+
+    with pytest.raises(APIConnectionError):
+        await provider.embed(["fail"])
+
+    # 初回 + 2 リトライ = 3 回
+    assert provider._client.embeddings.create.await_count == 3
+
+
+@pytest.mark.asyncio
+async def test_embed_no_retry_on_other_errors() -> None:
+    """接続・タイムアウト以外のエラーはリトライせず即座に伝播すること."""
+    provider = LMStudioEmbedding(
+        **make_lmstudio_embedding_args(retry_count=2, retry_base_delay=0.01),
+    )
+
+    provider._client.embeddings.create = AsyncMock(  # type: ignore[method-assign]
+        side_effect=ValueError("unexpected"),
+    )
+
+    with pytest.raises(ValueError, match="unexpected"):
+        await provider.embed(["fail"])
+
+    assert provider._client.embeddings.create.await_count == 1
+
+
+@pytest.mark.asyncio
+async def test_embed_no_retry_when_retry_count_zero() -> None:
+    """retry_count=0 のときリトライしないこと."""
+    provider = LMStudioEmbedding(
+        **make_lmstudio_embedding_args(retry_count=0, retry_base_delay=0.01),
+    )
+
+    provider._client.embeddings.create = AsyncMock(  # type: ignore[method-assign]
+        side_effect=APIConnectionError(request=MagicMock()),
+    )
+
+    with pytest.raises(APIConnectionError):
+        await provider.embed(["fail"])
+
+    assert provider._client.embeddings.create.await_count == 1
+
+
+def test_factory_passes_retry_settings() -> None:
+    """ファクトリがリトライ設定を LMStudioEmbedding に渡すこと."""
+    settings = Settings(**{
+        **TEST_SETTINGS_DEFAULTS,
+        "rag_embedding_retry_count": 5,
+        "rag_embedding_retry_base_delay": 2.0,
+    })
+    provider = get_embedding_provider(settings, "local")
+    assert isinstance(provider, LMStudioEmbedding)
+    assert provider._retry_count == 5
+    assert provider._retry_base_delay == 2.0

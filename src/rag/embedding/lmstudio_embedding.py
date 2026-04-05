@@ -4,9 +4,10 @@
 
 from __future__ import annotations
 
+import asyncio
 import logging
 
-from openai import AsyncOpenAI
+from openai import APIConnectionError, APITimeoutError, AsyncOpenAI
 
 from .base import EmbeddingProvider
 
@@ -27,6 +28,8 @@ class LMStudioEmbedding(EmbeddingProvider):
         base_url: str,
         model: str,
         prefix_enabled: bool,
+        retry_count: int,
+        retry_base_delay: float,
     ) -> None:
         normalized = base_url.rstrip("/")
         if not normalized.endswith("/v1"):
@@ -34,14 +37,41 @@ class LMStudioEmbedding(EmbeddingProvider):
         self._client = AsyncOpenAI(base_url=normalized, api_key="lm-studio")
         self._model = model
         self._prefix_enabled = prefix_enabled
+        self._retry_count = retry_count
+        self._retry_base_delay = retry_base_delay
 
     async def embed(self, texts: list[str]) -> list[list[float]]:
-        """テキストリストをベクトルリストに変換する."""
-        response = await self._client.embeddings.create(
-            model=self._model,
-            input=texts,
+        """テキストリストをベクトルリストに変換する.
+
+        一時的な接続エラー時は指数バックオフでリトライする。
+        """
+        last_error: Exception | None = None
+        for attempt in range(1 + self._retry_count):
+            try:
+                response = await self._client.embeddings.create(
+                    model=self._model,
+                    input=texts,
+                )
+                return [item.embedding for item in response.data]
+            except (APIConnectionError, APITimeoutError) as e:
+                last_error = e
+                if attempt < self._retry_count:
+                    delay = self._retry_base_delay * (2**attempt)
+                    logger.warning(
+                        "Embedding API error (attempt %d/%d), retrying in %.1fs: %s",
+                        attempt + 1,
+                        self._retry_count + 1,
+                        delay,
+                        e,
+                    )
+                    await asyncio.sleep(delay)
+        assert last_error is not None  # noqa: S101
+        logger.error(
+            "Embedding API failed after %d retries: %s",
+            self._retry_count,
+            last_error,
         )
-        return [item.embedding for item in response.data]
+        raise last_error
 
     async def embed_documents(self, texts: list[str]) -> list[list[float]]:
         """ドキュメント用Embedding（プレフィックス有効時はsearch_document:を付加）."""
