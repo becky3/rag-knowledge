@@ -66,6 +66,7 @@ metadata.db、converted_store、検索インデックスは全て source_store �
 - SQLite WAL モードで運用する
 - metadata.db が破損した場合、source_store のファイルと `.meta` からの再構築が可能であること
 - バックアップ時は metadata.db の WAL をフラッシュするため、事前に `PRAGMA wal_checkpoint(TRUNCATE)` を実行すること
+- スキーマ変更（マイグレーション）は CLI `migrate` コマンドで明示的に実行する。`initialize()` はテーブル作成（`CREATE TABLE IF NOT EXISTS`）のみ行い、スキーマ変更は行わない
 
 本コンポーネントは外部 API 通信を行わないため、想定プロファイル・安全制約セクションは省略する。
 

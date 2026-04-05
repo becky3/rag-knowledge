@@ -233,6 +233,7 @@ HTTP モード（`/mcp` パスが必要）:
 | `list-recent` | 指定 source_type のソースを新しい順で一覧取得 |
 | `delete` | ソースをナレッジベースから論理削除 |
 | `rebuild` | ナレッジベースを再構築 |
+| `migrate` | metadata.db のスキーマをマイグレーション |
 | `evaluate` | RAG 検索精度を評価 |
 | `init-test-db` | テスト用 ChromaDB・BM25 初期化 |
 | `generate-api-key` | Upload HTTP API 用の API キーを生成 |

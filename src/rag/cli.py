@@ -424,6 +424,13 @@ def main() -> None:
         help="インデックス再構築の並列数（未指定時は .env の RAG_EMBEDDING_CONCURRENCY）",
     )
     _add_output_option(rebuild_parser)
+
+    # migrate サブコマンド
+    subparsers.add_parser(
+        "migrate",
+        help="metadata.db のスキーマをマイグレーションする",
+    )
+
     # stats サブコマンド
     stats_parser = subparsers.add_parser("stats", help="ナレッジベースの統計情報を表示")
     _add_output_option(stats_parser)
@@ -632,6 +639,7 @@ def main() -> None:
         "search": run_search,
         "search-aozora": run_search_aozora,
         "migrate-journal": run_migrate_journal,
+        "migrate": run_migrate,
         "generate-api-key": run_generate_api_key,
     }
 
@@ -1938,6 +1946,37 @@ def run_migrate_journal(args: argparse.Namespace) -> None:
             )
     finally:
         store.close()
+
+
+def run_migrate(args: argparse.Namespace) -> None:
+    """metadata.db のスキーマをマイグレーションする."""
+    from rag.config import get_settings
+    from rag.store.metadata_db import MetadataDB
+
+    settings = get_settings()
+    source_store_dir = settings.source_store_dir
+    if not source_store_dir:
+        print("エラー: source_store_dir が設定されていません", file=sys.stderr)
+        raise SystemExit(1)
+
+    db_path = Path(source_store_dir) / "metadata.db"
+    if not db_path.exists():
+        print(f"エラー: metadata.db が見つかりません: {db_path}", file=sys.stderr)
+        raise SystemExit(1)
+
+    db = MetadataDB(db_path)
+    try:
+        db.initialize()
+        applied = db.migrate()
+    finally:
+        db.close()
+
+    if applied:
+        print(f"マイグレーション完了（{len(applied)} 件適用）:")
+        for desc in applied:
+            print(f"  - {desc}")
+    else:
+        print("マイグレーション不要（スキーマは最新です）")
 
 
 def run_generate_api_key(args: argparse.Namespace) -> None:
