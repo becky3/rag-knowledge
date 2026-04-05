@@ -88,6 +88,7 @@ uv run python -m rag.cli rebuild --mode <MODE> [--source-type <TYPE>]
 | `--mode` | str | はい | 再構築モード: `full`、`convert`、`index`、`incremental` |
 | `--source-type` | str | いいえ | 対象媒体フィルタ（値は [`_schema/enums.yml`](../../_schema/enums.yml) の `source_type` を参照） |
 | `--if-needed` | flag | いいえ | 前回の index/full rebuild 以降に更新がなければスキップする。`--mode` が `index` または `full` の場合のみ有効 |
+| `--concurrency` | int | いいえ | インデックス再構築の並列数。`.env` の `RAG_EMBEDDING_CONCURRENCY` を上書きする。`index` / `full` モードで有効。CLI 限定（MCP ツールでは `.env` の設定値が使用される） |
 
 MCP ツール `rag_rebuild` と同じバリデーション・振る舞いを適用する。`--if-needed` の詳細は [infrastructure/scheduled-rebuild.md](infrastructure/scheduled-rebuild.md) を参照。
 
@@ -308,7 +309,13 @@ metadata.db が破損・消失している場合は、パイプライン制御�
 
 ### 設定項目
 
-本コンポーネント固有の設定項目はない。source_store のパスは [source-store.md](source-store.md) の設定項目、converted_store のパスは [pipeline-controller.md](pipeline-controller.md) の設定項目を使用する。
+#### `.env`（環境依存値）
+
+| 設定項目 | 層 | 設計意図 |
+|---------|-----|---------|
+| `RAG_EMBEDDING_CONCURRENCY` | 環境依存値 | インデックス再構築時のソース並列数。Embedding プロバイダーの処理能力に応じて環境ごとに調整する |
+
+source_store のパスは [source-store.md](source-store.md) の設定項目、converted_store のパスは [pipeline-controller.md](pipeline-controller.md) の設定項目を使用する。
 
 ## エッジケース
 

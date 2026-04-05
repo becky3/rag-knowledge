@@ -8,6 +8,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import hashlib
 import inspect
 import logging
@@ -210,6 +211,7 @@ class PipelineController:
         source_type: SourceType | None = None,
         *,
         progress_callback: ProgressCallback | None = None,
+        concurrency: int = 1,
     ) -> PipelineSummary:
         """全再構築を実行する.
 
@@ -275,6 +277,7 @@ class PipelineController:
             progress_callback=progress_callback,
             from_commit_id=NULL_COMMIT_HASH,
             to_commit_id=to_commit,
+            concurrency=concurrency,
         )
 
         # pipeline_history に記録（正常完了時のみ）
@@ -382,6 +385,7 @@ class PipelineController:
         source_type: SourceType | None = None,
         *,
         progress_callback: ProgressCallback | None = None,
+        concurrency: int = 1,
     ) -> PipelineSummary:
         """インデックスのみ再構築する.
 
@@ -440,6 +444,7 @@ class PipelineController:
             mode=PipelineMode.INDEX_ONLY,
             log_prefix="インデックス再構築中に",
             progress_callback=progress_callback,
+            concurrency=concurrency,
         )
 
         # pipeline_history に記録（正常完了時のみ）
@@ -531,42 +536,64 @@ class PipelineController:
         progress_callback: ProgressCallback | None = None,
         from_commit_id: str = "",
         to_commit_id: str = "",
+        concurrency: int = 1,
     ) -> PipelineSummary:
         """共通の処理ループ.
 
         各パイプラインモードで共通する
         ループ + try/except + progress + PipelineSummary 組み立てを一元化する。
         process_fn は sync / async どちらも受け付ける。
+
+        asyncio.Semaphore で同時実行数を制限し、asyncio.gather で並列処理する。
+        concurrency=1 の場合は実質直列動作となる。
+        process_fn 内の sync 部分はイベントループをブロックする。
+        並列化の効果は process_fn 内の await ポイント（Embedding API 等）に依存する。
         """
+        sem = asyncio.Semaphore(concurrency)
         processed = 0
         skipped = 0
         errors: list[str] = []
         warnings: list[str] = []
+        lock = asyncio.Lock()
 
-        for item in items:
+        async def _process_one(item: _T) -> None:
+            nonlocal processed, skipped
             file_path = get_file_path(item)
-            try:
-                result = process_fn(item)
-                if inspect.isawaitable(result):
-                    await result
-                processed += 1
-            except ConversionSkippedError as e:
-                logger.warning(
-                    "%sスキップ: %s (%s)", log_prefix, file_path, e,
-                )
-                warnings.append(f"{file_path}: {e}")
-                skipped += 1
-            except Exception:
-                logger.exception(
-                    "%sエラー: %s", log_prefix, file_path,
-                )
-                errors.append(file_path)
-                skipped += 1
-            if progress_callback is not None:
-                progress_callback(
-                    processed + skipped, len(items),
-                    f"[{phase}] {file_path}",
-                )
+            async with sem:
+                try:
+                    result = process_fn(item)
+                    if inspect.isawaitable(result):
+                        await result
+                    async with lock:
+                        processed += 1
+                except ConversionSkippedError as e:
+                    logger.warning(
+                        "%sスキップ: %s (%s)", log_prefix, file_path, e,
+                    )
+                    async with lock:
+                        warnings.append(f"{file_path}: {e}")
+                        skipped += 1
+                except Exception:
+                    logger.exception(
+                        "%sエラー: %s", log_prefix, file_path,
+                    )
+                    async with lock:
+                        errors.append(file_path)
+                        skipped += 1
+                if progress_callback is not None:
+                    try:
+                        async with lock:
+                            progress_callback(
+                                processed + skipped, len(items),
+                                f"[{phase}] {file_path}",
+                            )
+                    except Exception:
+                        logger.debug(
+                            "progress_callback エラー: %s", file_path,
+                            exc_info=True,
+                        )
+
+        await asyncio.gather(*[_process_one(item) for item in items])
 
         return PipelineSummary(
             mode=mode,
