@@ -50,7 +50,6 @@ def _write_catalog(store: SourceStore, records: list[dict[str, str]]) -> None:
         data=csv_bytes,
         rel_path="aozora/catalog.csv",
         metadata={
-            "source_id": "aozora:catalog",
             "source_type": "aozora",
             "title": "Aozora Bunko Catalog",
             "collected_at": "2026-01-01T00:00:00+09:00",
@@ -292,7 +291,7 @@ class TestDuplicateSkip:
             data=b"<html>existing</html>",
             rel_path="aozora/000035/001567.html",
             metadata={
-                "source_id": "https://www.aozora.gr.jp/cards/000035/files/1567_14913.html",
+                "url": "https://www.aozora.gr.jp/cards/000035/files/1567_14913.html",
                 "source_type": "aozora",
                 "title": "Sample Title",
                 "collected_at": "2026-01-01T00:00:00+09:00",

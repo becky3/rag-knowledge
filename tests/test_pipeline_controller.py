@@ -177,7 +177,6 @@ def _place_web_file(
     full.parent.mkdir(parents=True, exist_ok=True)
     full.write_text(content, encoding="utf-8")
     meta = {
-        "source_id": source_id or rel_path,
         "source_type": "web",
         "title": title,
         "collected_at": "2026-01-01T00:00:00+00:00",
@@ -377,7 +376,6 @@ class TestRunIncremental:
             / "page.html.meta"
         )
         meta = {
-            "source_id": "web/example.com/page.html",
             "source_type": "web",
             "title": "New Title",
             "collected_at": "2026-01-01T00:00:00+00:00",
@@ -477,7 +475,6 @@ class TestDeleteAndReAdd:
         ctrl.source_store._db.register_source(
             source_id="local/a.txt",
             source_type="local",
-            file_path="local/a.txt",
             title="a",
             content_hash="dummy",
             file_size=len(content),
@@ -521,7 +518,6 @@ class TestDeleteAndReAdd:
         ctrl.source_store._db.register_source(
             source_id="local/b.txt",
             source_type="local",
-            file_path="local/b.txt",
             title="b",
             content_hash="dummy2",
             file_size=11,
@@ -553,13 +549,12 @@ class TestRemoveFile:
             "web/https/example.com/page.html",
             "<html>test</html>",
             title="Test",
-            source_id="https://example.com/page",
+            source_id="web/https/example.com/page.html",
         )
         # metadata.db に登録
         source_store._db.register_source(
-            source_id="https://example.com/page",
+            source_id="web/https/example.com/page.html",
             source_type="web",
-            file_path="web/https/example.com/page.html",
             title="Test",
             content_hash="dummy",
             file_size=17,
@@ -572,7 +567,7 @@ class TestRemoveFile:
         assert file_path.exists()
         assert meta_path.exists()
 
-        source_store.remove_file("https://example.com/page")
+        source_store.remove_file("web/https/example.com/page.html")
 
         assert not file_path.exists()
         assert not meta_path.exists()
@@ -602,7 +597,6 @@ class TestRemoveFile:
         source_store._db.register_source(
             source_id="local/ghost.txt",
             source_type="local",
-            file_path="local/ghost.txt",
             title="ghost",
             content_hash="dummy",
             file_size=0,
@@ -778,7 +772,7 @@ class TestRunIndexOnly:
         _place_web_file(
             workspace["source"],
             "web/example.com/page.html",
-            source_id="https://example.com/page",
+            source_id="web/example.com/page.html",
         )
         ctrl.commit("initial")
         await ctrl.run_incremental()
@@ -793,7 +787,7 @@ class TestRunIndexOnly:
         summary = await ctrl.run_index_only()
 
         assert summary.processed == 1
-        assert "https://example.com/page" in indexer.added
+        assert "web/example.com/page.html" in indexer.added
 
     async def test_json_source_maps_to_md_converted(
         self,
@@ -807,7 +801,6 @@ class TestRunIndexOnly:
         full.parent.mkdir(parents=True, exist_ok=True)
         full.write_text('{"title": "test"}', encoding="utf-8")
         meta = {
-            "source_id": "zenn/articles/article1",
             "source_type": "zenn",
             "title": "Test Article",
             "collected_at": "2026-01-01T00:00:00+00:00",
@@ -828,7 +821,7 @@ class TestRunIndexOnly:
         summary = await ctrl.run_index_only()
 
         assert summary.processed == 1
-        assert "zenn/articles/article1" in indexer.added
+        assert "zenn/articles/article1.json" in indexer.added
 
     async def test_skips_missing_converted(
         self,

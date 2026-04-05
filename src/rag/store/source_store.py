@@ -24,7 +24,7 @@ from rag.store.models import (
     SourceType,
 )
 from rag.store.path_converter import url_to_path
-from rag.store.resolve import resolve_published_at, resolve_source_id, resolve_title
+from rag.store.resolve import resolve_published_at, resolve_title
 
 logger = logging.getLogger(__name__)
 
@@ -120,7 +120,7 @@ class SourceStore:
         content_hash = hashlib.sha256(data).hexdigest()
         now = datetime.now(timezone.utc).isoformat()
 
-        source_id = self._resolve_source_id(source_type, rel_path, metadata)
+        source_id = rel_path
         title = self._resolve_title(source_type, rel_path, metadata)
 
         # collected_at: 既存レコード > metadata['collected_at'] > now の優先順
@@ -139,7 +139,6 @@ class SourceStore:
         self._db.register_source(
             source_id=source_id,
             source_type=source_type,
-            file_path=rel_path,
             title=title,
             content_hash=content_hash,
             file_size=len(data),
@@ -196,7 +195,7 @@ class SourceStore:
         extra: dict[str, Any] = {}
         collected_at = record.collected_at
         if record.source_type not in _NO_META_TYPES:
-            file_path = self._root / record.file_path
+            file_path = self._root / record.source_id
             meta_file = meta_path_for(file_path)
             if meta_file.exists():
                 meta_data = read_meta(file_path)
@@ -228,7 +227,7 @@ class SourceStore:
         if record is None:
             return None
 
-        file_path = self._root / record.file_path
+        file_path = self._root / record.source_id
         if not file_path.exists():
             logger.warning("DB にレコードがあるがファイルが見つかりません: %s", file_path)
             return None
@@ -237,7 +236,7 @@ class SourceStore:
 
         return FileData(
             content=content,
-            file_path=record.file_path,
+            file_path=record.source_id,
             metadata=self._build_metadata(record),
         )
 
@@ -334,8 +333,8 @@ class SourceStore:
             msg = f"source_id が存在しません: {source_id}"
             raise KeyError(msg)
 
-        self._validate_rel_path(record.file_path)
-        file_path = self._root / record.file_path
+        self._validate_rel_path(record.source_id)
+        file_path = self._root / record.source_id
         if file_path.exists():
             file_path.unlink()
 
@@ -398,7 +397,7 @@ class SourceStore:
                         ".meta ファイルが欠落しています: %s", full_path
                     )
 
-            source_id = self._resolve_source_id(detected_type, rel_str, meta_dict or None)
+            source_id = rel_str
             title = self._resolve_title(detected_type, rel_str, meta_dict or None)
             collected_at = meta_dict.get("collected_at", now)
             published_at = resolve_published_at(
@@ -408,7 +407,6 @@ class SourceStore:
             self._db.register_source(
                 source_id=source_id,
                 source_type=detected_type,
-                file_path=rel_str,
                 title=title,
                 content_hash=content_hash,
                 file_size=len(data),
@@ -466,15 +464,6 @@ class SourceStore:
         if rel_path.startswith("journal/"):
             return "journal"
         return "local"
-
-    @staticmethod
-    def _resolve_source_id(
-        source_type: SourceType,
-        rel_path: str,
-        metadata: dict[str, Any] | None,
-    ) -> str:
-        """source_id を決定する."""
-        return resolve_source_id(source_type, rel_path, metadata)
 
     @staticmethod
     def _resolve_title(

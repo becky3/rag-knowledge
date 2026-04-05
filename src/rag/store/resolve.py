@@ -1,36 +1,16 @@
 """ソース識別・タイトル解決の共通ユーティリティ.
 
-source_id / title の解決ロジックを一元化する。
+title / published_at の解決ロジックを一元化する。
 SourceStore と PipelineController の両方から呼び出される。
+
+source_id は source_store 内の相対パス（= file_path）をそのまま使用するため、
+解決関数は不要。
 """
 
 from __future__ import annotations
 
 from pathlib import Path
 from typing import Any
-
-
-def resolve_source_id(
-    source_type: str,
-    rel_path: str,
-    metadata: dict[str, Any] | None,
-) -> str:
-    """source_id を決定する.
-
-    .meta に source_id があればそれを使用し、
-    なければ相対パスをフォールバックとして使用する。
-
-    Args:
-        source_type: 媒体種別
-        rel_path: source_store 内の相対パス
-        metadata: .meta から読み取ったメタデータ辞書
-
-    Returns:
-        解決された source_id
-    """
-    if metadata and "source_id" in metadata:
-        return str(metadata["source_id"])
-    return rel_path
 
 
 def resolve_title(

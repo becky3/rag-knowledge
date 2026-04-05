@@ -83,7 +83,7 @@ youtube-transcript-api は非公式 API を使用しており、短時間に多�
 
 ### 重複検出
 
-[インジェスター共通仕様](common.md) のファイルシステムベース方式に従う。source_id（YouTube 動画 URL）からファイルパスを導出し、ファイルの存在有無で判定する。既存ファイルが存在する場合は上書きする（字幕は更新される可能性があるため）。
+[インジェスター共通仕様](common.md) のファイルシステムベース方式に従う。source_id（source_store 内の相対パス）で該当ファイルの存在有無を判定する。既存ファイルが存在する場合は上書きする（字幕は更新される可能性があるため）。
 
 ## 想定プロファイル
 
@@ -252,7 +252,6 @@ source_store/
 
 | フィールド | 型 | 内容 | 値の取得元 |
 |-----------|-----|------|-----------|
-| `source_id` | str | ソース識別子 | `https://www.youtube.com/watch?v={video_id}` |
 | `source_type` | str | 媒体種別 | 固定値 `"youtube"` |
 | `title` | str | 動画タイトル | yt-dlp メタデータの `title` フィールド |
 | `collected_at` | str | 取り込みタイムスタンプ（ISO 8601） | 取り込み実行時の現在時刻 |
@@ -261,6 +260,7 @@ source_store/
 
 | フィールド | 型 | 内容 | 値の取得元 |
 |-----------|-----|------|-----------|
+| `url` | str | YouTube 動画 URL | `https://www.youtube.com/watch?v={video_id}` |
 | `video_id` | str | YouTube 動画 ID | yt-dlp メタデータの `id` フィールド |
 | `channel_id` | str | チャンネル ID（`UC...` 形式） | yt-dlp メタデータの `channel_id` フィールド |
 | `uploader` | str | チャンネル名 | yt-dlp メタデータの `uploader` フィールド |
@@ -272,8 +272,8 @@ source_store/
 .meta ファイル例:
 
 ```yaml
-source_id: "https://www.youtube.com/watch?v=xxxxxxxxxxx"
 source_type: youtube
+url: "https://www.youtube.com/watch?v=xxxxxxxxxxx"
 title: "Sample Video Title"
 collected_at: "2026-03-23T10:30:00+09:00"
 video_id: "xxxxxxxxxxx"

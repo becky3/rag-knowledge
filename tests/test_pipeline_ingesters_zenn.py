@@ -299,7 +299,7 @@ class TestCrawlArticles:
         assert meta_path.exists()
         meta = yaml.safe_load(meta_path.read_text(encoding="utf-8"))
 
-        assert meta["source_id"] == "https://zenn.dev/testuser/articles/test-article"
+        assert meta["url"] == "https://zenn.dev/testuser/articles/test-article"
         assert meta["source_type"] == "zenn"
         assert meta["content_type"] == "article"
         assert meta["article_type"] == "tech"
@@ -366,7 +366,7 @@ class TestCrawlScraps:
         assert meta_path.exists()
         meta = yaml.safe_load(meta_path.read_text(encoding="utf-8"))
 
-        assert meta["source_id"] == "https://zenn.dev/testuser/scraps/test-scrap"
+        assert meta["url"] == "https://zenn.dev/testuser/scraps/test-scrap"
         assert meta["source_type"] == "zenn"
         assert meta["content_type"] == "scrap"
         assert meta["article_type"] == ""

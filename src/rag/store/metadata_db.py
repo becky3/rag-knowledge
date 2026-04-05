@@ -27,7 +27,6 @@ _SCHEMA_SQL = """\
 CREATE TABLE IF NOT EXISTS sources (
     source_id    TEXT PRIMARY KEY,
     source_type  TEXT NOT NULL,
-    file_path    TEXT NOT NULL UNIQUE,
     title        TEXT NOT NULL,
     status       TEXT NOT NULL DEFAULT 'active',
     content_hash TEXT NOT NULL,
@@ -104,6 +103,37 @@ class MetadataDB:
             self._connection.commit()
             logger.info("sources に published_at 列を追加しました")
 
+        # source_id = file_path 統合: file_path カラムが残っている旧スキーマを移行
+        if "file_path" in src_columns:
+            # file_path を新 source_id として直接 INSERT（UPDATE での PK 衝突を回避）
+            self._connection.executescript("""\
+                DROP TABLE IF EXISTS sources_new;
+                CREATE TABLE sources_new (
+                    source_id    TEXT PRIMARY KEY,
+                    source_type  TEXT NOT NULL,
+                    title        TEXT NOT NULL,
+                    status       TEXT NOT NULL DEFAULT 'active',
+                    content_hash TEXT NOT NULL,
+                    file_size    INTEGER NOT NULL,
+                    collected_at TEXT NOT NULL,
+                    updated_at   TEXT NOT NULL,
+                    published_at TEXT NOT NULL DEFAULT ''
+                );
+                INSERT OR REPLACE INTO sources_new
+                    (source_id, source_type, title, status,
+                     content_hash, file_size, collected_at, updated_at, published_at)
+                    SELECT file_path, source_type, title, status,
+                           content_hash, file_size, collected_at, updated_at, published_at
+                    FROM sources;
+                DROP TABLE sources;
+                ALTER TABLE sources_new RENAME TO sources;
+            """)
+            self._connection.commit()
+            logger.info(
+                "sources テーブルから file_path カラムを削除し"
+                " source_id を file_path ベースに移行しました"
+            )
+
     def __enter__(self) -> MetadataDB:
         return self
 
@@ -117,7 +147,6 @@ class MetadataDB:
         *,
         source_id: str,
         source_type: SourceType,
-        file_path: str,
         title: str,
         content_hash: str,
         file_size: int,
@@ -129,10 +158,9 @@ class MetadataDB:
 
         同一 source_id が既に存在する場合は上書きする
         （再取り込み時の更新動作。deleted → active への復帰を含む）。
-        異なる source_id で同一 file_path のレコードが存在する場合は
-        旧レコードを削除してから登録する。
 
         Note:
+            source_id は source_store 内の相対パス（file_path）と同一の値。
             collected_at は新規 INSERT 時のみ使用される。既存レコードの
             更新時は元の collected_at が保持される（ON CONFLICT で更新対象外）。
             published_at も同様に INSERT 時のみ使用される。
@@ -143,20 +171,14 @@ class MetadataDB:
         if not published_at:
             published_at = collected_at
 
-        # file_path UNIQUE 競合の防止: 異なる source_id で同じ file_path を持つ旧レコードを削除
-        self._connection.execute(
-            "DELETE FROM sources WHERE file_path = ? AND source_id != ?",
-            (file_path, source_id),
-        )
         self._connection.execute(
             """\
             INSERT INTO sources
-                (source_id, source_type, file_path, title, status,
+                (source_id, source_type, title, status,
                  content_hash, file_size, collected_at, updated_at, published_at)
-            VALUES (?, ?, ?, ?, 'active', ?, ?, ?, ?, ?)
+            VALUES (?, ?, ?, 'active', ?, ?, ?, ?, ?)
             ON CONFLICT(source_id) DO UPDATE SET
                 source_type = excluded.source_type,
-                file_path = excluded.file_path,
                 title = excluded.title,
                 status = 'active',
                 content_hash = excluded.content_hash,
@@ -166,7 +188,6 @@ class MetadataDB:
             (
                 source_id,
                 source_type,
-                file_path,
                 title,
                 content_hash,
                 file_size,
@@ -194,7 +215,6 @@ class MetadataDB:
 
         allowed = {
             "source_type",
-            "file_path",
             "title",
             "status",
             "content_hash",
@@ -226,16 +246,6 @@ class MetadataDB:
         row = self._connection.execute(
             "SELECT * FROM sources WHERE source_id = ?",
             (source_id,),
-        ).fetchone()
-        if row is None:
-            return None
-        return _row_to_source_record(row)
-
-    def get_source_by_path(self, file_path: str) -> SourceRecord | None:
-        """file_path でソースを取得する."""
-        row = self._connection.execute(
-            "SELECT * FROM sources WHERE file_path = ?",
-            (file_path,),
         ).fetchone()
         if row is None:
             return None
@@ -424,7 +434,6 @@ def _row_to_source_record(row: sqlite3.Row) -> SourceRecord:
     return SourceRecord(
         source_id=row["source_id"],
         source_type=row["source_type"],
-        file_path=row["file_path"],
         title=row["title"],
         status=row["status"],
         content_hash=row["content_hash"],

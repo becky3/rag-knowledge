@@ -3,6 +3,7 @@
 テスト方針:
 - published_at 列がない既存 DB に対するマイグレーション
 - マイグレーション後に published_at が collected_at で埋められること
+- file_path カラムがある旧スキーマの source_id 移行
 """
 
 from __future__ import annotations
@@ -20,7 +21,7 @@ class TestPublishedAtMigration:
         """published_at 列がない DB で initialize すると列が追加される."""
         db_path = tmp_path / "metadata.db"
 
-        # published_at なしのスキーマで DB を手動作成
+        # published_at なし + file_path ありの旧スキーマで DB を手動作成
         conn = sqlite3.connect(str(db_path))
         conn.executescript("""\
             CREATE TABLE sources (
@@ -50,11 +51,12 @@ class TestPublishedAtMigration:
         conn.commit()
         conn.close()
 
-        # MetadataDB で初期化（マイグレーション実行）
+        # MetadataDB で初期化（マイグレーション実行: published_at 追加 + source_id 移行）
         db = MetadataDB(db_path)
         db.initialize()
 
-        record = db.get_source("s1")
+        # マイグレーションで source_id が file_path の値に更新される
+        record = db.get_source("web/s1.html")
         assert record is not None
         assert record.published_at == "2026-01-15T10:00:00Z"
         db.close()
@@ -97,8 +99,9 @@ class TestPublishedAtMigration:
         db = MetadataDB(db_path)
         db.initialize()
 
+        # マイグレーションで source_id が file_path の値に更新される
         for i in range(3):
-            record = db.get_source(f"s{i}")
+            record = db.get_source(f"web/s{i}.html")
             assert record is not None
             assert record.published_at == f"2026-01-{i+1:02d}T00:00:00Z"
 

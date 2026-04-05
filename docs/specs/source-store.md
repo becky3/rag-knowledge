@@ -169,15 +169,21 @@ converted_store は source_store のディレクトリ構成をミラーする�
 
 ### source_id の決定方式
 
-| 媒体 | source_id | 安定性の根拠 | 例 |
-|------|-----------|-------------|-----|
-| local | source_store 内の相対パス | ユーザー自身が配置を管理 | `local/my-notes/memo.md` |
-| web | URL | URL 自体が安定識別子 | `https://example.com/docs/guide` |
-| bluesky | AT URI | AT Protocol の安定識別子 | `at://did:plc:xxx/app.bsky.feed.post/rkey` |
-| zenn | Zenn 記事 URL | URL が安定識別子 | `https://zenn.dev/user/articles/slug` |
-| youtube | YouTube 動画 URL | video_id が一意識別子 | `https://www.youtube.com/watch?v=xxxxxxxxxxx` |
-| aozora | 青空文庫 URL / 固定文字列 | 作品 URL が安定識別子、カタログは固定文字列 | `https://www.aozora.gr.jp/cards/000035/files/1567_14913.html`、`aozora:catalog` |
-| journal | source_store 内の相対パス | リポジトリ名 + entry_id で一意 | `journal/rag-knowledge/20260323-143000-session-summary.md` |
+source_id は全媒体共通で **source_store 内の相対パス（file_path）** を使用する。source_store のディレクトリ構造により source_type ごとに名前空間が分離されているため、構造的に一意性が保証される。
+
+source_store 層では `file_path` として、metadata_db 以上の層では `source_id` として同じ値を扱う。
+
+| 媒体 | source_id（= file_path） | 例 |
+|------|--------------------------|-----|
+| local | `local/{ユーザー指定パス}` | `local/my-notes/memo.md` |
+| web | `web/{スキーム}/{ホスト}/{パス}` | `web/https/example.com/docs/guide.html` |
+| bluesky | `bluesky/{escaped_did}/{年}/{月}/{rkey}.json` | `bluesky/did：plc：xxx/2026/03/rkey.json` |
+| zenn | `zenn/{username}/{articles\|scraps}/{slug}.json` | `zenn/alice/articles/sample-article.json` |
+| youtube | `youtube/{channel_id}/{video_id}.json` | `youtube/UCxxxxxxxx/xxxxxxxxxxx.json` |
+| aozora | `aozora/{person_id}/{book_id}.html` / `aozora/catalog.csv` | `aozora/000035/001567.html` |
+| journal | `journal/{repository}/{entry_id}.md` | `journal/rag-knowledge/20260323-143000-session-summary.md` |
+
+元 URL は .meta の `url` フィールド（web, zenn, youtube, aozora, bluesky）に保持される。bluesky は追加で `at_uri` フィールド（AT Protocol 識別子）も持つ。これらは検索インデックスでは `custom:url` / `custom:at_uri` のメタデータキーとして保持される。
 
 ### URL パス変換規則
 
@@ -240,7 +246,6 @@ URL: `http://localhost:8080/api/docs`
 
 | フィールド | 型 | 内容 |
 |-----------|-----|------|
-| `source_id` | str | ソース識別子 |
 | `source_type` | str | 媒体種別（値は [`_schema/enums.yml`](../../_schema/enums.yml) の `source_type` を参照。`local` は .meta を持たないため含まない） |
 | `title` | str | コンテンツのタイトル |
 | `collected_at` | str | 取り込みタイムスタンプ（ISO 8601） |
@@ -257,6 +262,7 @@ URL: `http://localhost:8080/api/docs`
 
 | フィールド | 型 | 内容 |
 |-----------|-----|------|
+| `at_uri` | str | 投稿の AT URI |
 | `handle` | str | 投稿者のハンドル |
 | `did` | str | 投稿者の DID |
 | `rkey` | str | 投稿の Record Key |
@@ -272,6 +278,7 @@ URL: `http://localhost:8080/api/docs`
 
 | フィールド | 型 | 内容 |
 |-----------|-----|------|
+| `url` | str | Zenn 記事/スクラップの URL |
 | `slug` | str | コンテンツスラッグ |
 | `content_type` | str | コンテンツ種別（`article` または `scrap`） |
 | `article_type` | str | 記事種別（`tech`, `idea` 等）。スクラップでは空文字列 |
@@ -286,6 +293,7 @@ URL: `http://localhost:8080/api/docs`
 
 | フィールド | 型 | 内容 |
 |-----------|-----|------|
+| `url` | str | YouTube 動画 URL |
 | `video_id` | str | YouTube 動画 ID |
 | `channel_id` | str | チャンネル ID |
 | `uploader` | str | 投稿者名 |
@@ -298,6 +306,7 @@ URL: `http://localhost:8080/api/docs`
 
 | フィールド | 型 | 内容 |
 |-----------|-----|------|
+| `url` | str | 青空文庫の作品 URL |
 | `book_id` | str | 作品 ID |
 | `person_id` | str | 著者 ID |
 | `author` | str | 著者名 |
@@ -315,7 +324,6 @@ URL: `http://localhost:8080/api/docs`
 **web:**
 
 ```yaml
-source_id: "https://example.com/docs/guide"
 source_type: web
 title: "Guide Title"
 collected_at: "2026-01-15T10:30:00+09:00"
@@ -325,10 +333,10 @@ url: "https://example.com/docs/guide"
 **bluesky:**
 
 ```yaml
-source_id: "at://did:plc:abc123/app.bsky.feed.post/xyz789"
 source_type: bluesky
 title: "Sample post text"
 collected_at: "2026-01-15T10:30:00+09:00"
+at_uri: "at://did:plc:abc123/app.bsky.feed.post/xyz789"
 handle: "alice.bsky.social"
 did: "did:plc:abc123"
 rkey: "xyz789"
@@ -344,8 +352,8 @@ is_repost: false
 **zenn（記事）:**
 
 ```yaml
-source_id: "https://zenn.dev/alice/articles/sample-article"
 source_type: zenn
+url: "https://zenn.dev/alice/articles/sample-article"
 title: "Sample Article Title"
 collected_at: "2026-01-15T10:30:00+09:00"
 slug: "sample-article"
@@ -364,8 +372,8 @@ username: "alice"
 **zenn（スクラップ）:**
 
 ```yaml
-source_id: "https://zenn.dev/alice/scraps/f0b53bc3944bb3"
 source_type: zenn
+url: "https://zenn.dev/alice/scraps/f0b53bc3944bb3"
 title: "Sample Scrap Title"
 collected_at: "2026-01-15T10:30:00+09:00"
 slug: "f0b53bc3944bb3"
@@ -382,8 +390,8 @@ username: "alice"
 **youtube:**
 
 ```yaml
-source_id: "https://www.youtube.com/watch?v=xxxxxxxxxxx"
 source_type: youtube
+url: "https://www.youtube.com/watch?v=xxxxxxxxxxx"
 title: "Sample Video Title"
 collected_at: "2026-03-25T10:00:00+09:00"
 video_id: "xxxxxxxxxxx"
@@ -397,8 +405,8 @@ transcript_source: "auto"
 **aozora:**
 
 ```yaml
-source_id: "https://www.aozora.gr.jp/cards/000035/files/1567_14913.html"
 source_type: aozora
+url: "https://www.aozora.gr.jp/cards/000035/files/1567_14913.html"
 title: "Sample Title"
 collected_at: "2026-03-23T10:00:00+09:00"
 book_id: "001567"
@@ -411,7 +419,6 @@ copyright_expired: true
 **journal:**
 
 ```yaml
-source_id: "journal/rag-knowledge/20260323-143000-session-summary.md"
 source_type: journal
 title: "Session Summary: Pipeline Migration"
 collected_at: "2026-03-23T14:30:00+00:00"
@@ -426,9 +433,8 @@ source_store 内の全ファイルのメタデータ索引。
 
 | カラム | 型 | 制約 | 内容 |
 |--------|-----|------|------|
-| `source_id` | TEXT | PRIMARY KEY | ソース識別子 |
+| `source_id` | TEXT | PRIMARY KEY | ソース識別子（= source_store 内の相対パス） |
 | `source_type` | TEXT | NOT NULL | 媒体種別（値は [`_schema/enums.yml`](../../_schema/enums.yml) の `source_type` を参照） |
-| `file_path` | TEXT | NOT NULL, UNIQUE | source_store 内の相対パス |
 | `title` | TEXT | NOT NULL | コンテンツのタイトル |
 | `status` | TEXT | NOT NULL, DEFAULT 'active' | `active` または `deleted` |
 | `content_hash` | TEXT | NOT NULL | ファイル内容の SHA-256 ハッシュ |

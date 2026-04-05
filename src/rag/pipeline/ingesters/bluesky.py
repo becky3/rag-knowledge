@@ -350,7 +350,7 @@ class BlueskyIngester:
                 bsky_url = f"https://bsky.app/profile/{handle_author}/post/{rkey}"
 
                 metadata = {
-                    "source_id": post_uri,
+                    "at_uri": post_uri,
                     "source_type": "bluesky",
                     "title": title,
                     "collected_at": now_iso(),

@@ -150,17 +150,17 @@ flowchart TB
 | BlueskyIngester | BlueSky 投稿取り込み用インジェスター。AT Protocol API 経由で投稿を取得し、source_store に JSON ファイルを配置する |
 | ConstrainedClient (py-common-lib) | 全外部 HTTP リクエストのゲートウェイ。ハードリミット・バジェット・サーキットブレーカーを統合する |
 
-### source_id
+### source_id（ファイルパス）
 
-AT URI 形式を使用する: `at://{did}/app.bsky.feed.post/{rkey}`
+source_store 内の相対パスを使用する: `bluesky/{did}/{year}/{month}/{rkey}.json`
 
-- `did`: `post.author.did` から取得した DID（例: `did:plc:xxx`）。リポストの場合は元投稿者の DID
+- `did`: `post.author.did` から取得した DID（例: `did:plc:xxx`）。リポストの場合は元投稿者の DID。コロンは全角に置換
 - `rkey`: `post.uri` の末尾パス（`at://did:plc:xxx/app.bsky.feed.post/{rkey}` の `{rkey}` 部分）
 
-AT URI を source_id に採用する理由:
+AT URI は .meta の `at_uri` フィールドに格納する。AT URI を安定した識別子として .meta に保持する理由:
 
-- DID はハンドル変更の影響を受けない安定した識別子であり、再取り込み時の重複検出が確実に機能する
-- ハンドルは変更可能なため、HTTPS URL 形式（`https://bsky.app/profile/{handle}/post/{rkey}`）では同一投稿に対して異なる source_id が生成されるリスクがある
+- DID はハンドル変更の影響を受けない安定した識別子であり、投稿の一意性を保証する
+- ハンドルは変更可能なため、HTTPS URL 形式（`https://bsky.app/profile/{handle}/post/{rkey}`）では同一投稿に対して異なる URL が生成されるリスクがある
 
 ### ディレクトリ構成
 
@@ -237,7 +237,7 @@ source_store/
 
 | フィールド | 型 | 内容 | 値の取得元 |
 |-----------|-----|------|-----------|
-| `source_id` | str | ソース識別子 | `at://{post.author.did}/app.bsky.feed.post/{rkey}` |
+| `source_id` | str | ソース識別子 | source_store 内の相対パス（例: `bluesky/did：plc：abc123/2026/01/xyz789.json`） |
 | `source_type` | str | 媒体種別 | 固定値 `"bluesky"` |
 | `title` | str | 投稿タイトル | `post.record.text` の先頭 50 文字（50 文字を超える場合は末尾に `...` を付加） |
 | `collected_at` | str | 取り込みタイムスタンプ（ISO 8601） | 取り込み実行時の現在時刻 |
@@ -246,6 +246,7 @@ source_store/
 
 | フィールド | 型 | 内容 | 値の取得元 |
 |-----------|-----|------|-----------|
+| `at_uri` | str | AT URI | `at://{post.author.did}/app.bsky.feed.post/{rkey}` |
 | `handle` | str | 元投稿者のハンドル（リポスト時も元投稿者） | `post.author.handle` |
 | `did` | str | 元投稿者の DID | `post.author.did` |
 | `rkey` | str | レコードキー | `post.uri` の末尾パス |
@@ -260,10 +261,10 @@ source_store/
 .meta ファイル例:
 
 ```yaml
-source_id: "at://did:plc:abc123/app.bsky.feed.post/xyz789"
 source_type: bluesky
 title: "Sample post text"
 collected_at: "2026-01-15T10:30:00+09:00"
+at_uri: "at://did:plc:abc123/app.bsky.feed.post/xyz789"
 handle: "alice.bsky.social"
 did: "did:plc:abc123"
 rkey: "xyz789"
@@ -336,7 +337,7 @@ flowchart TD
 リポスト時の振る舞い:
 
 - `include_reposts` が `false` の場合: フィードアイテムをスキップする
-- `include_reposts` が `true` の場合: 元投稿のデータを保存する。source_id・ファイルパスは元投稿者の DID と rkey から導出する。.meta の `is_repost` を `true` にする
+- `include_reposts` が `true` の場合: 元投稿のデータを保存する。source_id（ファイルパス）は元投稿者の DID と rkey から導出する。.meta の `is_repost` を `true` にする
 
 リポストの元投稿が `post` オブジェクトにそのまま含まれるため、追加の API リクエストは不要。
 
@@ -344,8 +345,8 @@ flowchart TD
 
 ファイルシステムベースで行う（[ingesters/common.md](common.md) の重複検出方式に準拠）。
 
-1. source_id（AT URI）からファイルパスを導出する
-2. source_store 内の該当パスにファイルが存在するか確認する
+1. source_id（ファイルパス）から source_store 内の該当パスを特定する
+2. ファイルが存在するか確認する
 3. 存在する場合: スキップする（BlueSky は投稿編集不可のため上書き不要）
 4. 存在しない場合: 新規ファイルとして配置する
 
