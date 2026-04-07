@@ -438,6 +438,7 @@ class BM25Index:
             if self._persist_dir.exists():
                 shutil.rmtree(self._persist_dir)
                 logger.debug("Removed empty BM25 persist dir: %s", self._persist_dir)
+            self._needs_rebuild = False
             return
 
         # インデックスが未構築なら構築

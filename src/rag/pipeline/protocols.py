@@ -9,7 +9,6 @@ Protocol で抽象化し、スタブで動作可能にする。
 from __future__ import annotations
 
 import contextlib
-from collections.abc import Iterator
 from pathlib import Path
 from typing import Protocol
 
@@ -137,8 +136,7 @@ class IndexerProtocol(Protocol):
         """BM25 の未保存変更を一括 rebuild + 永続化する."""
         ...
 
-    @contextlib.contextmanager
-    def bm25_deferred(self) -> Iterator[None]:
+    def bm25_deferred(self) -> contextlib.AbstractContextManager[None]:
         """BM25 遅延 save のコンテキストマネージャ."""
         ...
 
