@@ -334,3 +334,124 @@ class TestBM25IndexPersistence:
         # 空状態で再ロードしてもエラーなし
         index2 = make_bm25_index(persist_dir=persist_dir)
         assert index2.get_document_count() == 0
+
+
+class TestBM25DeferredSave:
+    """BM25 遅延 save モードのテスト (#548)."""
+
+    def _sample_docs(self) -> list[tuple[str, str, str, str]]:
+        return [
+            ("doc1", "adventure quest rpg game journey", "source1", "web"),
+            ("doc2", "monster taming battle capture arena", "source2", "web"),
+            ("doc3", "hero legend sword shield quest", "source3", "zenn"),
+        ]
+
+    def test_deferred_save_skips_rebuild_on_add(self) -> None:
+        """遅延モード中は add_documents で _save が呼ばれない."""
+        index = make_bm25_index()
+        index.set_deferred_save(True)
+
+        index.add_documents(self._sample_docs())
+
+        # _needs_rebuild が True のまま（save されていない）
+        assert index._needs_rebuild is True
+
+    def test_flush_triggers_rebuild(self) -> None:
+        """flush() で rebuild + 永続化が実行される."""
+        index = make_bm25_index()
+        index.set_deferred_save(True)
+
+        index.add_documents(self._sample_docs())
+        assert index._needs_rebuild is True
+
+        index.flush()
+
+        # flush 後は _needs_rebuild が False
+        assert index._needs_rebuild is False
+
+    def test_search_works_after_flush(self) -> None:
+        """flush 後に検索結果が正しく返る."""
+        index = make_bm25_index()
+        index.set_deferred_save(True)
+
+        index.add_documents(self._sample_docs())
+        index.flush()
+
+        results = index.search("adventure quest", n_results=3)
+        assert len(results) > 0
+        assert any("adventure" in r.text for r in results)
+
+    def test_flush_with_no_changes_is_noop(self) -> None:
+        """変更がない状態で flush しても何も起きない."""
+        index = make_bm25_index()
+        index.add_documents(self._sample_docs())
+
+        # 変更なし状態で deferred → flush
+        index.set_deferred_save(True)
+        index.flush()  # _needs_rebuild=False なので noop
+
+        assert index._needs_rebuild is False
+
+    def test_deferred_save_with_persistence(self, tmp_path: Path) -> None:
+        """遅延モードで永続化が flush まで遅延される (#548)."""
+        persist_dir = str(tmp_path / "bm25_deferred")
+
+        index = make_bm25_index(persist_dir=persist_dir)
+        index.set_deferred_save(True)
+
+        index.add_documents(self._sample_docs())
+
+        # 遅延中は永続化されていない（ディレクトリが存在しない、または古い状態）
+        # flush 前の状態を記録
+        persist_path = Path(persist_dir)
+        existed_before_flush = persist_path.exists()
+
+        index.flush()
+
+        # flush 後は永続化される
+        assert persist_path.exists()
+
+        # 新しいインスタンスで復元できる
+        index2 = make_bm25_index(persist_dir=persist_dir)
+        assert index2.get_document_count() == 3
+
+        # 初期状態では永続化ディレクトリがなかったことを確認
+        assert not existed_before_flush
+
+    def test_deferred_delete_and_flush(self) -> None:
+        """遅延モード中の delete も flush まで save されない."""
+        index = make_bm25_index()
+        index.add_documents(self._sample_docs())
+
+        index.set_deferred_save(True)
+        index.delete_by_source("source1")
+
+        # _needs_rebuild が True（save されていない）
+        assert index._needs_rebuild is True
+        assert index.get_document_count() == 2
+
+        index.flush()
+        assert index._needs_rebuild is False
+
+        # 削除が反映されている
+        results = index.search("adventure", n_results=3)
+        assert not any("adventure" in r.text for r in results)
+
+    def test_multiple_adds_single_flush(self) -> None:
+        """複数回の add 後に1回の flush でまとめて反映される."""
+        index = make_bm25_index()
+        index.set_deferred_save(True)
+
+        # 3回に分けて add
+        index.add_documents([("doc1", "adventure quest rpg", "s1", "web")])
+        index.add_documents([("doc2", "monster taming battle", "s2", "web")])
+        index.add_documents([("doc3", "hero legend sword", "s3", "zenn")])
+
+        assert index.get_document_count() == 3
+        assert index._needs_rebuild is True
+
+        index.flush()
+        assert index._needs_rebuild is False
+
+        results = index.search("adventure", n_results=3)
+        assert len(results) > 0

@@ -8,7 +8,9 @@ converted_store のテキストファイルからチャンキング・Embedding�
 
 from __future__ import annotations
 
+import contextlib
 import logging
+from collections.abc import Iterator
 from pathlib import Path
 
 from rag.bm25_index import BM25Index
@@ -208,6 +210,33 @@ class Indexer:
         logger.info(
             "メタデータを更新: %s (%d チャンク)", source_id, total_chunks,
         )
+
+    def set_bm25_deferred_save(self, enabled: bool) -> None:
+        """BM25 の遅延 save モードを切り替える.
+
+        Args:
+            enabled: True で遅延モード有効
+        """
+        self._bm25.set_deferred_save(enabled)
+
+    def flush_bm25(self) -> None:
+        """BM25 の未保存変更を一括 rebuild + 永続化する."""
+        self._bm25.flush()
+
+    @contextlib.contextmanager
+    def bm25_deferred(self) -> Iterator[None]:
+        """BM25 遅延 save のコンテキストマネージャ.
+
+        バッチ処理中は個別の rebuild + 永続化をスキップし、
+        ブロック終了時に一括で実行する。
+        エラー時も処理済み分を永続化する（部分失敗は PipelineSummary.errors で管理）。
+        """
+        self.set_bm25_deferred_save(True)
+        try:
+            yield
+        finally:
+            self.set_bm25_deferred_save(False)
+            self.flush_bm25()
 
     async def clear(self, source_type: SourceType | None = None) -> None:
         """インデックスをクリアする.

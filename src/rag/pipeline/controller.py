@@ -267,18 +267,19 @@ class PipelineController:
         if self._git.has_commits():
             to_commit = self._git.get_head_commit()
 
-        summary = await self._run_processing_loop(
-            records,
-            process_fn=_convert_and_index,
-            get_file_path=lambda r: r.source_id,
-            phase=PHASE_CONVERT_AND_INDEX,
-            mode=PipelineMode.FULL_REBUILD,
-            log_prefix="全再構築中に",
-            progress_callback=progress_callback,
-            from_commit_id=NULL_COMMIT_HASH,
-            to_commit_id=to_commit,
-            concurrency=concurrency,
-        )
+        with self._indexer.bm25_deferred():
+            summary = await self._run_processing_loop(
+                records,
+                process_fn=_convert_and_index,
+                get_file_path=lambda r: r.source_id,
+                phase=PHASE_CONVERT_AND_INDEX,
+                mode=PipelineMode.FULL_REBUILD,
+                log_prefix="全再構築中に",
+                progress_callback=progress_callback,
+                from_commit_id=NULL_COMMIT_HASH,
+                to_commit_id=to_commit,
+                concurrency=concurrency,
+            )
 
         # pipeline_history に記録（正常完了時のみ）
         if not summary.errors and to_commit:
@@ -436,16 +437,17 @@ class PipelineController:
         if self._git.has_commits():
             to_commit = self._git.get_head_commit()
 
-        summary = await self._run_processing_loop(
-            records,
-            process_fn=_index_single,
-            get_file_path=lambda r: r.source_id,
-            phase=PHASE_INDEX,
-            mode=PipelineMode.INDEX_ONLY,
-            log_prefix="インデックス再構築中に",
-            progress_callback=progress_callback,
-            concurrency=concurrency,
-        )
+        with self._indexer.bm25_deferred():
+            summary = await self._run_processing_loop(
+                records,
+                process_fn=_index_single,
+                get_file_path=lambda r: r.source_id,
+                phase=PHASE_INDEX,
+                mode=PipelineMode.INDEX_ONLY,
+                log_prefix="インデックス再構築中に",
+                progress_callback=progress_callback,
+                concurrency=concurrency,
+            )
 
         # pipeline_history に記録（正常完了時のみ）
         if not summary.errors and to_commit:
@@ -624,17 +626,19 @@ class PipelineController:
         progress_callback: ProgressCallback | None = None,
     ) -> PipelineSummary:
         """変更エントリを処理する."""
-        return await self._run_processing_loop(
-            changes,
-            process_fn=self._process_single_change,
-            get_file_path=lambda e: e.file_path,
-            phase=PHASE_CONVERT_AND_INDEX,
-            mode=mode,
-            log_prefix="パイプライン処理中に",
-            progress_callback=progress_callback,
-            from_commit_id=from_commit_id,
-            to_commit_id=to_commit_id,
-        )
+        with self._indexer.bm25_deferred():
+            summary = await self._run_processing_loop(
+                changes,
+                process_fn=self._process_single_change,
+                get_file_path=lambda e: e.file_path,
+                phase=PHASE_CONVERT_AND_INDEX,
+                mode=mode,
+                log_prefix="パイプライン処理中に",
+                progress_callback=progress_callback,
+                from_commit_id=from_commit_id,
+                to_commit_id=to_commit_id,
+            )
+        return summary
 
     async def _process_single_change(self, entry: ChangeEntry) -> None:
         """1ファイルの変更を処理する."""

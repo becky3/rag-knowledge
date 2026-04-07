@@ -8,6 +8,7 @@ Protocol で抽象化し、スタブで動作可能にする。
 
 from __future__ import annotations
 
+import contextlib
 from pathlib import Path
 from typing import Protocol
 
@@ -121,6 +122,22 @@ class IndexerProtocol(Protocol):
             source_id: ソース識別子
             metadata: ソースメタデータ
         """
+        ...
+
+    def set_bm25_deferred_save(self, enabled: bool) -> None:
+        """BM25 の遅延 save モードを切り替える.
+
+        Args:
+            enabled: True で遅延モード有効
+        """
+        ...
+
+    def flush_bm25(self) -> None:
+        """BM25 の未保存変更を一括 rebuild + 永続化する."""
+        ...
+
+    def bm25_deferred(self) -> contextlib.AbstractContextManager[None]:
+        """BM25 遅延 save のコンテキストマネージャ."""
         ...
 
     async def clear(self, source_type: SourceType | None = None) -> None:

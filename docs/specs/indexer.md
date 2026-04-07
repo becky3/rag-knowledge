@@ -122,6 +122,7 @@ Embedding に渡る最終テキストは「Embedding プレフィックス + チ
 - ChromaDB は upsert 方式で冪等性を確保する。同一チャンク ID で再実行しても結果が変わらない
 - BM25 インデックスはドキュメント追加・削除後にインメモリインデックスの再構築が必要（lazy rebuild: 検索実行時に自動再構築）
 - BM25 の永続化はアトミックスワップ（一時ディレクトリ + リネーム）で破損を防止する
+- バッチ処理（全再構築・インデックス再構築・差分更新）時、パイプライン制御は BM25 の遅延 save モードを有効にし、個別の add/delete ごとの rebuild + 永続化をスキップする。バッチ完了後に一括で rebuild + 永続化を実行する。これにより N 件のソース処理で N 回発生していた BM25 rebuild が 1 回に削減される
 
 ### バッチサイズ
 
@@ -133,7 +134,7 @@ Embedding に渡る最終テキストは「Embedding プレフィックス + チ
 
 インデックス再構築（`run_index_only` / `run_full_rebuild` のインデクサーフェーズ）では、複数ソースの Embedding を並列で実行できる。`asyncio.Semaphore` で同時実行数を制限し、`asyncio.gather` で並列処理する。
 
-- 並列処理の対象は Embedding API リクエスト。ChromaDB upsert・BM25 インデックス追加は各ソースの Embedding 完了後に実行される
+- 並列処理の対象は Embedding API リクエスト。ChromaDB upsert・BM25 のインメモリデータ構造への追加は各ソースの Embedding 完了後に実行される。BM25 の rebuild + 永続化はバッチ完了後に一括実行される（遅延 save モード）
 - 並列数は `.env` の `RAG_EMBEDDING_CONCURRENCY` で設定する。LM Studio のリクエストキュー飽和を考慮し、環境に応じて調整する
 - 差分更新（`_process_changes`）やコンバートのみ再実行（`run_convert_only`）は直列のまま（並列化の効果が小さいため）
 
