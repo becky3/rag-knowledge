@@ -281,7 +281,15 @@ class PipelineController:
         await self._indexer.clear(source_type)
 
         convert_failed = set(convert_summary.errors)
-        convert_warned = {w.split(": ", 1)[0] for w in convert_summary.warnings}
+        convert_warned: set[str] = set()
+        for w in convert_summary.warnings:
+            source_id, sep, _reason = w.partition(": ")
+            if sep and source_id:
+                convert_warned.add(source_id)
+            else:
+                logger.warning(
+                    "Convert warning の形式が不正なため index 除外対象外: %s", w,
+                )
         convert_excluded = convert_failed | convert_warned
         index_records = [r for r in records if r.source_id not in convert_excluded]
 

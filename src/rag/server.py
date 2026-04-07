@@ -937,6 +937,15 @@ async def rag_rebuild(
                     return _format_full_rebuild_summary(
                         convert_summary, index_summary, elapsed,
                     )
+            missing = []
+            if not convert_data:
+                missing.append("convert")
+            if not index_data:
+                missing.append("index")
+            logger.error(
+                "full rebuild 結果の解析に失敗: 欠落キー=%s, result_keys=%s",
+                missing or "parse_error", list(result.keys()),
+            )
             return "再構築完了（結果の解析に失敗）"
 
         # その他のモードは単一 PipelineSummary
