@@ -101,6 +101,9 @@ class BM25Index:
         # 再構築フラグ
         self._needs_rebuild = True
 
+        # 遅延 save モード: バッチ処理中は save をスキップし flush() で一括実行
+        self._deferred_save = False
+
         # 永続化ディレクトリからロード
         if self._persist_dir is not None:
             self._load()
@@ -147,7 +150,8 @@ class BM25Index:
             logger.debug(
                 "BM25 index: added %d, updated %d documents", added, updated
             )
-            self._save()
+            if not self._deferred_save:
+                self._save()
 
         return added
 
@@ -269,7 +273,8 @@ class BM25Index:
                 len(to_delete),
                 source_url,
             )
-            self._save()
+            if not self._deferred_save:
+                self._save()
 
         return len(to_delete)
 
@@ -301,7 +306,8 @@ class BM25Index:
                 len(to_delete),
                 source_type,
             )
-            self._save()
+            if not self._deferred_save:
+                self._save()
 
         return len(to_delete)
 
@@ -354,7 +360,8 @@ class BM25Index:
 
         if stale_ids:
             self._needs_rebuild = True
-            self._save()
+            if not self._deferred_save:
+                self._save()
 
         return len(stale_ids)
 
@@ -368,6 +375,33 @@ class BM25Index:
         self._bm25 = None
         self._needs_rebuild = True
         self._save()
+
+    def set_deferred_save(self, enabled: bool) -> None:
+        """遅延 save モードの有効/無効を切り替える.
+
+        有効にすると add/delete 操作で _save() を呼ばなくなる。
+        バッチ処理完了後に flush() で一括 rebuild + 永続化する。
+
+        Args:
+            enabled: True で遅延モード有効
+        """
+        self._deferred_save = enabled
+
+    def flush(self) -> None:
+        """未保存の変更を rebuild + 永続化する.
+
+        遅延 save モード中に蓄積された変更を一括で反映する。
+        _needs_rebuild が False（変更なし）の場合は何もしない。
+        """
+        if not self._needs_rebuild:
+            return
+
+        if self._persist_dir is not None:
+            self._save()
+        else:
+            # インメモリモードでは _save() が早期リターンするため
+            # rebuild のみ実行して _needs_rebuild をリセットする
+            self._rebuild_index()
 
     def _rebuild_index(self) -> None:
         """BM25インデックスを再構築する."""

@@ -13,8 +13,10 @@
 
 from __future__ import annotations
 
+import contextlib
 import shutil
 import subprocess
+from collections.abc import Iterator
 from pathlib import Path
 
 import pytest
@@ -120,6 +122,16 @@ class StubIndexer:
 
     async def clear(self, source_type: SourceType | None = None) -> None:
         self.cleared.append(source_type)
+
+    def set_bm25_deferred_save(self, enabled: bool) -> None:
+        pass
+
+    def flush_bm25(self) -> None:
+        pass
+
+    @contextlib.contextmanager
+    def bm25_deferred(self) -> Iterator[None]:
+        yield
 
 
 # --- フィクスチャ ---
