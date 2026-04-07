@@ -86,6 +86,30 @@ class TestBM25Index:
         # 残りは1件
         assert index.get_document_count() == 1
 
+    def test_delete_by_source_type(self) -> None:
+        """source_type 指定でドキュメントを一括削除できる (#544)."""
+        index = make_bm25_index()
+
+        docs = [
+            ("doc1", "Web text 1", "source1", "web"),
+            ("doc2", "Web text 2", "source2", "web"),
+            ("doc3", "Zenn text 1", "source3", "zenn"),
+        ]
+        index.add_documents(docs)
+
+        deleted = index.delete_by_source_type("web")
+        assert deleted == 2
+        assert index.get_document_count() == 1
+
+    def test_delete_by_source_type_nonexistent(self) -> None:
+        """存在しない source_type を指定すると 0 を返す (#544)."""
+        index = make_bm25_index()
+        index.add_documents([("doc1", "text", "source1", "web")])
+
+        deleted = index.delete_by_source_type("bluesky")
+        assert deleted == 0
+        assert index.get_document_count() == 1
+
     def test_search_empty_index_returns_empty_list(self) -> None:
         """AC6: 空のインデックスへの検索は空リストを返す."""
         index = make_bm25_index()

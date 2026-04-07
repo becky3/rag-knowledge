@@ -332,14 +332,13 @@ class Indexer:
         logger.info("全インデックスをクリアしました")
 
     async def _clear_by_source_type(self, source_type: SourceType) -> None:
-        """指定 source_type のインデックスをクリアする."""
-        records = self._metadata_db.search_sources(source_type=source_type)
-        for record in records:
-            await self.delete(record.source_id)
+        """指定 source_type のインデックスを一括クリアする."""
+        vector_count = await self._vector_store.delete_by_source_type(source_type)
+        bm25_count = self._bm25.delete_by_source_type(source_type)
 
         logger.info(
-            "source_type=%s のインデックスをクリア (%d 件)",
-            source_type, len(records),
+            "source_type=%s のインデックスをクリア (vector: %d, bm25: %d)",
+            source_type, vector_count, bm25_count,
         )
 
 
