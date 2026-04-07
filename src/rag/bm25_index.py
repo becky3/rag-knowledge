@@ -282,10 +282,13 @@ class BM25Index:
         Returns:
             削除されたドキュメント数
         """
+        def _get_source_type(doc_id: str) -> str | None:
+            return self._doc_source_type_map.get(doc_id) or self._doc_metadata_map.get(doc_id, {}).get("source_type")
+
         to_delete = [
             doc_id
-            for doc_id, st in self._doc_source_type_map.items()
-            if st == source_type
+            for doc_id in self._documents
+            if _get_source_type(doc_id) == source_type
         ]
 
         for doc_id in to_delete:
