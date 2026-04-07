@@ -273,6 +273,38 @@ class BM25Index:
 
         return len(to_delete)
 
+    def delete_by_source_type(self, source_type: str) -> int:
+        """source_type 指定でドキュメントを一括削除する.
+
+        Args:
+            source_type: 削除対象の source_type
+
+        Returns:
+            削除されたドキュメント数
+        """
+        to_delete = [
+            doc_id
+            for doc_id, st in self._doc_source_type_map.items()
+            if st == source_type
+        ]
+
+        for doc_id in to_delete:
+            self._documents.pop(doc_id, None)
+            self._doc_source_map.pop(doc_id, None)
+            self._doc_source_type_map.pop(doc_id, None)
+            self._doc_metadata_map.pop(doc_id, None)
+
+        if to_delete:
+            self._needs_rebuild = True
+            logger.debug(
+                "Deleted %d documents from BM25 index (source_type: %s)",
+                len(to_delete),
+                source_type,
+            )
+            self._save()
+
+        return len(to_delete)
+
     def get_document_count(self) -> int:
         """インデックス内のドキュメント数を返す."""
         return len(self._documents)

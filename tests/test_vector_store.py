@@ -224,6 +224,54 @@ class TestAC10DeleteBySource:
         assert deleted_count == 0
 
 
+class TestDeleteBySourceType:
+    """VectorStore.delete_by_source_type() で source_type 指定の一括削除ができること (#544)."""
+
+    @pytest.mark.asyncio
+    async def test_delete_by_source_type(self, ephemeral_store: VectorStore) -> None:
+        """source_type 指定で該当チャンクを一括削除できる."""
+        chunks = [
+            DocumentChunk(
+                id="web_0",
+                text="Web text 1",
+                metadata={"source_id": "src_web", "source_type": "web", "chunk_index": 0},
+            ),
+            DocumentChunk(
+                id="web_1",
+                text="Web text 2",
+                metadata={"source_id": "src_web", "source_type": "web", "chunk_index": 1},
+            ),
+            DocumentChunk(
+                id="zenn_0",
+                text="Zenn text 1",
+                metadata={"source_id": "src_zenn", "source_type": "zenn", "chunk_index": 0},
+            ),
+        ]
+        await ephemeral_store.add_documents(chunks)
+
+        deleted_count = await ephemeral_store.delete_by_source_type("web")
+        assert deleted_count == 2
+
+        stats = ephemeral_store.get_stats()
+        assert stats["total_chunks"] == 1
+
+    @pytest.mark.asyncio
+    async def test_delete_by_source_type_nonexistent(self, ephemeral_store: VectorStore) -> None:
+        """存在しない source_type を指定すると 0 を返す."""
+        chunk = DocumentChunk(
+            id="web_0",
+            text="Web text",
+            metadata={"source_id": "src_web", "source_type": "web", "chunk_index": 0},
+        )
+        await ephemeral_store.add_documents([chunk])
+
+        deleted_count = await ephemeral_store.delete_by_source_type("bluesky")
+        assert deleted_count == 0
+
+        stats = ephemeral_store.get_stats()
+        assert stats["total_chunks"] == 1
+
+
 class TestAC11GetStats:
     """AC11: VectorStore.get_stats() でナレッジベースの統計情報を取得できること."""
 

@@ -442,6 +442,27 @@ class VectorStore:
         logger.info("Deleted %d documents from vector store (source: %s)", count, source_id)
         return count
 
+    async def delete_by_source_type(self, source_type: str) -> int:
+        """source_type 指定でチャンクを一括削除.
+
+        Args:
+            source_type: 削除対象の source_type
+
+        Returns:
+            削除件数
+        """
+        result = await asyncio.to_thread(
+            self._collection.delete,
+            where={"source_type": source_type},
+        )
+
+        count = result["deleted"]
+        if count:
+            logger.info(
+                "Deleted %d documents from vector store (source_type: %s)", count, source_type
+            )
+        return count
+
     async def delete_stale_chunks(self, source_id: str, valid_ids: set[str]) -> int:
         """ソースのチャンクのうち、valid_idsに含まれないものを削除.
 
