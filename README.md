@@ -164,7 +164,7 @@ uv run chroma run --path <CHROMADB_PERSIST_DIR>
 起動確認（heartbeat チェック）:
 
 ```bash
-curl http://localhost:8000/api/v1/heartbeat
+curl http://localhost:8000/api/v2/heartbeat
 # 正常時: {"nanosecond heartbeat":<timestamp>}
 ```
 
