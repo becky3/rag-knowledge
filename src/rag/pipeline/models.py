@@ -34,7 +34,6 @@ class PipelineMode(Enum):
     """パイプライン実行モード."""
 
     INCREMENTAL = "incremental"
-    FULL_REBUILD = "full"
     CONVERT_ONLY = "convert"
     INDEX_ONLY = "index"
 
@@ -46,11 +45,21 @@ class PipelineSummary:
     mode: PipelineMode
     total_files: int
     processed: int
-    skipped: int
     errors: list[str] = field(default_factory=list)
     warnings: list[str] = field(default_factory=list)
     from_commit_id: str = ""
     to_commit_id: str = ""
+
+
+@dataclass
+class FullRebuildResult:
+    """全再構築の2フェーズ結果.
+
+    convert フェーズと index フェーズそれぞれの PipelineSummary を保持する。
+    """
+
+    convert: PipelineSummary
+    index: PipelineSummary
 
 
 # プログレス通知のフェーズ名

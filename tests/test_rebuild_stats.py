@@ -17,6 +17,7 @@ from rag.pipeline.models import PipelineMode, PipelineSummary
 from rag.rag_knowledge import format_file_size
 from rag.server import (
     CLISubprocessError,
+    _format_full_rebuild_summary,
     _format_rebuild_summary,
 )
 
@@ -53,15 +54,13 @@ class TestFormatRebuildSummary:
 
     def test_success_summary(self) -> None:
         summary = PipelineSummary(
-            mode=PipelineMode.FULL_REBUILD,
+            mode=PipelineMode.INDEX_ONLY,
             total_files=10,
             processed=8,
-            skipped=2,
         )
         result = _format_rebuild_summary(summary, 12.5)
-        assert "全再構築" in result
+        assert "インデックスのみ再構築" in result
         assert "処理件数: 8" in result
-        assert "スキップ: 2" in result
         assert "エラー: 0" in result
         assert "12.5 秒" in result
 
@@ -70,7 +69,6 @@ class TestFormatRebuildSummary:
             mode=PipelineMode.INDEX_ONLY,
             total_files=5,
             processed=3,
-            skipped=2,
             errors=["file1.txt", "file2.txt"],
         )
         result = _format_rebuild_summary(summary, 5.0)
@@ -79,19 +77,40 @@ class TestFormatRebuildSummary:
         assert "file1.txt" in result
         assert "file2.txt" in result
 
-    def test_all_modes(self) -> None:
+    def test_all_non_full_modes(self) -> None:
         mode_labels = {
-            PipelineMode.FULL_REBUILD: "全再構築",
             PipelineMode.CONVERT_ONLY: "コンバートのみ再実行",
             PipelineMode.INDEX_ONLY: "インデックスのみ再構築",
             PipelineMode.INCREMENTAL: "差分更新",
         }
         for mode, label in mode_labels.items():
             summary = PipelineSummary(
-                mode=mode, total_files=0, processed=0, skipped=0,
+                mode=mode, total_files=0, processed=0,
             )
             result = _format_rebuild_summary(summary, 0.0)
             assert label in result
+
+    def test_full_rebuild_format(self) -> None:
+        convert = PipelineSummary(
+            mode=PipelineMode.CONVERT_ONLY,
+            total_files=10,
+            processed=8,
+            errors=["bad.txt"],
+            warnings=["warn.txt: skipped"],
+        )
+        index = PipelineSummary(
+            mode=PipelineMode.INDEX_ONLY,
+            total_files=7,
+            processed=7,
+        )
+        result = _format_full_rebuild_summary(convert, index, 15.0)
+        assert "全再構築" in result
+        assert "[Convert]" in result
+        assert "[Index]" in result
+        assert "処理件数: 8" in result
+        assert "処理件数: 7" in result
+        assert "15.0 秒" in result
+        assert "bad.txt" in result
 
 
 # --- rag_rebuild MCP ツールテスト ---
@@ -102,16 +121,26 @@ class TestRagRebuild:
 
     @pytest.mark.asyncio
     async def test_full_rebuild_success(self) -> None:
-        """CLI サブプロセス経由の full rebuild が正常結果を返すこと."""
+        """CLI サブプロセス経由の full rebuild が2フェーズ結果を返すこと."""
         from rag.server import rag_rebuild
 
         mock_cli_result: dict[str, object] = {
             "type": "result",
             "mode": "full",
-            "total_files": 5,
-            "processed": 5,
-            "skipped": 0,
-            "errors": [],
+            "convert": {
+                "mode": "convert",
+                "total_files": 5,
+                "processed": 5,
+                "errors": [],
+                "warnings": [],
+            },
+            "index": {
+                "mode": "index",
+                "total_files": 5,
+                "processed": 5,
+                "errors": [],
+                "warnings": [],
+            },
             "elapsed": 1.2,
         }
 
@@ -120,6 +149,8 @@ class TestRagRebuild:
 
         assert "再構築完了" in result
         assert "全再構築" in result
+        assert "[Convert]" in result
+        assert "[Index]" in result
         assert "処理件数: 5" in result
 
     @pytest.mark.asyncio
@@ -132,8 +163,8 @@ class TestRagRebuild:
             "mode": "convert",
             "total_files": 3,
             "processed": 3,
-            "skipped": 0,
             "errors": [],
+            "warnings": [],
             "elapsed": 0.5,
         }
 
@@ -159,8 +190,8 @@ class TestRagRebuild:
             "mode": "incremental",
             "total_files": 2,
             "processed": 2,
-            "skipped": 0,
             "errors": [],
+            "warnings": [],
             "elapsed": 0.3,
         }
 

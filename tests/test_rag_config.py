@@ -218,6 +218,8 @@ site_ingest_max_pages = 500
 site_ingest_download_timeout = 30
 site_ingest_timeout_sec = 7200
 site_ingest_error_count = 10
+rag_embedding_retry_count = 3
+rag_embedding_retry_base_delay = 1.0
 """
 
     def _set_all_env(self, monkeypatch: pytest.MonkeyPatch, **overrides: str) -> None:

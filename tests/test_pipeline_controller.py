@@ -416,7 +416,6 @@ class TestRunIncremental:
 
         summary = await ctrl.run_incremental()
         assert summary.processed == 1
-        assert summary.skipped == 1
         assert len(summary.errors) == 1
 
         # pipeline_history は記録されない
@@ -654,10 +653,12 @@ class TestRunFullRebuild:
         converter.converted.clear()
         indexer.added.clear()
 
-        summary = await ctrl.run_full_rebuild()
+        result = await ctrl.run_full_rebuild()
 
-        assert summary.mode == PipelineMode.FULL_REBUILD
-        assert summary.processed == 2
+        assert result.convert.mode == PipelineMode.CONVERT_ONLY
+        assert result.convert.processed == 2
+        assert result.index.mode == PipelineMode.INDEX_ONLY
+        assert result.index.processed == 2
         assert len(converter.converted) == 2
         assert len(indexer.added) == 2
         assert converter.cleared == [None]
@@ -677,9 +678,9 @@ class TestRunFullRebuild:
         converter.converted.clear()
         indexer.added.clear()
 
-        summary = await ctrl.run_full_rebuild(source_type="local")
+        result = await ctrl.run_full_rebuild(source_type="local")
 
-        assert summary.processed == 1
+        assert result.convert.processed == 1
         assert converter.converted == ["local/a.txt"]
         assert converter.cleared == ["local"]
         assert indexer.cleared == ["local"]
@@ -696,9 +697,9 @@ class TestRunFullRebuild:
         ctrl, _, _ = controller
         ctrl.init_repo()
         ctrl.commit("initial")
-        summary = await ctrl.run_full_rebuild()
-        assert summary.total_files == 0
-        assert summary.processed == 0
+        result = await ctrl.run_full_rebuild()
+        assert result.convert.total_files == 0
+        assert result.index.total_files == 0
 
     async def test_concurrent_full_rebuild(
         self,
@@ -715,12 +716,59 @@ class TestRunFullRebuild:
         converter.converted.clear()
         indexer.added.clear()
 
-        summary = await ctrl.run_full_rebuild(concurrency=3)
+        result = await ctrl.run_full_rebuild(concurrency=3)
 
-        assert summary.mode == PipelineMode.FULL_REBUILD
-        assert summary.processed == 3
+        assert result.convert.processed == 3
+        assert result.index.processed == 3
         assert len(converter.converted) == 3
         assert len(indexer.added) == 3
+
+    async def test_convert_error_excludes_from_index(
+        self,
+        controller: tuple[PipelineController, StubConverter, StubIndexer],
+        workspace: dict[str, Path],
+    ) -> None:
+        """convert 失敗分は index フェーズから除外される."""
+        ctrl, converter, indexer = controller
+        _place_local_file(workspace["source"], "local/good.txt")
+        _place_local_file(workspace["source"], "local/bad.txt")
+        ctrl.commit("initial")
+
+        converter.fail_on.add("local/bad.txt")
+
+        result = await ctrl.run_full_rebuild()
+
+        # convert: 1 成功, 1 エラー
+        assert result.convert.processed == 1
+        assert len(result.convert.errors) == 1
+        assert "local/bad.txt" in result.convert.errors
+
+        # index: convert 成功分のみ
+        assert result.index.total_files == 1
+        assert result.index.processed == 1
+        assert len(result.index.errors) == 0
+
+        # indexer に bad.txt は渡されない
+        assert "local/bad.txt" not in indexer.added
+        assert "local/good.txt" in indexer.added
+
+    async def test_pipeline_history_requires_both_phases_clean(
+        self,
+        controller: tuple[PipelineController, StubConverter, StubIndexer],
+        workspace: dict[str, Path],
+    ) -> None:
+        """convert エラーがあると pipeline_history に記録されない."""
+        ctrl, converter, _ = controller
+        _place_local_file(workspace["source"], "local/a.txt")
+        _place_local_file(workspace["source"], "local/b.txt")
+        ctrl.commit("initial")
+
+        converter.fail_on.add("local/b.txt")
+
+        await ctrl.run_full_rebuild()
+
+        history = ctrl.db.get_pipeline_history()
+        assert len(history) == 0
 
 
 class TestRunConvertOnly:
@@ -850,7 +898,7 @@ class TestRunIndexOnly:
         workspace["converted"].mkdir()
 
         summary = await ctrl.run_index_only()
-        assert summary.skipped == 1
+        assert len(summary.warnings) == 1
         assert summary.processed == 0
 
     async def test_concurrent_index_only(
@@ -871,7 +919,7 @@ class TestRunIndexOnly:
 
         assert summary.mode == PipelineMode.INDEX_ONLY
         assert summary.processed == 3
-        assert summary.skipped == 0
+        assert len(summary.errors) == 0
         assert len(indexer.added) == 3
 
     async def test_concurrent_index_handles_errors(
@@ -892,7 +940,6 @@ class TestRunIndexOnly:
         summary = await ctrl.run_index_only(concurrency=4)
 
         assert summary.processed == 2
-        assert summary.skipped == 1
         assert len(summary.errors) == 1
 
 
@@ -1167,5 +1214,5 @@ class TestUncommittedChanges:
         )
 
         # source_type="local" で rebuild → web の変更は無視されるので成功する
-        summary = await ctrl.run_full_rebuild(source_type="local")
-        assert summary.mode == PipelineMode.FULL_REBUILD
+        result = await ctrl.run_full_rebuild(source_type="local")
+        assert result.convert.mode == PipelineMode.CONVERT_ONLY

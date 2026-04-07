@@ -179,11 +179,36 @@ def _ingest_result_to_dict(
             "mode": pipeline_summary.mode.value,
             "total_files": pipeline_summary.total_files,
             "processed": pipeline_summary.processed,
-            "skipped": pipeline_summary.skipped,
             "errors": pipeline_summary.errors,
             "warnings": pipeline_summary.warnings,
         }
     return data
+
+
+def _summary_to_dict(summary: "PipelineSummary") -> dict[str, object]:
+    """PipelineSummary を JSON 出力用 dict に変換する."""
+    return {
+        "mode": summary.mode.value,
+        "total_files": summary.total_files,
+        "processed": summary.processed,
+        "errors": summary.errors,
+        "warnings": summary.warnings,
+    }
+
+
+def _log_phase_summary(phase: str, summary: "PipelineSummary") -> None:
+    """フェーズ別の PipelineSummary をログ出力する."""
+    logger.info(
+        "[%s] %d 処理 / %d エラー / %d 警告",
+        phase,
+        summary.processed,
+        len(summary.errors),
+        len(summary.warnings),
+    )
+    for warn in summary.warnings:
+        logger.warning("  [%s] 警告: %s", phase, warn)
+    for err_file in summary.errors:
+        logger.error("  [%s] エラーファイル: %s", phase, err_file)
 
 
 def _add_output_option(parser: argparse.ArgumentParser) -> None:
@@ -1353,7 +1378,7 @@ async def run_rebuild(args: argparse.Namespace) -> None:
             sys.exit(1)
 
         if mode == "full":
-            summary = await controller.run_full_rebuild(
+            full_result = await controller.run_full_rebuild(
                 source_type=source_type,
                 progress_callback=progress_cb,
                 concurrency=concurrency,
@@ -1376,41 +1401,59 @@ async def run_rebuild(args: argparse.Namespace) -> None:
 
         elapsed = time.monotonic() - start
 
-        if json_out:
-            _output_result({
-                "mode": summary.mode.value,
-                "total_files": summary.total_files,
-                "processed": summary.processed,
-                "skipped": summary.skipped,
-                "errors": summary.errors,
-                "warnings": summary.warnings,
-                "elapsed": round(elapsed, 1),
-            })
+        if mode == "full":
+            all_errors = full_result.convert.errors + full_result.index.errors
+            if json_out:
+                _output_result({
+                    "mode": "full",
+                    "convert": _summary_to_dict(full_result.convert),
+                    "index": _summary_to_dict(full_result.index),
+                    "elapsed": round(elapsed, 1),
+                })
+                if all_errors:
+                    has_error = True
+                    if if_needed:
+                        error_files = ", ".join(all_errors)
+                        _show_error_dialog(
+                            f"rebuild --mode {mode} でエラーが発生しました。\n"
+                            f"エラーファイル: {error_files}"
+                        )
+                return
+
+            _log_phase_summary("Convert", full_result.convert)
+            _log_phase_summary("Index", full_result.index)
+            logger.info("所要時間: %s", _format_elapsed(elapsed))
+            if all_errors:
+                has_error = True
+        else:
+            if json_out:
+                _output_result(_summary_to_dict(summary) | {
+                    "elapsed": round(elapsed, 1),
+                })
+                if summary.errors:
+                    has_error = True
+                    if if_needed:
+                        error_files = ", ".join(summary.errors)
+                        _show_error_dialog(
+                            f"rebuild --mode {mode} でエラーが発生しました。\n"
+                            f"エラーファイル: {error_files}"
+                        )
+                return
+
+            logger.info(
+                "再構築完了: %d 処理 / %d エラー / %d 警告 / %s",
+                summary.processed,
+                len(summary.errors),
+                len(summary.warnings),
+                _format_elapsed(elapsed),
+            )
+            if summary.warnings:
+                for warn in summary.warnings:
+                    logger.warning("  警告: %s", warn)
             if summary.errors:
                 has_error = True
-                if if_needed:
-                    error_files = ", ".join(summary.errors)
-                    _show_error_dialog(
-                        f"rebuild --mode {mode} でエラーが発生しました。\n"
-                        f"エラーファイル: {error_files}"
-                    )
-            return
-
-        logger.info(
-            "再構築完了: %d 処理 / %d スキップ / %d エラー / %d 警告 / %s",
-            summary.processed,
-            summary.skipped,
-            len(summary.errors),
-            len(summary.warnings),
-            _format_elapsed(elapsed),
-        )
-        if summary.warnings:
-            for warn in summary.warnings:
-                logger.warning("  警告: %s", warn)
-        if summary.errors:
-            has_error = True
-            for err_file in summary.errors:
-                logger.error("  エラーファイル: %s", err_file)
+                for err_file in summary.errors:
+                    logger.error("  エラーファイル: %s", err_file)
     except Exception as e:
         has_error = True
         if if_needed:
@@ -1419,7 +1462,12 @@ async def run_rebuild(args: argparse.Namespace) -> None:
     else:
         # 処理エラー（例外なしだがエラーファイルあり）
         if has_error and if_needed:
-            error_files = ", ".join(summary.errors)
+            all_err = (
+                full_result.convert.errors + full_result.index.errors
+                if mode == "full"
+                else summary.errors
+            )
+            error_files = ", ".join(all_err)
             _show_error_dialog(
                 f"rebuild --mode {mode} でエラーが発生しました。\n"
                 f"エラーファイル: {error_files}"
@@ -1819,14 +1867,7 @@ async def run_delete(args: argparse.Namespace) -> None:
     if json_out:
         _output_result({
             "deleted": True,
-            "pipeline": {
-                "mode": summary.mode.value,
-                "total_files": summary.total_files,
-                "processed": summary.processed,
-                "skipped": summary.skipped,
-                "errors": summary.errors,
-                "warnings": summary.warnings,
-            },
+            "pipeline": _summary_to_dict(summary),
         })
         return
 

@@ -27,6 +27,7 @@ from rag.pipeline.models import (
     PHASE_INDEX,
     ChangeEntry,
     ChangeStatus,
+    FullRebuildResult,
     PipelineMode,
     PipelineSummary,
     detect_source_type,
@@ -149,7 +150,6 @@ class PipelineController:
                 mode=PipelineMode.INCREMENTAL,
                 total_files=0,
                 processed=0,
-                skipped=0,
             )
 
         last_commit_id = self.db.get_last_commit_id()
@@ -161,7 +161,6 @@ class PipelineController:
                 mode=PipelineMode.INCREMENTAL,
                 total_files=0,
                 processed=0,
-                skipped=0,
                 from_commit_id=last_commit_id,
                 to_commit_id=head_commit,
             )
@@ -185,7 +184,6 @@ class PipelineController:
                 mode=PipelineMode.INCREMENTAL,
                 total_files=0,
                 processed=0,
-                skipped=0,
                 from_commit_id=last_commit_id,
                 to_commit_id=head_commit,
             )
@@ -212,14 +210,16 @@ class PipelineController:
         *,
         progress_callback: ProgressCallback | None = None,
         concurrency: int = 1,
-    ) -> PipelineSummary:
+    ) -> FullRebuildResult:
         """全再構築を実行する.
 
-        converted_store とインデックスをクリアし、
-        source_store 全ファイルをパイプライン処理する。
+        全 convert → 全 index の2フェーズで処理する。
+        convert 失敗分は index から除外される。
 
         Args:
             source_type: 対象媒体フィルタ（None で全媒体）
+            progress_callback: 進捗コールバック
+            concurrency: index フェーズの同時実行数
 
         Raises:
             RuntimeError: source_store に未コミットの変更がある場合
@@ -230,13 +230,7 @@ class PipelineController:
         # 1. metadata.db 再構築
         self._source_store.rebuild_db(source_type)
 
-        # 2. converted_store クリア
-        self._converter.clear(self._converted_store_dir, source_type)
-
-        # 3. インデックスクリア
-        await self._indexer.clear(source_type)
-
-        # 4. active ファイルをスキャン（パイプライン対象外ファイルを除外）
+        # 2. active ファイルをスキャン（パイプライン対象外ファイルを除外）
         records = [
             r for r in self.db.search_sources(
                 source_type=source_type,
@@ -245,44 +239,90 @@ class PipelineController:
             if r.source_id not in _PIPELINE_EXCLUDE_FILES
         ]
 
-        if not records:
-            return PipelineSummary(
-                mode=PipelineMode.FULL_REBUILD,
-                total_files=0,
-                processed=0,
-                skipped=0,
-            )
+        empty_convert = PipelineSummary(
+            mode=PipelineMode.CONVERT_ONLY,
+            total_files=0,
+            processed=0,
+        )
+        empty_index = PipelineSummary(
+            mode=PipelineMode.INDEX_ONLY,
+            total_files=0,
+            processed=0,
+        )
 
-        # 5-6. コンバート + インデックス
-        async def _convert_and_index(record: SourceRecord) -> None:
-            converted_path = self._converter.convert(
-                record.source_id,
-                self._source_store.root_dir,
-                self._converted_store_dir,
-            )
-            metadata = self._build_metadata_from_record(record)
-            await self._indexer.add(record.source_id, converted_path, metadata)
+        if not records:
+            return FullRebuildResult(convert=empty_convert, index=empty_index)
 
         to_commit = ""
         if self._git.has_commits():
             to_commit = self._git.get_head_commit()
 
+        # --- Phase 1: Convert ---
+        self._converter.clear(self._converted_store_dir, source_type)
+
+        def _convert_single(record: SourceRecord) -> None:
+            self._converter.convert(
+                record.source_id,
+                self._source_store.root_dir,
+                self._converted_store_dir,
+            )
+
+        convert_summary = await self._run_processing_loop(
+            records,
+            process_fn=_convert_single,
+            get_file_path=lambda r: r.source_id,
+            phase=PHASE_CONVERT,
+            mode=PipelineMode.CONVERT_ONLY,
+            log_prefix="全再構築(Convert)中に",
+            progress_callback=progress_callback,
+        )
+
+        # --- Phase 2: Index (convert 成功分のみ) ---
+        await self._indexer.clear(source_type)
+
+        convert_failed = set(convert_summary.errors)
+        convert_warned = {w.split(": ", 1)[0] for w in convert_summary.warnings}
+        convert_excluded = convert_failed | convert_warned
+        index_records = [r for r in records if r.source_id not in convert_excluded]
+
+        if not index_records:
+            return FullRebuildResult(
+                convert=convert_summary,
+                index=PipelineSummary(
+                    mode=PipelineMode.INDEX_ONLY,
+                    total_files=0,
+                    processed=0,
+                    from_commit_id=NULL_COMMIT_HASH,
+                    to_commit_id=to_commit,
+                ),
+            )
+
+        async def _index_single(record: SourceRecord) -> None:
+            converted_rel = get_converted_rel_path(record.source_id)
+            converted_path = self._converted_store_dir / converted_rel
+            if not converted_path.exists():
+                raise ConversionSkippedError(
+                    f"converted file not found: {converted_path}",
+                )
+            metadata = self._build_metadata_from_record(record)
+            await self._indexer.add(record.source_id, converted_path, metadata)
+
         with self._indexer.bm25_deferred():
-            summary = await self._run_processing_loop(
-                records,
-                process_fn=_convert_and_index,
+            index_summary = await self._run_processing_loop(
+                index_records,
+                process_fn=_index_single,
                 get_file_path=lambda r: r.source_id,
-                phase=PHASE_CONVERT_AND_INDEX,
-                mode=PipelineMode.FULL_REBUILD,
-                log_prefix="全再構築中に",
+                phase=PHASE_INDEX,
+                mode=PipelineMode.INDEX_ONLY,
+                log_prefix="全再構築(Index)中に",
                 progress_callback=progress_callback,
                 from_commit_id=NULL_COMMIT_HASH,
                 to_commit_id=to_commit,
                 concurrency=concurrency,
             )
 
-        # pipeline_history に記録（正常完了時のみ）
-        if not summary.errors and to_commit:
+        # pipeline_history に記録（両フェーズともエラーなしの場合のみ）
+        if not convert_summary.errors and not index_summary.errors and to_commit:
             self.db.add_pipeline_history(
                 from_commit_id=NULL_COMMIT_HASH,
                 to_commit_id=to_commit,
@@ -290,7 +330,7 @@ class PipelineController:
                 mode="full",
             )
 
-        return summary
+        return FullRebuildResult(convert=convert_summary, index=index_summary)
 
     def _check_uncommitted_changes(
         self,
@@ -360,7 +400,6 @@ class PipelineController:
                 mode=PipelineMode.CONVERT_ONLY,
                 total_files=0,
                 processed=0,
-                skipped=0,
             )
 
         # 3. 全ファイルをコンバート
@@ -419,7 +458,6 @@ class PipelineController:
                 mode=PipelineMode.INDEX_ONLY,
                 total_files=0,
                 processed=0,
-                skipped=0,
             )
 
         # 3. converted_store からインデックス再構築
@@ -557,13 +595,12 @@ class PipelineController:
 
         sem = asyncio.Semaphore(concurrency)
         processed = 0
-        skipped = 0
         errors: list[str] = []
         warnings: list[str] = []
         lock = asyncio.Lock()
 
         async def _process_one(item: _T) -> None:
-            nonlocal processed, skipped
+            nonlocal processed
             file_path = get_file_path(item)
             async with sem:
                 try:
@@ -580,17 +617,15 @@ class PipelineController:
                     )
                     async with lock:
                         warnings.append(f"{file_path}: {e}")
-                        skipped += 1
                 except Exception:
                     logger.exception(
                         "%sエラー: %s", log_prefix, file_path,
                     )
                     async with lock:
                         errors.append(file_path)
-                        skipped += 1
                 if progress_callback is not None:
                     async with lock:
-                        completed = processed + skipped
+                        completed = processed + len(errors) + len(warnings)
                     try:
                         progress_callback(
                             completed, len(items),
@@ -608,7 +643,6 @@ class PipelineController:
             mode=mode,
             total_files=len(items),
             processed=processed,
-            skipped=skipped,
             errors=errors,
             warnings=warnings,
             from_commit_id=from_commit_id,
