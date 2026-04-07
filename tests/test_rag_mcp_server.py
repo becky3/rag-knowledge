@@ -641,7 +641,7 @@ class TestFormatCliIngestResult:
             "errors": 0, "error_details": [],
             "pipeline": {
                 "mode": "incremental",
-                "total_files": 1, "processed": 1, "skipped": 0, "errors": [],
+                "total_files": 1, "processed": 1, "errors": [],
             },
         }
         text = mod._format_cli_ingest_result(result)
@@ -698,7 +698,7 @@ class TestRagRebuildTool:
         mod = import_module("rag.server")
         mock_result = {
             "mode": "incremental",
-            "total_files": 10, "processed": 8, "skipped": 2, "errors": [],
+            "total_files": 10, "processed": 8, "errors": [], "warnings": [],
             "elapsed": 5.5,
         }
         with patch.object(
@@ -717,7 +717,14 @@ class TestRagRebuildTool:
         mod = import_module("rag.server")
         mock_result = {
             "mode": "full",
-            "total_files": 5, "processed": 5, "skipped": 0, "errors": [],
+            "convert": {
+                "mode": "convert",
+                "total_files": 5, "processed": 5, "errors": [], "warnings": [],
+            },
+            "index": {
+                "mode": "index",
+                "total_files": 5, "processed": 5, "errors": [], "warnings": [],
+            },
             "elapsed": 10.0,
         }
         with patch.object(

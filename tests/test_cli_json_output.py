@@ -131,14 +131,15 @@ class TestIngestResultToDict:
         pipeline_summary.mode.value = "incremental"
         pipeline_summary.total_files = 5
         pipeline_summary.processed = 3
-        pipeline_summary.skipped = 2
         pipeline_summary.errors = []
+        pipeline_summary.warnings = []
 
         result = _ingest_result_to_dict(ingest_result, pipeline_summary)
         assert result["placed"] == 1
         assert "pipeline" in result
         assert result["pipeline"]["mode"] == "incremental"
         assert result["pipeline"]["processed"] == 3
+        assert "skipped" not in result["pipeline"]
 
 
 class TestCommandsHaveOutputOption:

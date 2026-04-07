@@ -66,7 +66,7 @@
 | `incremental` | 差分更新 | 適用不可（git diff に従う） | 通常運用。未コミット変更は自動コミットされる |
 
 - `source_type` フィルタが適用不可のモード（`incremental`）で `source_type` が指定された場合、エラーを返す
-- 戻り値: 処理結果サマリ（処理件数、スキップ件数、エラー件数、所要時間）をテキストで返す
+- 戻り値: 処理結果サマリ（処理件数、エラー件数、所要時間）をテキストで返す。`full` モードは Convert / Index の2フェーズ結果を表示する
 
 #### rag_stats（拡張）
 
@@ -152,7 +152,7 @@ CLI は `--output json` 指定時に JSON Lines 形式で stdout に出力する
 | `type` 値 | 出力タイミング | フィールド |
 |-----------|-------------|-----------|
 | `progress` | ファイル処理完了ごと | `processed`（int）、`total`（int）、`current`（str: 処理済みファイルパス） |
-| `result` | 処理完了時（最終行） | コマンド固有のフィールド（`mode`, `total_files`, `processed`, `skipped`, `errors`, `elapsed` 等） |
+| `result` | 処理完了時（最終行） | コマンド固有のフィールド（`mode`, `total_files`, `processed`, `errors`, `warnings`, `elapsed` 等。`full` モードは `convert` / `index` オブジェクトに分割） |
 | `error` | エラー時（最終行） | `error`（bool, 常に `true`）、`message`（str） |
 
 MCP サーバー（server.py）は stdout を行単位で読み取り、`progress` 行を MCP 通知に変換し、`result` / `error` 行で処理結果を確定する。
@@ -175,7 +175,7 @@ MCP サーバー（server.py）は stdout を行単位で読み取り、`progres
 
 | メソッド | 対象ループ |
 |---------|-----------|
-| `run_full_rebuild` | 全レコードのコンバート + インデックス |
+| `run_full_rebuild` | Phase 1: 全レコードのコンバート、Phase 2: convert 成功分のインデックス |
 | `run_convert_only` | 全レコードのコンバート |
 | `run_index_only` | 全レコードのインデックス |
 | `_process_changes` | 差分変更エントリの処理 |

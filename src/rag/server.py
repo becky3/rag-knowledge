@@ -819,10 +819,32 @@ _VALID_PIPELINE_SOURCE_TYPES: frozenset[str] = frozenset({
 })
 
 
+def _format_phase_summary(phase: str, summary: PipelineSummary) -> list[str]:
+    """1フェーズの PipelineSummary をテキスト行リストに変換する."""
+    parts = [
+        f"  [{phase}]",
+        f"    処理件数: {summary.processed}",
+        f"    警告: {len(summary.warnings)}",
+        f"    エラー: {len(summary.errors)}",
+    ]
+    if summary.warnings:
+        parts.append("    警告詳細:")
+        for warn in summary.warnings[:10]:
+            parts.append(f"      - {warn}")
+        if len(summary.warnings) > 10:
+            parts.append(f"      ... 他 {len(summary.warnings) - 10} 件")
+    if summary.errors:
+        parts.append("    エラーファイル:")
+        for err_file in summary.errors[:10]:
+            parts.append(f"      - {err_file}")
+        if len(summary.errors) > 10:
+            parts.append(f"      ... 他 {len(summary.errors) - 10} 件")
+    return parts
+
+
 def _format_rebuild_summary(summary: PipelineSummary, elapsed: float) -> str:
     """PipelineSummary をテキストに変換する."""
     mode_names = {
-        PipelineMode.FULL_REBUILD: "全再構築",
         PipelineMode.CONVERT_ONLY: "コンバートのみ再実行",
         PipelineMode.INDEX_ONLY: "インデックスのみ再構築",
         PipelineMode.INCREMENTAL: "差分更新",
@@ -832,7 +854,6 @@ def _format_rebuild_summary(summary: PipelineSummary, elapsed: float) -> str:
     parts = [
         f"再構築完了 ({mode_name})",
         f"  処理件数: {summary.processed}",
-        f"  スキップ: {summary.skipped}",
         f"  警告: {len(summary.warnings)}",
         f"  エラー: {len(summary.errors)}",
         f"  所要時間: {elapsed:.1f} 秒",
@@ -850,6 +871,19 @@ def _format_rebuild_summary(summary: PipelineSummary, elapsed: float) -> str:
         if len(summary.errors) > 10:
             parts.append(f"    ... 他 {len(summary.errors) - 10} 件")
 
+    return "\n".join(parts)
+
+
+def _format_full_rebuild_summary(
+    convert: PipelineSummary,
+    index: PipelineSummary,
+    elapsed: float,
+) -> str:
+    """FullRebuildResult の2フェーズ結果をテキストに変換する."""
+    parts = ["再構築完了 (全再構築)"]
+    parts.extend(_format_phase_summary("Convert", convert))
+    parts.extend(_format_phase_summary("Index", index))
+    parts.append(f"  所要時間: {elapsed:.1f} 秒")
     return "\n".join(parts)
 
 
@@ -882,7 +916,7 @@ async def rag_rebuild(
             未指定時は全媒体。incremental モードでは指定不可。
 
     Returns:
-        処理結果サマリ（処理件数、スキップ件数、エラー件数、所要時間）
+        処理結果サマリ（処理件数、エラー件数、所要時間）
     """
     args: list[str] = ["--mode", mode]
     if source_type is not None:
@@ -890,12 +924,34 @@ async def rag_rebuild(
 
     try:
         result = await _run_cli_subprocess("rebuild", args, ctx=ctx)
+        elapsed = float(result.get("elapsed", 0.0))
 
-        # result dict → フォーマット済みテキスト
+        # full モードは2フェーズ結果
+        if mode == "full":
+            convert_data = result.get("convert")
+            index_data = result.get("index")
+            if convert_data and index_data:
+                convert_summary = _parse_pipeline_summary(convert_data)
+                index_summary = _parse_pipeline_summary(index_data)
+                if convert_summary and index_summary:
+                    return _format_full_rebuild_summary(
+                        convert_summary, index_summary, elapsed,
+                    )
+            missing = []
+            if not convert_data:
+                missing.append("convert")
+            if not index_data:
+                missing.append("index")
+            logger.error(
+                "full rebuild 結果の解析に失敗: 欠落キー=%s, result_keys=%s",
+                missing or "parse_error", list(result.keys()),
+            )
+            return "再構築完了（結果の解析に失敗）"
+
+        # その他のモードは単一 PipelineSummary
         summary = _parse_pipeline_summary(result)
-        elapsed = result.get("elapsed", 0.0)
         if summary is not None:
-            return _format_rebuild_summary(summary, float(elapsed))
+            return _format_rebuild_summary(summary, elapsed)
         return "再構築完了（結果の解析に失敗）"
     except CLISubprocessError as e:
         if e.lock_conflict:
@@ -1117,7 +1173,6 @@ def _parse_pipeline_summary(data: dict[str, Any]) -> PipelineSummary | None:
             mode=PipelineMode(data.get("mode", "incremental")),
             total_files=data.get("total_files", 0),
             processed=data.get("processed", 0),
-            skipped=data.get("skipped", 0),
             errors=data.get("errors", []),
             warnings=data.get("warnings", []),
         )

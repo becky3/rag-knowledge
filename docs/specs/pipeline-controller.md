@@ -52,14 +52,15 @@
 | インデックスのみ再構築 | source_type フィルタ（任意） | 処理結果サマリ | ChromaDB + BM25 をクリアし、converted_store 全ファイルからインデックスを再構築する。source_type 指定時はその媒体のインデックスのみ削除して再構築する（他の source_type のインデックスは維持）。Embedding モデル変更時やチャンクパラメータ変更時に使用。source_store に未コミットの変更がある場合はエラー |
 | 取り込み実行 | コミットメッセージ | 処理結果サマリ | インジェスター実行後の後処理を一括実行する。source_store の変更を `git add -A` + `git commit` し、差分更新を実行する。インジェスターと後続パイプライン処理を結合する便利操作 |
 
-全操作は処理結果サマリを返す。サマリの構造:
+差分更新・コンバートのみ再実行・インデックスのみ再構築は処理結果サマリ（`PipelineSummary`）を返す。全再構築は convert フェーズと index フェーズそれぞれの `PipelineSummary` を保持する `FullRebuildResult` を返す。
+
+サマリの構造:
 
 | フィールド | 型 | 説明 |
 |-----------|-----|------|
-| `mode` | str | 実行モード（`incremental`, `full`, `convert`, `index`） |
+| `mode` | str | 実行モード（`incremental`, `convert`, `index`） |
 | `total_files` | int | 処理対象ファイル総数 |
 | `processed` | int | 正常処理されたファイル数 |
-| `skipped` | int | スキップされたファイル数（warnings + errors の合計） |
 | `errors` | list[str] | 予期しない例外が発生したファイルパスのリスト |
 | `warnings` | list[str] | 非致命的スキップの詳細リスト（ファイルパス + 理由） |
 | `from_commit_id` | str | 処理開始時点のコミット ID |
@@ -72,9 +73,9 @@
 | フェーズ名 | 意味 | 付与箇所 |
 |-----------|------|---------|
 | `[Fetch]` | 外部ソースからのデータ取得 | CLI がインジェスターに渡す callback をラップして付与 |
-| `[Convert]` | ソースファイルのテキスト変換 | `run_convert_only` |
-| `[Index]` | チャンキング・Embedding・インデックス登録 | `run_index_only` |
-| `[Convert & Index]` | 変換とインデックスの一体処理 | `_process_changes`（差分更新）、`run_full_rebuild` |
+| `[Convert]` | ソースファイルのテキスト変換 | `run_convert_only`、`run_full_rebuild`（Phase 1） |
+| `[Index]` | チャンキング・Embedding・インデックス登録 | `run_index_only`、`run_full_rebuild`（Phase 2） |
+| `[Convert & Index]` | 変換とインデックスの一体処理 | `_process_changes`（差分更新） |
 
 > **TODO:#495** MCP 経由の進捗通知では、Claude Code が `report_progress` の `message` パラメータを表示しないため、フェーズ名はユーザーに見えない
 > （Claude Code の MCP クライアント側の制約。上流: anthropics/claude-code#3174）。
@@ -183,41 +184,46 @@ flowchart TD
 
 ### パイプラインフロー（全再構築）
 
+全再構築は「全 convert → 全 index」の2フェーズで処理する。convert フェーズで失敗したファイルは index フェーズから除外される。
+
 1. 未コミットの変更がある場合、エラーとして rebuild を拒否する
 2. source_store スキャンで metadata.db を再構築する
-3. converted_store をクリアする
-4. ChromaDB + BM25 をクリアする
-5. source_store の全ファイルをスキャンし、status が active のファイルを抽出する
-6. コンバーターで全ファイルをテキスト変換する
-7. インデクサーで全ファイルをインデックス構築する
-8. `pipeline_history` に実行履歴を追加する
+3. source_store の全ファイルをスキャンし、status が active のファイルを抽出する
+4. **Phase 1 (Convert)**: converted_store をクリアし、全ファイルをテキスト変換する
+5. **Phase 2 (Index)**: ChromaDB + BM25 をクリアし、convert 成功分のみインデックス構築する
+6. 両フェーズともエラーなしの場合、`pipeline_history` に実行履歴を追加する
 
 ```mermaid
 flowchart TD
     START["全再構築開始"]
     CHECK_DIRTY{"未コミットの変更あり?"}
     ERROR_DIRTY["エラー: rebuild 拒否"]
-    CLEAR_CONV["converted_store をクリア"]
-    CLEAR_IDX["ChromaDB + BM25 をクリア"]
-    SCAN["source_store 全ファイルをスキャン"]
-    FILTER["status が active のファイルを抽出"]
-    CONVERT["コンバーター: 全ファイルをテキスト変換"]
-    INDEX["インデクサー: 全ファイルをインデックス構築"]
+    REBUILD_DB["metadata.db 再構築（source_store スキャン）"]
+    SCAN["全 active ファイルを抽出"]
+
+    subgraph PHASE1["Phase 1: Convert"]
+        CLEAR_CONV["converted_store をクリア"]
+        CONVERT["全ファイルをテキスト変換"]
+    end
+
+    EXCLUDE["convert 失敗分を除外"]
+
+    subgraph PHASE2["Phase 2: Index"]
+        CLEAR_IDX["ChromaDB + BM25 をクリア"]
+        INDEX["convert 成功分をインデックス構築"]
+    end
+
     UPDATE["pipeline_history に実行履歴を追加"]
     END_NODE["全再構築完了"]
-
-    REBUILD_DB["metadata.db 再構築（source_store スキャン）"]
 
     START --> CHECK_DIRTY
     CHECK_DIRTY -- Yes --> ERROR_DIRTY
     CHECK_DIRTY -- No --> REBUILD_DB
-    REBUILD_DB --> CLEAR_CONV
-    CLEAR_CONV --> CLEAR_IDX
-    CLEAR_IDX --> SCAN
-    SCAN --> FILTER
-    FILTER --> CONVERT
-    CONVERT --> INDEX
-    INDEX --> UPDATE
+    REBUILD_DB --> SCAN
+    SCAN --> PHASE1
+    PHASE1 --> EXCLUDE
+    EXCLUDE --> PHASE2
+    PHASE2 --> UPDATE
     UPDATE --> END_NODE
 ```
 

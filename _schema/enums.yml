@@ -26,8 +26,6 @@ pipeline_mode:
   values:
     - value: incremental
       description: 差分更新（git diff ベース）
-    - value: full
-      description: 全件再構築
     - value: convert
       description: 変換のみ（インデックス構築なし）
     - value: index
