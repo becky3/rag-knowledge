@@ -415,7 +415,7 @@ embed の `$type` が `app.bsky.embed.recordWithMedia` の場合、メディア�
 1. **投稿 JSON**: 既存ファイルを上書きする（通常モードではスキップ）
 2. **メディアファイル**: 画像・動画を再 DL する
 3. **投稿内 Web URL**: site_ingest で再取得する
-4. **投稿内 YouTube URL**: `rag_bluesky_force_youtube_reingest` が `true` の場合のみ再取得する。デフォルトは再取得しない（YouTube の再取り込みは字幕取得・音声 DL 等のコストが高いため）
+4. **投稿内 YouTube URL**: 投稿が新規（初回取り込み）の場合は常に取り込む。投稿が上書き（既存ファイルの再取得）の場合は `rag_bluesky_force_youtube_reingest` が `true` の場合のみ再取得する。デフォルトは再取得しない（YouTube の再取り込みは字幕取得・音声 DL 等のコストが高いため）
 
 `--force` は既存データの更新が必要な場合に使用する。主な用途:
 
@@ -648,7 +648,7 @@ AppView のベース URL は設定可能とし、デフォルトは `https://pub
 | 画像の CDN URL が 404 | エラーをログに記録し、当該画像の DL をスキップする。投稿 JSON の取り込みには影響しない |
 | HLS プレイリストの取得に失敗 | エラーをログに記録し、当該動画の DL をスキップする |
 | ts セグメントの一部が DL に失敗 | エラーをログに記録し、当該動画の DL をスキップする（部分的な動画は保存しない） |
-| `--force` 時に YouTube 再取り込みが `rag_bluesky_force_youtube_reingest` で抑制されている | YouTube URL をスキップし、Web URL とメディアのみ再取得する |
+| `--force` 時に上書き投稿の YouTube 再取り込みが `rag_bluesky_force_youtube_reingest` で抑制されている | 上書き投稿の YouTube URL をスキップし、Web URL とメディアのみ再取得する。新規投稿の YouTube URL は常に取り込む |
 | メディアが添付されていない投稿 | メディア DL フェーズをスキップし、JSON のみ配置する（既存動作と同じ） |
 
 ## 関連ドキュメント

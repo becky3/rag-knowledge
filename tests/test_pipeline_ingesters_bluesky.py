@@ -987,14 +987,15 @@ class TestForceMode:
 
 
 @pytest.mark.asyncio()
-class TestFollowUrlsForce:
-    """follow_urls の force モード関連テスト."""
+class TestFollowUrlsYoutubeOverwrite:
+    """follow_urls の上書き/新規投稿における YouTube スキップ判定テスト."""
 
-    async def test_force_youtube_reingest_disabled(
+    async def test_overwrite_item_youtube_reingest_disabled(
         self, source_store: SourceStore,
     ) -> None:
-        """force=True かつ force_youtube_reingest=False で YouTube がスキップされること."""
+        """上書き投稿かつ force_youtube_reingest=False で YouTube がスキップされること."""
         item = _make_feed_item()
+        item["_is_overwrite"] = True
         item["post"]["record"]["facets"] = [
             {
                 "features": [
@@ -1015,20 +1016,20 @@ class TestFollowUrlsForce:
         stats = await ingester.follow_urls(
             [item],
             youtube_ingester=mock_yt,
-            force=True,
             force_youtube_reingest=False,
         )
 
-        # YouTube は呼ばれずスキップされる
+        # 上書き投稿の YouTube は呼ばれずスキップされる
         mock_yt.ingest_video.assert_not_called()
         assert stats["skipped"] == 1
         assert stats["youtube_placed"] == 0
 
-    async def test_force_youtube_reingest_enabled(
+    async def test_overwrite_item_youtube_reingest_enabled(
         self, source_store: SourceStore,
     ) -> None:
-        """force=True かつ force_youtube_reingest=True で YouTube が再取り込みされること."""
+        """上書き投稿かつ force_youtube_reingest=True で YouTube が再取り込みされること."""
         item = _make_feed_item()
+        item["_is_overwrite"] = True
         item["post"]["record"]["facets"] = [
             {
                 "features": [
@@ -1050,9 +1051,91 @@ class TestFollowUrlsForce:
         stats = await ingester.follow_urls(
             [item],
             youtube_ingester=mock_yt,
-            force=True,
             force_youtube_reingest=True,
         )
 
         mock_yt.ingest_video.assert_called_once()
         assert stats["youtube_placed"] == 1
+
+    async def test_new_item_youtube_always_ingested(
+        self, source_store: SourceStore,
+    ) -> None:
+        """新規投稿の YouTube URL は force_youtube_reingest=False でも取り込まれること."""
+        item = _make_feed_item()
+        item["_is_overwrite"] = False
+        item["post"]["record"]["facets"] = [
+            {
+                "features": [
+                    {
+                        "$type": "app.bsky.richtext.facet#link",
+                        "uri": "https://www.youtube.com/watch?v=new123",
+                    }
+                ]
+            }
+        ]
+
+        mock_yt = AsyncMock()
+        mock_yt.ingest_video = AsyncMock(
+            return_value=MagicMock(placed=1, errors=0)
+        )
+
+        ingester = make_bluesky_ingester(source_store)
+        stats = await ingester.follow_urls(
+            [item],
+            youtube_ingester=mock_yt,
+            force_youtube_reingest=False,
+        )
+
+        # 新規投稿の YouTube は常に取り込まれる
+        mock_yt.ingest_video.assert_called_once()
+        assert stats["youtube_placed"] == 1
+        assert stats["skipped"] == 0
+
+    async def test_mixed_new_and_overwrite_items(
+        self, source_store: SourceStore,
+    ) -> None:
+        """新規と上書きが混在する場合、新規の YouTube のみ取り込まれること."""
+        new_item = _make_feed_item()
+        new_item["_is_overwrite"] = False
+        new_item["post"]["record"]["facets"] = [
+            {
+                "features": [
+                    {
+                        "$type": "app.bsky.richtext.facet#link",
+                        "uri": "https://www.youtube.com/watch?v=new456",
+                    }
+                ]
+            }
+        ]
+
+        overwrite_item = _make_feed_item()
+        overwrite_item["_is_overwrite"] = True
+        overwrite_item["post"]["record"]["facets"] = [
+            {
+                "features": [
+                    {
+                        "$type": "app.bsky.richtext.facet#link",
+                        "uri": "https://www.youtube.com/watch?v=old789",
+                    }
+                ]
+            }
+        ]
+
+        mock_yt = AsyncMock()
+        mock_yt.ingest_video = AsyncMock(
+            return_value=MagicMock(placed=1, errors=0)
+        )
+
+        ingester = make_bluesky_ingester(source_store)
+        stats = await ingester.follow_urls(
+            [new_item, overwrite_item],
+            youtube_ingester=mock_yt,
+            force_youtube_reingest=False,
+        )
+
+        # 新規の YouTube のみ取り込まれ、上書きはスキップ
+        mock_yt.ingest_video.assert_called_once_with(
+            video_url="https://www.youtube.com/watch?v=new456"
+        )
+        assert stats["youtube_placed"] == 1
+        assert stats["skipped"] == 1
