@@ -286,18 +286,20 @@ async def rag_crawl_bluesky(
     handle: str,
     max_posts: int | None = None,
     include_reposts: bool | None = None,
+    force: bool = False,
     ctx: MCPContext | None = None,
 ) -> str:
     """[rag-knowledge] RAG crawl BlueSky - BlueSky 投稿を AT Protocol API 経由で取得し一括取り込み.
 
     knowledge base, BlueSky, Bluesky, ingest, posts, AT Protocol.
     指定ユーザーの BlueSky 投稿を AT Protocol API 経由で取得し、ナレッジベースに取り込む。
-    BlueSky は投稿編集不可のため、既存の投稿はスキップする（上書き不要）。
+    通常は既存の投稿をスキップする。force 指定時は全データを上書き再取得する。
 
     Args:
         handle: BlueSky ハンドル（例: user.bsky.social）。DID 形式は不可
         max_posts: 取得する最大投稿数（タイムライン全体に適用、未指定時は設定値を使用、許容範囲: 1〜1000）
         include_reposts: タイムラインにリポストを含めるか（未指定時は設定値を使用）
+        force: 上書き再取得モード。既存ファイルを上書きし、メディアDLと投稿内URL先の再取得も実行する
 
     Returns:
         取り込み結果のサマリーテキスト
@@ -307,6 +309,8 @@ async def rag_crawl_bluesky(
         args.extend(["--max-posts", str(max_posts)])
     if include_reposts is True:
         args.append("--include-reposts")
+    if force:
+        args.append("--force")
 
     try:
         result = await _run_cli_subprocess("crawl-bluesky", args, ctx=ctx)

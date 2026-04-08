@@ -7,6 +7,10 @@
 - crawl_bluesky のフロー（ページネーション、重複検出、リポストフィルタ）
 - .meta サイドカーファイルの生成
 - ファイル構造の検証
+- メディア DL（画像・動画）
+- --force オプション（上書き再取得）
+- recordWithMedia 時のメディア URL パス分岐
+- YouTube 再取り込み制御
 """
 
 from __future__ import annotations
@@ -20,6 +24,8 @@ import pytest
 from rag.pipeline.ingesters.bluesky import (
     MAX_POSTS_HARD_LIMIT,
     _escape_did,
+    _ext_from_content_type,
+    _extract_media_urls,
     _make_title,
     _validate_max_posts,
     classify_url,
@@ -643,3 +649,367 @@ class TestFollowUrls:
         assert stats["youtube_placed"] == 0
         assert stats["skipped"] == 0
         assert stats["errors"] == 0
+
+
+class TestExtFromContentType:
+    """_ext_from_content_type のテスト."""
+
+    def test_webp(self) -> None:
+        assert _ext_from_content_type("image/webp") == ".webp"
+
+    def test_jpeg(self) -> None:
+        assert _ext_from_content_type("image/jpeg") == ".jpg"
+
+    def test_png(self) -> None:
+        assert _ext_from_content_type("image/png") == ".png"
+
+    def test_with_charset_param(self) -> None:
+        """Content-Type にパラメータが付いている場合."""
+        assert _ext_from_content_type("image/webp; charset=utf-8") == ".webp"
+
+    def test_unknown_defaults_to_webp(self) -> None:
+        """不明な Content-Type はデフォルト .webp."""
+        assert _ext_from_content_type("application/octet-stream") == ".webp"
+
+
+class TestExtractMediaUrls:
+    """_extract_media_urls のテスト."""
+
+    def test_images_from_embed(self) -> None:
+        """通常の画像 embed から fullsize URL が抽出されること."""
+        item = _make_feed_item()
+        item["post"]["embed"] = {
+            "$type": "app.bsky.embed.images#view",
+            "images": [
+                {"fullsize": "https://cdn.bsky.app/img/feed_fullsize/image1.webp"},
+                {"fullsize": "https://cdn.bsky.app/img/feed_fullsize/image2.webp"},
+            ],
+        }
+        images, playlist = _extract_media_urls(item)
+        assert len(images) == 2
+        assert playlist is None
+
+    def test_video_from_embed(self) -> None:
+        """動画 embed から playlist URL が抽出されること."""
+        item = _make_feed_item()
+        item["post"]["embed"] = {
+            "$type": "app.bsky.embed.video#view",
+            "playlist": "https://video.bsky.app/watch/playlist.m3u8",
+        }
+        images, playlist = _extract_media_urls(item)
+        assert len(images) == 0
+        assert playlist == "https://video.bsky.app/watch/playlist.m3u8"
+
+    def test_record_with_media_images(self) -> None:
+        """recordWithMedia 時の画像 URL が media 配下から抽出されること."""
+        item = _make_feed_item()
+        item["post"]["embed"] = {
+            "$type": "app.bsky.embed.recordWithMedia#view",
+            "media": {
+                "$type": "app.bsky.embed.images#view",
+                "images": [
+                    {"fullsize": "https://cdn.bsky.app/img/nested_image.webp"},
+                ],
+            },
+        }
+        images, playlist = _extract_media_urls(item)
+        assert len(images) == 1
+        assert images[0] == "https://cdn.bsky.app/img/nested_image.webp"
+
+    def test_record_with_media_video(self) -> None:
+        """recordWithMedia 時の動画 playlist URL が media 配下から抽出されること."""
+        item = _make_feed_item()
+        item["post"]["embed"] = {
+            "$type": "app.bsky.embed.recordWithMedia#view",
+            "media": {
+                "$type": "app.bsky.embed.video#view",
+                "playlist": "https://video.bsky.app/nested_playlist.m3u8",
+            },
+        }
+        images, playlist = _extract_media_urls(item)
+        assert len(images) == 0
+        assert playlist == "https://video.bsky.app/nested_playlist.m3u8"
+
+    def test_no_embed(self) -> None:
+        """embed がない場合は空が返ること."""
+        item = _make_feed_item()
+        images, playlist = _extract_media_urls(item)
+        assert len(images) == 0
+        assert playlist is None
+
+
+@pytest.mark.asyncio()
+class TestMediaDownload:
+    """メディア DL のテスト."""
+
+    async def test_image_download(self, source_store: SourceStore) -> None:
+        """画像が CDN から DL されて配置されること."""
+        item = _make_feed_item(
+            embed={"$type": "app.bsky.embed.images"},
+        )
+        item["post"]["embed"] = {
+            "$type": "app.bsky.embed.images#view",
+            "images": [
+                {"fullsize": "https://cdn.bsky.app/img/image1"},
+            ],
+        }
+
+        # モック CDN レスポンス
+        img_resp = MagicMock()
+        img_resp.headers = {"content-type": "image/webp"}
+        img_resp.content = b"fake-image-data"
+
+        # API レスポンス（フィード取得）
+        api_resp = MagicMock()
+        api_resp.json.return_value = {"feed": [item]}
+
+        client = AsyncMock()
+        client.get = AsyncMock(side_effect=[api_resp, img_resp])
+
+        ingester = make_bluesky_ingester(source_store, max_posts=3)
+        result, _ = await ingester.crawl_bluesky(
+            "alice.bsky.social", client=client,
+        )
+
+        assert result.placed == 1
+
+        # メディアファイルの検証
+        escaped = _escape_did("did:plc:abc123")
+        media_path = (
+            source_store.root_dir / "bluesky" / escaped / "2026" / "01"
+            / "media" / "xyz789" / "image_0.webp"
+        )
+        assert media_path.exists()
+        assert media_path.read_bytes() == b"fake-image-data"
+
+    async def test_video_hls_download(self, source_store: SourceStore) -> None:
+        """HLS 動画が ts セグメント結合で保存されること."""
+        item = _make_feed_item(
+            embed={"$type": "app.bsky.embed.video"},
+        )
+        item["post"]["embed"] = {
+            "$type": "app.bsky.embed.video#view",
+            "playlist": "https://video.bsky.app/watch/playlist.m3u8",
+        }
+
+        # モックレスポンス
+        api_resp = MagicMock()
+        api_resp.json.return_value = {"feed": [item]}
+
+        playlist_resp = MagicMock()
+        playlist_resp.text = "#EXTM3U\nseg0.ts\nseg1.ts\n"
+
+        seg0_resp = MagicMock()
+        seg0_resp.content = b"segment-0-"
+        seg1_resp = MagicMock()
+        seg1_resp.content = b"segment-1"
+
+        client = AsyncMock()
+        client.get = AsyncMock(
+            side_effect=[api_resp, playlist_resp, seg0_resp, seg1_resp]
+        )
+
+        ingester = make_bluesky_ingester(source_store, max_posts=3)
+        result, _ = await ingester.crawl_bluesky(
+            "alice.bsky.social", client=client,
+        )
+
+        assert result.placed == 1
+
+        escaped = _escape_did("did:plc:abc123")
+        video_path = (
+            source_store.root_dir / "bluesky" / escaped / "2026" / "01"
+            / "media" / "xyz789" / "video_0.ts"
+        )
+        assert video_path.exists()
+        assert video_path.read_bytes() == b"segment-0-segment-1"
+
+    async def test_media_download_error_isolated(
+        self, source_store: SourceStore,
+    ) -> None:
+        """メディア DL のエラーが投稿配置に影響しないこと."""
+        item = _make_feed_item(
+            embed={"$type": "app.bsky.embed.images"},
+        )
+        item["post"]["embed"] = {
+            "$type": "app.bsky.embed.images#view",
+            "images": [
+                {"fullsize": "https://cdn.bsky.app/img/fail"},
+            ],
+        }
+
+        api_resp = MagicMock()
+        api_resp.json.return_value = {"feed": [item]}
+
+        client = AsyncMock()
+        # API 成功 → 画像 DL 失敗
+        client.get = AsyncMock(
+            side_effect=[api_resp, Exception("CDN error")]
+        )
+
+        ingester = make_bluesky_ingester(source_store, max_posts=3)
+        result, placed = await ingester.crawl_bluesky(
+            "alice.bsky.social", client=client,
+        )
+
+        # 投稿自体は配置される
+        assert result.placed == 1
+        assert len(placed) == 1
+
+
+@pytest.mark.asyncio()
+class TestForceMode:
+    """--force オプションのテスト."""
+
+    async def test_force_overwrites_existing(
+        self, source_store: SourceStore,
+    ) -> None:
+        """force=True で既存ファイルが上書きされること."""
+        item = _make_feed_item(text="original text")
+        client1 = _make_mock_client([{"feed": [item]}])
+
+        ingester = make_bluesky_ingester(source_store, max_posts=10)
+
+        # 1 回目: 通常配置
+        result1, _ = await ingester.crawl_bluesky(
+            "alice.bsky.social", client=client1,
+        )
+        assert result1.placed == 1
+
+        # 2 回目: force=False → スキップ
+        client2 = _make_mock_client([{"feed": [item]}])
+        result2, _ = await ingester.crawl_bluesky(
+            "alice.bsky.social", force=False, client=client2,
+        )
+        assert result2.skipped == 1
+        assert result2.placed == 0
+
+        # 3 回目: force=True → 上書き
+        client3 = _make_mock_client([{"feed": [item]}])
+        result3, _ = await ingester.crawl_bluesky(
+            "alice.bsky.social", force=True, client=client3,
+        )
+        assert result3.placed == 1
+        assert result3.skipped == 0
+
+    async def test_force_triggers_media_download(
+        self, source_store: SourceStore,
+    ) -> None:
+        """force=True で既存投稿のメディアも DL されること."""
+        item = _make_feed_item(
+            embed={"$type": "app.bsky.embed.images"},
+        )
+        item["post"]["embed"] = {
+            "$type": "app.bsky.embed.images#view",
+            "images": [
+                {"fullsize": "https://cdn.bsky.app/img/image1"},
+            ],
+        }
+
+        # 1 回目: メディアなし（API のみ）
+        api_resp1 = MagicMock()
+        api_resp1.json.return_value = {"feed": [item]}
+        img_resp1 = MagicMock()
+        img_resp1.headers = {"content-type": "image/webp"}
+        img_resp1.content = b"first-image"
+        client1 = AsyncMock()
+        client1.get = AsyncMock(side_effect=[api_resp1, img_resp1])
+
+        ingester = make_bluesky_ingester(source_store, max_posts=10)
+        await ingester.crawl_bluesky("alice.bsky.social", client=client1)
+
+        # 2 回目: force=True → メディア再 DL
+        api_resp2 = MagicMock()
+        api_resp2.json.return_value = {"feed": [item]}
+        img_resp2 = MagicMock()
+        img_resp2.headers = {"content-type": "image/jpeg"}
+        img_resp2.content = b"updated-image"
+        client2 = AsyncMock()
+        client2.get = AsyncMock(side_effect=[api_resp2, img_resp2])
+
+        result, _ = await ingester.crawl_bluesky(
+            "alice.bsky.social", force=True, client=client2,
+        )
+
+        assert result.placed == 1
+        escaped = _escape_did("did:plc:abc123")
+        media_dir = (
+            source_store.root_dir / "bluesky" / escaped / "2026" / "01"
+            / "media" / "xyz789"
+        )
+        # 新しい画像が保存されている（拡張子は Content-Type に従う）
+        jpg_path = media_dir / "image_0.jpg"
+        assert jpg_path.exists()
+        assert jpg_path.read_bytes() == b"updated-image"
+
+
+@pytest.mark.asyncio()
+class TestFollowUrlsForce:
+    """follow_urls の force モード関連テスト."""
+
+    async def test_force_youtube_reingest_disabled(
+        self, source_store: SourceStore,
+    ) -> None:
+        """force=True かつ force_youtube_reingest=False で YouTube がスキップされること."""
+        item = _make_feed_item()
+        item["post"]["record"]["facets"] = [
+            {
+                "features": [
+                    {
+                        "$type": "app.bsky.richtext.facet#link",
+                        "uri": "https://www.youtube.com/watch?v=test123",
+                    }
+                ]
+            }
+        ]
+
+        mock_yt = AsyncMock()
+        mock_yt.ingest_video = AsyncMock(
+            return_value=MagicMock(placed=1, errors=0)
+        )
+
+        ingester = make_bluesky_ingester(source_store)
+        stats = await ingester.follow_urls(
+            [item],
+            youtube_ingester=mock_yt,
+            force=True,
+            force_youtube_reingest=False,
+        )
+
+        # YouTube は呼ばれずスキップされる
+        mock_yt.ingest_video.assert_not_called()
+        assert stats["skipped"] == 1
+        assert stats["youtube_placed"] == 0
+
+    async def test_force_youtube_reingest_enabled(
+        self, source_store: SourceStore,
+    ) -> None:
+        """force=True かつ force_youtube_reingest=True で YouTube が再取り込みされること."""
+        item = _make_feed_item()
+        item["post"]["record"]["facets"] = [
+            {
+                "features": [
+                    {
+                        "$type": "app.bsky.richtext.facet#link",
+                        "uri": "https://www.youtube.com/watch?v=test123",
+                    }
+                ]
+            }
+        ]
+
+        mock_yt = AsyncMock()
+        mock_yt.ingest_video = AsyncMock(
+            return_value=MagicMock(placed=1, errors=0)
+        )
+        mock_yt.request_interval = 5.0
+
+        ingester = make_bluesky_ingester(source_store)
+        stats = await ingester.follow_urls(
+            [item],
+            youtube_ingester=mock_yt,
+            force=True,
+            force_youtube_reingest=True,
+        )
+
+        mock_yt.ingest_video.assert_called_once()
+        assert stats["youtube_placed"] == 1

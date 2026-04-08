@@ -234,6 +234,8 @@ class RAGSettings(BaseModel):
     rag_bluesky_request_interval: float = Field(ge=0.1, le=60.0)
     # リポストを含めるとノイズが増えるため選択可能
     rag_bluesky_include_reposts: bool
+    # --force 時の YouTube 再取り込みはコストが高いため個別に抑制可能
+    rag_bluesky_force_youtube_reingest: bool
 
     # HNSW パラメータ（ChromaDB ベクトルインデックス）
     # m, construction_ef はコレクション作成時のみ適用（変更には rebuild --mode full が必要）
