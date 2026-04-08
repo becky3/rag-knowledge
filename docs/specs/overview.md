@@ -33,6 +33,7 @@ RAG Knowledge は、外部 Web ページから収集した知識をベクトル 
 | 23 | コンテンツアップロード | HTTP モードでのファイル直接アップロード（multipart/form-data） | [infrastructure/content-upload.md](infrastructure/content-upload.md) |
 | 24 | Upload HTTP API 認証 | API キー認証・バインドアドレス制約 | [infrastructure/upload-auth.md](infrastructure/upload-auth.md) |
 | 25 | 定期 index rebuild | 条件付き index rebuild の自動実行 | [infrastructure/scheduled-rebuild.md](infrastructure/scheduled-rebuild.md) |
+| 26 | メディア解析 | 画像・動画の Vision モデルによるテキスト変換 | [infrastructure/media-analysis.md](infrastructure/media-analysis.md) |
 
 ## 3. 技術スタック
 
@@ -55,6 +56,9 @@ RAG Knowledge は、外部 Web ページから収集した知識をベクトル 
 | Web クローラー（大規模サイト） | Scrapy |
 | multipart フォーム解析 | python-multipart |
 | YAML パーサー | PyYAML |
+| Vision モデル（メディア解析） | LM Studio (OpenAI 互換 API) + Gemma 4 等 |
+| 動画フレーム抽出 | ffmpeg |
+| 画像処理 | Pillow |
 | プロセス間排他制御 | ファイルベースロック（fcntl/msvcrt） |
 | 設定管理 | pydantic-settings (.env + config.toml) |
 
