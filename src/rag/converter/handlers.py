@@ -410,9 +410,14 @@ def _resolve_bluesky_media_dir(
         メディアディレクトリの絶対パス、または導出不可時は None
     """
     p = PurePosixPath(file_path)
+    if p.is_absolute() or ".." in p.parts:
+        return None
+
     rkey = p.stem
     parent_dir = p.parent
-    media_dir = source_store_dir / str(parent_dir / "media" / rkey)
+    media_dir = (source_store_dir / str(parent_dir / "media" / rkey)).resolve()
+    if not media_dir.is_relative_to(source_store_dir.resolve()):
+        return None
     if media_dir.is_dir():
         return media_dir
     return None
@@ -431,7 +436,7 @@ def _analyze_bluesky_media(
     Returns:
         <image:N> / <video:N> タグ付きテキストのリスト
     """
-    from rag.converter.converter import _IMAGE_EXTENSIONS, _VIDEO_EXTENSIONS
+    from rag.converter.converter import IMAGE_EXTENSIONS, VIDEO_EXTENSIONS
 
     sections: list[str] = []
     image_idx = 0
@@ -442,12 +447,12 @@ def _analyze_bluesky_media(
             continue
         ext = media_file.suffix.lower()
 
-        if ext in _IMAGE_EXTENSIONS:
+        if ext in IMAGE_EXTENSIONS:
             text = media_analyzer.analyze_image(media_file)
             if text:
                 image_idx += 1
                 sections.append(f"<image:{image_idx}>\n{text}\n</image:{image_idx}>")
-        elif ext in _VIDEO_EXTENSIONS:
+        elif ext in VIDEO_EXTENSIONS:
             text = media_analyzer.analyze_video(media_file)
             if text:
                 video_idx += 1

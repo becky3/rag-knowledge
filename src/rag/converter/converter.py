@@ -58,10 +58,10 @@ _EXTENSION_OUTPUT_MAP: dict[str, str] = {
 # パススルー対象の拡張子
 _PASSTHROUGH_EXTENSIONS: frozenset[str] = frozenset({".md", ".txt", ".adoc"})
 
-# メディア解析対象の拡張子
-_IMAGE_EXTENSIONS: frozenset[str] = frozenset({".webp", ".jpg", ".jpeg", ".png"})
-_VIDEO_EXTENSIONS: frozenset[str] = frozenset({".ts", ".mp4"})
-_MEDIA_EXTENSIONS: frozenset[str] = _IMAGE_EXTENSIONS | _VIDEO_EXTENSIONS
+# メディア解析対象の拡張子（handlers.py からも参照される public 定数）
+IMAGE_EXTENSIONS: frozenset[str] = frozenset({".webp", ".jpg", ".jpeg", ".png"})
+VIDEO_EXTENSIONS: frozenset[str] = frozenset({".ts", ".mp4"})
+MEDIA_EXTENSIONS: frozenset[str] = IMAGE_EXTENSIONS | VIDEO_EXTENSIONS
 
 # 変換対象外のファイル名
 _EXCLUDED_FILES: frozenset[str] = frozenset({"metadata.db"})
@@ -369,7 +369,7 @@ class Converter:
         if ext == ".json":
             return self._convert_json(source_path, file_path, source_store_dir)
 
-        if ext in _MEDIA_EXTENSIONS:
+        if ext in MEDIA_EXTENSIONS:
             return self._convert_media(ext, source_path)
 
         return None
@@ -399,9 +399,9 @@ class Converter:
                 f"LM Studio が利用不可のためメディア解析をスキップ: {source_path}",
             )
 
-        if ext in _IMAGE_EXTENSIONS:
+        if ext in IMAGE_EXTENSIONS:
             text = self._media_analyzer.analyze_image(source_path)
-        elif ext in _VIDEO_EXTENSIONS:
+        elif ext in VIDEO_EXTENSIONS:
             text = self._media_analyzer.analyze_video(source_path)
         else:
             return None
