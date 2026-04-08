@@ -127,6 +127,8 @@ QA 検証グループ:
 - MCP サーバーの状態を確認する（MCP フェーズでは HTTP モードで起動中かつ `/mcp` で enabled であること、CLI 検証時は停止推奨）。disabled の場合はユーザーに有効化を依頼する
 - ChromaDB サーバー疎通確認: `curl http://localhost:<CHROMADB_SERVER_PORT>/api/v2/heartbeat` で応答を確認する
 - LM Studio の接続確認（Embedding API が必要なグループの場合）
+- LM Studio Vision モデルの確認（グループ A でメディア解析ステップを実行する場合）: Vision 対応モデルがロードされているか確認する
+- ffmpeg の確認（メディア解析の動画処理を検証する場合）: `ffmpeg -version` で利用可能か確認する
 - `.env` のストレージパスが worktree 内の絶対パスを指していることを確認する
 
 ### ステップ 5: 選択グループの順次実行
@@ -231,11 +233,13 @@ NG が検出された場合、Issue 起票を提案する。
 |---|----------------|---------|---------|
 | 1 | `add-document --file README.md` | Markdown 取り込み成功 | `ingest` |
 | 2 | `add-document --file .qa/pdf_add_test.pdf` | PDF 取り込み成功 | `ingest` |
-| 3 | `add-document --file README.md --upload-mode replace` | 上書き成功、エラーなし | `none` |
-| 4 | `crawl-documents docs/specs/`（`dir_path` は positional 引数） | ディレクトリ一括取り込み成功 | `ingest` |
-| 5 | `add-journal --title "コンテンツ一覧取得機能の実装" --file .qa/journal_add_test.md --repository rag-knowledge` | ジャーナル登録成功 | `ingest` |
-| 6a | `migrate-journal --dir .qa/journals --repository rag-knowledge` | ジャーナル一括配置成功 | `none` |
-| 6b | `rebuild --mode incremental` | 再構築成功、migrate 分がインデックスに反映 | `ingest` |
+| 3 | `add-document --file .qa/image_add_test.jpg` | 画像取り込み成功。メディア解析テキストが生成されること（LM Studio Vision 起動時）。search 結果に画像の解析テキストが含まれることを確認する | `ingest` |
+| 4 | `add-document --file README.md --upload-mode replace` | 上書き成功、エラーなし | `none` |
+| 5 | `crawl-documents docs/specs/`（`dir_path` は positional 引数） | ディレクトリ一括取り込み成功 | `ingest` |
+| 6 | `add-journal --title "コンテンツ一覧取得機能の実装" --file .qa/journal_add_test.md --repository rag-knowledge` | ジャーナル登録成功 | `ingest` |
+| 7a | `migrate-journal --dir .qa/journals --repository rag-knowledge` | ジャーナル一括配置成功 | `none` |
+| 7b | `rebuild --mode incremental` | 再構築成功、migrate 分がインデックスに反映 | `ingest` |
+| 8 | LM Studio を停止した状態で `add-document --file .qa/image_add_test.jpg --upload-mode replace` | 取り込み成功するがメディア解析テキストなし（フォールバック動作）。エラーで中断しないこと | `ingest` |
 
 CLI / MCP 対応:
 
@@ -249,7 +253,9 @@ CLI / MCP 対応:
 **MCP テスト時の注意:**
 
 - A-2 (PDF): 大きい PDF は MCP パラメータサイズ制約で失敗する場合がある。失敗時は CLI で代替実行する
-- A-4 (crawl-documents): HTTP モード非対応のため MCP テスト時はスキップする
+- A-3 (画像): LM Studio Vision モデルが未ロードの場合はスキップする
+- A-5 (crawl-documents): HTTP モード非対応のため MCP テスト時はスキップする
+- A-8 (フォールバック): LM Studio の停止・再起動はユーザーの手動操作が必要。MCP テスト時はスキップする
 
 ### B) Web
 
@@ -264,14 +270,15 @@ CLI / MCP 対応: `rag_site_ingest`（`url` パラメータ / `urls` パラメ�
 
 ### C) SNS
 
-目的: Zenn・BlueSky インジェスターの動作確認。
+目的: Zenn・BlueSky インジェスターの動作確認。BlueSky メディア DL と --force オプションの検証を含む。
 
 | # | コマンド（CLI） | 期待結果 | 検証種別 |
 |---|----------------|---------|---------|
 | 1 | `crawl-zenn rhythmcan --max-articles 1` | Zenn 記事 1 件取り込み成功 | `ingest` |
-| 2 | `crawl-bluesky rhythmcan.bsky.social --max-posts 1` | BlueSky 投稿 1 件取り込み成功 | `ingest` |
+| 2 | `crawl-bluesky rhythmcan.bsky.social --max-posts 5` | BlueSky 投稿取り込み成功。メディア付き投稿がある場合、source_store の `bluesky/{did}/{year}/{month}/media/{rkey}/` にメディアファイル（`image_0.{ext}` / `video_0.ts`）が配置されていること | `ingest` |
+| 3 | `crawl-bluesky rhythmcan.bsky.social --max-posts 1 --force` | `--force` による上書き再取得成功。既存投稿が上書きされ、CLI に `完了: N件配置`（N > 0）と表示されること | `ingest` |
 
-CLI / MCP 対応: `rag_crawl_zenn` / `rag_crawl_bluesky`
+CLI / MCP 対応: `rag_crawl_zenn` / `rag_crawl_bluesky`（`force=True` で --force 相当）
 
 ### D) YouTube
 
@@ -424,3 +431,5 @@ QA 完了後、worktree 環境を片付ける。ChromaDB・HTTP サーバー等�
 - [RAG ナレッジ](../../rag-knowledge.md) — ChromaDB client/server 構成、MCP 薄層アダプターパターン
 - [content-upload](../../infrastructure/content-upload.md) — Upload HTTP API 仕様
 - [content-listing](../../infrastructure/content-listing.md) — コンテンツ一覧取得仕様
+- [メディア解析](../../infrastructure/media-analysis.md) — 画像・動画の Vision モデルによるテキスト変換
+- [BlueSky インジェスター](../../ingesters/bluesky.md) — メディア DL・--force オプション
