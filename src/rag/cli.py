@@ -2359,7 +2359,6 @@ async def run_crawl_bluesky(args: argparse.Namespace) -> None:
                 url_stats = await bluesky_ingester.follow_urls(
                     placed_items,
                     youtube_ingester=youtube_ingester,
-                    force=force,
                     force_youtube_reingest=settings.rag_bluesky_force_youtube_reingest,
                 )
     except (ValueError, TypeError) as e:

@@ -388,7 +388,8 @@ class BlueskyIngester:
                 seen_paths.add(rel_path)
 
                 dest = self._store.root_dir / rel_path
-                if dest.exists() and not force:
+                is_overwrite = dest.exists()
+                if is_overwrite and not force:
                     result.skipped += 1
                     continue
 
@@ -454,7 +455,9 @@ class BlueskyIngester:
                         metadata=metadata,
                     )
                     result.placed += 1
-                    placed_items.append(item)
+                    placed_items.append(
+                        {**item, "_is_overwrite": is_overwrite},
+                    )
                 except Exception:
                     logger.exception("投稿の配置に失敗しました: %s", rel_path)
                     result.errors += 1
@@ -584,7 +587,6 @@ class BlueskyIngester:
         placed_items: list[dict[str, Any]],
         *,
         youtube_ingester: YoutubeIngester | None = None,
-        force: bool = False,
         force_youtube_reingest: bool = False,
     ) -> dict[str, int]:
         """配置済み投稿から URL を抽出し、site_ingest/YouTube インジェスターに委譲する.
@@ -594,12 +596,14 @@ class BlueskyIngester:
         Web URL は CLI の site-ingest コマンド（複数 URL モード）でバッチ取得する。
         YouTube URL は個別に YoutubeIngester で取り込む。
 
+        各 placed_item の ``_is_overwrite`` フラグにより新規/上書きを判定する。
+        上書き投稿の YouTube URL は ``force_youtube_reingest`` が True の場合のみ
+        再取得する。新規投稿の YouTube URL は常に取り込む。
+
         Args:
-            placed_items: 配置済みフィードアイテムのリスト
+            placed_items: 配置済みフィードアイテムのリスト（``_is_overwrite`` フラグ付き）
             youtube_ingester: YoutubeIngester インスタンス
-            force: 上書き再取得モード。site-ingest 側の重複判定に委譲するため
-                Web URL には直接影響しない。YouTube 再取得の制御に使用する
-            force_youtube_reingest: force 時に YouTube URL を再取得するか
+            force_youtube_reingest: 上書き投稿の YouTube URL を再取得するか
 
         Returns:
             {"web_placed": N, "youtube_placed": N, "skipped": N, "errors": N}
@@ -611,31 +615,35 @@ class BlueskyIngester:
             "errors": 0,
         }
 
-        # 全投稿から URL を一括抽出・重複排除
-        all_urls: list[str] = []
-        seen: set[str] = set()
-        for item in placed_items:
-            for url in extract_urls_from_item(item):
-                if url not in seen:
-                    seen.add(url)
-                    all_urls.append(url)
-
-        if not all_urls:
-            return stats
-
-        logger.info("投稿内から %d 件の URL を抽出しました", len(all_urls))
-
-        # URL を種別ごとに分類
+        # 全投稿から URL を一括抽出・重複排除・種別分類
+        # YouTube URL は投稿の is_overwrite 情報を保持する（新規投稿由来は常に取り込むため）
+        # 同一 URL が新規と上書き両方に存在する場合は安全側（新規=取り込む）に倒す
         web_urls: list[str] = []
         youtube_urls: list[str] = []
-        for url in all_urls:
-            url_type = classify_url(url)
-            if url_type == "web":
-                web_urls.append(url)
-            elif url_type == "youtube":
-                youtube_urls.append(url)
-            else:
-                stats["skipped"] += 1
+        seen: set[str] = set()
+        youtube_url_overwrite: dict[str, bool] = {}
+        for item in placed_items:
+            item_is_overwrite = item.get("_is_overwrite", False)
+            for url in extract_urls_from_item(item):
+                url_type = classify_url(url)
+                if url_type == "youtube":
+                    youtube_url_overwrite[url] = (
+                        youtube_url_overwrite.get(url, True) and item_is_overwrite
+                    )
+                if url not in seen:
+                    seen.add(url)
+                    if url_type == "web":
+                        web_urls.append(url)
+                    elif url_type == "youtube":
+                        youtube_urls.append(url)
+                    else:
+                        stats["skipped"] += 1
+
+        all_url_count = len(web_urls) + len(youtube_urls) + stats["skipped"]
+        if all_url_count == 0:
+            return stats
+
+        logger.info("投稿内から %d 件の URL を抽出しました", all_url_count)
 
         # Web URL をバッチ取得（site-ingest 複数 URL モード、download_only）
         if web_urls:
@@ -644,14 +652,24 @@ class BlueskyIngester:
             stats["errors"] += web_errors
 
         # YouTube URL を個別取り込み（URL 間にレート制限スリープを挿入）
-        # force 時は force_youtube_reingest 設定に従う
-        if force and not force_youtube_reingest:
-            logger.info(
-                "force モードですが YouTube 再取り込みは無効です（%d 件スキップ）",
-                len(youtube_urls),
-            )
-            stats["skipped"] += len(youtube_urls)
-        else:
+        # 上書き投稿の YouTube URL は force_youtube_reingest 設定に従う
+        # 新規投稿の YouTube URL は常に取り込む
+        if not force_youtube_reingest:
+            new_youtube_urls = [
+                u for u in youtube_urls if not youtube_url_overwrite.get(u, False)
+            ]
+            skipped_count = len(youtube_urls) - len(new_youtube_urls)
+            if skipped_count > 0:
+                logger.info(
+                    "上書き投稿の YouTube 再取り込みは無効です"
+                    "（%d 件スキップ、新規 %d 件は取り込み）",
+                    skipped_count,
+                    len(new_youtube_urls),
+                )
+                stats["skipped"] += skipped_count
+            youtube_urls = new_youtube_urls
+
+        if youtube_urls:
             for i, url in enumerate(youtube_urls):
                 if youtube_ingester is not None:
                     try:
