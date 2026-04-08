@@ -239,7 +239,7 @@ NG が検出された場合、Issue 起票を提案する。
 | 6 | `add-journal --title "コンテンツ一覧取得機能の実装" --file .qa/journal_add_test.md --repository rag-knowledge` | ジャーナル登録成功 | `ingest` |
 | 7a | `migrate-journal --dir .qa/journals --repository rag-knowledge` | ジャーナル一括配置成功 | `none` |
 | 7b | `rebuild --mode incremental` | 再構築成功、migrate 分がインデックスに反映 | `ingest` |
-| 8 | LM Studio を停止した状態で `add-document --file .qa/image_add_test.jpg --upload-mode replace` | 取り込み成功するがメディア解析テキストなし（フォールバック動作）。エラーで中断しないこと | `none` |
+| 8 | LM Studio を停止した状態で `add-document --file .qa/image_add_test.jpg --upload-mode replace` | 取り込み成功するがメディア解析テキストなし（フォールバック動作）。エラーで中断しないこと | `ingest` |
 
 CLI / MCP 対応:
 

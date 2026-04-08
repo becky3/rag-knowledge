@@ -189,6 +189,8 @@ NG を検出した場合、Issue 起票を提案する。
 | B) Web | site-ingest（複数URL） | `https://www.stat.go.jp/data/jinsui/` と `https://www.stat.go.jp/data/roudou/` |
 | C) SNS | Zenn ユーザー | `rhythmcan` |
 | C) SNS | BlueSky ハンドル | `rhythmcan.bsky.social` |
+| C) SNS | BlueSky --max-posts | `5`（メディア付き投稿を含むため増加） |
+| C) SNS | BlueSky --force | C-2 の後に `--max-posts 1 --force` で上書き再取得 |
 | D) YouTube | 動画 URL | `https://www.youtube.com/watch?v=GuFBDpzH3ck` |
 | D) YouTube | プレイリスト URL | `https://www.youtube.com/playlist?list=PLaFZvPBpvhKKgHIDI16ja0jwEG_vIH55K`（`--max-videos 1`） |
 | E) Aozora | 著者検索キーワード | `太宰`（「太宰 治」にマッチ） |
@@ -220,7 +222,7 @@ NG を検出した場合、Issue 起票を提案する。
 | 6 | `add-journal --title "コンテンツ一覧取得機能の実装" --file .qa/journal_add_test.md --repository rag-knowledge` | ジャーナル登録成功 | `ingest` |
 | 7a | `migrate-journal --dir .qa/journals --repository rag-knowledge` | ジャーナル一括配置成功 | `none` |
 | 7b | `rebuild --mode incremental` | 再構築成功、migrate 分がインデックスに反映 | `ingest` |
-| 8 | LM Studio を停止した状態で `add-document --file .qa/image_add_test.jpg --upload-mode replace` | 取り込み成功するがメディア解析テキストなし（フォールバック動作）。エラーで中断しないこと | `none` |
+| 8 | LM Studio を停止した状態で `add-document --file .qa/image_add_test.jpg --upload-mode replace` | 取り込み成功するがメディア解析テキストなし（フォールバック動作）。エラーで中断しないこと | `ingest` |
 
 MCP 対応コマンド:
 
