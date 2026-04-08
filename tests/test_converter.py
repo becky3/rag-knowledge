@@ -10,7 +10,7 @@ import json
 import os
 import time
 from pathlib import Path
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 import pytest
 from bs4 import BeautifulSoup
@@ -1216,6 +1216,206 @@ class TestZennArticleTitlePrepend:
         text = result.read_text(encoding="utf-8")
         assert not text.startswith("# ")
 
+
+
+# ============================================================
+# メディア変換（Converter._convert_media）
+# ============================================================
+
+
+class TestConverterConvertMedia:
+    """Converter のメディアファイル変換テスト."""
+
+    def _make_mock_analyzer(
+        self, *, available: bool = True, text: str = "Analyzed text",
+    ) -> MagicMock:
+        analyzer = MagicMock()
+        analyzer.is_available.return_value = available
+        analyzer.analyze_image.return_value = text
+        analyzer.analyze_video.return_value = text
+        return analyzer
+
+    def test_convert_jpg_image(self, tmp_path: Path) -> None:
+        """JPEG 画像がテキストに変換される."""
+        source_dir, converted_dir = _setup_source(
+            tmp_path, "local/photos/test.jpg", b"fake jpeg",
+        )
+        analyzer = self._make_mock_analyzer()
+        converter = Converter(**make_converter_args(media_analyzer=analyzer))
+        result = converter.convert(
+            "local/photos/test.jpg", source_dir, converted_dir,
+        )
+        assert result.exists()
+        assert result.name == "test.md"
+        assert "Analyzed text" in result.read_text(encoding="utf-8")
+        analyzer.analyze_image.assert_called_once()
+
+    def test_convert_png_image(self, tmp_path: Path) -> None:
+        """PNG 画像がテキストに変換される."""
+        source_dir, converted_dir = _setup_source(
+            tmp_path, "local/photos/test.png", b"fake png",
+        )
+        analyzer = self._make_mock_analyzer()
+        converter = Converter(**make_converter_args(media_analyzer=analyzer))
+        result = converter.convert(
+            "local/photos/test.png", source_dir, converted_dir,
+        )
+        assert result.exists()
+        assert result.name == "test.md"
+        analyzer.analyze_image.assert_called_once()
+
+    def test_convert_webp_image(self, tmp_path: Path) -> None:
+        """WebP 画像がテキストに変換される."""
+        source_dir, converted_dir = _setup_source(
+            tmp_path, "local/photos/test.webp", b"fake webp",
+        )
+        analyzer = self._make_mock_analyzer()
+        converter = Converter(**make_converter_args(media_analyzer=analyzer))
+        result = converter.convert(
+            "local/photos/test.webp", source_dir, converted_dir,
+        )
+        assert result.exists()
+        analyzer.analyze_image.assert_called_once()
+
+    def test_convert_mp4_video(self, tmp_path: Path) -> None:
+        """MP4 動画がテキストに変換される."""
+        source_dir, converted_dir = _setup_source(
+            tmp_path, "local/videos/test.mp4", b"fake mp4",
+        )
+        analyzer = self._make_mock_analyzer()
+        converter = Converter(**make_converter_args(media_analyzer=analyzer))
+        result = converter.convert(
+            "local/videos/test.mp4", source_dir, converted_dir,
+        )
+        assert result.exists()
+        assert result.name == "test.md"
+        analyzer.analyze_video.assert_called_once()
+
+    def test_convert_ts_video(self, tmp_path: Path) -> None:
+        """MPEG-TS 動画がテキストに変換される."""
+        source_dir, converted_dir = _setup_source(
+            tmp_path, "local/videos/test.ts", b"fake ts",
+        )
+        analyzer = self._make_mock_analyzer()
+        converter = Converter(**make_converter_args(media_analyzer=analyzer))
+        result = converter.convert(
+            "local/videos/test.ts", source_dir, converted_dir,
+        )
+        assert result.exists()
+        analyzer.analyze_video.assert_called_once()
+
+    def test_skips_when_analyzer_unavailable(self, tmp_path: Path) -> None:
+        """LM Studio 利用不可時に ConversionSkippedError."""
+        source_dir, converted_dir = _setup_source(
+            tmp_path, "local/photos/test.jpg", b"fake jpeg",
+        )
+        analyzer = self._make_mock_analyzer(available=False)
+        converter = Converter(**make_converter_args(media_analyzer=analyzer))
+        with pytest.raises(ConversionSkippedError, match="LM Studio"):
+            converter.convert(
+                "local/photos/test.jpg", source_dir, converted_dir,
+            )
+
+    def test_skips_when_no_analyzer(self, tmp_path: Path) -> None:
+        """media_analyzer=None 時に ConversionSkippedError."""
+        source_dir, converted_dir = _setup_source(
+            tmp_path, "local/photos/test.jpg", b"fake jpeg",
+        )
+        converter = Converter(**make_converter_args(media_analyzer=None))
+        with pytest.raises(ConversionSkippedError, match="未設定"):
+            converter.convert(
+                "local/photos/test.jpg", source_dir, converted_dir,
+            )
+
+
+# ============================================================
+# BlueSky メディアタグ埋め込み
+# ============================================================
+
+
+class TestConvertJsonBlueskyMedia:
+    """convert_json_bluesky のメディア解析タグ埋め込みテスト."""
+
+    def _make_bluesky_data(self, text: str = "Post text") -> dict:
+        return {
+            "post": {
+                "record": {"text": text},
+            },
+        }
+
+    def _make_mock_analyzer(
+        self, *, available: bool = True, image_text: str = "Image desc",
+    ) -> MagicMock:
+        analyzer = MagicMock()
+        analyzer.is_available.return_value = available
+        analyzer.analyze_image.return_value = image_text
+        analyzer.analyze_video.return_value = ""
+        return analyzer
+
+    def test_media_tags_appended_when_media_exists(
+        self, tmp_path: Path,
+    ) -> None:
+        """media/ ディレクトリに画像がある場合、タグが追記される."""
+        source_dir = tmp_path / "source_store"
+        media_dir = source_dir / "bluesky" / "did" / "2026" / "03" / "media" / "rkey"
+        media_dir.mkdir(parents=True)
+        (media_dir / "image_001.jpg").write_bytes(b"fake jpg")
+
+        data = self._make_bluesky_data()
+        analyzer = self._make_mock_analyzer()
+
+        result = convert_json_bluesky(
+            data,
+            media_analyzer=analyzer,
+            source_store_dir=source_dir,
+            file_path="bluesky/did/2026/03/rkey.json",
+        )
+        assert result is not None
+        assert "Post text" in result
+        assert "<image:1>" in result
+        assert "Image desc" in result
+        assert "</image:1>" in result
+
+    def test_no_media_tags_when_unavailable(self, tmp_path: Path) -> None:
+        """is_available=False ではタグが追記されない."""
+        source_dir = tmp_path / "source_store"
+        media_dir = source_dir / "bluesky" / "did" / "2026" / "03" / "media" / "rkey"
+        media_dir.mkdir(parents=True)
+        (media_dir / "image_001.jpg").write_bytes(b"fake jpg")
+
+        data = self._make_bluesky_data()
+        analyzer = self._make_mock_analyzer(available=False)
+
+        result = convert_json_bluesky(
+            data,
+            media_analyzer=analyzer,
+            source_store_dir=source_dir,
+            file_path="bluesky/did/2026/03/rkey.json",
+        )
+        assert result is not None
+        assert "Post text" in result
+        assert "<image:" not in result
+
+    def test_no_media_tags_when_no_media_dir(self) -> None:
+        """media/ ディレクトリが存在しない場合、タグなし."""
+        data = self._make_bluesky_data()
+        analyzer = self._make_mock_analyzer()
+
+        result = convert_json_bluesky(
+            data,
+            media_analyzer=analyzer,
+            source_store_dir=Path("/nonexistent"),
+            file_path="bluesky/did/2026/03/rkey.json",
+        )
+        assert result is not None
+        assert "Post text" in result
+        assert "<image:" not in result
+
+    def test_no_media_tags_without_analyzer(self) -> None:
+        """media_analyzer=None ではタグなし."""
+        data = self._make_bluesky_data()
+        result = convert_json_bluesky(data)
+        assert result == "Post text"
 
 
 # ============================================================
