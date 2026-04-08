@@ -13,7 +13,10 @@ import json
 import logging
 import re
 import sys
+import tempfile
 from datetime import datetime
+from pathlib import Path
+from urllib.parse import urljoin
 
 from rag.pipeline.ingesters._common import IngestResult, ProgressCallback, now_iso
 from typing import TYPE_CHECKING, Any, Literal
@@ -77,6 +80,81 @@ def _validate_max_posts(max_posts: object) -> int:
         )
         return MAX_POSTS_HARD_LIMIT
     return max_posts
+
+
+# Content-Type → 拡張子マッピング（メディア DL 用）
+_CONTENT_TYPE_EXT: dict[str, str] = {
+    "image/webp": ".webp",
+    "image/jpeg": ".jpg",
+    "image/png": ".png",
+    "image/gif": ".gif",
+    "image/avif": ".avif",
+    "video/mp2t": ".ts",
+}
+
+# デフォルト拡張子（Content-Type が不明な場合）
+_DEFAULT_IMAGE_EXT = ".webp"
+
+
+def _ext_from_content_type(content_type: str) -> str:
+    """Content-Type ヘッダーから拡張子を決定する."""
+    # "image/webp; charset=utf-8" のようなパラメータを除去
+    media_type = content_type.split(";")[0].strip().lower()
+    ext = _CONTENT_TYPE_EXT.get(media_type)
+    if ext is None:
+        logger.warning("不明な Content-Type、デフォルト拡張子を使用: %s", media_type)
+        return _DEFAULT_IMAGE_EXT
+    return ext
+
+
+def _extract_media_urls(item: dict[str, Any]) -> tuple[list[str], str | None]:
+    """フィードアイテムから画像 URL リストと動画プレイリスト URL を抽出する.
+
+    view 版 embed（post.embed）から取得する。
+    recordWithMedia の場合は post.embed.media 配下にネストされる。
+
+    Returns:
+        (画像 fullsize URL リスト, 動画 playlist URL or None)
+    """
+    image_urls: list[str] = []
+    playlist_url: str | None = None
+
+    post = item.get("post")
+    if not isinstance(post, dict):
+        return image_urls, playlist_url
+
+    embed = post.get("embed")
+    if not isinstance(embed, dict):
+        return image_urls, playlist_url
+
+    embed_type = embed.get("$type", "")
+
+    # recordWithMedia の場合は media 配下を参照
+    if embed_type == "app.bsky.embed.recordWithMedia#view":
+        media = embed.get("media")
+        if isinstance(media, dict):
+            _collect_media_from_embed(media, image_urls)
+            pl = media.get("playlist")
+            if isinstance(pl, str) and pl:
+                playlist_url = pl
+    else:
+        _collect_media_from_embed(embed, image_urls)
+        pl = embed.get("playlist")
+        if isinstance(pl, str) and pl:
+            playlist_url = pl
+
+    return image_urls, playlist_url
+
+
+def _collect_media_from_embed(embed: dict[str, Any], image_urls: list[str]) -> None:
+    """embed オブジェクトから画像 URL を収集する."""
+    images = embed.get("images")
+    if isinstance(images, list):
+        for img in images:
+            if isinstance(img, dict):
+                fullsize = img.get("fullsize")
+                if isinstance(fullsize, str) and fullsize:
+                    image_urls.append(fullsize)
 
 
 # YouTube URL 判定パターン
@@ -199,6 +277,7 @@ class BlueskyIngester:
         *,
         max_posts: int | None = None,
         include_reposts: bool | None = None,
+        force: bool = False,
         client: ConstrainedClient | None = None,
         progress_callback: ProgressCallback | None = None,
     ) -> tuple[IngestResult, list[dict[str, Any]]]:
@@ -208,6 +287,7 @@ class BlueskyIngester:
             handle: BlueSky ハンドル
             max_posts: 取得する最大投稿数（None の場合はインスタンス設定を使用）
             include_reposts: リポストを含めるか（None の場合はインスタンス設定を使用）
+            force: 上書き再取得モード（既存ファイルを上書き + メディア再DL）
             client: ConstrainedClient インスタンス
             progress_callback: 進捗コールバック (processed, total, current)
 
@@ -308,7 +388,7 @@ class BlueskyIngester:
                 seen_paths.add(rel_path)
 
                 dest = self._store.root_dir / rel_path
-                if dest.exists():
+                if dest.exists() and not force:
                     result.skipped += 1
                     continue
 
@@ -379,6 +459,22 @@ class BlueskyIngester:
                     logger.exception("投稿の配置に失敗しました: %s", rel_path)
                     result.errors += 1
                     result.error_details.append(rel_path)
+                    continue
+
+                # メディア DL（画像・動画）
+                if has_images or has_video:
+                    media_dir = (
+                        self._store.root_dir
+                        / "bluesky"
+                        / escaped_did
+                        / year
+                        / month
+                        / "media"
+                        / rkey
+                    )
+                    await self._download_media(
+                        item, media_dir=media_dir, client=client,
+                    )
 
                 if progress_callback is not None:
                     progress_callback(total_processed, effective_max, bsky_url)
@@ -390,11 +486,106 @@ class BlueskyIngester:
 
         return result, placed_items
 
+    async def _download_media(
+        self,
+        item: dict[str, Any],
+        *,
+        media_dir: Path,
+        client: ConstrainedClient,
+    ) -> None:
+        """投稿に添付されたメディア（画像・動画）を DL して配置する.
+
+        Args:
+            item: フィードアイテム
+            media_dir: メディア配置先ディレクトリ
+            client: ConstrainedClient インスタンス
+        """
+        image_urls, playlist_url = _extract_media_urls(item)
+
+        # 画像 DL
+        for idx, img_url in enumerate(image_urls):
+            try:
+                resp = await client.get(img_url)
+                content_type = resp.headers.get("content-type", "")
+                ext = _ext_from_content_type(content_type)
+                filename = f"image_{idx}{ext}"
+                dest = media_dir / filename
+                dest.parent.mkdir(parents=True, exist_ok=True)
+                # 拡張子が変わった場合に古いファイルが残らないようクリーンアップ
+                for existing in media_dir.glob(f"image_{idx}.*"):
+                    if existing != dest:
+                        existing.unlink(missing_ok=True)
+                dest.write_bytes(resp.content)
+                logger.debug("画像を保存しました: %s", dest)
+            except Exception:
+                logger.exception("画像の DL に失敗しました: %s", img_url)
+
+        # 動画 DL（HLS ts セグメント結合）
+        if playlist_url:
+            try:
+                await self._download_hls_video(
+                    playlist_url,
+                    dest=media_dir / "video_0.ts",
+                    client=client,
+                )
+            except Exception:
+                logger.exception("動画の DL に失敗しました: %s", playlist_url)
+
+    async def _download_hls_video(
+        self,
+        playlist_url: str,
+        *,
+        dest: Path,
+        client: ConstrainedClient,
+    ) -> None:
+        """HLS プレイリストから ts セグメントを DL し、バイナリ結合して保存する.
+
+        Args:
+            playlist_url: HLS プレイリスト URL (.m3u8)
+            dest: 保存先パス
+            client: ConstrainedClient インスタンス
+        """
+        # プレイリスト取得
+        resp = await client.get(playlist_url)
+        playlist_text = resp.text
+
+        # ts セグメント URL を抽出（urljoin でルート相対・相対パスも正しく解決）
+        segment_urls: list[str] = []
+        for line in playlist_text.splitlines():
+            line = line.strip()
+            if not line or line.startswith("#"):
+                continue
+            segment_urls.append(urljoin(playlist_url, line))
+
+        if not segment_urls:
+            logger.warning("HLS プレイリストに ts セグメントが見つかりません: %s", playlist_url)
+            return
+
+        # ts セグメントを temp ファイルに逐次書き込み、全成功後に atomic rename
+        dest.parent.mkdir(parents=True, exist_ok=True)
+        tmp_fd, tmp_path_str = tempfile.mkstemp(
+            dir=str(dest.parent), suffix=".tmp",
+        )
+        tmp_path = Path(tmp_path_str)
+        try:
+            with open(tmp_fd, "wb") as f:
+                for seg_url in segment_urls:
+                    seg_resp = await client.get(seg_url)
+                    f.write(seg_resp.content)
+            tmp_path.replace(dest)
+        except BaseException:
+            tmp_path.unlink(missing_ok=True)
+            raise
+
+        logger.debug("動画を保存しました（%d セグメント）: %s", len(segment_urls), dest)
+
     async def follow_urls(
         self,
         placed_items: list[dict[str, Any]],
         *,
         youtube_ingester: YoutubeIngester | None = None,
+        force: bool = False,
+        force_youtube_reingest: bool = False,
     ) -> dict[str, int]:
         """配置済み投稿から URL を抽出し、site_ingest/YouTube インジェスターに委譲する.
 
@@ -406,6 +597,9 @@ class BlueskyIngester:
         Args:
             placed_items: 配置済みフィードアイテムのリスト
             youtube_ingester: YoutubeIngester インスタンス
+            force: 上書き再取得モード。site-ingest 側の重複判定に委譲するため
+                Web URL には直接影響しない。YouTube 再取得の制御に使用する
+            force_youtube_reingest: force 時に YouTube URL を再取得するか
 
         Returns:
             {"web_placed": N, "youtube_placed": N, "skipped": N, "errors": N}
@@ -450,22 +644,30 @@ class BlueskyIngester:
             stats["errors"] += web_errors
 
         # YouTube URL を個別取り込み（URL 間にレート制限スリープを挿入）
-        for i, url in enumerate(youtube_urls):
-            if youtube_ingester is not None:
-                try:
-                    yt_result = await youtube_ingester.ingest_video(video_url=url)
-                    stats["youtube_placed"] += yt_result.placed
-                    if yt_result.errors > 0:
-                        stats["errors"] += yt_result.errors
-                except Exception:
-                    logger.exception("YouTube URL の取り込みに失敗: %s", url)
-                    stats["errors"] += 1
-                # リクエスト間隔待機（次の URL がある場合のみ）
-                if i < len(youtube_urls) - 1:
-                    await asyncio.sleep(youtube_ingester.request_interval)
-            else:
-                logger.warning("YouTube インジェスターが未指定: %s", url)
-                stats["skipped"] += 1
+        # force 時は force_youtube_reingest 設定に従う
+        if force and not force_youtube_reingest:
+            logger.info(
+                "force モードですが YouTube 再取り込みは無効です（%d 件スキップ）",
+                len(youtube_urls),
+            )
+            stats["skipped"] += len(youtube_urls)
+        else:
+            for i, url in enumerate(youtube_urls):
+                if youtube_ingester is not None:
+                    try:
+                        yt_result = await youtube_ingester.ingest_video(video_url=url)
+                        stats["youtube_placed"] += yt_result.placed
+                        if yt_result.errors > 0:
+                            stats["errors"] += yt_result.errors
+                    except Exception:
+                        logger.exception("YouTube URL の取り込みに失敗: %s", url)
+                        stats["errors"] += 1
+                    # リクエスト間隔待機（次の URL がある場合のみ）
+                    if i < len(youtube_urls) - 1:
+                        await asyncio.sleep(youtube_ingester.request_interval)
+                else:
+                    logger.warning("YouTube インジェスターが未指定: %s", url)
+                    stats["skipped"] += 1
 
         logger.info(
             "URL 取り込み完了: web=%d, youtube=%d, skipped=%d, errors=%d",
@@ -511,7 +713,9 @@ class BlueskyIngester:
         logger.info("site-ingest 完了: 合計 %d 件配置, %d 件エラー", total_placed, total_errors)
         return total_placed, total_errors
 
-    async def _run_site_ingest_batch(self, urls: list[str]) -> int:
+    async def _run_site_ingest_batch(
+        self, urls: list[str],
+    ) -> int:
         """site-ingest CLI subprocess を 1 バッチ分実行する."""
         cmd = [
             sys.executable, "-m", "rag.cli",

@@ -542,6 +542,7 @@ def main() -> None:
     bs_parser.add_argument("handle", help="BlueSky ハンドル（例: user.bsky.social）")
     bs_parser.add_argument("--max-posts", type=int, default=None, help="取得する最大投稿数")
     bs_parser.add_argument("--include-reposts", action="store_true", default=None, help="リポストを含める")
+    bs_parser.add_argument("--force", action="store_true", default=False, help="上書き再取得モード（既存ファイルを上書き + メディア再DL）")
     _add_output_option(bs_parser)
 
     # crawl-zenn: Zenn 取り込み
@@ -2340,10 +2341,13 @@ async def run_crawl_bluesky(args: argparse.Namespace) -> None:
             request_timeout=settings.rag_bluesky_request_timeout,
             request_interval=settings.rag_bluesky_request_interval,
         ) as client:
+            force = args.force
+
             ingest_result, placed_items = await bluesky_ingester.crawl_bluesky(
                 args.handle,
                 max_posts=max_posts,
                 include_reposts=include_reposts,
+                force=force,
                 client=client,
                 progress_callback=_wrap_progress(progress_cb, PHASE_FETCH),
             )
@@ -2355,6 +2359,8 @@ async def run_crawl_bluesky(args: argparse.Namespace) -> None:
                 url_stats = await bluesky_ingester.follow_urls(
                     placed_items,
                     youtube_ingester=youtube_ingester,
+                    force=force,
+                    force_youtube_reingest=settings.rag_bluesky_force_youtube_reingest,
                 )
     except (ValueError, TypeError) as e:
         if json_out:
