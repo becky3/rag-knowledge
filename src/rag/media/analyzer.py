@@ -240,6 +240,9 @@ class MediaAnalyzer:
         try:
             cmd = [
                 "ffmpeg",
+                "-y",
+                "-loglevel",
+                "error",
                 "-i",
                 str(video_path),
                 "-vf",
@@ -247,9 +250,6 @@ class MediaAnalyzer:
                 "-q:v",
                 "2",
                 str(tmp_dir / "frame_%04d.jpg"),
-                "-y",
-                "-loglevel",
-                "error",
             ]
             subprocess.run(cmd, check=True, capture_output=True, timeout=300)
 
