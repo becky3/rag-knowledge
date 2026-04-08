@@ -23,6 +23,7 @@
 | **青空文庫インジェスター** | 青空文庫の著作権切れ作品をカタログ検索・取り込み |
 | **コンテンツ一覧取得** | source_type 別に最新ソースを一覧取得（MCP + CLI） |
 | **Upload HTTP API** | HTTP モードでのファイル直接アップロード（multipart/form-data） |
+| **メディア解析** | 画像・動画を Vision モデル（LM Studio）でテキスト化し、RAG 検索対象に含める |
 | **制約付き HTTP クライアント** | バジェット・サーキットブレーカー・レート制限を統合した安全な HTTP アクセス（py-common-lib 提供） |
 
 ## 動作環境
@@ -52,6 +53,9 @@
 | Web クローラー（大規模サイト） | Scrapy |
 | multipart フォーム解析 | python-multipart |
 | YAML パーサー | PyYAML |
+| Vision モデル（メディア解析） | LM Studio (OpenAI 互換 API) + Gemma 4 等 |
+| 動画フレーム抽出 | ffmpeg |
+| 画像処理 | Pillow |
 | プロセス間排他制御 | ファイルベースロック（fcntl/msvcrt） |
 
 ## セットアップ
@@ -65,6 +69,13 @@
 5. **サーバー起動** — ChromaDB + MCP サーバー
 
 HTTP モードで運用する場合は、ステップ 5 の後に「HTTP モードセットアップ」も参照。
+
+### 前提: ffmpeg（メディア解析の動画処理に必要）
+
+動画のフレーム抽出にはシステムに ffmpeg がインストールされている必要がある。画像のみの解析であれば ffmpeg は不要。
+
+- [ffmpeg 公式サイト](https://ffmpeg.org/download.html) からダウンロード・インストール
+- `ffmpeg` コマンドが PATH で利用可能であること
 
 ### 1. 依存パッケージのインストール
 
@@ -337,6 +348,7 @@ git-flow ベースのブランチ戦略を採用。詳細は `~/.claude/docs/spe
 - [コンテンツアップロード](docs/specs/infrastructure/content-upload.md)
 - [Upload HTTP API 認証](docs/specs/infrastructure/upload-auth.md)
 - [定期 index rebuild](docs/specs/infrastructure/scheduled-rebuild.md)
+- [メディア解析](docs/specs/infrastructure/media-analysis.md)
 
 ### インジェスター仕様
 

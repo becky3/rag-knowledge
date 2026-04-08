@@ -12,6 +12,7 @@ BlueSky（AT Protocol）の投稿を API 経由で取得し、source_store に�
 - リポストのフィルタリング（`include_reposts` パラメータによる除外制御）
 - source_store への JSON ファイル配置と .meta サイドカーファイルの生成
 - 投稿内 URL の自動取り込み（site_ingest / YouTube インジェスターへの委譲）
+- 投稿に添付されたメディア（画像・動画）の DL と source_store 配置
 - MCP ツールとしての投稿取り込みインターフェースの提供
 
 スコープ外:
@@ -70,7 +71,7 @@ BlueSky（AT Protocol）の投稿を API 経由で取得し、source_store に�
 
 | ツール | 入力 | 振る舞い |
 |--------|------|---------|
-| rag_crawl_bluesky | handle、max_posts（任意）、include_reposts（任意） | 指定ユーザーの BlueSky 投稿を AT Protocol API 経由で取得し、source_store に JSON ファイルとして配置する。BlueSky は投稿編集不可のため、既存ファイルと一致する投稿はスキップする |
+| rag_crawl_bluesky | handle、max_posts（任意）、include_reposts（任意）、force（任意） | 指定ユーザーの BlueSky 投稿を AT Protocol API 経由で取得し、source_store に JSON ファイルとして配置する。通常は既存ファイルと一致する投稿をスキップする。`force` 指定時は全データを上書き再取得する |
 
 ツール入力パラメータ:
 
@@ -79,6 +80,7 @@ BlueSky（AT Protocol）の投稿を API 経由で取得し、source_store に�
 | `handle` | 文字列 | はい | BlueSky ハンドル（例: `user.bsky.social`）。DID 形式（`did:` 始まり）はバリデーションで拒否する |
 | `max_posts` | 整数 | いいえ | 取得する最大投稿数（タイムライン全体に適用） |
 | `include_reposts` | 真偽値 | いいえ | タイムラインにリポストを含めるか。`false` の場合、リポスト（`reason.$type` が `app.bsky.feed.defs#reasonRepost` のアイテム）を除外する。デフォルト: `true` |
+| `force` | 真偽値 | いいえ | 上書き再取得モード。`true` の場合、既存ファイルの有無に関わらず全データを再取得する。メディア DL・投稿内 URL 先の再取得も実行する。デフォルト: `false` |
 
 ツール出力: 取り込み結果のサマリーテキスト（配置ファイル数、スキップ数、エラー数）
 
@@ -88,7 +90,7 @@ BlueSky（AT Protocol）の投稿を API 経由で取得し、source_store に�
 
 | コマンド | 引数 | 振る舞い |
 |---------|------|---------|
-| `crawl-bluesky` | `handle`、`--max-posts`（任意）、`--include-reposts`（任意） | `rag_crawl_bluesky` と同等の処理を CLI から実行する |
+| `crawl-bluesky` | `handle`、`--max-posts`（任意）、`--include-reposts`（任意）、`--force`（任意） | `rag_crawl_bluesky` と同等の処理を CLI から実行する |
 
 ### 設定項目
 
@@ -99,6 +101,7 @@ BlueSky（AT Protocol）の投稿を API 経由で取得し、source_store に�
 | `rag_bluesky_request_timeout` | 共通設定値 | AT Protocol API リクエストのタイムアウト |
 | `rag_bluesky_request_interval` | 共通設定値 | AT Protocol API リクエスト間の最低間隔 |
 | `rag_bluesky_include_reposts` | 共通設定値 | リポストの取り込み制御。不要なコンテンツの除外に使用 |
+| `rag_bluesky_force_youtube_reingest` | 共通設定値 | `--force` 時に YouTube URL を再取り込みするかの制御。YouTube の再取り込みはコストが高いため、個別に抑制できるようにする |
 
 ## コンポーネント構成
 
@@ -176,9 +179,16 @@ source_store/
         01/
           xyz789.json
           xyz789.json.meta
+          media/
+            xyz789/
+              image_0.webp
+              image_1.webp
         03/
           abc456.json
           abc456.json.meta
+          media/
+            abc456/
+              video_0.ts
 ```
 
 年月の導出: `post.record.createdAt`（投稿日時）から年（4桁）と月（2桁ゼロ埋め）を抽出する。
@@ -283,13 +293,16 @@ is_repost: false
 
 ```mermaid
 flowchart TD
-    START["rag_crawl_bluesky(handle, max_posts, include_reposts)"]
+    START["rag_crawl_bluesky(handle, max_posts, include_reposts, force)"]
     VALIDATE["入力バリデーション"]
     PAGE["ページ取得（getAuthorFeed）"]
     EACH_ITEM{"ページ内に未処理アイテムがある?"}
     REPOST_FILTER{"リポスト除外?"}
     DUP_CHECK{"ファイルが既に存在する?"}
+    FORCE_CHECK{"force モード?"}
     SAVE["JSON ファイル配置 + .meta 生成"]
+    MEDIA_CHECK{"メディア添付あり?"}
+    MEDIA_DL["メディア DL（画像/動画）"]
     CHECK_CURSOR{"cursor が存在する?"}
     CHECK_LIMIT{"投稿数上限到達?"}
     NOTIFY["パイプライン制御に完了通知"]
@@ -302,9 +315,14 @@ flowchart TD
     EACH_ITEM -->|"いいえ（全件処理済み）"| CHECK_CURSOR
     REPOST_FILTER -->|"はい（スキップ）"| EACH_ITEM
     REPOST_FILTER -->|"いいえ（処理する）"| DUP_CHECK
-    DUP_CHECK -->|"はい（スキップ）"| EACH_ITEM
+    DUP_CHECK -->|"はい"| FORCE_CHECK
     DUP_CHECK -->|"いいえ（新規）"| SAVE
-    SAVE --> EACH_ITEM
+    FORCE_CHECK -->|"はい（上書き）"| SAVE
+    FORCE_CHECK -->|"いいえ（スキップ）"| EACH_ITEM
+    SAVE --> MEDIA_CHECK
+    MEDIA_CHECK -->|"はい"| MEDIA_DL
+    MEDIA_CHECK -->|"いいえ"| EACH_ITEM
+    MEDIA_DL --> EACH_ITEM
     CHECK_CURSOR -->|"いいえ（最終ページ）"| NOTIFY
     CHECK_CURSOR -->|"はい"| CHECK_LIMIT
     CHECK_LIMIT -->|"はい（上限到達）"| NOTIFY
@@ -321,7 +339,8 @@ flowchart TD
    - `post.uri` から `did` と `rkey` を抽出する
    - ファイルパスを導出し、source_store にファイルが存在するか確認する（重複検出）
    - 存在しない場合: フィードアイテムの JSON をファイルとして配置し、.meta を生成する
-   - 存在する場合: スキップする
+   - 存在する場合: `force` が `true` の場合は上書き再取得する。`false` の場合はスキップする
+   - 投稿にメディア（画像・動画）が添付されている場合、メディアを DL して source_store に配置する
 4. 終了判定（以下のいずれかで走査を終了する）:
    - `cursor` がレスポンスに存在しない（最終ページ）
    - 投稿数上限に到達
@@ -352,7 +371,58 @@ flowchart TD
 
 タイムライン内で同一投稿が重複して出現する場合（リポストと元投稿の両方がタイムラインに含まれる等）も、ファイルパスの一致で重複を検出しスキップする。
 
-### 再取り込み時の挙動
+### メディア DL と配置
+
+投稿に添付された画像・動画を DL し、source_store に配置する。メディアの DL は投稿 JSON の配置と同時に行う。
+
+#### 画像の DL
+
+- BlueSky CDN から fullsize 画像を取得する（サムネイルではなくオリジナルサイズ）
+- 画像 URL: `post.embed.images[].fullsize`（view 版 embed から取得）
+- 保存形式: CDN が返す形式のまま保存する（変換はコンバーターフェーズで実施）。CDN は通常 webp を返すが、JPEG 等の他形式を返す可能性もある
+- ファイル名: `image_0.{ext}`, `image_1.{ext}`, ...（0-indexed、拡張子は CDN レスポンスの Content-Type から決定）
+
+#### 動画の DL
+
+- HLS プレイリストから ts セグメントを DL し、バイナリ結合（単純連結）して保存する
+- プレイリスト URL: `post.embed.playlist`（view 版 embed から取得）
+- 保存形式: ts セグメント結合のまま保存（mp4 変換は行わない）
+- ファイル名: `video_0.ts`
+
+#### メディア配置先
+
+投稿 JSON と同階層の `media/{rkey}/` ディレクトリに配置する:
+
+```
+{year}/{month}/media/{rkey}/image_0.webp
+{year}/{month}/media/{rkey}/image_1.webp
+{year}/{month}/media/{rkey}/video_0.ts
+```
+
+#### recordWithMedia 時のメディア URL
+
+embed の `$type` が `app.bsky.embed.recordWithMedia` の場合、メディアは `post.embed.media` 配下にネストされる:
+
+| メディア種別 | URL パス（通常） | URL パス（recordWithMedia） |
+|-------------|-----------------|---------------------------|
+| 画像 | `post.embed.images[].fullsize` | `post.embed.media.images[].fullsize` |
+| 動画 | `post.embed.playlist` | `post.embed.media.playlist` |
+
+### --force オプション（上書き再取得）
+
+`force` パラメータが `true` の場合、以下の全てを再取得する:
+
+1. **投稿 JSON**: 既存ファイルを上書きする（通常モードではスキップ）
+2. **メディアファイル**: 画像・動画を再 DL する
+3. **投稿内 Web URL**: site_ingest で再取得する
+4. **投稿内 YouTube URL**: `rag_bluesky_force_youtube_reingest` が `true` の場合のみ再取得する。デフォルトは再取得しない（YouTube の再取り込みは字幕取得・音声 DL 等のコストが高いため）
+
+`--force` は既存データの更新が必要な場合に使用する。主な用途:
+
+- メディア DL 機能の追加後、既存投稿のメディアを取得する
+- 変換ロジック改修後にオリジナルデータを再取得する
+
+### 再取り込み時の挙動（通常モード）
 
 BlueSky は投稿の編集が不可能なため、既存ファイルと一致する投稿はスキップする（上書き不要）。スキップ件数はサマリーに含めて返却する。
 
@@ -575,6 +645,11 @@ AppView のベース URL は設定可能とし、デフォルトは `https://pub
 | YouTube URL の字幕取得に失敗 | YouTube インジェスターの既存のエラーハンドリングでスキップされる |
 | Web URL が 0 件の場合 | site_ingest 呼び出しをスキップする |
 | site_ingest subprocess が失敗 | エラーをログに記録し、Web URL の取り込みを失敗として計上する。BlueSky 投稿の取り込みには影響しない |
+| 画像の CDN URL が 404 | エラーをログに記録し、当該画像の DL をスキップする。投稿 JSON の取り込みには影響しない |
+| HLS プレイリストの取得に失敗 | エラーをログに記録し、当該動画の DL をスキップする |
+| ts セグメントの一部が DL に失敗 | エラーをログに記録し、当該動画の DL をスキップする（部分的な動画は保存しない） |
+| `--force` 時に YouTube 再取り込みが `rag_bluesky_force_youtube_reingest` で抑制されている | YouTube URL をスキップし、Web URL とメディアのみ再取得する |
+| メディアが添付されていない投稿 | メディア DL フェーズをスキップし、JSON のみ配置する（既存動作と同じ） |
 
 ## 関連ドキュメント
 
@@ -583,3 +658,4 @@ AppView のベース URL は設定可能とし、デフォルトは `https://pub
 - [ingesters/youtube.md](youtube.md) — YouTube インジェスター仕様（YouTube URL 取り込みの委譲先）
 - [source-store.md](../source-store.md) — source_store 仕様（ディレクトリ構成、.meta 形式、URL パス変換）
 - [pipeline-controller.md](../pipeline-controller.md) — パイプライン制御仕様（git 操作、ステージ間連携）
+- [infrastructure/media-analysis.md](../infrastructure/media-analysis.md) — メディア解析仕様（画像・動画→テキスト変換）

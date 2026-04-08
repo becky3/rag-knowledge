@@ -9,6 +9,7 @@
 スコープ:
 
 - ファイル形式に応じたテキスト変換
+- メディアファイル（画像・動画）のテキスト変換（メディア解析モジュール経由）
 - 変換不要ファイルのパススルー（コピー）
 - converted_store へのファイル配置
 - 再生成オプションの制御
@@ -18,7 +19,8 @@
 - source_store のディレクトリ構成・.meta 形式の定義（source_store 仕様の範疇）
 - git 操作（パイプライン制御の範疇）
 - インデックス構築・更新（インデクサーの範疇）
-- 外部 API 通信（変換処理はローカルで完結する）
+- メディアファイルの取得・保存（インジェスターの範疇）
+- Vision モデルの管理・設定（メディア解析モジュールの範疇）
 
 ## 背景
 
@@ -33,10 +35,11 @@
 - **変換対象外ファイル**: `.meta` サイドカーファイルおよび `metadata.db` は変換対象外とする（スキップする）
 - **変換結果は UTF-8 テキスト**: 変換処理（HTML → Markdown、PDF テキスト抽出、JSON → テキスト）の出力は UTF-8 エンコーディングとする。パススルーファイルはバイト列コピーであり、この制約の対象外（元のエンコーディングをそのまま保持する）
 - **converted_store は git 管理しない**: 再生成可能な派生データであるため、git 管理対象外とする
-- **変換エラー時の継続**: 個別ファイルの変換エラーは当該ファイルをスキップし、エラーログに記録して残りのファイルの処理を続行する。パイプライン制御にエラー情報を返却する
+- **変換エラー時の継続**: 個別ファイルの変換エラーは当該ファイルをスキップし、エラーログに記録して残りのファイルの処理を続行する。パイプライン制御にエラー情報を返却する。メディア解析モジュールが利用不可の場合も同様にスキップする
+- **メディア解析時の外部通信**: メディアファイルの変換ではメディア解析モジュール経由で LM Studio Vision API を呼び出す。メディア解析以外の変換処理はローカルで完結する
 - **テキスト正規化**: 変換後のテキストに対して共通の正規化処理を適用する（末尾空白の除去、連続する空行を最大 1 行に圧縮）
 
-本コンポーネントは外部 API 通信を行わないため、想定プロファイル・安全制約セクションは省略する。
+メディア解析を伴う変換では LM Studio の Vision API への通信が発生する。詳細は [infrastructure/media-analysis.md](infrastructure/media-analysis.md) を参照。メディア解析以外の変換処理はローカルで完結する。
 
 ## インターフェース
 
@@ -74,6 +77,11 @@
 | `.md` | Markdown | Markdown | `.md` | パススルー（コピー） |
 | `.txt` | プレーンテキスト | プレーンテキスト | `.txt` | パススルー（コピー） |
 | `.adoc` | AsciiDoc | AsciiDoc | `.adoc` | パススルー（コピー） |
+| `.webp` | 画像 | Markdown | `.md` | メディア解析（画像→テキスト） |
+| `.jpg`, `.jpeg` | 画像 | Markdown | `.md` | メディア解析（画像→テキスト） |
+| `.png` | 画像 | Markdown | `.md` | メディア解析（画像→テキスト） |
+| `.ts` | 動画 | Markdown | `.md` | メディア解析（動画→テキスト） |
+| `.mp4` | 動画 | Markdown | `.md` | メディア解析（動画→テキスト） |
 
 未対応の拡張子のファイルは変換をスキップし、警告ログを出力する。
 
@@ -93,6 +101,7 @@ flowchart TD
         HTML["HTML → Markdown 変換"]
         PDF["PDF テキスト抽出"]
         JSON["JSON → テキスト抽出"]
+        MEDIA["メディア解析（画像/動画→テキスト）"]
         PASS["パススルー（コピー）"]
     end
 
@@ -103,10 +112,13 @@ flowchart TD
     EXT -->|.html, .htm| HTML
     EXT -->|.pdf| PDF
     EXT -->|.json| JSON
+    EXT -->|.webp, .jpg, .jpeg, .png| MEDIA
+    EXT -->|.ts, .mp4| MEDIA
     EXT -->|.md, .txt, .adoc| PASS
     HTML --> NORM
     PDF --> NORM
     JSON --> NORM
+    MEDIA --> NORM
     PASS --> OUTPUT
     NORM --> OUTPUT
 ```
@@ -128,6 +140,8 @@ source_store のディレクトリ構成をミラーする。source_store 内の
 | `local/my-notes/memo.md` | `local/my-notes/memo.md` |
 | `local/my-notes/note.txt` | `local/my-notes/note.txt` |
 | `local/docs/guide.adoc` | `local/docs/guide.adoc` |
+| `local/photos/image.jpg` | `local/photos/image.md` |
+| `bluesky/did：plc：xxx/2026/03/media/rkey/image_0.webp` | `bluesky/did：plc：xxx/2026/03/media/rkey/image_0.md` |
 | `journal/rag-knowledge/entry.md` | `journal/rag-knowledge/entry.md` |
 
 ### HTML → Markdown 変換
@@ -324,6 +338,18 @@ embed の `$type` が `app.bsky.embed.recordWithMedia`（メディア + 引用�
 [Image ALT] 画像の代替テキスト（複数ある場合は改行で連結）
 [Video ALT] 動画の代替テキスト
 
+<image:1>
+メディア解析モジュールによる画像解析テキスト
+</image:1>
+
+<image:2>
+2 枚目の画像解析テキスト
+</image:2>
+
+<video:1>
+メディア解析モジュールによる動画解析テキスト
+</video:1>
+
 [Link Card]
 Title: 外部リンクのタイトル
 URL: 外部リンクの URL
@@ -336,6 +362,10 @@ Description: 外部リンクの説明文
 - リポストの場合、先頭に `[Repost: @元投稿者ハンドル]` ヘッダーを付与する。元投稿者のハンドルは `post.author.handle` から取得する
 - 投稿テキストを先頭に配置する（検索ヒット時に最も重要な情報が先頭に来る）
 - セクションラベルは英語表記とする（LLM による検索・解釈の精度向上のため）
+- `<image:N>` / `<video:N>` タグはメディア解析テキストを囲む。N は 1-indexed の連番
+- メディア解析テキストは、source_store の `media/{rkey}/` ディレクトリ内のメディアファイルをメディア解析モジュールで処理して取得する
+- メディアファイルが存在しない場合（メディア DL 未実行時等）、`<image:N>` / `<video:N>` タグは出力しない
+- メディア解析モジュールが利用不可の場合（LM Studio 停止時等）、`<image:N>` / `<video:N>` タグは出力しない
 
 #### YouTube 動画（source_type: youtube）
 
@@ -365,6 +395,39 @@ Zenn スクラップの JSON（`scrap` オブジェクト）から `comments` �
 3. 変換後の各コメントを `---`（水平線）で区切って結合する
 
 コメントが 0 件または全コメントの `body_html` が空の場合は、変換をスキップする。converted_store に既存ファイルがある場合は削除する。パイプライン制御にスキップ結果（変換なし）を返却し、パイプライン制御がインデクサーに当該 source_id のインデックス削除を指示する。
+
+### メディア解析（画像・動画→テキスト）
+
+画像ファイル（`.webp`, `.jpg`, `.jpeg`, `.png`）および動画ファイル（`.ts`, `.mp4`）をメディア解析モジュールでテキスト化する。メディア解析モジュールの詳細は [infrastructure/media-analysis.md](infrastructure/media-analysis.md) を参照。
+
+#### 画像ファイルの変換
+
+1. メディア解析モジュールの利用可能チェックを行う
+2. 利用可能な場合、画像解析 API を呼び出してテキストを取得する
+3. 取得したテキストを Markdown 形式で出力する
+
+#### 動画ファイルの変換
+
+1. メディア解析モジュールの利用可能チェックを行う
+2. 利用可能な場合、動画解析 API を呼び出してテキストを取得する
+3. 取得したテキストを Markdown 形式で出力する
+
+#### BlueSky 投稿のメディア解析
+
+BlueSky 投稿の JSON → テキスト抽出時、対応する `media/{rkey}/` ディレクトリ内のメディアファイルを検出し、メディア解析モジュールで処理する。解析結果は `<image:N>` / `<video:N>` タグで投稿テキストに埋め込む（テキスト構造の詳細は「BlueSky 投稿」セクション参照）。
+
+メディアファイルの検出は source_store のパスから導出する。JSON ファイルのパスが `bluesky/{did}/{year}/{month}/{rkey}.json` の場合、`bluesky/{did}/{year}/{month}/media/{rkey}/` ディレクトリを走査する。これは通常の単一ファイル変換とは異なり、入力ファイル（JSON）に加えて関連するメディアディレクトリも参照するパターンである。
+
+#### Local ソースのメディア
+
+source_type が `local` のメディアファイル（画像・動画）は、単体のテキストファイルとして変換する。メディア解析モジュールの出力をそのまま converted_store に配置する。
+
+#### メディア解析が利用不可の場合
+
+メディア解析モジュールが利用不可（LM Studio 停止中、ffmpeg 未インストール等）の場合:
+
+- 画像・動画ファイル単体の変換: スキップし、警告ログを出力する
+- BlueSky 投稿の JSON → テキスト抽出: メディア解析テキストなしで処理を続行する（`<image:N>` / `<video:N>` タグを出力しない）
 
 ### パススルー
 
@@ -413,11 +476,15 @@ Zenn スクラップの JSON（`scrap` オブジェクト）から `comments` �
 | パススルー対象ファイルのコピーエラー（I/O エラー等） | エラーログを出力し、当該ファイルのコピーをスキップする |
 | `.meta` ファイルや `metadata.db` が変換対象として渡された場合 | 変換対象外としてスキップする |
 | HTML の void 要素（`<img>`, `<br>` 等）が `html.parser` により非自己閉じとして解析された場合 | BeautifulSoup 解析後に void 要素の子ノードを親に巻き上げる前処理を適用し、本文の消失を防ぐ |
+| メディア解析モジュールが利用不可（LM Studio 停止中） | メディアファイルの変換をスキップし、警告ログを出力する。BlueSky 投稿はテキストのみで変換する |
+| BlueSky 投稿に対応する media ディレクトリが存在しない | メディア解析テキストなしで変換する（`<image:N>` / `<video:N>` タグを出力しない） |
+| ffmpeg が未インストールの環境で動画ファイルを変換 | 動画解析をスキップし、警告ログを出力する |
 
 ## 関連ドキュメント
 
 - [source-store.md](source-store.md) — source_store 仕様
 - [pipeline-controller.md](pipeline-controller.md) — パイプライン制御仕様
+- [infrastructure/media-analysis.md](infrastructure/media-analysis.md) — メディア解析仕様（画像・動画→テキスト変換）
 - [ingesters/bluesky.md](ingesters/bluesky.md) — BlueSky インジェスター仕様（JSON 保存形式の定義元）
 - [ingesters/youtube.md](ingesters/youtube.md) — YouTube インジェスター仕様（JSON 保存形式の定義元）
 - [ingesters/zenn.md](ingesters/zenn.md) — Zenn インジェスター仕様（JSON 保存形式の定義元）
