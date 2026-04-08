@@ -112,7 +112,7 @@ flowchart TD
     EXT -->|.html, .htm| HTML
     EXT -->|.pdf| PDF
     EXT -->|.json| JSON
-    EXT -->|.webp, .jpg, .png| MEDIA
+    EXT -->|.webp, .jpg, .jpeg, .png| MEDIA
     EXT -->|.ts, .mp4| MEDIA
     EXT -->|.md, .txt, .adoc| PASS
     HTML --> NORM

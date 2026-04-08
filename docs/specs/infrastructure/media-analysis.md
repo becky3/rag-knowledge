@@ -137,13 +137,15 @@ flowchart TD
 
 | 連携先 | 用途 | 接続方式 |
 |--------|------|---------|
-| LM Studio | 画像・動画フレームの Vision 解析 | OpenAI 互換 API（`/v1/chat/completions`） |
+| LM Studio | 画像・動画フレームの Vision 解析 | OpenAI 互換 API（`/chat/completions`） |
+
+`LMSTUDIO_BASE_URL` は `/v1` を含む正準形（例: `http://localhost:1234/v1`）を前提とする。
 
 API リクエスト形式:
 
 | パラメータ | 値 |
 |-----------|-----|
-| エンドポイント | `{LMSTUDIO_BASE_URL}/v1/chat/completions` |
+| エンドポイント | `{LMSTUDIO_BASE_URL}/chat/completions` |
 | メソッド | POST |
 | `model` | `rag_vision_model` で指定 |
 | `messages` | `role: "user"`, `content` に画像データ（base64）とプロンプトを含む |
