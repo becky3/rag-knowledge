@@ -55,6 +55,7 @@ TEST_SETTINGS_DEFAULTS: dict[str, object] = {
     "rag_bluesky_request_timeout": 30,
     "rag_bluesky_request_interval": 1.0,
     "rag_bluesky_include_reposts": True,
+    "rag_bluesky_force_youtube_reingest": False,
     # YouTube インジェスター
     "rag_youtube_whisper_model": "base",
     "rag_youtube_whisper_device": "cpu",

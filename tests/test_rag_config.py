@@ -193,6 +193,7 @@ rag_bluesky_max_posts = 200
 rag_bluesky_request_timeout = 30
 rag_bluesky_request_interval = 1.0
 rag_bluesky_include_reposts = true
+rag_bluesky_force_youtube_reingest = false
 rag_youtube_max_videos = 100
 rag_youtube_request_interval = 5.0
 rag_youtube_request_timeout = 30
