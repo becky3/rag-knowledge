@@ -46,7 +46,10 @@ class MediaAnalyzer:
         max_tokens: int,
         api_timeout: float = 180.0,
     ) -> None:
-        self._base_url = lmstudio_base_url.rstrip("/")
+        base_url = lmstudio_base_url.rstrip("/")
+        if not base_url.endswith("/v1"):
+            base_url = f"{base_url}/v1"
+        self._base_url = base_url
         self._vision_model = vision_model
         self._reasoning_effort = reasoning_effort
         self._frame_interval = frame_interval
@@ -64,7 +67,7 @@ class MediaAnalyzer:
         if self._available_cache is not None:
             return self._available_cache
         try:
-            with httpx.Client(timeout=self._HEALTHCHECK_TIMEOUT) as client:
+            with httpx.Client(timeout=self._HEALTHCHECK_TIMEOUT) as client:  # safety:allowed
                 resp = client.get(f"{self._base_url}/models")
                 resp.raise_for_status()
             return True
@@ -201,7 +204,7 @@ class MediaAnalyzer:
         }
 
         try:
-            with httpx.Client(timeout=self._api_timeout) as client:
+            with httpx.Client(timeout=self._api_timeout) as client:  # safety:allowed
                 resp = client.post(
                     f"{self._base_url}/chat/completions",
                     json=payload,
@@ -234,26 +237,30 @@ class MediaAnalyzer:
         """
         tmp_dir = Path(tempfile.mkdtemp(prefix="rag_video_"))
 
-        cmd = [
-            "ffmpeg",
-            "-i",
-            str(video_path),
-            "-vf",
-            f"fps=1/{self._frame_interval}",
-            "-q:v",
-            "2",
-            str(tmp_dir / "frame_%04d.jpg"),
-            "-y",
-            "-loglevel",
-            "error",
-        ]
-        subprocess.run(cmd, check=True, capture_output=True, timeout=300)
+        try:
+            cmd = [
+                "ffmpeg",
+                "-i",
+                str(video_path),
+                "-vf",
+                f"fps=1/{self._frame_interval}",
+                "-q:v",
+                "2",
+                str(tmp_dir / "frame_%04d.jpg"),
+                "-y",
+                "-loglevel",
+                "error",
+            ]
+            subprocess.run(cmd, check=True, capture_output=True, timeout=300)
 
-        frame_files = sorted(tmp_dir.glob("frame_*.jpg"))
-        frames: list[tuple[Path, float]] = []
-        for i, frame_file in enumerate(frame_files):
-            timestamp_sec = float(i * self._frame_interval)
-            frames.append((frame_file, timestamp_sec))
+            frame_files = sorted(tmp_dir.glob("frame_*.jpg"))
+            frames: list[tuple[Path, float]] = []
+            for i, frame_file in enumerate(frame_files):
+                timestamp_sec = float(i * self._frame_interval)
+                frames.append((frame_file, timestamp_sec))
+        except Exception:
+            shutil.rmtree(tmp_dir, ignore_errors=True)
+            raise
 
         return tmp_dir, frames
 

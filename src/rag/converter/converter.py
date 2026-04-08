@@ -386,19 +386,18 @@ class Converter:
             source_path: メディアファイルの絶対パス
 
         Returns:
-            解析テキスト、またはスキップ時は None
+            解析テキスト。メディア解析を実行できない場合は
+            ConversionSkippedError を送出する。
         """
         if self._media_analyzer is None:
-            logger.warning(
-                "メディア解析モジュール未設定のためスキップ: %s", source_path,
+            raise ConversionSkippedError(
+                f"メディア解析モジュール未設定のためスキップ: {source_path}",
             )
-            return None
 
         if not self._media_analyzer.is_available():
-            logger.warning(
-                "LM Studio が利用不可のためメディア解析をスキップ: %s", source_path,
+            raise ConversionSkippedError(
+                f"LM Studio が利用不可のためメディア解析をスキップ: {source_path}",
             )
-            return None
 
         if ext in _IMAGE_EXTENSIONS:
             text = self._media_analyzer.analyze_image(source_path)
