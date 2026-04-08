@@ -276,7 +276,7 @@ CLI / MCP 対応: `rag_site_ingest`（`url` パラメータ / `urls` パラメ�
 |---|----------------|---------|---------|
 | 1 | `crawl-zenn rhythmcan --max-articles 1` | Zenn 記事 1 件取り込み成功 | `ingest` |
 | 2 | `crawl-bluesky rhythmcan.bsky.social --max-posts 5` | BlueSky 投稿取り込み成功。メディア付き投稿がある場合、source_store の `bluesky/{did}/{year}/{month}/media/{rkey}/` にメディアファイル（`image_0.{ext}` / `video_0.ts`）が配置されていること | `ingest` |
-| 3 | `crawl-bluesky rhythmcan.bsky.social --max-posts 1 --force` | `--force` による上書き再取得成功。既存投稿が上書きされ、placed > 0 であること | `ingest` |
+| 3 | `crawl-bluesky rhythmcan.bsky.social --max-posts 1 --force` | `--force` による上書き再取得成功。既存投稿が上書きされ、CLI に `完了: N件配置`（N > 0）と表示されること | `ingest` |
 
 CLI / MCP 対応: `rag_crawl_zenn` / `rag_crawl_bluesky`（`force=True` で --force 相当）
 
