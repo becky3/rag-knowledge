@@ -98,7 +98,11 @@ def _ext_from_content_type(content_type: str) -> str:
     """Content-Type ヘッダーから拡張子を決定する."""
     # "image/webp; charset=utf-8" のようなパラメータを除去
     media_type = content_type.split(";")[0].strip().lower()
-    return _CONTENT_TYPE_EXT.get(media_type, _DEFAULT_IMAGE_EXT)
+    ext = _CONTENT_TYPE_EXT.get(media_type)
+    if ext is None:
+        logger.warning("不明な Content-Type、デフォルト拡張子を使用: %s", media_type)
+        return _DEFAULT_IMAGE_EXT
+    return ext
 
 
 def _extract_media_urls(item: dict[str, Any]) -> tuple[list[str], str | None]:
@@ -556,12 +560,15 @@ class BlueskyIngester:
             logger.warning("HLS プレイリストに ts セグメントが見つかりません: %s", playlist_url)
             return
 
-        # ts セグメントを DL して結合
+        # ts セグメントを DL してメモリに蓄積（途中失敗時にファイルを残さない）
+        segments: list[bytes] = []
+        for seg_url in segment_urls:
+            seg_resp = await client.get(seg_url)
+            segments.append(seg_resp.content)
+
+        # 全セグメント成功後に一括書き込み
         dest.parent.mkdir(parents=True, exist_ok=True)
-        with dest.open("wb") as f:
-            for seg_url in segment_urls:
-                seg_resp = await client.get(seg_url)
-                f.write(seg_resp.content)
+        dest.write_bytes(b"".join(segments))
 
         logger.debug("動画を保存しました（%d セグメント）: %s", len(segment_urls), dest)
 
@@ -699,7 +706,7 @@ class BlueskyIngester:
         return total_placed, total_errors
 
     async def _run_site_ingest_batch(
-        self, urls: list[str], *, force: bool = False,
+        self, urls: list[str],
     ) -> int:
         """site-ingest CLI subprocess を 1 バッチ分実行する."""
         cmd = [

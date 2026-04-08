@@ -856,6 +856,49 @@ class TestMediaDownload:
         assert result.placed == 1
         assert len(placed) == 1
 
+    async def test_hls_partial_download_no_file(
+        self, source_store: SourceStore,
+    ) -> None:
+        """HLS セグメントの途中 DL 失敗で動画ファイルが残らないこと."""
+        item = _make_feed_item(
+            embed={"$type": "app.bsky.embed.video"},
+        )
+        item["post"]["embed"] = {
+            "$type": "app.bsky.embed.video#view",
+            "playlist": "https://video.bsky.app/watch/playlist.m3u8",
+        }
+
+        api_resp = MagicMock()
+        api_resp.json.return_value = {"feed": [item]}
+
+        playlist_resp = MagicMock()
+        playlist_resp.text = "#EXTM3U\nseg0.ts\nseg1.ts\n"
+
+        seg0_resp = MagicMock()
+        seg0_resp.content = b"segment-0-"
+
+        client = AsyncMock()
+        # API 成功 → プレイリスト成功 → seg0 成功 → seg1 失敗
+        client.get = AsyncMock(
+            side_effect=[api_resp, playlist_resp, seg0_resp, Exception("segment error")]
+        )
+
+        ingester = make_bluesky_ingester(source_store, max_posts=3)
+        result, _ = await ingester.crawl_bluesky(
+            "alice.bsky.social", client=client,
+        )
+
+        # 投稿は配置されるがメディアは失敗
+        assert result.placed == 1
+
+        escaped = _escape_did("did:plc:abc123")
+        video_path = (
+            source_store.root_dir / "bluesky" / escaped / "2026" / "01"
+            / "media" / "xyz789" / "video_0.ts"
+        )
+        # 部分ファイルが残っていないこと
+        assert not video_path.exists()
+
 
 @pytest.mark.asyncio()
 class TestForceMode:
