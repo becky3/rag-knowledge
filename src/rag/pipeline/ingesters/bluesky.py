@@ -13,8 +13,10 @@ import json
 import logging
 import re
 import sys
+import tempfile
 from datetime import datetime
 from pathlib import Path
+from urllib.parse import urljoin
 
 from rag.pipeline.ingesters._common import IngestResult, ProgressCallback, now_iso
 from typing import TYPE_CHECKING, Any, Literal
@@ -509,6 +511,10 @@ class BlueskyIngester:
                 filename = f"image_{idx}{ext}"
                 dest = media_dir / filename
                 dest.parent.mkdir(parents=True, exist_ok=True)
+                # 拡張子が変わった場合に古いファイルが残らないようクリーンアップ
+                for existing in media_dir.glob(f"image_{idx}.*"):
+                    if existing != dest:
+                        existing.unlink(missing_ok=True)
                 dest.write_bytes(resp.content)
                 logger.debug("画像を保存しました: %s", dest)
             except Exception:
@@ -543,32 +549,33 @@ class BlueskyIngester:
         resp = await client.get(playlist_url)
         playlist_text = resp.text
 
-        # ts セグメント URL を抽出
-        base_url = playlist_url.rsplit("/", 1)[0] + "/"
+        # ts セグメント URL を抽出（urljoin でルート相対・相対パスも正しく解決）
         segment_urls: list[str] = []
         for line in playlist_text.splitlines():
             line = line.strip()
             if not line or line.startswith("#"):
                 continue
-            # 相対 URL → 絶対 URL
-            if line.startswith("http://") or line.startswith("https://"):
-                segment_urls.append(line)
-            else:
-                segment_urls.append(base_url + line)
+            segment_urls.append(urljoin(playlist_url, line))
 
         if not segment_urls:
             logger.warning("HLS プレイリストに ts セグメントが見つかりません: %s", playlist_url)
             return
 
-        # ts セグメントを DL してメモリに蓄積（途中失敗時にファイルを残さない）
-        segments: list[bytes] = []
-        for seg_url in segment_urls:
-            seg_resp = await client.get(seg_url)
-            segments.append(seg_resp.content)
-
-        # 全セグメント成功後に一括書き込み
+        # ts セグメントを temp ファイルに逐次書き込み、全成功後に atomic rename
         dest.parent.mkdir(parents=True, exist_ok=True)
-        dest.write_bytes(b"".join(segments))
+        tmp_fd, tmp_path_str = tempfile.mkstemp(
+            dir=str(dest.parent), suffix=".tmp",
+        )
+        tmp_path = Path(tmp_path_str)
+        try:
+            with open(tmp_fd, "wb") as f:
+                for seg_url in segment_urls:
+                    seg_resp = await client.get(seg_url)
+                    f.write(seg_resp.content)
+            tmp_path.replace(dest)
+        except BaseException:
+            tmp_path.unlink(missing_ok=True)
+            raise
 
         logger.debug("動画を保存しました（%d セグメント）: %s", len(segment_urls), dest)
 
@@ -590,7 +597,8 @@ class BlueskyIngester:
         Args:
             placed_items: 配置済みフィードアイテムのリスト
             youtube_ingester: YoutubeIngester インスタンス
-            force: 上書き再取得モード（Web URL の再取得を有効にする）
+            force: 上書き再取得モード。site-ingest 側の重複判定に委譲するため
+                Web URL には直接影響しない。YouTube 再取得の制御に使用する
             force_youtube_reingest: force 時に YouTube URL を再取得するか
 
         Returns:
