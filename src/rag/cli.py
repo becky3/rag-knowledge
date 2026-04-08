@@ -2089,9 +2089,10 @@ def _build_cli_pipeline_controller() -> tuple[
     from .bm25_index import BM25Index
     from .config import get_settings
     from .converter import Converter
+    from .converter.pdf_extractor import PdfBackendConfig
     from .embedding.factory import get_embedding_provider
     from .indexer import Indexer
-    from .converter.pdf_extractor import PdfBackendConfig
+    from .media.analyzer import MediaAnalyzer
     from .pipeline.controller import PipelineController
     from .store.source_store import SourceStore
     from .vector_store import VectorStore
@@ -2114,11 +2115,20 @@ def _build_cli_pipeline_controller() -> tuple[
         quality_min_chars_per_page=settings.rag_pdf_quality_min_chars_per_page,
         quality_sample_pages=settings.rag_pdf_quality_sample_pages,
     )
+    media_analyzer = MediaAnalyzer(
+        lmstudio_base_url=settings.lmstudio_base_url,
+        vision_model=settings.rag_vision_model,
+        reasoning_effort=settings.rag_vision_reasoning_effort,
+        frame_interval=settings.rag_vision_frame_interval,
+        max_tokens=settings.rag_vision_max_tokens,
+        api_timeout=settings.rag_vision_api_timeout,
+    )
     converter = Converter(
         regen_option="force",
         pdf_config=pdf_config,
         youtube_merge_gap_sec=settings.rag_youtube_merge_gap_sec,
         youtube_merge_max_chars=settings.rag_youtube_merge_max_chars,
+        media_analyzer=media_analyzer,
     )
 
     embedding_provider = get_embedding_provider(settings, settings.embedding_provider)

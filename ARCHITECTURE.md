@@ -23,6 +23,7 @@
 | `src/rag/converter/` | source_store のファイルを converted_store のテキストに変換（HTML→Markdown、PDF テキスト抽出等） |
 | `src/rag/embedding/` | Embedding プロバイダー抽象化（ローカル / OpenAI）とファクトリ |
 | `src/rag/indexer/` | converted_store からチャンキング・Embedding 生成・ChromaDB/BM25 インデックス構築 |
+| `src/rag/media/` | メディア解析（画像・動画を Vision モデルでテキスト化） |
 | `src/rag/ingesters/` | レガシーインジェスタープラグイン（BaseIngester 抽象基底・IngestedContent 共通モデル） |
 | `src/rag/infrastructure/` | インフラ基盤（ChromaDB サーバーのライフサイクル管理・ファイルベースロック） |
 | `src/rag/pipeline/` | パイプライン制御（git 操作・差分検知・ステージ間連携・4モード実行） |
@@ -69,6 +70,7 @@
 | `infrastructure/content-upload.md` | `src/rag/upload.py`, `src/rag/server.py` |
 | `infrastructure/upload-auth.md` | `src/rag/server.py`, `src/rag/config.py` |
 | `infrastructure/scheduled-rebuild.md` | `src/rag/server.py` |
+| `infrastructure/media-analysis.md` | `src/rag/media/` |
 | `ingesters/common.md` | `src/rag/pipeline/ingesters/_common.py` |
 | `ingesters/bluesky.md` | `src/rag/pipeline/ingesters/bluesky.py` |
 | `ingesters/youtube.md` | `src/rag/pipeline/ingesters/youtube.py` |

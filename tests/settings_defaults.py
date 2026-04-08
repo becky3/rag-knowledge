@@ -77,6 +77,12 @@ TEST_SETTINGS_DEFAULTS: dict[str, object] = {
     "rag_aozora_max_works": 200,
     "rag_aozora_request_interval": 1.0,
     "rag_aozora_request_timeout": 30,
+    # メディア解析（Vision モデル）
+    "rag_vision_model": "gemma-3-4b-it",
+    "rag_vision_reasoning_effort": "low",
+    "rag_vision_frame_interval": 5,
+    "rag_vision_max_tokens": 1024,
+    "rag_vision_api_timeout": 180.0,
     # HNSW パラメータ
     "hnsw_m": 48,
     "hnsw_construction_ef": 400,
