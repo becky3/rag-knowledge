@@ -443,14 +443,14 @@ def _analyze_bluesky_media(
         ext = media_file.suffix.lower()
 
         if ext in _IMAGE_EXTENSIONS:
-            image_idx += 1
             text = media_analyzer.analyze_image(media_file)
             if text:
+                image_idx += 1
                 sections.append(f"<image:{image_idx}>\n{text}\n</image:{image_idx}>")
         elif ext in _VIDEO_EXTENSIONS:
-            video_idx += 1
             text = media_analyzer.analyze_video(media_file)
             if text:
+                video_idx += 1
                 sections.append(f"<video:{video_idx}>\n{text}\n</video:{video_idx}>")
 
     return sections

@@ -211,7 +211,7 @@ class MediaAnalyzer:
                 )
                 resp.raise_for_status()
                 result = resp.json()
-        except (httpx.HTTPError, httpx.ConnectError, OSError) as e:
+        except (httpx.HTTPError, httpx.ConnectError, OSError, ValueError) as e:
             logger.warning("Vision API 呼び出しに失敗しました: %s", e)
             return ""
 
