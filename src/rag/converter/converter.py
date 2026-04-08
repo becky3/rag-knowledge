@@ -15,7 +15,10 @@ import logging
 import shutil
 from dataclasses import dataclass, field
 from pathlib import Path, PurePosixPath
-from typing import Literal
+from typing import TYPE_CHECKING, Literal
+
+if TYPE_CHECKING:
+    from rag.media.analyzer import MediaAnalyzer
 
 from rag.converter.handlers import (
     convert_html,
@@ -41,10 +44,24 @@ _EXTENSION_OUTPUT_MAP: dict[str, str] = {
     ".htm": ".md",
     ".pdf": ".md",
     ".json": ".md",
+    # メディア解析対象（画像）
+    ".webp": ".md",
+    ".jpg": ".md",
+    ".jpeg": ".md",
+    ".png": ".md",
+    # メディア解析対象（動画）
+    ".ts": ".md",  # MPEG-TS（HLS セグメント）
+
+    ".mp4": ".md",
 }
 
 # パススルー対象の拡張子
 _PASSTHROUGH_EXTENSIONS: frozenset[str] = frozenset({".md", ".txt", ".adoc"})
+
+# メディア解析対象の拡張子
+_IMAGE_EXTENSIONS: frozenset[str] = frozenset({".webp", ".jpg", ".jpeg", ".png"})
+_VIDEO_EXTENSIONS: frozenset[str] = frozenset({".ts", ".mp4"})
+_MEDIA_EXTENSIONS: frozenset[str] = _IMAGE_EXTENSIONS | _VIDEO_EXTENSIONS
 
 # 変換対象外のファイル名
 _EXCLUDED_FILES: frozenset[str] = frozenset({"metadata.db"})
@@ -79,6 +96,7 @@ class Converter:
         pdf_config: PdfBackendConfig,
         youtube_merge_gap_sec: float,
         youtube_merge_max_chars: int,
+        media_analyzer: MediaAnalyzer | None,
     ) -> None:
         """Converter を初期化する.
 
@@ -87,11 +105,13 @@ class Converter:
             pdf_config: PDF バックエンド設定
             youtube_merge_gap_sec: YouTube スニペット結合の間隔閾値（秒）
             youtube_merge_max_chars: YouTube スニペット結合の最大文字数
+            media_analyzer: メディア解析モジュール（None の場合メディア解析スキップ）
         """
         self._regen_option = regen_option
         self._pdf_config = pdf_config
         self._youtube_merge_gap_sec = youtube_merge_gap_sec
         self._youtube_merge_max_chars = youtube_merge_max_chars
+        self._media_analyzer = media_analyzer
 
     # --- ConverterProtocol 実装 ---
 
@@ -168,7 +188,9 @@ class Converter:
                 ) from None
 
         # 変換処理
-        text = self._dispatch_conversion(ext, source_path, file_path)
+        text = self._dispatch_conversion(
+            ext, source_path, file_path, source_store_dir,
+        )
 
         # Zenn 記事: body_html にタイトルが含まれないため .meta から取得して先頭付与
         if text is not None:
@@ -259,6 +281,10 @@ class Converter:
         if regen_option is not None:
             self._regen_option = regen_option
 
+        # バッチ開始時に Vision API の利用可否をキャッシュ
+        if self._media_analyzer is not None:
+            self._media_analyzer.check_and_cache_availability()
+
         result = ConvertBatchResult()
         try:
             for file_path in file_paths:
@@ -275,6 +301,8 @@ class Converter:
                     result.error_files.append(file_path)
         finally:
             self._regen_option = saved_option
+            if self._media_analyzer is not None:
+                self._media_analyzer.clear_availability_cache()
 
         return result
 
@@ -319,6 +347,7 @@ class Converter:
         ext: str,
         source_path: Path,
         file_path: str,
+        source_store_dir: Path,
     ) -> str | None:
         """拡張子に応じた変換処理を実行する.
 
@@ -326,6 +355,7 @@ class Converter:
             ext: ファイル拡張子（小文字、ドット付き）
             source_path: ソースファイルの絶対パス
             file_path: source_store 内の相対パス
+            source_store_dir: source_store のルートディレクトリ
 
         Returns:
             変換後テキスト、または失敗時は None
@@ -337,20 +367,60 @@ class Converter:
             return extract_pdf(source_path, self._pdf_config)
 
         if ext == ".json":
-            return self._convert_json(source_path, file_path)
+            return self._convert_json(source_path, file_path, source_store_dir)
+
+        if ext in _MEDIA_EXTENSIONS:
+            return self._convert_media(ext, source_path)
 
         return None
+
+    def _convert_media(
+        self,
+        ext: str,
+        source_path: Path,
+    ) -> str | None:
+        """メディアファイルを Vision モデルでテキスト化する.
+
+        Args:
+            ext: ファイル拡張子（小文字、ドット付き）
+            source_path: メディアファイルの絶対パス
+
+        Returns:
+            解析テキスト、またはスキップ時は None
+        """
+        if self._media_analyzer is None:
+            logger.warning(
+                "メディア解析モジュール未設定のためスキップ: %s", source_path,
+            )
+            return None
+
+        if not self._media_analyzer.is_available():
+            logger.warning(
+                "LM Studio が利用不可のためメディア解析をスキップ: %s", source_path,
+            )
+            return None
+
+        if ext in _IMAGE_EXTENSIONS:
+            text = self._media_analyzer.analyze_image(source_path)
+        elif ext in _VIDEO_EXTENSIONS:
+            text = self._media_analyzer.analyze_video(source_path)
+        else:
+            return None
+
+        return text if text else None
 
     def _convert_json(
         self,
         source_path: Path,
         file_path: str,
+        source_store_dir: Path,
     ) -> str | None:
         """JSON ファイルを source_type に応じて変換する.
 
         Args:
             source_path: JSON ファイルの絶対パス
             file_path: source_store 内の相対パス
+            source_store_dir: source_store のルートディレクトリ
 
         Returns:
             抽出テキスト、または変換不可時は None
@@ -375,7 +445,12 @@ class Converter:
         data: dict[str, object] = parsed
 
         if source_type == "bluesky":
-            return convert_json_bluesky(data)
+            return convert_json_bluesky(
+                data,
+                media_analyzer=self._media_analyzer,
+                source_store_dir=source_store_dir,
+                file_path=file_path,
+            )
 
         if source_type == "youtube":
             return convert_json_youtube(

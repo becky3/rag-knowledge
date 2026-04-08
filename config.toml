@@ -92,6 +92,18 @@ rag_aozora_max_works = 200
 rag_aozora_request_interval = 1.0
 rag_aozora_request_timeout = 30
 
+# メディア解析（Vision モデル）
+# LM Studio にロードする Vision 対応モデルの識別子
+rag_vision_model = "gemma-3-4b-it"
+# Vision API の推論深度（low / medium / high）
+rag_vision_reasoning_effort = "low"
+# 動画フレーム抽出間隔（秒）
+rag_vision_frame_interval = 5
+# Vision API レスポンスの最大トークン数
+rag_vision_max_tokens = 1024
+# Vision API リクエストタイムアウト（秒）
+rag_vision_api_timeout = 180.0
+
 # HNSW パラメータ（ChromaDB ベクトルインデックス）
 # M / construction_ef はコレクション作成時のみ適用。既存コレクションへの反映には rebuild --mode full が必要
 # search_ef は起動時に collection.modify() で既存コレクションにも自動適用される

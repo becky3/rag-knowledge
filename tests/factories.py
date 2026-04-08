@@ -233,6 +233,7 @@ def make_converter_args(**overrides: Any) -> dict[str, Any]:
         "pdf_config": PdfBackendConfig(),
         "youtube_merge_gap_sec": 2.0,
         "youtube_merge_max_chars": 300,
+        "media_analyzer": None,
     }
     defaults.update(overrides)
     return defaults

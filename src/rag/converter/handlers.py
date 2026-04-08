@@ -10,8 +10,11 @@ from __future__ import annotations
 import logging
 import re
 import shutil
-from pathlib import Path
-from typing import Any
+from pathlib import Path, PurePosixPath
+from typing import TYPE_CHECKING, Any
+
+if TYPE_CHECKING:
+    from rag.media.analyzer import MediaAnalyzer
 
 from bs4 import BeautifulSoup, Tag
 from charset_normalizer import from_bytes
@@ -390,7 +393,76 @@ def _extract_quote_text_from_view_embed(
     return None
 
 
-def convert_json_bluesky(data: dict[str, Any]) -> str | None:
+def _resolve_bluesky_media_dir(
+    file_path: str,
+    source_store_dir: Path,
+) -> Path | None:
+    """BlueSky JSON パスからメディアディレクトリパスを導出する.
+
+    JSON: bluesky/{did}/{year}/{month}/{rkey}.json
+    Media: bluesky/{did}/{year}/{month}/media/{rkey}/
+
+    Args:
+        file_path: source_store 内の相対パス
+        source_store_dir: source_store のルートディレクトリ
+
+    Returns:
+        メディアディレクトリの絶対パス、または導出不可時は None
+    """
+    p = PurePosixPath(file_path)
+    rkey = p.stem
+    parent_dir = p.parent
+    media_dir = source_store_dir / str(parent_dir / "media" / rkey)
+    if media_dir.is_dir():
+        return media_dir
+    return None
+
+
+def _analyze_bluesky_media(
+    media_dir: Path,
+    media_analyzer: MediaAnalyzer,
+) -> list[str]:
+    """BlueSky メディアディレクトリ内のファイルを解析して tagged テキストを返す.
+
+    Args:
+        media_dir: メディアディレクトリ
+        media_analyzer: メディア解析モジュール
+
+    Returns:
+        <image:N> / <video:N> タグ付きテキストのリスト
+    """
+    from rag.converter.converter import _IMAGE_EXTENSIONS, _VIDEO_EXTENSIONS
+
+    sections: list[str] = []
+    image_idx = 0
+    video_idx = 0
+
+    for media_file in sorted(media_dir.iterdir()):
+        if not media_file.is_file():
+            continue
+        ext = media_file.suffix.lower()
+
+        if ext in _IMAGE_EXTENSIONS:
+            image_idx += 1
+            text = media_analyzer.analyze_image(media_file)
+            if text:
+                sections.append(f"<image:{image_idx}>\n{text}\n</image:{image_idx}>")
+        elif ext in _VIDEO_EXTENSIONS:
+            video_idx += 1
+            text = media_analyzer.analyze_video(media_file)
+            if text:
+                sections.append(f"<video:{video_idx}>\n{text}\n</video:{video_idx}>")
+
+    return sections
+
+
+def convert_json_bluesky(
+    data: dict[str, Any],
+    *,
+    media_analyzer: MediaAnalyzer | None = None,
+    source_store_dir: Path | None = None,
+    file_path: str | None = None,
+) -> str | None:
     """BlueSky 投稿 JSON からテキストを抽出する.
 
     仕様: docs/specs/converter.md「BlueSky 投稿」
@@ -400,6 +472,9 @@ def convert_json_bluesky(data: dict[str, Any]) -> str | None:
 
     Args:
         data: フィードアイテム JSON（getAuthorFeed レスポンスの1アイテム）
+        media_analyzer: メディア解析モジュール（None の場合メディア解析スキップ）
+        source_store_dir: source_store のルートディレクトリ
+        file_path: source_store 内の相対パス
 
     Returns:
         構造化プレーンテキスト、または抽出不可時は None
@@ -414,6 +489,20 @@ def convert_json_bluesky(data: dict[str, Any]) -> str | None:
 
     # テキスト抽出（post.record = raw record）
     text = _extract_text_from_post(record)
+
+    # メディア解析テキストの埋め込み
+    if (
+        media_analyzer is not None
+        and source_store_dir is not None
+        and file_path is not None
+        and media_analyzer.is_available()
+    ):
+        media_dir = _resolve_bluesky_media_dir(file_path, source_store_dir)
+        if media_dir is not None:
+            media_sections = _analyze_bluesky_media(media_dir, media_analyzer)
+            if media_sections:
+                media_text = "\n\n".join(media_sections)
+                text = text + "\n\n" + media_text if text else media_text
 
     # 引用元テキストの取得（post.embed = view版）
     view_embed = post.get("embed")

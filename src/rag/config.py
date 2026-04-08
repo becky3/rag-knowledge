@@ -235,6 +235,18 @@ class RAGSettings(BaseModel):
     # リポストを含めるとノイズが増えるため選択可能
     rag_bluesky_include_reposts: bool
 
+    # メディア解析（Vision モデル）
+    # LM Studio 上の Vision モデルを指定
+    rag_vision_model: str
+    # 推論の深度を制御し、処理速度と品質のバランスを調整
+    rag_vision_reasoning_effort: str
+    # 動画フレーム抽出の間隔（秒）。抽出頻度を制御し、処理時間とカバレッジのバランスを調整
+    rag_vision_frame_interval: int = Field(ge=1, le=300)
+    # Vision API レスポンスの出力長を制限
+    rag_vision_max_tokens: int = Field(ge=1, le=16384)
+    # Vision API のリクエストタイムアウト（秒）。大きな画像・動画フレームの解析に十分な時間を確保
+    rag_vision_api_timeout: float = Field(ge=1.0, le=600.0)
+
     # HNSW パラメータ（ChromaDB ベクトルインデックス）
     # m, construction_ef はコレクション作成時のみ適用（変更には rebuild --mode full が必要）
     hnsw_m: int = Field(ge=2, le=100)
