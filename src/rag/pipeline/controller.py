@@ -530,7 +530,7 @@ class PipelineController:
         """git diff の生出力を ChangeEntry に分類する.
 
         .meta ファイルのみの変更を meta_only として検出する。
-        media/ 配下のファイル変更時は対応する親 JSON を再変換対象に含める。
+        BlueSky の media/ 配下のファイル変更時は対応する親 JSON を再変換対象に含める。
         """
         data_entries: dict[str, ChangeEntry] = {}
         meta_files: list[tuple[str, str, str]] = []
