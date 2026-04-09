@@ -117,6 +117,7 @@
 | リポジトリ初期化 | source_store パス | なし | source_store ディレクトリで `git init` を実行する。既に初期化済みの場合は何もしない |
 | ステージング＋コミット | コミットメッセージ、対象パス（任意） | コミット ID | source_store 内の変更をステージング＋コミットする。対象パス指定時は `git add {対象パス}/` でそのパス配下のみをステージングする。未指定時は `git add -A` で全体をステージングする。変更がない場合はスキップする。CLI `rebuild --commit-message` 指定時は再構築前にこの操作を実行する |
 | 差分取得 | 基準コミット ID | 変更ファイルリスト | `git diff --name-status <基準ID>..HEAD` で変更ファイル（追加・変更・削除・リネーム）を取得する |
+| 中間コミット全触ファイル取得 | 基準コミット ID | ファイルパスの集合 | `git log --name-only --pretty=format: <基準ID>..HEAD` で中間コミットで1回でも変更されたファイルパスを返す。ネット差分では検出できない「削除→同一内容再追加」の補完に使用する |
 
 ### 変更ファイルリストの構造
 
@@ -135,11 +136,12 @@ git diff から取得する変更ファイルリストの各エントリが持�
 1. 未コミットの変更がある場合、自動コミットを実行する
 2. `pipeline_history` から `last_commit_id` を取得する
 3. `last_commit_id` が null commit hash（初回）の場合は全ファイルを対象とする。通常のコミット ID の場合は `git diff` で変更ファイルを取得する
-4. 変更ファイルがなければ終了する
-5. 変更ファイルを種別（追加・変更 / 削除）ごとに分類する。BlueSky の `bluesky/.../media/{rkey}/` 配下のファイルが追加・変更された場合、対応する親ファイル（`{rkey}.json`）が diff に含まれていなくても `modified` として処理対象に追加する
-6. 追加・変更ファイルはコンバーターで変換後、インデクサーでインデックスに追加・更新する
-7. 削除ファイルはインデクサーでインデックスから削除し、metadata.db で論理削除する
-8. `pipeline_history` に実行履歴を追加する
+4. ネット差分で検出されない中間変更を補完する。`git log --name-only` で中間コミットの全触ファイルを取得し、ネット差分に含まれないが HEAD に存在するファイルを `modified` として追加する。HEAD に存在しないファイル（一時的に追加→削除）は除外する
+5. 変更ファイルがなければ終了する
+6. 変更ファイルを種別（追加・変更 / 削除）ごとに分類する。BlueSky の `bluesky/.../media/{rkey}/` 配下のファイルが追加・変更された場合、対応する親ファイル（`{rkey}.json`）が diff に含まれていなくても `modified` として処理対象に追加する
+7. 追加・変更ファイルはコンバーターで変換後、インデクサーでインデックスに追加・更新する
+8. 削除ファイルはインデクサーでインデックスから削除し、metadata.db で論理削除する
+9. `pipeline_history` に実行履歴を追加する
 
 ```mermaid
 flowchart TD
@@ -149,6 +151,7 @@ flowchart TD
     GET_STATE["pipeline_history から last_commit_id 取得"]
     CHECK["last_commit_id が null commit hash か"]
     DIFF["git diff last_commit_id..HEAD"]
+    SUPPLEMENT["中間コミットの全触ファイルで補完"]
     FULL["全ファイルを対象とする"]
     HAS_CHANGES["変更ファイルあり"]
     NO_CHANGES["変更なし → 終了"]
@@ -173,7 +176,8 @@ flowchart TD
     GET_STATE --> CHECK
     CHECK -->|通常のコミット ID| DIFF
     CHECK -->|null commit hash（初回）| FULL
-    DIFF --> HAS_CHANGES
+    DIFF --> SUPPLEMENT
+    SUPPLEMENT --> HAS_CHANGES
     FULL --> HAS_CHANGES
     HAS_CHANGES -->|あり| CLASSIFY
     HAS_CHANGES -->|なし| NO_CHANGES
@@ -298,6 +302,7 @@ source_store 内の以下のファイルは、git diff で検出されてもパ�
 | `last_commit_id` が null commit hash（初回実行） | source_store 全ファイルを対象として処理する |
 | `last_commit_id` が指す commit が git 履歴に存在しない | 警告ログを出力し、全ファイルを対象として処理する |
 | git diff の結果が空（変更なし） | 何もせず正常終了する |
+| ネット差分で検出されない中間変更（削除→同一内容再追加等） | `git log --name-only` で中間コミットの全触ファイルを取得し、ネット差分に含まれないが HEAD に存在するファイルを `modified` として追加する。HEAD に存在しないファイル（一時的に追加→削除）は除外する |
 | パイプライン処理中にエラーが発生した場合 | エラーが発生したファイルをスキップし、残りのファイルの処理を続行する。pipeline_history にレコードを追加しないことで `last_commit_id` が前回値のまま保持される（次回再実行で再処理される） |
 | コンバーターが変換スキップを返したファイル（空テキスト、0バイト、未対応拡張子等） | 該当ファイルをスキップし、処理結果サマリの `warnings` に記録する（`errors` ではない）。非致命的なスキップであり、パイプライン全体の成否には影響しない |
 | コンバーターが予期しない例外を発生させたファイル | 該当ファイルのインデックス追加をスキップし、処理結果サマリの `errors` に記録する |

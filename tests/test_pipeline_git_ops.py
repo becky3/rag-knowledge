@@ -241,6 +241,64 @@ class TestGetDiff:
         assert diff[0] == ("A", "web/example.com/page.html", "")
 
 
+class TestGetFilesTouchedInRange:
+    """get_files_touched_in_range のテスト."""
+
+    def test_returns_all_touched_files(self, git_repo: Path) -> None:
+        ops = GitOperations(git_repo)
+        ops.init_repo()
+        (git_repo / "a.txt").write_text("v1", encoding="utf-8")
+        first = ops.commit("first")
+        assert first is not None
+        (git_repo / "b.txt").write_text("new", encoding="utf-8")
+        ops.commit("add b")
+        (git_repo / "a.txt").write_text("v2", encoding="utf-8")
+        ops.commit("modify a")
+        touched = ops.get_files_touched_in_range(first)
+        assert "a.txt" in touched
+        assert "b.txt" in touched
+
+    def test_includes_deleted_then_readded_file(self, git_repo: Path) -> None:
+        """削除→同一内容再追加されたファイルが含まれること."""
+        ops = GitOperations(git_repo)
+        ops.init_repo()
+        f = git_repo / "data.txt"
+        f.write_text("content", encoding="utf-8")
+        first = ops.commit("first")
+        assert first is not None
+        f.unlink()
+        ops.commit("delete")
+        f.write_text("content", encoding="utf-8")
+        ops.commit("re-add same content")
+        # ネット差分はゼロだが touched には含まれる
+        diff = ops.get_diff(first)
+        assert len(diff) == 0
+        touched = ops.get_files_touched_in_range(first)
+        assert "data.txt" in touched
+
+    def test_no_changes(self, git_repo: Path) -> None:
+        """基準コミット以降に変更がない場合、空集合を返す."""
+        ops = GitOperations(git_repo)
+        ops.init_repo()
+        (git_repo / "a.txt").write_text("content", encoding="utf-8")
+        commit_id = ops.commit("first")
+        assert commit_id is not None
+        touched = ops.get_files_touched_in_range(commit_id)
+        assert touched == set()
+
+    def test_returns_tracked_files_only(self, git_repo: Path) -> None:
+        """追跡対象のファイルのみを返す."""
+        ops = GitOperations(git_repo)
+        ops.init_repo()
+        (git_repo / "a.txt").write_text("init", encoding="utf-8")
+        first = ops.commit("first")
+        assert first is not None
+        (git_repo / "b.txt").write_text("new", encoding="utf-8")
+        ops.commit("add b")
+        touched = ops.get_files_touched_in_range(first)
+        assert "b.txt" in touched
+
+
 class TestListAllFiles:
     """list_all_files のテスト."""
 

@@ -542,6 +542,101 @@ class TestDeleteAndReAdd:
         assert "local/b.txt" in indexer.added
 
 
+class TestHiddenChangesSupplementation:
+    """ネット差分で検出されない中間変更の補完テスト (#571)."""
+
+    async def test_delete_then_readd_same_content_without_pipeline_run(
+        self,
+        controller: tuple[PipelineController, StubConverter, StubIndexer],
+        workspace: dict[str, Path],
+    ) -> None:
+        """パイプライン未実行の削除→同一内容再追加が MODIFIED として検出される."""
+        ctrl, converter, indexer = controller
+        content = "same content"
+
+        # 1. 初回追加 → パイプライン実行（last_commit_id = A）
+        _place_local_file(workspace["source"], "local/a.txt", content)
+        ctrl.commit("add a")
+        await ctrl.run_incremental()
+        assert "local/a.txt" in indexer.added
+
+        indexer.added.clear()
+        converter.converted.clear()
+
+        # 2. 削除 → コミット（パイプライン未実行、last_commit_id は A のまま）
+        (workspace["source"] / "local" / "a.txt").unlink()
+        ctrl.commit("delete a")
+
+        # 3. 同一内容で再追加 → コミット
+        _place_local_file(workspace["source"], "local/a.txt", content)
+        ctrl.source_store._db.register_source(
+            source_id="local/a.txt",
+            source_type="local",
+            title="a",
+            content_hash="dummy",
+            file_size=len(content),
+            collected_at="2026-01-01T00:00:00+00:00",
+            updated_at="2026-01-01T00:00:00+00:00",
+        )
+        ctrl.commit("readd a")
+
+        # 4. パイプライン実行 → git diff A..HEAD はネット差分ゼロだが検出される
+        summary = await ctrl.run_incremental()
+        assert summary.processed >= 1
+        assert "local/a.txt" in converter.converted
+
+    async def test_temporarily_added_then_deleted_file_is_excluded(
+        self,
+        controller: tuple[PipelineController, StubConverter, StubIndexer],
+        workspace: dict[str, Path],
+    ) -> None:
+        """一時的に追加→削除されたファイルは処理対象外."""
+        ctrl, converter, indexer = controller
+
+        # 1. 初回コミット → パイプライン実行
+        _place_local_file(workspace["source"], "local/base.txt", "base")
+        ctrl.commit("initial")
+        await ctrl.run_incremental()
+
+        converter.converted.clear()
+        indexer.added.clear()
+
+        # 2. 新規ファイルを追加 → コミット（パイプライン未実行）
+        _place_local_file(workspace["source"], "local/temp.txt", "temp")
+        ctrl.commit("add temp")
+
+        # 3. そのファイルを削除 → コミット
+        (workspace["source"] / "local" / "temp.txt").unlink()
+        ctrl.commit("delete temp")
+
+        # 4. パイプライン実行 → temp.txt は HEAD に存在しないので処理されない
+        await ctrl.run_incremental()
+        assert "local/temp.txt" not in converter.converted
+
+    async def test_normal_diff_not_affected(
+        self,
+        controller: tuple[PipelineController, StubConverter, StubIndexer],
+        workspace: dict[str, Path],
+    ) -> None:
+        """通常の差分更新は影響を受けない."""
+        ctrl, converter, indexer = controller
+
+        # 1. 初回コミット → パイプライン実行
+        _place_local_file(workspace["source"], "local/a.txt", "v1")
+        ctrl.commit("add a")
+        await ctrl.run_incremental()
+
+        converter.converted.clear()
+        indexer.added.clear()
+
+        # 2. 通常の変更 → パイプライン実行
+        _place_local_file(workspace["source"], "local/a.txt", "v2")
+        ctrl.commit("modify a")
+        summary = await ctrl.run_incremental()
+        assert summary.processed == 1
+        assert "local/a.txt" in converter.converted
+
+
 class TestRemoveFile:
     """source_store.remove_file のテスト."""
 
