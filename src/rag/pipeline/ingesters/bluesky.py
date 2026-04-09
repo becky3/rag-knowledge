@@ -708,7 +708,8 @@ class BlueskyIngester:
             url = resolved
             resp = await client.get(url)
 
-        logger.warning("リダイレクト回数上限に到達: %s", url)
+        if resp.status_code in BlueskyIngester._REDIRECT_STATUSES:
+            logger.warning("リダイレクト回数上限に到達: %s", url)
         return resp
 
     async def follow_urls(

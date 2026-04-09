@@ -1331,7 +1331,7 @@ class TestGetFollowingSameOriginRedirect:
         self, source_store: SourceStore,
     ) -> None:
         """リダイレクト上限で停止し、最後のレスポンスを返す."""
-        # 3回リダイレクト（上限=2 に設定）
+        # 2回リダイレクト（上限=2 に設定）
         redirect1 = MagicMock(
             status_code=302,
             headers={"location": "https://video.cdn.bsky.app/r1"},
