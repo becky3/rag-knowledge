@@ -633,8 +633,6 @@ class BlueskyIngester:
                     m = _BW_RE.search(line)
                     if m:
                         candidates.append((int(m.group(1)), variant_url))
-                    else:
-                        candidates.append((0, variant_url))
             i += 1
 
         if candidates:

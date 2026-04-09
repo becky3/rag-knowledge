@@ -1191,11 +1191,49 @@ class TestSelectHlsVariant:
         )
         assert result == "https://video.bsky.app/other/video.m3u8"
 
+    def test_falls_back_to_first_variant_when_no_bandwidth(
+        self, source_store: SourceStore,
+    ) -> None:
+        """全バリアントに BANDWIDTH がない場合は最初のバリアントにフォールバックする."""
+        master = (
+            "#EXTM3U\n"
+            "#EXT-X-STREAM-INF:RESOLUTION=360x640\n"
+            "360p/video.m3u8\n"
+            "#EXT-X-STREAM-INF:RESOLUTION=720x1280\n"
+            "720p/video.m3u8\n"
+        )
+        ingester = make_bluesky_ingester(source_store)
+        result = ingester._select_hls_variant(
+            master, "https://video.bsky.app/playlist.m3u8",
+        )
+        # BANDWIDTH なし → fallback_url（最初のバリアント）
+        assert result == "https://video.bsky.app/360p/video.m3u8"
+
+    def test_ignores_no_bandwidth_variant_when_others_have_it(
+        self, source_store: SourceStore,
+    ) -> None:
+        """BANDWIDTH ありとなしが混在する場合、BANDWIDTH ありの最小を選択する."""
+        master = (
+            "#EXTM3U\n"
+            "#EXT-X-STREAM-INF:RESOLUTION=360x640\n"
+            "360p/video.m3u8\n"
+            "#EXT-X-STREAM-INF:BANDWIDTH=3440800,RESOLUTION=720x1280\n"
+            "720p/video.m3u8\n"
+            "#EXT-X-STREAM-INF:BANDWIDTH=655600,RESOLUTION=480x854\n"
+            "480p/video.m3u8\n"
+        )
+        ingester = make_bluesky_ingester(source_store)
+        result = ingester._select_hls_variant(
+            master, "https://video.bsky.app/playlist.m3u8",
+        )
+        # BANDWIDTH なしの 360p は candidates に入らず、655600 の 480p が選択される
+        assert result == "https://video.bsky.app/480p/video.m3u8"
+
 
 class TestDownloadHlsVideo:
     """_download_hls_video のマスタープレイリスト解決テスト."""
 
-    @pytest.mark.anyio()
+    @pytest.mark.asyncio()
     async def test_resolves_master_playlist_then_downloads_segments(
         self, source_store: SourceStore, tmp_path: Path,
     ) -> None:
@@ -1236,7 +1274,7 @@ class TestDownloadHlsVideo:
         assert dest.read_bytes() == seg0 + seg1
         assert mock_client.get.call_count == 4
 
-    @pytest.mark.anyio()
+    @pytest.mark.asyncio()
     async def test_downloads_variant_playlist_directly(
         self, source_store: SourceStore, tmp_path: Path,
     ) -> None:
