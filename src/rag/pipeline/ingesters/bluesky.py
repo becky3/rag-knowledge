@@ -18,12 +18,12 @@ from datetime import datetime
 from pathlib import Path
 from urllib.parse import urljoin, urlparse
 
-import httpx
-
 from rag.pipeline.ingesters._common import IngestResult, ProgressCallback, now_iso
 from typing import TYPE_CHECKING, Any, Literal
 
 if TYPE_CHECKING:
+    import httpx
+
     from py_common_lib.httpx import ConstrainedClient
     from rag.pipeline.ingesters.youtube import YoutubeIngester
     from rag.store.source_store import SourceStore
@@ -618,7 +618,6 @@ class BlueskyIngester:
         最小値のバリアントを選択する。BANDWIDTH が取得できない場合は
         最初のバリアントにフォールバックする。
         """
-        _BW_RE = re.compile(r"BANDWIDTH=(\d+)")
         lines = master_playlist.splitlines()
         candidates: list[tuple[int, str]] = []  # (bandwidth, url)
         fallback_url: str | None = None
@@ -638,7 +637,7 @@ class BlueskyIngester:
                 if variant_url is not None:
                     if fallback_url is None:
                         fallback_url = variant_url
-                    m = _BW_RE.search(line)
+                    m = BlueskyIngester._BW_RE.search(line)
                     if m:
                         candidates.append((int(m.group(1)), variant_url))
             i += 1
@@ -651,11 +650,16 @@ class BlueskyIngester:
             return urljoin(master_url, fallback_url)
         return None
 
+    _BW_RE = re.compile(r"BANDWIDTH=(\d+)")
     _REDIRECT_STATUSES = frozenset({301, 302, 307, 308})
 
     @staticmethod
     def _base_domain(hostname: str | None) -> str:
-        """ホスト名から末尾2セグメント（eTLD+1 相当）を返す."""
+        """ホスト名から末尾2セグメント（eTLD+1 相当）を返す.
+
+        ccTLD（.co.uk 等）では正確な eTLD+1 を返さない簡易実装。
+        BlueSky CDN のドメイン構成（.app TLD）では問題ない。
+        """
         if not hostname:
             return ""
         parts = hostname.rsplit(".", 2)
