@@ -241,7 +241,7 @@ class RAGSettings(BaseModel):
     # LM Studio 上の Vision モデルを指定
     rag_vision_model: str
     # 推論の深度を制御し、処理速度と品質のバランスを調整
-    rag_vision_reasoning_effort: Literal["low", "medium", "high"]
+    rag_vision_reasoning_effort: Literal["none", "low", "medium", "high"]
     # 動画フレーム抽出の間隔（秒）。抽出頻度を制御し、処理時間とカバレッジのバランスを調整
     rag_vision_frame_interval: int = Field(ge=1, le=300)
     # Vision API レスポンスの出力長を制限

@@ -29,8 +29,8 @@ def _make_analyzer(**kwargs: object) -> MediaAnalyzer:
     """テスト用 MediaAnalyzer を生成する."""
     defaults = {
         "lmstudio_base_url": "http://localhost:1234/v1",
-        "vision_model": "gemma-3-4b-it",
-        "reasoning_effort": "low",
+        "vision_model": "google/gemma-4-26b-a4b",
+        "reasoning_effort": "none",
         "frame_interval": 5,
         "max_tokens": 1024,
     }
@@ -113,9 +113,9 @@ class TestAnalyzeImage:
             # API に正しい payload が送られたか確認
             call_args = mock_client.post.call_args
             payload = call_args.kwargs["json"]
-            assert payload["model"] == "gemma-3-4b-it"
+            assert payload["model"] == "google/gemma-4-26b-a4b"
             assert payload["max_tokens"] == 1024
-            assert payload["reasoning_effort"] == "low"
+            assert payload["reasoning_effort"] == "none"
 
     def test_converts_webp_to_jpeg(self, tmp_path: Path) -> None:
         """webp 画像が JPEG に変換されて API に送信される."""

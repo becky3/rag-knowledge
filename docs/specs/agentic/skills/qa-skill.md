@@ -233,13 +233,14 @@ NG が検出された場合、Issue 起票を提案する。
 |---|----------------|---------|---------|
 | 1 | `add-document --file README.md` | Markdown 取り込み成功 | `ingest` |
 | 2 | `add-document --file .qa/pdf_add_test.pdf` | PDF 取り込み成功 | `ingest` |
-| 3 | `add-document --file .qa/image_add_test.jpg` | 画像取り込み成功。メディア解析テキストが生成されること（LM Studio Vision 起動時）。search 結果に画像の解析テキストが含まれることを確認する | `ingest` |
-| 4 | `add-document --file README.md --upload-mode replace` | 上書き成功、エラーなし | `none` |
-| 5 | `crawl-documents docs/specs/`（`dir_path` は positional 引数） | ディレクトリ一括取り込み成功 | `ingest` |
-| 6 | `add-journal --title "コンテンツ一覧取得機能の実装" --file .qa/journal_add_test.md --repository rag-knowledge` | ジャーナル登録成功 | `ingest` |
-| 7a | `migrate-journal --dir .qa/journals --repository rag-knowledge` | ジャーナル一括配置成功 | `none` |
-| 7b | `rebuild --mode incremental` | 再構築成功、migrate 分がインデックスに反映 | `ingest` |
-| 8 | LM Studio を停止した状態で `add-document --file .qa/image_add_test.jpg --upload-mode replace` | 取り込み成功するがメディア解析テキストなし（フォールバック動作）。エラーで中断しないこと | `ingest` |
+| 3 | LM Studio を停止した状態で `add-document --file .qa/image_add_test.jpg` | 取り込み成功するがメディア解析テキストなし（フォールバック動作）。エラーで中断しないこと | `ingest` |
+| 4 | LM Studio を起動した状態で `add-document --file .qa/image_add_test.jpg --upload-mode replace` | 画像取り込み成功。メディア解析テキストが生成されること。search 結果に画像の解析テキストが含まれることを確認する | `ingest` |
+| 5 | `add-document --file .qa/video_add_test.mp4` | 動画取り込み成功。ffmpeg フレーム抽出 → Vision モデルで各フレーム解析 → タイムスタンプ付きテキスト生成。search 結果に動画の解析テキストが含まれること | `ingest` |
+| 6 | `add-document --file README.md --upload-mode replace` | 上書き成功、エラーなし | `none` |
+| 7 | `crawl-documents docs/specs/`（`dir_path` は positional 引数） | ディレクトリ一括取り込み成功 | `ingest` |
+| 8 | `add-journal --title "コンテンツ一覧取得機能の実装" --file .qa/journal_add_test.md --repository rag-knowledge` | ジャーナル登録成功 | `ingest` |
+| 9a | `migrate-journal --dir .qa/journals --repository rag-knowledge` | ジャーナル一括配置成功 | `none` |
+| 9b | `rebuild --mode incremental` | 再構築成功、migrate 分がインデックスに反映 | `ingest` |
 
 CLI / MCP 対応:
 
@@ -253,9 +254,9 @@ CLI / MCP 対応:
 **MCP テスト時の注意:**
 
 - A-2 (PDF): 大きい PDF は MCP パラメータサイズ制約で失敗する場合がある。失敗時は CLI で代替実行する
-- A-3 (画像): LM Studio Vision モデルが未ロードの場合はスキップする
-- A-5 (crawl-documents): HTTP モード非対応のため MCP テスト時はスキップする
-- A-8 (フォールバック): LM Studio の停止・再起動はユーザーの手動操作が必要。MCP テスト時はスキップする
+- A-3 (フォールバック): LM Studio の停止・再起動はユーザーの手動操作が必要。MCP テスト時はスキップする
+- A-4 (画像), A-5 (動画): LM Studio Vision モデルが未ロードの場合はスキップする
+- A-7 (crawl-documents): HTTP モード非対応のため MCP テスト時はスキップする
 
 ### B) Web
 
