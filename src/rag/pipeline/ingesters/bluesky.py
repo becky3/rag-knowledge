@@ -16,7 +16,9 @@ import sys
 import tempfile
 from datetime import datetime
 from pathlib import Path
-from urllib.parse import urljoin
+from urllib.parse import urljoin, urlparse
+
+import httpx
 
 from rag.pipeline.ingesters._common import IngestResult, ProgressCallback, now_iso
 from typing import TYPE_CHECKING, Any, Literal
@@ -549,7 +551,9 @@ class BlueskyIngester:
             client: ConstrainedClient インスタンス
         """
         # プレイリスト取得
-        resp = await client.get(playlist_url)
+        resp = await self._get_following_same_origin_redirect(
+            client, playlist_url,
+        )
         playlist_text = resp.text
 
         # マスタープレイリスト判定: #EXT-X-STREAM-INF が含まれる場合は
@@ -563,7 +567,9 @@ class BlueskyIngester:
                 )
                 return
             logger.debug("HLS バリアント選択: %s", variant_url)
-            resp = await client.get(variant_url)
+            resp = await self._get_following_same_origin_redirect(
+                client, variant_url,
+            )
             playlist_text = resp.text
             playlist_url = variant_url
 
@@ -588,7 +594,9 @@ class BlueskyIngester:
         try:
             with open(tmp_fd, "wb") as f:
                 for seg_url in segment_urls:
-                    seg_resp = await client.get(seg_url)
+                    seg_resp = await self._get_following_same_origin_redirect(
+                        client, seg_url,
+                    )
                     f.write(seg_resp.content)
             tmp_path.replace(dest)
         except BaseException:
@@ -642,6 +650,62 @@ class BlueskyIngester:
         if fallback_url is not None:
             return urljoin(master_url, fallback_url)
         return None
+
+    _REDIRECT_STATUSES = frozenset({301, 302, 307, 308})
+
+    @staticmethod
+    def _base_domain(hostname: str | None) -> str:
+        """ホスト名から末尾2セグメント（eTLD+1 相当）を返す."""
+        if not hostname:
+            return ""
+        parts = hostname.rsplit(".", 2)
+        # "video.cdn.bsky.app" → ["video", "cdn", "bsky.app"] ではなく
+        # rsplit(".", 2) → ["video.cdn", "bsky", "app"]
+        # 末尾2つ = "bsky.app"
+        if len(parts) >= 2:
+            return f"{parts[-2]}.{parts[-1]}"
+        return hostname
+
+    @staticmethod
+    async def _get_following_same_origin_redirect(
+        client: ConstrainedClient,
+        url: str,
+        *,
+        _max_redirects: int = 5,
+    ) -> httpx.Response:
+        """同一ベースドメインのリダイレクトのみ追従する GET リクエスト.
+
+        ConstrainedClient の follow_redirects=False を維持しつつ、
+        CDN の 3xx リダイレクトに対応する。リダイレクト先のベースドメイン
+        （eTLD+1 相当）が異なる場合はリダイレクト前のレスポンスをそのまま
+        返す（SSRF 防止）。
+        """
+        original_parsed = urlparse(url)
+        original_base = BlueskyIngester._base_domain(original_parsed.hostname)
+        resp = await client.get(url)
+
+        for _ in range(_max_redirects):
+            if resp.status_code not in BlueskyIngester._REDIRECT_STATUSES:
+                return resp
+            location = resp.headers.get("location", "")
+            if not location:
+                return resp
+            # 相対 URL を解決
+            resolved = urljoin(url, location)
+            parsed = urlparse(resolved)
+            redirect_base = BlueskyIngester._base_domain(parsed.hostname)
+            if parsed.scheme != original_parsed.scheme or redirect_base != original_base:
+                logger.warning(
+                    "リダイレクト先が異なるドメイン（拒否）: %s → %s",
+                    url,
+                    resolved,
+                )
+                return resp
+            url = resolved
+            resp = await client.get(url)
+
+        logger.warning("リダイレクト回数上限に到達: %s", url)
+        return resp
 
     async def follow_urls(
         self,

@@ -1230,6 +1230,133 @@ class TestSelectHlsVariant:
         assert result == "https://video.bsky.app/480p/video.m3u8"
 
 
+class TestBaseDomain:
+    """_base_domain のテスト."""
+
+    def test_extracts_base_domain_from_subdomain(
+        self, source_store: SourceStore,
+    ) -> None:
+        """サブドメイン付きホストから eTLD+1 相当を抽出する."""
+        ingester = make_bluesky_ingester(source_store)
+        assert ingester._base_domain("video.cdn.bsky.app") == "bsky.app"
+
+    def test_extracts_base_domain_from_two_level_host(
+        self, source_store: SourceStore,
+    ) -> None:
+        """2レベルのホスト名はそのまま返す."""
+        ingester = make_bluesky_ingester(source_store)
+        assert ingester._base_domain("bsky.app") == "bsky.app"
+
+    def test_returns_single_label_as_is(
+        self, source_store: SourceStore,
+    ) -> None:
+        """1ラベルのホスト名はそのまま返す."""
+        ingester = make_bluesky_ingester(source_store)
+        assert ingester._base_domain("localhost") == "localhost"
+
+    def test_returns_empty_for_none(
+        self, source_store: SourceStore,
+    ) -> None:
+        """None は空文字列を返す."""
+        ingester = make_bluesky_ingester(source_store)
+        assert ingester._base_domain(None) == ""
+
+
+class TestGetFollowingSameOriginRedirect:
+    """_get_following_same_origin_redirect のテスト."""
+
+    @pytest.mark.asyncio()
+    async def test_returns_200_response_directly(
+        self, source_store: SourceStore,
+    ) -> None:
+        """200 レスポンスはそのまま返す."""
+        mock_client = AsyncMock()
+        mock_client.get.return_value = MagicMock(status_code=200, content=b"data")
+
+        ingester = make_bluesky_ingester(source_store)
+        resp = await ingester._get_following_same_origin_redirect(
+            mock_client, "https://video.bsky.app/playlist.m3u8",
+        )
+
+        assert resp.status_code == 200
+        assert resp.content == b"data"
+        mock_client.get.assert_called_once()
+
+    @pytest.mark.asyncio()
+    async def test_follows_redirect_to_same_base_domain(
+        self, source_store: SourceStore,
+    ) -> None:
+        """同一ベースドメインへの 302 リダイレクトを追従する."""
+        redirect_resp = MagicMock(
+            status_code=302,
+            headers={"location": "https://video.cdn.bsky.app/data/video0.ts"},
+        )
+        final_resp = MagicMock(status_code=200, content=b"video-data")
+
+        mock_client = AsyncMock()
+        mock_client.get.side_effect = [redirect_resp, final_resp]
+
+        ingester = make_bluesky_ingester(source_store)
+        resp = await ingester._get_following_same_origin_redirect(
+            mock_client, "https://video.bsky.app/360p/video0.ts",
+        )
+
+        assert resp.status_code == 200
+        assert resp.content == b"video-data"
+        assert mock_client.get.call_count == 2
+
+    @pytest.mark.asyncio()
+    async def test_rejects_redirect_to_different_domain(
+        self, source_store: SourceStore,
+    ) -> None:
+        """異なるベースドメインへのリダイレクトは追従せず 302 を返す."""
+        redirect_resp = MagicMock(
+            status_code=302,
+            headers={"location": "https://evil.example.com/steal"},
+        )
+
+        mock_client = AsyncMock()
+        mock_client.get.return_value = redirect_resp
+
+        ingester = make_bluesky_ingester(source_store)
+        resp = await ingester._get_following_same_origin_redirect(
+            mock_client, "https://video.bsky.app/360p/video0.ts",
+        )
+
+        assert resp.status_code == 302
+        mock_client.get.assert_called_once()
+
+    @pytest.mark.asyncio()
+    async def test_stops_at_max_redirects(
+        self, source_store: SourceStore,
+    ) -> None:
+        """リダイレクト上限で停止し、最後のレスポンスを返す."""
+        # 3回リダイレクト（上限=2 に設定）
+        redirect1 = MagicMock(
+            status_code=302,
+            headers={"location": "https://video.cdn.bsky.app/r1"},
+        )
+        redirect2 = MagicMock(
+            status_code=302,
+            headers={"location": "https://video.cdn.bsky.app/r2"},
+        )
+        final = MagicMock(status_code=200, content=b"finally")
+
+        mock_client = AsyncMock()
+        mock_client.get.side_effect = [redirect1, redirect2, final]
+
+        ingester = make_bluesky_ingester(source_store)
+        resp = await ingester._get_following_same_origin_redirect(
+            mock_client,
+            "https://video.bsky.app/start",
+            _max_redirects=2,
+        )
+
+        # 初回 GET + 2回リダイレクト追従 = 3回の GET
+        assert mock_client.get.call_count == 3
+        assert resp.status_code == 200
+
+
 class TestDownloadHlsVideo:
     """_download_hls_video のマスタープレイリスト解決テスト."""
 
@@ -1256,10 +1383,10 @@ class TestDownloadHlsVideo:
         mock_client = AsyncMock()
         # 1st call: master playlist, 2nd: variant, 3rd: seg0, 4th: seg1
         mock_client.get.side_effect = [
-            MagicMock(text=master_text),
-            MagicMock(text=variant_text),
-            MagicMock(content=seg0),
-            MagicMock(content=seg1),
+            MagicMock(text=master_text, status_code=200),
+            MagicMock(text=variant_text, status_code=200),
+            MagicMock(content=seg0, status_code=200),
+            MagicMock(content=seg1, status_code=200),
         ]
 
         dest = tmp_path / "media" / "video_0.ts"
@@ -1288,8 +1415,8 @@ class TestDownloadHlsVideo:
 
         mock_client = AsyncMock()
         mock_client.get.side_effect = [
-            MagicMock(text=variant_text),
-            MagicMock(content=seg0),
+            MagicMock(text=variant_text, status_code=200),
+            MagicMock(content=seg0, status_code=200),
         ]
 
         dest = tmp_path / "media" / "video_0.ts"
