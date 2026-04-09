@@ -32,8 +32,6 @@ ChromaDB は HttpClient 経由でサーバーに接続するため、MCP と CLI
 | テスト実行 | 停止推奨 | テスト用 DB との分離のため |
 | MCP ツールの動作確認 | 起動中 + enabled | |
 
-**注意**: BM25 インデックスは単一プロセス前提のインメモリキャッシュを持つ。MCP 経由の書き込み後はキャッシュが自動リセットされるが、CLI 直接実行で BM25 を更新した場合、MCP 側の検索結果に反映されるのは次回のサービスリセット後となる。
-
 ### DB 破損時の復旧
 
 MCP サーバープロセスを停止 → ChromaDB サーバーが起動していることを確認（停止していれば `uv run chroma run --path <CHROMADB_PERSIST_DIR>` で手動起動）→ CLI `rebuild --mode full` で復旧する。
