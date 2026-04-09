@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import hashlib
 import logging
+import shutil
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -341,6 +342,22 @@ class SourceStore:
         meta_file = meta_path_for(file_path)
         if meta_file.exists():
             meta_file.unlink()
+
+        # BlueSky 投稿の media サブディレクトリを削除
+        # JSON: bluesky/{did}/{year}/{month}/{rkey}.json
+        # Media: bluesky/{did}/{year}/{month}/media/{rkey}/
+        self._remove_media_dir(file_path)
+
+    def _remove_media_dir(self, file_path: Path) -> None:
+        """BlueSky 投稿の JSON に対応する media/{rkey}/ サブディレクトリを削除する."""
+        if file_path.suffix != ".json":
+            return
+        rel = file_path.relative_to(self._root)
+        if rel.parts[0] != "bluesky":
+            return
+        media_dir = file_path.parent / "media" / file_path.stem
+        if media_dir.is_dir():
+            shutil.rmtree(media_dir)
 
     def soft_delete(self, source_id: str) -> None:
         """ソースを論理削除する.
