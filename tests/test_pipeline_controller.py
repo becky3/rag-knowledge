@@ -582,7 +582,7 @@ class TestHiddenChangesSupplementation:
 
         # 4. パイプライン実行 → git diff A..HEAD はネット差分ゼロだが検出される
         summary = await ctrl.run_incremental()
-        assert summary.processed >= 1
+        assert summary.processed == 1
         assert "local/a.txt" in converter.converted
 
     async def test_temporarily_added_then_deleted_file_is_excluded(

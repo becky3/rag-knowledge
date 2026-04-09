@@ -548,14 +548,22 @@ class PipelineController:
 
         head_files = set(self._git.list_all_files())
         supplemented = list(raw_diff)
-        for file_path in hidden:
+        added_count = 0
+        for file_path in sorted(hidden):
             if file_path in head_files:
-                logger.info(
+                logger.debug(
                     "中間コミットで変更されたがネット差分に出ないファイルを"
                     "MODIFIED として追加: %s",
                     file_path,
                 )
                 supplemented.append(("M", file_path, ""))
+                added_count += 1
+        if added_count:
+            logger.info(
+                "中間コミットで変更されたがネット差分に出ないファイルを"
+                "MODIFIED として %d 件追加",
+                added_count,
+            )
         return supplemented
 
     def _classify_changes(

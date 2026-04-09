@@ -286,17 +286,22 @@ class TestGetFilesTouchedInRange:
         touched = ops.get_files_touched_in_range(commit_id)
         assert touched == set()
 
-    def test_returns_tracked_files_only(self, git_repo: Path) -> None:
-        """追跡対象のファイルのみを返す."""
+    def test_deduplicates_same_path_touched_multiple_times(
+        self, git_repo: Path,
+    ) -> None:
+        """同一パスが複数回変更されても1回だけ含まれる."""
         ops = GitOperations(git_repo)
         ops.init_repo()
-        (git_repo / "a.txt").write_text("init", encoding="utf-8")
+        target = git_repo / "a.txt"
+        target.write_text("v1", encoding="utf-8")
         first = ops.commit("first")
         assert first is not None
-        (git_repo / "b.txt").write_text("new", encoding="utf-8")
-        ops.commit("add b")
+        target.write_text("v2", encoding="utf-8")
+        ops.commit("modify a once")
+        target.write_text("v3", encoding="utf-8")
+        ops.commit("modify a twice")
         touched = ops.get_files_touched_in_range(first)
-        assert "b.txt" in touched
+        assert touched == {"a.txt"}
 
 
 class TestListAllFiles:
