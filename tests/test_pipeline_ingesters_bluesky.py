@@ -1139,3 +1139,294 @@ class TestFollowUrlsYoutubeOverwrite:
         )
         assert stats["youtube_placed"] == 1
         assert stats["skipped"] == 1
+
+
+# ---- HLS ダウンロード ----
+
+
+class TestSelectHlsVariant:
+    """_select_hls_variant のテスト."""
+
+    def test_selects_lowest_bandwidth_variant(
+        self, source_store: SourceStore,
+    ) -> None:
+        """BANDWIDTH が最小のバリアント URL を選択する."""
+        master = (
+            "#EXTM3U\n"
+            "#EXT-X-STREAM-INF:BANDWIDTH=3440800,RESOLUTION=720x1280\n"
+            "720p/video.m3u8?session_id=abc\n"
+            "#EXT-X-STREAM-INF:BANDWIDTH=655600,RESOLUTION=360x640\n"
+            "360p/video.m3u8?session_id=abc\n"
+        )
+        ingester = make_bluesky_ingester(source_store)
+        result = ingester._select_hls_variant(
+            master, "https://video.bsky.app/playlist.m3u8",
+        )
+        # 720p が先に列挙されていても、BANDWIDTH 最小の 360p を選択
+        assert result == "https://video.bsky.app/360p/video.m3u8?session_id=abc"
+
+    def test_returns_none_for_empty_playlist(
+        self, source_store: SourceStore,
+    ) -> None:
+        """バリアントが見つからない場合は None を返す."""
+        master = "#EXTM3U\n#EXT-X-VERSION:3\n"
+        ingester = make_bluesky_ingester(source_store)
+        result = ingester._select_hls_variant(
+            master, "https://video.bsky.app/playlist.m3u8",
+        )
+        assert result is None
+
+    def test_resolves_relative_url(
+        self, source_store: SourceStore,
+    ) -> None:
+        """相対パスのバリアント URL が正しく解決される."""
+        master = (
+            "#EXTM3U\n"
+            "#EXT-X-STREAM-INF:BANDWIDTH=655600\n"
+            "../other/video.m3u8\n"
+        )
+        ingester = make_bluesky_ingester(source_store)
+        result = ingester._select_hls_variant(
+            master, "https://video.bsky.app/hls/playlist.m3u8",
+        )
+        assert result == "https://video.bsky.app/other/video.m3u8"
+
+    def test_falls_back_to_first_variant_when_no_bandwidth(
+        self, source_store: SourceStore,
+    ) -> None:
+        """全バリアントに BANDWIDTH がない場合は最初のバリアントにフォールバックする."""
+        master = (
+            "#EXTM3U\n"
+            "#EXT-X-STREAM-INF:RESOLUTION=360x640\n"
+            "360p/video.m3u8\n"
+            "#EXT-X-STREAM-INF:RESOLUTION=720x1280\n"
+            "720p/video.m3u8\n"
+        )
+        ingester = make_bluesky_ingester(source_store)
+        result = ingester._select_hls_variant(
+            master, "https://video.bsky.app/playlist.m3u8",
+        )
+        # BANDWIDTH なし → fallback_url（最初のバリアント）
+        assert result == "https://video.bsky.app/360p/video.m3u8"
+
+    def test_ignores_no_bandwidth_variant_when_others_have_it(
+        self, source_store: SourceStore,
+    ) -> None:
+        """BANDWIDTH ありとなしが混在する場合、BANDWIDTH ありの最小を選択する."""
+        master = (
+            "#EXTM3U\n"
+            "#EXT-X-STREAM-INF:RESOLUTION=360x640\n"
+            "360p/video.m3u8\n"
+            "#EXT-X-STREAM-INF:BANDWIDTH=3440800,RESOLUTION=720x1280\n"
+            "720p/video.m3u8\n"
+            "#EXT-X-STREAM-INF:BANDWIDTH=655600,RESOLUTION=480x854\n"
+            "480p/video.m3u8\n"
+        )
+        ingester = make_bluesky_ingester(source_store)
+        result = ingester._select_hls_variant(
+            master, "https://video.bsky.app/playlist.m3u8",
+        )
+        # BANDWIDTH なしの 360p は candidates に入らず、655600 の 480p が選択される
+        assert result == "https://video.bsky.app/480p/video.m3u8"
+
+
+class TestBaseDomain:
+    """_base_domain のテスト."""
+
+    def test_extracts_base_domain_from_subdomain(
+        self, source_store: SourceStore,
+    ) -> None:
+        """サブドメイン付きホストから eTLD+1 相当を抽出する."""
+        ingester = make_bluesky_ingester(source_store)
+        assert ingester._base_domain("video.cdn.bsky.app") == "bsky.app"
+
+    def test_extracts_base_domain_from_two_level_host(
+        self, source_store: SourceStore,
+    ) -> None:
+        """2レベルのホスト名はそのまま返す."""
+        ingester = make_bluesky_ingester(source_store)
+        assert ingester._base_domain("bsky.app") == "bsky.app"
+
+    def test_returns_single_label_as_is(
+        self, source_store: SourceStore,
+    ) -> None:
+        """1ラベルのホスト名はそのまま返す."""
+        ingester = make_bluesky_ingester(source_store)
+        assert ingester._base_domain("localhost") == "localhost"
+
+    def test_returns_empty_for_none(
+        self, source_store: SourceStore,
+    ) -> None:
+        """None は空文字列を返す."""
+        ingester = make_bluesky_ingester(source_store)
+        assert ingester._base_domain(None) == ""
+
+
+class TestGetFollowingSameOriginRedirect:
+    """_get_following_same_origin_redirect のテスト."""
+
+    @pytest.mark.asyncio()
+    async def test_returns_200_response_directly(
+        self, source_store: SourceStore,
+    ) -> None:
+        """200 レスポンスはそのまま返す."""
+        mock_client = AsyncMock()
+        mock_client.get.return_value = MagicMock(status_code=200, content=b"data")
+
+        ingester = make_bluesky_ingester(source_store)
+        resp = await ingester._get_following_same_origin_redirect(
+            mock_client, "https://video.bsky.app/playlist.m3u8",
+        )
+
+        assert resp.status_code == 200
+        assert resp.content == b"data"
+        mock_client.get.assert_called_once()
+
+    @pytest.mark.asyncio()
+    async def test_follows_redirect_to_same_base_domain(
+        self, source_store: SourceStore,
+    ) -> None:
+        """同一ベースドメインへの 302 リダイレクトを追従する."""
+        redirect_resp = MagicMock(
+            status_code=302,
+            headers={"location": "https://video.cdn.bsky.app/data/video0.ts"},
+        )
+        final_resp = MagicMock(status_code=200, content=b"video-data")
+
+        mock_client = AsyncMock()
+        mock_client.get.side_effect = [redirect_resp, final_resp]
+
+        ingester = make_bluesky_ingester(source_store)
+        resp = await ingester._get_following_same_origin_redirect(
+            mock_client, "https://video.bsky.app/360p/video0.ts",
+        )
+
+        assert resp.status_code == 200
+        assert resp.content == b"video-data"
+        assert mock_client.get.call_count == 2
+
+    @pytest.mark.asyncio()
+    async def test_rejects_redirect_to_different_domain(
+        self, source_store: SourceStore,
+    ) -> None:
+        """異なるベースドメインへのリダイレクトは追従せず 302 を返す."""
+        redirect_resp = MagicMock(
+            status_code=302,
+            headers={"location": "https://evil.example.com/steal"},
+        )
+
+        mock_client = AsyncMock()
+        mock_client.get.return_value = redirect_resp
+
+        ingester = make_bluesky_ingester(source_store)
+        resp = await ingester._get_following_same_origin_redirect(
+            mock_client, "https://video.bsky.app/360p/video0.ts",
+        )
+
+        assert resp.status_code == 302
+        mock_client.get.assert_called_once()
+
+    @pytest.mark.asyncio()
+    async def test_stops_at_max_redirects(
+        self, source_store: SourceStore,
+    ) -> None:
+        """リダイレクト上限で停止し、最後のレスポンスを返す."""
+        # 2回リダイレクト（上限=2 に設定）
+        redirect1 = MagicMock(
+            status_code=302,
+            headers={"location": "https://video.cdn.bsky.app/r1"},
+        )
+        redirect2 = MagicMock(
+            status_code=302,
+            headers={"location": "https://video.cdn.bsky.app/r2"},
+        )
+        final = MagicMock(status_code=200, content=b"finally")
+
+        mock_client = AsyncMock()
+        mock_client.get.side_effect = [redirect1, redirect2, final]
+
+        ingester = make_bluesky_ingester(source_store)
+        resp = await ingester._get_following_same_origin_redirect(
+            mock_client,
+            "https://video.bsky.app/start",
+            _max_redirects=2,
+        )
+
+        # 初回 GET + 2回リダイレクト追従 = 3回の GET
+        assert mock_client.get.call_count == 3
+        assert resp.status_code == 200
+
+
+class TestDownloadHlsVideo:
+    """_download_hls_video のマスタープレイリスト解決テスト."""
+
+    @pytest.mark.asyncio()
+    async def test_resolves_master_playlist_then_downloads_segments(
+        self, source_store: SourceStore, tmp_path: Path,
+    ) -> None:
+        """マスタープレイリストを検出し、バリアント経由で ts をDLする."""
+        master_text = (
+            "#EXTM3U\n"
+            "#EXT-X-STREAM-INF:BANDWIDTH=655600,RESOLUTION=360x640\n"
+            "360p/video.m3u8?sid=1\n"
+        )
+        variant_text = (
+            "#EXTM3U\n"
+            "#EXTINF:6.000,\n"
+            "video0.ts?sid=1\n"
+            "#EXTINF:5.000,\n"
+            "video1.ts?sid=1\n"
+        )
+        seg0 = b"\x00" * 100
+        seg1 = b"\xff" * 50
+
+        mock_client = AsyncMock()
+        # 1st call: master playlist, 2nd: variant, 3rd: seg0, 4th: seg1
+        mock_client.get.side_effect = [
+            MagicMock(text=master_text, status_code=200),
+            MagicMock(text=variant_text, status_code=200),
+            MagicMock(content=seg0, status_code=200),
+            MagicMock(content=seg1, status_code=200),
+        ]
+
+        dest = tmp_path / "media" / "video_0.ts"
+        ingester = make_bluesky_ingester(source_store)
+        await ingester._download_hls_video(
+            "https://video.bsky.app/watch/playlist.m3u8",
+            dest=dest,
+            client=mock_client,
+        )
+
+        assert dest.exists()
+        assert dest.read_bytes() == seg0 + seg1
+        assert mock_client.get.call_count == 4
+
+    @pytest.mark.asyncio()
+    async def test_downloads_variant_playlist_directly(
+        self, source_store: SourceStore, tmp_path: Path,
+    ) -> None:
+        """バリアントプレイリスト（#EXT-X-STREAM-INF なし）は直接 ts をDLする."""
+        variant_text = (
+            "#EXTM3U\n"
+            "#EXTINF:6.000,\n"
+            "video0.ts?sid=1\n"
+        )
+        seg0 = b"\xab" * 80
+
+        mock_client = AsyncMock()
+        mock_client.get.side_effect = [
+            MagicMock(text=variant_text, status_code=200),
+            MagicMock(content=seg0, status_code=200),
+        ]
+
+        dest = tmp_path / "media" / "video_0.ts"
+        ingester = make_bluesky_ingester(source_store)
+        await ingester._download_hls_video(
+            "https://video.bsky.app/360p/video.m3u8",
+            dest=dest,
+            client=mock_client,
+        )
+
+        assert dest.exists()
+        assert dest.read_bytes() == seg0
+        assert mock_client.get.call_count == 2

@@ -16,12 +16,14 @@ import sys
 import tempfile
 from datetime import datetime
 from pathlib import Path
-from urllib.parse import urljoin
+from urllib.parse import urljoin, urlparse
 
 from rag.pipeline.ingesters._common import IngestResult, ProgressCallback, now_iso
 from typing import TYPE_CHECKING, Any, Literal
 
 if TYPE_CHECKING:
+    import httpx
+
     from py_common_lib.httpx import ConstrainedClient
     from rag.pipeline.ingesters.youtube import YoutubeIngester
     from rag.store.source_store import SourceStore
@@ -549,8 +551,27 @@ class BlueskyIngester:
             client: ConstrainedClient インスタンス
         """
         # プレイリスト取得
-        resp = await client.get(playlist_url)
+        resp = await self._get_following_same_origin_redirect(
+            client, playlist_url,
+        )
         playlist_text = resp.text
+
+        # マスタープレイリスト判定: #EXT-X-STREAM-INF が含まれる場合は
+        # バリアントプレイリスト URL を解決してから ts セグメントを取得する
+        if "#EXT-X-STREAM-INF" in playlist_text:
+            variant_url = self._select_hls_variant(playlist_text, playlist_url)
+            if variant_url is None:
+                logger.warning(
+                    "マスタープレイリストからバリアントを取得できません: %s",
+                    playlist_url,
+                )
+                return
+            logger.debug("HLS バリアント選択: %s", variant_url)
+            resp = await self._get_following_same_origin_redirect(
+                client, variant_url,
+            )
+            playlist_text = resp.text
+            playlist_url = variant_url
 
         # ts セグメント URL を抽出（urljoin でルート相対・相対パスも正しく解決）
         segment_urls: list[str] = []
@@ -573,7 +594,9 @@ class BlueskyIngester:
         try:
             with open(tmp_fd, "wb") as f:
                 for seg_url in segment_urls:
-                    seg_resp = await client.get(seg_url)
+                    seg_resp = await self._get_following_same_origin_redirect(
+                        client, seg_url,
+                    )
                     f.write(seg_resp.content)
             tmp_path.replace(dest)
         except BaseException:
@@ -581,6 +604,113 @@ class BlueskyIngester:
             raise
 
         logger.debug("動画を保存しました（%d セグメント）: %s", len(segment_urls), dest)
+
+    @staticmethod
+    def _select_hls_variant(
+        master_playlist: str,
+        master_url: str,
+    ) -> str | None:
+        """マスタープレイリストから最低 BANDWIDTH のバリアント URL を返す.
+
+        仕様: docs/specs/ingesters/bluesky.md
+
+        Vision 解析用途のため低画質で十分。BANDWIDTH 属性をパースし、
+        最小値のバリアントを選択する。BANDWIDTH が取得できない場合は
+        最初のバリアントにフォールバックする。
+        """
+        lines = master_playlist.splitlines()
+        candidates: list[tuple[int, str]] = []  # (bandwidth, url)
+        fallback_url: str | None = None
+
+        i = 0
+        while i < len(lines):
+            line = lines[i].strip()
+            if line.startswith("#EXT-X-STREAM-INF"):
+                # 次の非空行がバリアント URL
+                variant_url: str | None = None
+                for j in range(i + 1, len(lines)):
+                    variant_line = lines[j].strip()
+                    if variant_line and not variant_line.startswith("#"):
+                        variant_url = variant_line
+                        i = j
+                        break
+                if variant_url is not None:
+                    if fallback_url is None:
+                        fallback_url = variant_url
+                    m = BlueskyIngester._BW_RE.search(line)
+                    if m:
+                        candidates.append((int(m.group(1)), variant_url))
+            i += 1
+
+        if candidates:
+            # BANDWIDTH 最小のバリアントを選択
+            _, best_url = min(candidates, key=lambda c: c[0])
+            return urljoin(master_url, best_url)
+        if fallback_url is not None:
+            return urljoin(master_url, fallback_url)
+        return None
+
+    _BW_RE = re.compile(r"BANDWIDTH=(\d+)")
+    _REDIRECT_STATUSES = frozenset({301, 302, 307, 308})
+
+    @staticmethod
+    def _base_domain(hostname: str | None) -> str:
+        """ホスト名から末尾2セグメント（eTLD+1 相当）を返す.
+
+        ccTLD（.co.uk 等）では正確な eTLD+1 を返さない簡易実装。
+        BlueSky CDN のドメイン構成（.app TLD）では問題ない。
+        """
+        if not hostname:
+            return ""
+        parts = hostname.rsplit(".", 2)
+        # "video.cdn.bsky.app" → ["video", "cdn", "bsky.app"] ではなく
+        # rsplit(".", 2) → ["video.cdn", "bsky", "app"]
+        # 末尾2つ = "bsky.app"
+        if len(parts) >= 2:
+            return f"{parts[-2]}.{parts[-1]}"
+        return hostname
+
+    @staticmethod
+    async def _get_following_same_origin_redirect(
+        client: ConstrainedClient,
+        url: str,
+        *,
+        _max_redirects: int = 5,
+    ) -> httpx.Response:
+        """同一ベースドメインのリダイレクトのみ追従する GET リクエスト.
+
+        ConstrainedClient の follow_redirects=False を維持しつつ、
+        CDN の 3xx リダイレクトに対応する。リダイレクト先のベースドメイン
+        （eTLD+1 相当）が異なる場合はリダイレクト前のレスポンスをそのまま
+        返す（SSRF 防止）。
+        """
+        original_parsed = urlparse(url)
+        original_base = BlueskyIngester._base_domain(original_parsed.hostname)
+        resp = await client.get(url)
+
+        for _ in range(_max_redirects):
+            if resp.status_code not in BlueskyIngester._REDIRECT_STATUSES:
+                return resp
+            location = resp.headers.get("location", "")
+            if not location:
+                return resp
+            # 相対 URL を解決
+            resolved = urljoin(url, location)
+            parsed = urlparse(resolved)
+            redirect_base = BlueskyIngester._base_domain(parsed.hostname)
+            if parsed.scheme != original_parsed.scheme or redirect_base != original_base:
+                logger.warning(
+                    "リダイレクト先が異なるドメイン（拒否）: %s → %s",
+                    url,
+                    resolved,
+                )
+                return resp
+            url = resolved
+            resp = await client.get(url)
+
+        if resp.status_code in BlueskyIngester._REDIRECT_STATUSES:
+            logger.warning("リダイレクト回数上限に到達: %s", url)
+        return resp
 
     async def follow_urls(
         self,
