@@ -713,6 +713,75 @@ class TestRemoveFile:
         # エラーにならない
         source_store.remove_file("local/ghost.txt")
 
+    def test_remove_file_deletes_media_subdir(
+        self,
+        workspace: dict[str, Path],
+    ) -> None:
+        """BlueSky 投稿削除時に media/{rkey}/ ディレクトリも削除する."""
+        source_dir = workspace["source"]
+        source_store = SourceStore(source_dir)
+        source_store.initialize()
+
+        rel = "bluesky/testdid/2026/03/testrkey.json"
+        full = source_dir / rel
+        full.parent.mkdir(parents=True, exist_ok=True)
+        full.write_text('{"text":"test"}', encoding="utf-8")
+        meta = full.with_name(full.name + ".meta")
+        meta.write_text("source_type: bluesky\n", encoding="utf-8")
+
+        # media ディレクトリ配置
+        media_dir = source_dir / "bluesky/testdid/2026/03/media/testrkey"
+        media_dir.mkdir(parents=True, exist_ok=True)
+        (media_dir / "video_0.ts").write_bytes(b"dummy")
+        (media_dir / "image_0.jpg").write_bytes(b"dummy")
+
+        source_store._db.register_source(
+            source_id=rel,
+            source_type="bluesky",
+            title="test",
+            content_hash="dummy",
+            file_size=15,
+            collected_at="2026-01-01T00:00:00+00:00",
+            updated_at="2026-01-01T00:00:00+00:00",
+        )
+
+        source_store.remove_file(rel)
+
+        assert not full.exists()
+        assert not meta.exists()
+        assert not media_dir.exists()
+
+    def test_remove_file_without_media_dir_is_safe(
+        self,
+        workspace: dict[str, Path],
+    ) -> None:
+        """media ディレクトリが存在しない投稿の削除でエラーにならない."""
+        source_dir = workspace["source"]
+        source_store = SourceStore(source_dir)
+        source_store.initialize()
+
+        rel = "bluesky/testdid/2026/03/norkey.json"
+        full = source_dir / rel
+        full.parent.mkdir(parents=True, exist_ok=True)
+        full.write_text('{"text":"no media"}', encoding="utf-8")
+        meta = full.with_name(full.name + ".meta")
+        meta.write_text("source_type: bluesky\n", encoding="utf-8")
+
+        source_store._db.register_source(
+            source_id=rel,
+            source_type="bluesky",
+            title="no media",
+            content_hash="dummy",
+            file_size=19,
+            collected_at="2026-01-01T00:00:00+00:00",
+            updated_at="2026-01-01T00:00:00+00:00",
+        )
+
+        source_store.remove_file(rel)
+
+        assert not full.exists()
+        assert not meta.exists()
+
 
 class TestRunFullRebuild:
     """全再構築のテスト."""
