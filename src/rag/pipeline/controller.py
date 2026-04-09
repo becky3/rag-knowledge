@@ -530,9 +530,11 @@ class PipelineController:
         """git diff の生出力を ChangeEntry に分類する.
 
         .meta ファイルのみの変更を meta_only として検出する。
+        media/ 配下のファイル変更時は対応する親 JSON を再変換対象に含める。
         """
         data_entries: dict[str, ChangeEntry] = {}
         meta_files: list[tuple[str, str, str]] = []
+        media_parent_jsons: set[str] = set()
 
         for status_char, file_path, old_path in raw_diff:
             if file_path in _PIPELINE_EXCLUDE_FILES:
@@ -540,8 +542,22 @@ class PipelineController:
             if file_path.endswith(".meta"):
                 meta_files.append((status_char, file_path, old_path))
             else:
+                # media/ 配下のファイルは対応する親 JSON を再変換対象に追加
+                parent_json = self._resolve_media_parent_json(file_path)
+                if parent_json is not None:
+                    media_parent_jsons.add(parent_json)
                 entry = self._map_status(status_char, file_path, old_path)
                 data_entries[file_path] = entry
+
+        # media/ 変更に対応する親 JSON を MODIFIED として追加
+        for json_path in media_parent_jsons:
+            if json_path not in data_entries:
+                source_path = self._source_store.root_dir / json_path
+                if source_path.exists():
+                    data_entries[json_path] = ChangeEntry(
+                        status=ChangeStatus.MODIFIED,
+                        file_path=json_path,
+                    )
 
         # .meta のみの変更を検出
         for _status_char, meta_path, _old_path in meta_files:
@@ -553,6 +569,28 @@ class PipelineController:
                 )
 
         return list(data_entries.values())
+
+    @staticmethod
+    def _resolve_media_parent_json(file_path: str) -> str | None:
+        """BlueSky media/ 配下のファイルパスから対応する親 JSON パスを導出する.
+
+        パス構造: bluesky/{did}/{year}/{month}/media/{rkey}/{filename}
+        親 JSON:  bluesky/{did}/{year}/{month}/{rkey}.json
+        """
+        normalized = file_path.replace("\\", "/")
+        if not normalized.startswith("bluesky/"):
+            return None
+        parts = normalized.split("/")
+        try:
+            media_idx = parts.index("media")
+        except ValueError:
+            return None
+        # media の次が rkey、その前が {year}/{month} を含む親ディレクトリ
+        if media_idx + 1 >= len(parts):
+            return None
+        rkey = parts[media_idx + 1]
+        parent_parts = parts[:media_idx]
+        return "/".join(parent_parts) + f"/{rkey}.json"
 
     @staticmethod
     def _map_status(

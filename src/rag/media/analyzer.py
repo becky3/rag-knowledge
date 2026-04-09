@@ -23,8 +23,8 @@ logger = logging.getLogger(__name__)
 
 # Vision API に送信するプロンプト
 _IMAGE_PROMPT = (
-    "Describe the content of this image in detail. "
-    "Include any text, objects, people, actions, and context visible in the image."
+    "この画像の内容を日本語で端的に説明してください。"
+    "感想や推測は含めず、画像に写っているテキスト・物体・人物・動作・状況を客観的に記述してください。"
 )
 
 
