@@ -177,6 +177,9 @@ class PipelineController:
             changes = self._scan_all_as_added()
         else:
             raw_diff = self._git.get_diff(last_commit_id)
+            raw_diff = self._supplement_hidden_changes(
+                raw_diff, last_commit_id,
+            )
             changes = self._classify_changes(raw_diff)
 
         if not changes:
@@ -522,6 +525,46 @@ class PipelineController:
                 file_path=f,
             ))
         return entries
+
+    def _supplement_hidden_changes(
+        self,
+        raw_diff: list[tuple[str, str, str]],
+        from_commit_id: str,
+    ) -> list[tuple[str, str, str]]:
+        """ネット差分で検出されない中間変更を補完する.
+
+        git diff（ネット差分）では「削除→同一内容再追加」が差分ゼロになる。
+        git log で中間コミットの全触ファイルを取得し、ネット差分に含まれないが
+        HEAD に存在するファイルを MODIFIED として追加する。
+        """
+        touched = self._git.get_files_touched_in_range(from_commit_id)
+        if not touched:
+            return raw_diff
+
+        net_files = {entry[1] for entry in raw_diff}
+        hidden = touched - net_files
+        if not hidden:
+            return raw_diff
+
+        head_files = set(self._git.list_all_files())
+        supplemented = list(raw_diff)
+        added_count = 0
+        for file_path in sorted(hidden):
+            if file_path in head_files:
+                logger.debug(
+                    "中間コミットで変更されたがネット差分に出ないファイルを"
+                    "MODIFIED として追加: %s",
+                    file_path,
+                )
+                supplemented.append(("M", file_path, ""))
+                added_count += 1
+        if added_count:
+            logger.info(
+                "中間コミットで変更されたがネット差分に出ないファイルを"
+                "MODIFIED として %d 件追加",
+                added_count,
+            )
+        return supplemented
 
     def _classify_changes(
         self,

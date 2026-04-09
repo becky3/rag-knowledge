@@ -150,6 +150,35 @@ class GitOperations:
         ])
         return self._parse_diff_output(result.stdout)
 
+    def get_files_touched_in_range(self, from_commit_id: str) -> set[str]:
+        """中間コミットで触れた全ファイルを取得する.
+
+        git log --name-only で from_commit_id..HEAD の間に
+        1回でも変更されたファイルパスを返す。
+        get_diff（ネット差分）では検出できない
+        「削除→同一内容再追加」のようなケースを補完するために使用する。
+
+        Args:
+            from_commit_id: 基準コミット ID（40桁の16進ハッシュ）
+
+        Returns:
+            中間コミットで触れたファイルパスの集合
+        """
+        result = self._run([
+            "git",
+            "-c",
+            "core.quotepath=false",
+            "log",
+            "--name-only",
+            "--pretty=format:",
+            f"{from_commit_id}..HEAD",
+        ])
+        return {
+            line
+            for line in result.stdout.strip().splitlines()
+            if line
+        }
+
     def list_all_files(self) -> list[str]:
         """HEAD で追跡されている全ファイルを列挙する.
 
