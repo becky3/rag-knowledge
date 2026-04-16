@@ -3,13 +3,16 @@
 テスト方針:
 - migrate() を明示的に呼び出してスキーマ変更を適用
 - initialize() ではマイグレーションが走らないことを確認
-- published_at 列の追加、file_path → source_id 移行を検証
+- published_at 列の追加、file_path → source_id 移行、meta 列追加を検証
 """
 
 from __future__ import annotations
 
+import json
 import sqlite3
 from pathlib import Path
+
+import yaml
 
 from rag.store.metadata_db import MetadataDB
 
@@ -103,8 +106,8 @@ class TestMigrateExplicit:
         db.initialize()
         applied = db.migrate()
 
-        # 3件のマイグレーションが適用される
-        assert len(applied) == 3
+        # 4件のマイグレーションが適用される
+        assert len(applied) == 4
 
         # file_path カラムが削除されている
         cursor = db._connection.execute("PRAGMA table_info(sources)")
@@ -160,7 +163,7 @@ class TestMigrateExplicit:
         db.initialize()
 
         first = db.migrate()
-        assert len(first) == 3
+        assert len(first) == 4
 
         second = db.migrate()
         assert len(second) == 0
@@ -218,12 +221,131 @@ class TestMigrateExplicit:
         db.initialize()
         applied = db.migrate()
 
-        # published_at + file_path 移行の 2 件
-        assert len(applied) == 2
+        # published_at + file_path 移行 + meta の 3 件
+        assert len(applied) == 3
 
         for i in range(3):
             record = db.get_source(f"web/s{i}.html")
             assert record is not None
             assert record.published_at == f"2026-01-{i+1:02d}T00:00:00Z"
+
+        db.close()
+
+
+class TestMetaMigration:
+    """meta カラムマイグレーションのテスト."""
+
+    def _create_pre_meta_db(self, db_path: Path) -> None:
+        """meta カラムなしの DB を作成する."""
+        conn = sqlite3.connect(str(db_path))
+        conn.executescript("""\
+            CREATE TABLE sources (
+                source_id    TEXT PRIMARY KEY,
+                source_type  TEXT NOT NULL,
+                title        TEXT NOT NULL,
+                status       TEXT NOT NULL DEFAULT 'active',
+                content_hash TEXT NOT NULL,
+                file_size    INTEGER NOT NULL,
+                collected_at TEXT NOT NULL,
+                updated_at   TEXT NOT NULL,
+                published_at TEXT NOT NULL DEFAULT ''
+            );
+            CREATE TABLE pipeline_history (
+                id             INTEGER PRIMARY KEY AUTOINCREMENT,
+                from_commit_id TEXT NOT NULL,
+                to_commit_id   TEXT NOT NULL,
+                processed_at   TEXT NOT NULL,
+                mode           TEXT NOT NULL DEFAULT 'incremental'
+            );
+        """)
+        conn.close()
+
+    def test_migrate_adds_meta_column(self, tmp_path: Path) -> None:
+        """migrate() で meta カラムが追加される."""
+        db_path = tmp_path / "metadata.db"
+        self._create_pre_meta_db(db_path)
+
+        db = MetadataDB(db_path)
+        db.initialize()
+        applied = db.migrate()
+
+        assert len(applied) == 1
+        assert "meta" in applied[0]
+
+        cursor = db._connection.execute("PRAGMA table_info(sources)")
+        columns = {row["name"] for row in cursor.fetchall()}
+        assert "meta" in columns
+
+        db.close()
+
+    def test_migrate_fills_meta_from_files(self, tmp_path: Path) -> None:
+        """migrate() が .meta ファイルからデータを充填する."""
+        source_store = tmp_path / "source_store"
+        source_store.mkdir()
+        db_path = source_store / "metadata.db"
+        self._create_pre_meta_db(db_path)
+
+        # ソースレコードを事前登録
+        conn = sqlite3.connect(str(db_path))
+        conn.execute(
+            "INSERT INTO sources VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            ("journal/repo-a/entry.md", "journal", "Entry", "active",
+             "hash", 100, "2026-01-01T00:00:00Z", "2026-01-01T00:00:00Z",
+             "2026-01-01T00:00:00Z"),
+        )
+        conn.commit()
+        conn.close()
+
+        # .meta ファイルを作成
+        journal_dir = source_store / "journal" / "repo-a"
+        journal_dir.mkdir(parents=True)
+        (journal_dir / "entry.md").write_text("content")
+        meta_content = {
+            "title": "Entry",
+            "repository": "repo-a",
+            "collected_at": "2026-01-01T00:00:00Z",
+        }
+        with open(journal_dir / "entry.md.meta", "w", encoding="utf-8") as f:
+            yaml.safe_dump(meta_content, f)
+
+        db = MetadataDB(db_path)
+        db.initialize()
+        applied = db.migrate(source_store_dir=source_store)
+
+        assert len(applied) == 1
+        assert "1 件" in applied[0]
+
+        record = db.get_source("journal/repo-a/entry.md")
+        assert record is not None
+        meta = json.loads(record.meta)
+        assert meta["repository"] == "repo-a"
+
+        db.close()
+
+    def test_migrate_without_source_store_dir(self, tmp_path: Path) -> None:
+        """source_store_dir なしでもカラム追加は行われる（データ充填はスキップ）."""
+        db_path = tmp_path / "metadata.db"
+        self._create_pre_meta_db(db_path)
+
+        conn = sqlite3.connect(str(db_path))
+        conn.execute(
+            "INSERT INTO sources VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            ("local/test.md", "local", "Test", "active",
+             "hash", 10, "2026-01-01T00:00:00Z", "2026-01-01T00:00:00Z",
+             "2026-01-01T00:00:00Z"),
+        )
+        conn.commit()
+        conn.close()
+
+        db = MetadataDB(db_path)
+        db.initialize()
+        applied = db.migrate()
+
+        assert len(applied) == 1
+        assert "0 件" in applied[0]
+
+        record = db.get_source("local/test.md")
+        assert record is not None
+        assert record.meta == "{}"
 
         db.close()

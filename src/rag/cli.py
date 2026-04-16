@@ -2009,7 +2009,7 @@ def run_migrate(args: argparse.Namespace) -> None:
     db = MetadataDB(db_path)
     try:
         db.initialize()
-        applied = db.migrate()
+        applied = db.migrate(source_store_dir=Path(source_store_dir))
     finally:
         db.close()
 
