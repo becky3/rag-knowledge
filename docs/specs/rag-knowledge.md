@@ -43,6 +43,7 @@ MCP サーバーとして独立動作し、18 個のツールを提供する。
 | ChromaDB サーバー | `CHROMADB_SERVER_HOST`, `CHROMADB_SERVER_PORT`, `CHROMADB_AUTO_START` |
 | トランスポート | `RAG_TRANSPORT`, `RAG_HTTP_HOST`, `RAG_HTTP_PORT`, `RAG_DNS_REBINDING_PROTECTION` |
 | デバッグ | `RAG_DEBUG_LOG_ENABLED` |
+| ログファイル出力 | `RAG_LOG_DIR` |
 | YouTube Whisper | `RAG_YOUTUBE_WHISPER_MODEL`, `RAG_YOUTUBE_WHISPER_DEVICE` |
 | サイト一括取り込み | `SITE_INGEST_TEMP_DIR` |
 | Embedding 並列 | `RAG_EMBEDDING_CONCURRENCY` |
@@ -58,6 +59,7 @@ MCP サーバーとして独立動作し、18 個のツールを提供する。
 | ChromaDB | `chromadb_collection_name` |
 | URL 安全性 | `rag_url_safety_check`, `rag_url_safety_cache_ttl`, `rag_url_safety_timeout` |
 | レスポンス制御 | `rag_max_response_chars`（rag_get_document のトランケーション）, `rag_stats_max_sources`, `rag_list_recent_limit` |
+| ログファイル出力 | `rag_log_file_max_bytes` |
 | Zenn インジェスター | `rag_zenn_max_articles`, `rag_zenn_request_timeout`, `rag_zenn_request_interval` |
 | BlueSky インジェスター | `rag_bluesky_appview_url`, `rag_bluesky_max_posts`, `rag_bluesky_request_timeout`, `rag_bluesky_request_interval`, `rag_bluesky_include_reposts` |
 | ドキュメントインジェスター | `rag_document_supported_extensions`, `rag_document_http_mode_enabled`, `rag_document_allowed_dirs` |
@@ -105,6 +107,20 @@ MCP サーバーとして独立動作し、18 個のツールを提供する。
 MCP サーバープロセスでは `rag` 名前空間ロガーに StreamHandler を直接設定する。`logging.basicConfig` は使用しない（uvicorn / FastMCP のルートロガー設定を上書きしないため）。
 
 `rag_debug_log_enabled` が有効な場合、`rag` 名前空間ロガーのレベルを DEBUG に切り替える。これにより CLI サブプロセスの stderr 転送等の詳細情報が出力される。
+
+#### ログファイル出力
+
+`rag_log_dir` が設定されている場合、stderr 出力を維持したまま追加でログファイルに出力する。未設定時は従来通り stderr のみ。本節で「セッション」はサーバープロセスの 1 起動期間（起動から終了まで）を指す。
+
+- **パスの解釈**: `rag_log_dir` は絶対パス、またはサーバープロセスの CWD からの相対パスとして解釈する
+- **ディレクトリの準備**: 指定ディレクトリが存在しない場合は親を含めて自動作成する
+- **ファイル命名**: `rag-server-YYYYMMDD-HHMMSS-NNNNN.log`（サーバー起動時刻 + 5 桁ゼロパディングの連番）
+  - 起動時刻はローカルタイム（運用者がログを確認する際の可読性を優先）
+  - 連番はセッション開始時に `-00001` から始まる
+- **プロセス起動中のローテーション**: 書き込み時点で現在のファイルサイズが `rag_log_file_max_bytes`（バイト）以上であれば、連番をインクリメントして新ファイルを開く。旧ファイルは削除しない
+- **ファイル衝突時の扱い**: セッション開始時の `-00001`、およびローテーション時に生成するファイルパスが既に存在する場合は、同一の「既存ファイルを上書きしない」ポリシーで失敗させる。起動時は起動失敗、ローテーション時は logging の `handleError` に委ねる
+- **空文字列の扱い**: `rag_log_dir` に空文字列（または空白のみ）が指定された場合は設定ミスとして起動時エラー。ファイル出力を無効化したい場合は未設定とする
+- **`rag_debug_log_enabled` との関係**: ファイル出力にも同一のログレベルを適用する
 
 #### CLI サブプロセスの stderr 転送
 

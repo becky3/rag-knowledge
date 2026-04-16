@@ -14,7 +14,10 @@ MCPサーバーとして公開されていることを検証する。
 from __future__ import annotations
 
 from importlib import import_module
+from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock, patch
+
+import logging
 
 import pytest
 
@@ -187,6 +190,7 @@ class TestConfigureAndRun:
         mod = import_module("rag.server")
         mock_settings = MagicMock()
         mock_settings.rag_transport = "stdio"
+        mock_settings.rag_log_dir = None
 
         with (
             patch.object(mod, "get_settings", return_value=mock_settings),
@@ -204,6 +208,7 @@ class TestConfigureAndRun:
         mock_settings.rag_http_host = "127.0.0.1"
         mock_settings.rag_http_port = 9090
         mock_settings.rag_dns_rebinding_protection = True
+        mock_settings.rag_log_dir = None
 
         with (
             patch.object(mod, "get_settings", return_value=mock_settings),
@@ -223,6 +228,7 @@ class TestConfigureAndRun:
         mock_settings.rag_http_host = "127.0.0.1"
         mock_settings.rag_http_port = 8080
         mock_settings.rag_dns_rebinding_protection = True
+        mock_settings.rag_log_dir = None
 
         with (
             patch.object(mod, "get_settings", return_value=mock_settings),
@@ -241,6 +247,7 @@ class TestConfigureAndRun:
         mod = import_module("rag.server")
         mock_settings = MagicMock()
         mock_settings.rag_transport = "stdio"
+        mock_settings.rag_log_dir = None
 
         with (
             patch.object(mod, "get_settings", return_value=mock_settings),
@@ -259,6 +266,7 @@ class TestConfigureAndRun:
         mod = import_module("rag.server")
         mock_settings = MagicMock()
         mock_settings.rag_transport = "stdio"
+        mock_settings.rag_log_dir = None
 
         with (
             patch.object(mod, "get_settings", return_value=mock_settings),
@@ -268,6 +276,57 @@ class TestConfigureAndRun:
             _configure_and_run()
 
         mock_log.assert_any_call("MCP server shut down")
+
+
+class TestAttachLogFileHandler:
+    """_attach_log_file_handler のテスト (#588)."""
+
+    def _build_rag_logger(self) -> logging.Logger:
+        """毎回新しい名前空間を用意してグローバル状態汚染を避ける."""
+        import uuid
+
+        return logging.getLogger(f"rag_test_{uuid.uuid4().hex}")
+
+    def test_handler_not_attached_when_rag_log_dir_is_none(self) -> None:
+        from rag.infrastructure.log_file_handler import SessionRotatingFileHandler
+        from rag.server import _attach_log_file_handler
+
+        rag_logger = self._build_rag_logger()
+        mock_settings = MagicMock()
+        mock_settings.rag_log_dir = None
+
+        _attach_log_file_handler(
+            rag_logger, mock_settings, logging.Formatter("%(message)s")
+        )
+
+        assert not any(
+            isinstance(h, SessionRotatingFileHandler) for h in rag_logger.handlers
+        )
+
+    def test_handler_attached_when_rag_log_dir_set(
+        self, tmp_path: Path
+    ) -> None:
+        from rag.infrastructure.log_file_handler import SessionRotatingFileHandler
+        from rag.server import _attach_log_file_handler
+
+        rag_logger = self._build_rag_logger()
+        mock_settings = MagicMock()
+        mock_settings.rag_log_dir = str(tmp_path)
+        mock_settings.rag_log_file_max_bytes = 1_000_000
+
+        _attach_log_file_handler(
+            rag_logger, mock_settings, logging.Formatter("%(message)s")
+        )
+        try:
+            file_handlers = [
+                h for h in rag_logger.handlers
+                if isinstance(h, SessionRotatingFileHandler)
+            ]
+            assert len(file_handlers) == 1
+        finally:
+            for h in list(rag_logger.handlers):
+                h.close()
+                rag_logger.removeHandler(h)
 
 
 class TestRagGetDocumentTool:

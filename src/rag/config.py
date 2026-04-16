@@ -78,6 +78,9 @@ class _EnvLoader(BaseSettings):
     # デバッグ
     rag_debug_log_enabled: bool
 
+    # 長時間運用で stderr が失われる環境向けにログをファイル永続化する。未設定時は stderr のみ
+    rag_log_dir: str | None = None
+
     # YouTube インジェスター（Whisper）— GPU 有無で選択が変わるため .env 管理
     rag_youtube_whisper_model: str = "base"
     rag_youtube_whisper_device: Literal["cuda", "cpu"] = "cuda"
@@ -102,7 +105,7 @@ class RAGSettings(BaseModel):
     - 環境依存値(.env): embedding_provider, lmstudio_base_url 等
     - 共通設定値(config.toml): rag_chunk_size, rag_retrieval_count 等
 
-    全フィールドは必須。例外: float | None / int | None 型のフィールドは
+    全フィールドは必須。例外: float | None / int | None / str | None 型のフィールドは
     未設定時に None（機能無効）がデフォルト。
     """
 
@@ -122,6 +125,8 @@ class RAGSettings(BaseModel):
     rag_http_port: int = Field(ge=1, le=65535)
     rag_dns_rebinding_protection: bool
     rag_debug_log_enabled: bool
+    # 長時間運用で stderr が失われる環境向けにログをファイル永続化する。未設定時は stderr のみ
+    rag_log_dir: str | None = None
     rag_youtube_whisper_model: str
     rag_youtube_whisper_device: Literal["cuda", "cpu"]
     site_ingest_temp_dir: str
@@ -181,6 +186,9 @@ class RAGSettings(BaseModel):
     # MCP レスポンスの情報量を制御
     rag_stats_max_sources: int = Field(ge=1)
     rag_list_recent_limit: int = Field(ge=1, le=100)
+
+    # 単一ログファイルの肥大化を防ぎ、ツール側での読み込みコストを抑える
+    rag_log_file_max_bytes: int = Field(ge=1)
 
     # Zenn インジェスター — API BAN 回避のためのレート制限
     rag_zenn_max_articles: int = Field(ge=1, le=100)
@@ -272,6 +280,16 @@ class RAGSettings(BaseModel):
             raise ValueError(
                 f"rag_chunk_overlap ({self.rag_chunk_overlap}) must be less than "
                 f"rag_chunk_size ({self.rag_chunk_size})"
+            )
+        return self
+
+    @model_validator(mode="after")
+    def validate_log_dir(self) -> RAGSettings:
+        """rag_log_dir が空文字列の場合は設定ミスとして検出する."""
+        if self.rag_log_dir is not None and self.rag_log_dir.strip() == "":
+            raise ValueError(
+                "rag_log_dir must be a non-empty directory path (use None/unset "
+                "to disable file logging)"
             )
         return self
 

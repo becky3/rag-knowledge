@@ -34,6 +34,7 @@ import logging
 import os
 import re
 import sys
+from datetime import datetime
 from pathlib import Path
 from typing import Any
 
@@ -42,7 +43,8 @@ os.environ.setdefault("ANONYMIZED_TELEMETRY", "False")
 
 # bm25s が "resource module not available on Windows" を stdout に print する
 # 問題への対策として、import 時に stdout を抑制する。
-from .config import ensure_utf8_streams
+from .config import RAGSettings, ensure_utf8_streams
+from .infrastructure.log_file_handler import SessionRotatingFileHandler
 from .rag_knowledge import format_file_size
 
 with contextlib.redirect_stdout(io.StringIO()):
@@ -1851,19 +1853,52 @@ def _check_api_key_registered() -> str | None:
     return None
 
 
+def _attach_log_file_handler(
+    rag_logger: logging.Logger,
+    settings: RAGSettings,
+    formatter: logging.Formatter,
+) -> None:
+    """rag_log_dir が設定されている場合にファイルハンドラを追加する."""
+    if settings.rag_log_dir is None:
+        return
+    if any(
+        isinstance(h, SessionRotatingFileHandler) for h in rag_logger.handlers
+    ):
+        return
+    log_dir = Path(settings.rag_log_dir)
+    try:
+        log_dir.mkdir(parents=True, exist_ok=True)
+        file_handler = SessionRotatingFileHandler(
+            log_dir=log_dir,
+            started_at=datetime.now(),
+            max_bytes=settings.rag_log_file_max_bytes,
+        )
+    except Exception:
+        logger.exception(
+            "Failed to set up log file output (RAG_LOG_DIR=%s)",
+            settings.rag_log_dir,
+        )
+        raise
+    file_handler.setFormatter(formatter)
+    rag_logger.addHandler(file_handler)
+
+
 def _configure_and_run() -> None:
     """トランスポート設定に基づいて MCP サーバーを起動する."""
     # rag 名前空間ロガーの設定（uvicorn/FastMCP のルートロガーを上書きしない）
     rag_logger = logging.getLogger("rag")
+    log_formatter = logging.Formatter(
+        "%(asctime)s %(name)s %(levelname)s %(message)s",
+    )
     if not rag_logger.handlers:
         handler = logging.StreamHandler(sys.__stderr__)
-        handler.setFormatter(
-            logging.Formatter("%(asctime)s %(name)s %(levelname)s %(message)s"),
-        )
+        handler.setFormatter(log_formatter)
         rag_logger.addHandler(handler)
     rag_logger.propagate = False
 
     settings = get_settings()
+
+    _attach_log_file_handler(rag_logger, settings, log_formatter)
 
     # ログレベル設定
     log_level = logging.DEBUG if settings.rag_debug_log_enabled else logging.INFO
