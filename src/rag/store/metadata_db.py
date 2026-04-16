@@ -8,7 +8,9 @@ WAL モードで運用し、source_store のファイルと .meta から再構�
 
 from __future__ import annotations
 
+import json
 import logging
+import re
 import sqlite3
 from pathlib import Path
 from typing import Any
@@ -23,6 +25,9 @@ from rag.store.models import (
 
 logger = logging.getLogger(__name__)
 
+# json_extract の JSON パスに埋め込むキー名の許容パターン
+_VALID_FILTER_KEY_RE = re.compile(r"^[a-zA-Z_][a-zA-Z0-9_]*$")
+
 _SCHEMA_SQL = """\
 CREATE TABLE IF NOT EXISTS sources (
     source_id    TEXT PRIMARY KEY,
@@ -33,7 +38,8 @@ CREATE TABLE IF NOT EXISTS sources (
     file_size    INTEGER NOT NULL,
     collected_at TEXT NOT NULL,
     updated_at   TEXT NOT NULL,
-    published_at TEXT NOT NULL DEFAULT ''
+    published_at TEXT NOT NULL DEFAULT '',
+    meta         TEXT NOT NULL DEFAULT '{}'
 );
 
 CREATE TABLE IF NOT EXISTS pipeline_history (
@@ -78,12 +84,18 @@ class MetadataDB:
             self._conn.close()
             self._conn = None
 
-    def migrate(self) -> list[str]:
+    def migrate(
+        self, *, source_store_dir: Path | None = None,
+    ) -> list[str]:
         """既存テーブルのスキーマをマイグレーションする.
 
         CLI の migrate コマンドから明示的に呼び出す。
         initialize() からは呼び出されない。
         各種機能は最新スキーマを前提とし、旧スキーマへのフォールバックは行わない。
+
+        Args:
+            source_store_dir: source_store のルートディレクトリ。
+                meta カラムマイグレーションで .meta ファイルを読み取るために必要。
 
         Returns:
             適用されたマイグレーションの説明リスト（適用なしなら空リスト）
@@ -149,8 +161,77 @@ class MetadataDB:
                 "sources テーブルから file_path カラムを削除し"
                 " source_id を file_path ベースに移行しました"
             )
+            # 再取得（テーブル再作成後のカラム情報を反映）
+            cursor = self._connection.execute("PRAGMA table_info(sources)")
+            src_columns = {row["name"] for row in cursor.fetchall()}
+
+        # sources に meta 列を追加し、.meta ファイルからデータを充填
+        if "meta" not in src_columns:
+            self._connection.execute(
+                "ALTER TABLE sources"
+                " ADD COLUMN meta TEXT NOT NULL DEFAULT '{}'"
+            )
+            self._connection.commit()
+
+            filled = self._fill_meta_from_files(source_store_dir)
+            applied.append(
+                f"sources に meta 列を追加（{filled} 件の .meta データを充填）"
+            )
+            logger.info(
+                "sources に meta 列を追加しました（%d 件充填）", filled,
+            )
 
         return applied
+
+    def _fill_meta_from_files(
+        self, source_store_dir: Path | None,
+    ) -> int:
+        """source_store の .meta ファイルを読み取り meta カラムに充填する.
+
+        Args:
+            source_store_dir: source_store のルートディレクトリ。
+                None の場合は充填をスキップする。
+
+        Returns:
+            充填した件数
+        """
+        if source_store_dir is None:
+            logger.warning(
+                "source_store_dir が未指定のため"
+                " meta カラムのデータ充填をスキップします"
+            )
+            return 0
+
+        from rag.store.meta import meta_path_for, read_meta
+
+        rows = self._connection.execute(
+            "SELECT source_id FROM sources WHERE meta = '{}'"
+        ).fetchall()
+
+        filled = 0
+        for row in rows:
+            source_id = row["source_id"]
+            file_path = source_store_dir / source_id
+            meta_file = meta_path_for(file_path)
+            if meta_file.exists():
+                try:
+                    meta_dict = read_meta(file_path)
+                    meta_json = json.dumps(
+                        meta_dict, ensure_ascii=False, default=str,
+                    )
+                    self._connection.execute(
+                        "UPDATE sources SET meta = ? WHERE source_id = ?",
+                        (meta_json, source_id),
+                    )
+                    filled += 1
+                except Exception:
+                    logger.warning(
+                        ".meta ファイルの読み取りに失敗: %s", source_id,
+                        exc_info=True,
+                    )
+
+        self._connection.commit()
+        return filled
 
     def __enter__(self) -> MetadataDB:
         return self
@@ -171,6 +252,7 @@ class MetadataDB:
         collected_at: str,
         updated_at: str,
         published_at: str = "",
+        meta: str = "{}",
     ) -> None:
         """ソースを登録する.
 
@@ -184,6 +266,7 @@ class MetadataDB:
             published_at も同様に INSERT 時のみ使用される。
             local 媒体の git 由来時刻への補正は、パイプライン制御層が
             update_source() で後から実施する。
+            meta は .meta ファイルの内容を JSON 文字列として格納する。
         """
         # published_at 未指定時は collected_at を使用
         if not published_at:
@@ -193,15 +276,17 @@ class MetadataDB:
             """\
             INSERT INTO sources
                 (source_id, source_type, title, status,
-                 content_hash, file_size, collected_at, updated_at, published_at)
-            VALUES (?, ?, ?, 'active', ?, ?, ?, ?, ?)
+                 content_hash, file_size, collected_at, updated_at,
+                 published_at, meta)
+            VALUES (?, ?, ?, 'active', ?, ?, ?, ?, ?, ?)
             ON CONFLICT(source_id) DO UPDATE SET
                 source_type = excluded.source_type,
                 title = excluded.title,
                 status = 'active',
                 content_hash = excluded.content_hash,
                 file_size = excluded.file_size,
-                updated_at = excluded.updated_at
+                updated_at = excluded.updated_at,
+                meta = excluded.meta
             """,
             (
                 source_id,
@@ -212,6 +297,7 @@ class MetadataDB:
                 collected_at,
                 updated_at,
                 published_at,
+                meta,
             ),
         )
         self._connection.commit()
@@ -240,6 +326,7 @@ class MetadataDB:
             "collected_at",
             "updated_at",
             "published_at",
+            "meta",
         }
         invalid = set(fields.keys()) - allowed
         if invalid:
@@ -419,30 +506,94 @@ class MetadataDB:
             ).fetchone()
         return int(row["cnt"]) if row else 0
 
+    @staticmethod
+    def _build_meta_filter_conditions(
+        filters: dict[str, str],
+        conditions: list[str],
+        params: list[Any],
+    ) -> None:
+        """filters dict から meta カラム用の WHERE 条件を構築する.
+
+        キー名は英数字・アンダースコアのみ許可し、
+        SQL インジェクションを防止する。
+
+        Raises:
+            ValueError: キー名に不正な文字が含まれる場合
+        """
+        for key, value in filters.items():
+            if not _VALID_FILTER_KEY_RE.match(key):
+                msg = (
+                    f"フィルタキー名に不正な文字が含まれています: {key!r}"
+                    "（英数字・アンダースコアのみ許可）"
+                )
+                raise ValueError(msg)
+            conditions.append(f"json_extract(meta, '$.{key}') = ?")
+            params.append(value)
+
     def list_sources(
         self,
         *,
         source_type: SourceType,
         limit: int,
         ascending: bool = False,
+        filters: dict[str, str] | None = None,
     ) -> list[SourceRecord]:
-        """指定 source_type の active ソースを published_at でソートして取得する."""
+        """指定 source_type の active ソースを published_at でソートして取得する.
+
+        Args:
+            source_type: ソース種別
+            limit: 取得件数
+            ascending: True で古い順、False で新しい順
+            filters: メタデータフィルタ（key=value 形式）。
+                meta JSON カラムの json_extract でフィルタする。
+
+        Raises:
+            ValueError: filters のキー名に不正な文字が含まれる場合
+        """
         direction = "ASC" if ascending else "DESC"
+        conditions = ["source_type = ?", "status = 'active'"]
+        params: list[Any] = [source_type]
+
+        if filters:
+            self._build_meta_filter_conditions(filters, conditions, params)
+
+        where = " AND ".join(conditions)
+        params.append(limit)
+
         rows = self._connection.execute(
-            "SELECT * FROM sources"
-            " WHERE source_type = ? AND status = 'active'"
+            f"SELECT * FROM sources WHERE {where}"  # noqa: S608
             f" ORDER BY published_at {direction}"
             " LIMIT ?",
-            (source_type, limit),
+            params,
         ).fetchall()
         return [_row_to_source_record(r) for r in rows]
 
-    def count_sources_by_type(self, *, source_type: SourceType) -> int:
-        """指定 source_type の active ソース件数を返す."""
+    def count_sources_by_type(
+        self,
+        *,
+        source_type: SourceType,
+        filters: dict[str, str] | None = None,
+    ) -> int:
+        """指定 source_type の active ソース件数を返す.
+
+        Args:
+            source_type: ソース種別
+            filters: メタデータフィルタ（key=value 形式）。
+                meta JSON カラムの json_extract でフィルタする。
+
+        Raises:
+            ValueError: filters のキー名に不正な文字が含まれる場合
+        """
+        conditions = ["source_type = ?", "status = 'active'"]
+        params: list[Any] = [source_type]
+
+        if filters:
+            self._build_meta_filter_conditions(filters, conditions, params)
+
+        where = " AND ".join(conditions)
         row = self._connection.execute(
-            "SELECT COUNT(*) as cnt FROM sources"
-            " WHERE source_type = ? AND status = 'active'",
-            (source_type,),
+            f"SELECT COUNT(*) as cnt FROM sources WHERE {where}",  # noqa: S608
+            params,
         ).fetchone()
         return int(row["cnt"]) if row else 0
 
@@ -459,4 +610,5 @@ def _row_to_source_record(row: sqlite3.Row) -> SourceRecord:
         collected_at=row["collected_at"],
         updated_at=row["updated_at"],
         published_at=row["published_at"],
+        meta=row["meta"],
     )

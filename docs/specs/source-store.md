@@ -442,6 +442,8 @@ source_store 内の全ファイルのメタデータ索引。
 | `file_size` | INTEGER | NOT NULL | ファイルサイズ（バイト） |
 | `collected_at` | TEXT | NOT NULL | 初回取り込み日時（ISO 8601） |
 | `updated_at` | TEXT | NOT NULL | 最終更新日時（ISO 8601）。`register_source` の呼び出し時に現在時刻で設定される（新規登録・再取り込み時の上書きの両方） |
+| `published_at` | TEXT | NOT NULL, DEFAULT '' | 公開日時（ISO 8601）。source_type ごとの `.meta` フィールドから解決する。空の場合は `collected_at` を使用する |
+| `meta` | TEXT | NOT NULL, DEFAULT '{}' | `.meta` ファイルの内容を JSON 文字列として格納する索引。`json_extract()` でフィルタ可能。`.meta` が原本であり、本カラムは検索用の索引 |
 
 #### pipeline_history テーブル
 

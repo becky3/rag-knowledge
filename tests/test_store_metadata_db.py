@@ -5,6 +5,7 @@
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
 import pytest
@@ -239,6 +240,195 @@ class TestSourcesCRUD:
         assert db.source_count() == 2
         assert db.source_count(status="active") == 1
         assert db.source_count(status="deleted") == 1
+
+
+class TestMetaColumn:
+    """meta JSON カラムのテスト."""
+
+    def test_register_with_meta(self, db: MetadataDB) -> None:
+        """meta パラメータ付きで登録できる."""
+        meta = json.dumps({"repository": "test-repo", "author": "alice"})
+        db.register_source(
+            source_id="journal/test-repo/entry.md",
+            source_type="journal",
+            title="Test Entry",
+            content_hash="h",
+            file_size=100,
+            collected_at="2026-01-01T00:00:00Z",
+            updated_at="2026-01-01T00:00:00Z",
+            meta=meta,
+        )
+
+        record = db.get_source("journal/test-repo/entry.md")
+        assert record is not None
+        assert json.loads(record.meta) == {"repository": "test-repo", "author": "alice"}
+
+    def test_register_default_meta(self, db: MetadataDB) -> None:
+        """meta 未指定時は空 JSON オブジェクトがデフォルト."""
+        db.register_source(
+            source_id="local/test.md",
+            source_type="local",
+            title="Test",
+            content_hash="h",
+            file_size=10,
+            collected_at="2026-01-01T00:00:00Z",
+            updated_at="2026-01-01T00:00:00Z",
+        )
+
+        record = db.get_source("local/test.md")
+        assert record is not None
+        assert record.meta == "{}"
+
+    def test_upsert_updates_meta(self, db: MetadataDB) -> None:
+        """再登録で meta が更新される."""
+        db.register_source(
+            source_id="journal/repo/e.md",
+            source_type="journal",
+            title="Entry",
+            content_hash="h1",
+            file_size=10,
+            collected_at="2026-01-01T00:00:00Z",
+            updated_at="2026-01-01T00:00:00Z",
+            meta=json.dumps({"repository": "old"}),
+        )
+        db.register_source(
+            source_id="journal/repo/e.md",
+            source_type="journal",
+            title="Entry Updated",
+            content_hash="h2",
+            file_size=20,
+            collected_at="2026-01-02T00:00:00Z",
+            updated_at="2026-01-02T00:00:00Z",
+            meta=json.dumps({"repository": "new"}),
+        )
+
+        record = db.get_source("journal/repo/e.md")
+        assert record is not None
+        assert json.loads(record.meta)["repository"] == "new"
+
+    def test_list_sources_with_filter(self, db: MetadataDB) -> None:
+        """filters で meta の値を絞り込める."""
+        for repo in ("repo-a", "repo-b"):
+            db.register_source(
+                source_id=f"journal/{repo}/entry.md",
+                source_type="journal",
+                title=f"Entry {repo}",
+                content_hash="h",
+                file_size=10,
+                collected_at="2026-01-01T00:00:00Z",
+                updated_at="2026-01-01T00:00:00Z",
+                published_at="2026-01-01T00:00:00Z",
+                meta=json.dumps({"repository": repo}),
+            )
+
+        results = db.list_sources(
+            source_type="journal",
+            limit=10,
+            filters={"repository": "repo-a"},
+        )
+        assert len(results) == 1
+        assert results[0].source_id == "journal/repo-a/entry.md"
+
+    def test_list_sources_without_filter(self, db: MetadataDB) -> None:
+        """filters 未指定で全件返る."""
+        for i in range(3):
+            db.register_source(
+                source_id=f"journal/repo/e{i}.md",
+                source_type="journal",
+                title=f"Entry {i}",
+                content_hash="h",
+                file_size=10,
+                collected_at="2026-01-01T00:00:00Z",
+                updated_at="2026-01-01T00:00:00Z",
+                published_at=f"2026-01-0{i+1}T00:00:00Z",
+            )
+
+        results = db.list_sources(source_type="journal", limit=10)
+        assert len(results) == 3
+
+    def test_count_sources_by_type_with_filter(self, db: MetadataDB) -> None:
+        """count_sources_by_type が filters で絞り込める."""
+        entries = [
+            ("journal/repo-a/e1.md", "repo-a"),
+            ("journal/repo-a/e2.md", "repo-a"),
+            ("journal/repo-b/e1.md", "repo-b"),
+        ]
+        for source_id, repo in entries:
+            db.register_source(
+                source_id=source_id,
+                source_type="journal",
+                title="Entry",
+                content_hash="h",
+                file_size=10,
+                collected_at="2026-01-01T00:00:00Z",
+                updated_at="2026-01-01T00:00:00Z",
+                meta=json.dumps({"repository": repo}),
+            )
+
+        assert db.count_sources_by_type(
+            source_type="journal",
+            filters={"repository": "repo-a"},
+        ) == 2
+        assert db.count_sources_by_type(
+            source_type="journal",
+            filters={"repository": "repo-b"},
+        ) == 1
+
+    def test_filter_nonexistent_key(self, db: MetadataDB) -> None:
+        """存在しないキーでフィルタすると 0 件."""
+        db.register_source(
+            source_id="journal/repo/e.md",
+            source_type="journal",
+            title="Entry",
+            content_hash="h",
+            file_size=10,
+            collected_at="2026-01-01T00:00:00Z",
+            updated_at="2026-01-01T00:00:00Z",
+            meta=json.dumps({"repository": "test"}),
+        )
+
+        results = db.list_sources(
+            source_type="journal",
+            limit=10,
+            filters={"nonexistent": "value"},
+        )
+        assert len(results) == 0
+
+    def test_filter_key_validation_rejects_injection(self, db: MetadataDB) -> None:
+        """フィルタキー名に SQL インジェクション文字列が含まれる場合 ValueError."""
+        with pytest.raises(ValueError, match="不正な文字"):
+            db.list_sources(
+                source_type="journal",
+                limit=10,
+                filters={"') OR 1=1 --": "value"},
+            )
+
+    def test_filter_key_validation_rejects_dot(self, db: MetadataDB) -> None:
+        """フィルタキー名にドットが含まれる場合 ValueError."""
+        with pytest.raises(ValueError, match="不正な文字"):
+            db.count_sources_by_type(
+                source_type="journal",
+                filters={"nested.key": "value"},
+            )
+
+    def test_update_source_meta(self, db: MetadataDB) -> None:
+        """update_source で meta を更新できる."""
+        db.register_source(
+            source_id="journal/repo/e.md",
+            source_type="journal",
+            title="Entry",
+            content_hash="h",
+            file_size=10,
+            collected_at="2026-01-01T00:00:00Z",
+            updated_at="2026-01-01T00:00:00Z",
+        )
+
+        new_meta = json.dumps({"repository": "updated"})
+        db.update_source("journal/repo/e.md", meta=new_meta)
+
+        record = db.get_source("journal/repo/e.md")
+        assert record is not None
+        assert json.loads(record.meta)["repository"] == "updated"
 
 
 class TestPipelineHistory:

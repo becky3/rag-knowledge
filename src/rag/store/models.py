@@ -32,6 +32,7 @@ class SourceRecord:
     collected_at: str
     updated_at: str
     published_at: str = ""
+    meta: str = "{}"
 
 
 @dataclass(frozen=True)

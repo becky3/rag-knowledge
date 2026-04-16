@@ -9,6 +9,7 @@ git 操作はパイプライン制御層の責務であり、このモジュー�
 from __future__ import annotations
 
 import hashlib
+import json
 import logging
 import shutil
 from datetime import datetime, timezone
@@ -137,6 +138,12 @@ class SourceStore:
             source_type, metadata, collected_at,
         )
 
+        meta_json = (
+            json.dumps(metadata, ensure_ascii=False, default=str)
+            if metadata
+            else "{}"
+        )
+
         self._db.register_source(
             source_id=source_id,
             source_type=source_type,
@@ -146,6 +153,7 @@ class SourceStore:
             collected_at=collected_at,
             updated_at=now,
             published_at=published_at,
+            meta=meta_json,
         )
 
         return dest
@@ -421,6 +429,12 @@ class SourceStore:
                 detected_type, meta_dict or None, collected_at,
             )
 
+            meta_json = (
+                json.dumps(meta_dict, ensure_ascii=False, default=str)
+                if meta_dict
+                else "{}"
+            )
+
             self._db.register_source(
                 source_id=source_id,
                 source_type=detected_type,
@@ -430,6 +444,7 @@ class SourceStore:
                 collected_at=collected_at,
                 updated_at=now,
                 published_at=published_at,
+                meta=meta_json,
             )
             count += 1
 
