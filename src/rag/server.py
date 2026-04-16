@@ -988,6 +988,14 @@ class CLISubprocessError(Exception):
         self.lock_conflict = lock_conflict
 
 
+def _sanitize_log_value(value: str, *, max_length: int = 200) -> str:
+    """ログ出力用に文字列をサニタイズする（制御文字除去 + 長さ制限）."""
+    sanitized = value.replace("\r", "").replace("\n", " ")
+    if len(sanitized) > max_length:
+        return sanitized[:max_length] + "..."
+    return sanitized
+
+
 async def _run_cli_subprocess(
     command: str,
     args: list[str] | None = None,
@@ -1019,7 +1027,7 @@ async def _run_cli_subprocess(
         *(args or []),
     ]
 
-    logger.info("CLI subprocess: %s %s", command, " ".join(args or []))
+    logger.info("CLI subprocess: %s %s", command, _sanitize_log_value(" ".join(args or [])))
 
     env = os.environ.copy()
     env["PYTHONIOENCODING"] = "utf-8"
@@ -1650,7 +1658,7 @@ async def upload_document(request: Request) -> Response:
             import datetime as _dt
             _today = _dt.date.today()
             source_id = f"local/{_LOCAL_UPLOAD_DIR}/{_today.year}/{_today.month:02d}/{_today.day:02d}/{sanitized}"
-            logger.info("Document uploaded: %s", sanitized)
+            logger.info("Document uploaded: %s", _sanitize_log_value(sanitized))
             return _upload_success(
                 f"ドキュメントを取り込みました: {sanitized}",
                 source_id=source_id,
@@ -1743,7 +1751,7 @@ async def upload_journal(request: Request) -> Response:
             # CLI の result から entry_id を取得（利用可能な場合）
             resolved_entry_id = cli_result.get("entry_id") or entry_id_str or title
             source_id = f"journal/{repository}/{resolved_entry_id}.md"
-            logger.info("Journal uploaded: %s/%s", repository, resolved_entry_id)
+            logger.info("Journal uploaded: %s/%s", _sanitize_log_value(repository), _sanitize_log_value(resolved_entry_id))
             return _upload_success(
                 f"ジャーナルエントリを登録しました: {repository}/{resolved_entry_id}",
                 source_id=source_id,
