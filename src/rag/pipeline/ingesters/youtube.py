@@ -295,6 +295,11 @@ class YoutubeIngester:
         Returns:
             配置結果
         """
+        logger.info(
+            "Playlist crawl started: url=%s, max_videos=%s",
+            playlist_url,
+            max_videos if max_videos is not None else self._max_videos,
+        )
         result = IngestResult()
 
         playlist_id = extract_playlist_id(playlist_url)
@@ -312,6 +317,10 @@ class YoutubeIngester:
             result.errors += 1
             result.error_details.append(f"プレイリスト展開失敗: {e}")
             return result
+
+        logger.info(
+            "Playlist expanded: %d videos found", len(video_entries),
+        )
 
         if not video_entries:
             logger.info("プレイリストに動画がありません: %s", playlist_url)
@@ -371,6 +380,10 @@ class YoutubeIngester:
             if i < len(entries_to_process) - 1:
                 await asyncio.sleep(self._request_interval)
 
+        logger.info(
+            "Playlist crawl completed: placed=%d, skipped=%d, errors=%d",
+            result.placed, result.skipped, result.errors,
+        )
         return result
 
     async def _fetch_metadata(self, video_id: str) -> dict[str, Any]:

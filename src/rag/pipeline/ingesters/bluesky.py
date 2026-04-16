@@ -296,6 +296,13 @@ class BlueskyIngester:
         Returns:
             (配置結果, 配置済みフィードアイテムのリスト)
         """
+        logger.info(
+            "BlueSky crawl started: handle=%s, max_posts=%s, include_reposts=%s, force=%s",
+            handle,
+            max_posts if max_posts is not None else self._max_posts,
+            include_reposts if include_reposts is not None else self._include_reposts,
+            force,
+        )
         result = IngestResult()
 
         # バリデーション
@@ -489,6 +496,10 @@ class BlueskyIngester:
             if not cursor:
                 break
 
+        logger.info(
+            "BlueSky crawl completed: placed=%d, skipped=%d, errors=%d",
+            result.placed, result.skipped, result.errors,
+        )
         return result, placed_items
 
     async def _download_media(

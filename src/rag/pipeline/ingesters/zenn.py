@@ -69,6 +69,12 @@ class ZennIngester:
         Returns:
             配置結果
         """
+        logger.info(
+            "Zenn crawl started: username=%s, content_type=%s, max=%s, force=%s",
+            username, content_type,
+            max_articles if max_articles is not None else self._max_articles,
+            force,
+        )
         result = IngestResult()
 
         # バリデーション
@@ -116,6 +122,10 @@ class ZennIngester:
                 progress_callback=effective_cb,
             )
 
+        logger.info(
+            "Zenn crawl completed: placed=%d, skipped=%d, errors=%d",
+            result.placed, result.skipped, result.errors,
+        )
         return result
 
     async def _crawl_articles(
@@ -287,6 +297,7 @@ class ZennIngester:
         Returns:
             slug のリスト
         """
+        logger.info("Discovering %s slugs (max=%d)", kind, max_count)
         slugs: list[str] = []
         page = 1
 
@@ -325,6 +336,7 @@ class ZennIngester:
                 break
             page = next_page
 
+        logger.info("Discovered %d %s slugs", len(slugs), kind)
         return slugs
 
     @staticmethod

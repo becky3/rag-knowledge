@@ -284,6 +284,12 @@ class AozoraIngester:
         Returns:
             配置結果
         """
+        logger.info(
+            "Aozora author crawl started: person_id=%s, max_works=%s",
+            person_id,
+            max_works if max_works is not None else self._max_works,
+        )
+
         if client is None:
             raise ValueError("client (ConstrainedClient) が必要です")
         if not person_id or not person_id.strip():
@@ -313,6 +319,8 @@ class AozoraIngester:
             targets.append(record)
             if len(targets) >= effective_max:
                 break
+
+        logger.info("Author %s: %d target works", person_id, len(targets))
 
         if not targets:
             return IngestResult()
@@ -345,6 +353,10 @@ class AozoraIngester:
             if progress_callback is not None:
                 progress_callback(work_idx + 1, len(targets), f"book_id={book_id}")
 
+        logger.info(
+            "Aozora author crawl completed: placed=%d, skipped=%d, errors=%d",
+            result.placed, result.skipped, result.errors,
+        )
         return result
 
     # ------------------------------------------------------------------
