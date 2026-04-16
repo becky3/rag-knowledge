@@ -6,6 +6,7 @@
 - MetadataDB の list_sources / count_sources_by_type メソッドの単体テスト
 - list_recent_sources 共通関数のフォーマット・統合テスト
 - エッジケース: 0件、limit > 該当件数、論理削除除外、ソート順、昇順/降順
+- filters パラメータによるメタデータ絞り込み（list_sources / count / 共通関数）
 """
 
 from __future__ import annotations
@@ -34,6 +35,7 @@ def _register(
     published_at: str = "",
     file_size: int = 1024,
     status: str = "active",
+    meta: str = "{}",
 ) -> None:
     """テスト用ソース登録ヘルパー."""
     db.register_source(
@@ -45,6 +47,7 @@ def _register(
         collected_at=collected_at,
         updated_at=collected_at,
         published_at=published_at,
+        meta=meta,
     )
     if status == "deleted":
         db.set_status(source_id, "deleted")
@@ -137,6 +140,28 @@ class TestListSources:
         assert len(result) == 1
         assert result[0].source_id == "active1"
 
+    def test_filters_by_meta(self, db: MetadataDB) -> None:
+        """filters 指定時に該当レコードのみ返る."""
+        import json
+
+        _register(db, "j1", source_type="journal", meta=json.dumps({"repository": "rag-knowledge"}))
+        _register(db, "j2", source_type="journal", meta=json.dumps({"repository": "other-repo"}))
+        _register(db, "j3", source_type="journal")
+
+        result = db.list_sources(source_type="journal", limit=10, filters={"repository": "rag-knowledge"})
+        assert len(result) == 1
+        assert result[0].source_id == "j1"
+
+    def test_filters_none_returns_all(self, db: MetadataDB) -> None:
+        """filters=None は既存動作（全件返却）を維持する."""
+        import json
+
+        _register(db, "j1", source_type="journal", meta=json.dumps({"repository": "rag-knowledge"}))
+        _register(db, "j2", source_type="journal")
+
+        result = db.list_sources(source_type="journal", limit=10, filters=None)
+        assert len(result) == 2
+
 
 class TestCountSourcesByType:
     """MetadataDB.count_sources_by_type のテスト."""
@@ -157,6 +182,17 @@ class TestCountSourcesByType:
 
         assert db.count_sources_by_type(source_type="web") == 1
         assert db.count_sources_by_type(source_type="local") == 1
+
+    def test_counts_with_filters(self, db: MetadataDB) -> None:
+        """filters 指定時は絞り込み後の件数を返す."""
+        import json
+
+        _register(db, "j1", source_type="journal", meta=json.dumps({"repository": "rag-knowledge"}))
+        _register(db, "j2", source_type="journal", meta=json.dumps({"repository": "other-repo"}))
+        _register(db, "j3", source_type="journal")
+
+        assert db.count_sources_by_type(source_type="journal", filters={"repository": "rag-knowledge"}) == 1
+        assert db.count_sources_by_type(source_type="journal") == 3
 
 
 class TestListRecentSources:
@@ -240,6 +276,81 @@ class TestListRecentSources:
         assert "1. Page 4" in result
         assert "2. Page 3" in result
         assert "3." not in result
+
+    def test_filters_narrows_results_and_total(self, tmp_path: Path) -> None:
+        """filters 指定時に該当レコードのみ返り、総件数も絞り込み後の件数を反映する."""
+        import json
+
+        from rag.rag_knowledge import list_recent_sources
+
+        source_store_dir = self._setup_db(tmp_path)
+        db = MetadataDB(source_store_dir / "metadata.db")
+        db.initialize()
+        _register(
+            db, "j/entry1", source_type="journal", title="Entry 1",
+            published_at="2026-01-01T00:00:00Z",
+            meta=json.dumps({"repository": "rag-knowledge"}),
+        )
+        _register(
+            db, "j/entry2", source_type="journal", title="Entry 2",
+            published_at="2026-01-02T00:00:00Z",
+            meta=json.dumps({"repository": "other-repo"}),
+        )
+        _register(
+            db, "j/entry3", source_type="journal", title="Entry 3",
+            published_at="2026-01-03T00:00:00Z",
+            meta=json.dumps({"repository": "rag-knowledge"}),
+        )
+        db.close()
+
+        result = list_recent_sources(
+            str(source_store_dir), "journal", 10,
+            filters={"repository": "rag-knowledge"},
+        )
+        assert "source_type: journal（2件 / 全2件" in result
+        assert "Entry 3" in result
+        assert "Entry 1" in result
+        assert "Entry 2" not in result
+
+    def test_filters_no_match(self, tmp_path: Path) -> None:
+        """filters 指定で該当ソースが0件の場合."""
+        import json
+
+        from rag.rag_knowledge import list_recent_sources
+
+        source_store_dir = self._setup_db(tmp_path)
+        db = MetadataDB(source_store_dir / "metadata.db")
+        db.initialize()
+        _register(
+            db, "j/entry1", source_type="journal",
+            meta=json.dumps({"repository": "other-repo"}),
+        )
+        db.close()
+
+        result = list_recent_sources(
+            str(source_store_dir), "journal", 10,
+            filters={"repository": "rag-knowledge"},
+        )
+        assert result == "source_type: journal（0件 / 全0件）"
+
+    def test_filters_none_returns_all(self, tmp_path: Path) -> None:
+        """filters=None は全件返却（既存動作を維持）."""
+        import json
+
+        from rag.rag_knowledge import list_recent_sources
+
+        source_store_dir = self._setup_db(tmp_path)
+        db = MetadataDB(source_store_dir / "metadata.db")
+        db.initialize()
+        _register(
+            db, "j/entry1", source_type="journal", title="Entry 1",
+            meta=json.dumps({"repository": "rag-knowledge"}),
+        )
+        _register(db, "j/entry2", source_type="journal", title="Entry 2")
+        db.close()
+
+        result = list_recent_sources(str(source_store_dir), "journal", 10)
+        assert "全2件" in result
 
 
 class TestFormatFileSize:

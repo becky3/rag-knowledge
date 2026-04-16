@@ -361,6 +361,7 @@ A〜G の取り込みデータを使ってパイプライン基盤を検証す�
 | 1 | `stats` | 統計情報が表示される | `none` |
 | 2 | `list-recent --source-type local` | 取り込み済み local ソースが一覧に表示される | `none` |
 | 3 | `list-recent --source-type journal` | 取り込み済み journal ソースが一覧に表示される | `none` |
+| 3a | `list-recent --source-type journal --filters repository=rag-knowledge` | journal がリポジトリ名で絞り込まれる | `none` |
 | 4 | `search --query <取り込み内容に関連するワード>` | ベクトル検索・BM25 の両方で結果が返る | `none` |
 | 5a | `get-document <source_id> --format text`（`source_id` は positional 引数） | A) の README.md の全文がテキスト形式で取得できる | `none` |
 | 5b | `get-document <source_id> --format original` | A) の README.md の全文がオリジナル形式で取得できる | `none` |
@@ -368,7 +369,9 @@ A〜G の取り込みデータを使ってパイプライン基盤を検証す�
 | 7 | `rebuild --mode incremental` | 差分再構築が成功する | `none` |
 | 8 | `stats` | 再構築後の統計が更新されている | `none` |
 
-MCP 対応: `rag_stats` / `rag_list_recent` / `rag_search` / `rag_get_document` / `rag_delete` / `rag_rebuild`
+MCP 対応: `rag_stats` / `rag_list_recent` (+ filters) / `rag_search` / `rag_get_document` / `rag_delete` / `rag_rebuild`
+
+> MCP `rag_list_recent` の filters 確認: `rag_list_recent(source_type="journal", filters="repository=rag-knowledge")` で journal がリポジトリ名で絞り込まれること。
 
 ### 7. クリーンアップ
 

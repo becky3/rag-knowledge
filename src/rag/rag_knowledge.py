@@ -999,6 +999,7 @@ def list_recent_sources(
     source_type: str,
     limit: int,
     ascending: bool = False,
+    filters: dict[str, str] | None = None,
 ) -> str:
     """指定 source_type のソースを published_at でソートして一覧取得する（MCP/CLI 共通ロジック）.
 
@@ -1009,6 +1010,7 @@ def list_recent_sources(
         source_type: ソース種別
         limit: 取得件数
         ascending: True で昇順（古い順）、False で降順（新しい順、デフォルト）
+        filters: メタデータフィルタ（key=value 形式）。meta JSON カラムで絞り込む
 
     Returns:
         フォーマット済みテキスト
@@ -1025,8 +1027,8 @@ def list_recent_sources(
         from .store.models import SourceType
 
         st = cast(SourceType, source_type)
-        sources = db.list_sources(source_type=st, limit=limit, ascending=ascending)
-        total = db.count_sources_by_type(source_type=st)
+        sources = db.list_sources(source_type=st, limit=limit, ascending=ascending, filters=filters)
+        total = db.count_sources_by_type(source_type=st, filters=filters)
     finally:
         db.close()
 

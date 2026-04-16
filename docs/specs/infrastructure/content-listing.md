@@ -8,6 +8,7 @@
 
 - ソース単位の一覧取得（MCP ツール + CLI サブコマンド）
 - `source_type` 指定による絞り込み
+- メタデータフィルタ（`filters`）による絞り込み
 - `published_at` によるソート（降順/昇順切り替え可能）
 - 取得件数の制限
 
@@ -76,12 +77,14 @@
 | `source_type` | str | はい | ソース種別（値は [`_schema/enums.yml`](../../../_schema/enums.yml) の `source_type` を参照） |
 | `limit` | int | いいえ | 取得件数。デフォルト: `rag_list_recent_limit`（config.toml） |
 | `order` | str | いいえ | ソート順。`"desc"`（新しい順、デフォルト）または `"asc"`（古い順） |
+| `filters` | str | いいえ | メタデータフィルタ（`key=value` 形式、カンマ区切りで複数指定可）。`.meta` のカスタムフィールドで絞り込む。完全一致。例: `"repository=rag-knowledge"`。[search-response.md](../search-response.md) の `rag_search` の `filters` と同一形式 |
 
 バリデーション:
 
 - `source_type` が有効値でない場合、エラーメッセージを返す（有効値の一覧を含める）
 - `limit` が許容範囲外の場合、エラーメッセージを返す。許容範囲は `src/rag/config.py` の pydantic Field 制約に従う
 - `order` が `"asc"` / `"desc"` 以外の場合、エラーメッセージを返す
+- `filters` のキー名が不正な場合、エラーメッセージを返す
 
 出力:
 
@@ -102,7 +105,7 @@ source_type: web（5件 / 全80件, 新しい順）
 ```
 
 - ヘッダー行: `source_type: {type}（{表示件数}件 / 全{該当source_typeの総件数}件, {ソート順}）`
-  - 総件数: MetadataDB の `sources` テーブルに対して同一 `source_type` + `status = 'active'` 条件の `COUNT(*)` で取得する
+  - 総件数: MetadataDB の `sources` テーブルに対して同一 `source_type` + `status = 'active'` + `filters` 条件の `COUNT(*)` で取得する。`filters` 指定時は絞り込み後の件数を反映する
 - 各エントリ: 番号付きリスト。タイトル、source_id、published_at、ファイルサイズを表示
   - ファイルサイズ: MetadataDB の `file_size` カラムから取得する。人間が読みやすい単位（KB / MB）でフォーマットする
 - 該当するソースが0件の場合: `source_type: {type}（0件 / 全0件）`（ソート順は省略する）
@@ -114,7 +117,7 @@ source_type: web（5件 / 全80件, 新しい順）
 #### list-recent コマンド
 
 ```
-uv run python -m rag.cli list-recent --source-type <TYPE> [--limit <N>] [--order asc|desc]
+uv run python -m rag.cli list-recent --source-type <TYPE> [--limit <N>] [--order asc|desc] [--filters <FILTERS>]
 ```
 
 | オプション | 型 | 必須 | 内容 |
@@ -122,6 +125,7 @@ uv run python -m rag.cli list-recent --source-type <TYPE> [--limit <N>] [--order
 | `--source-type` | str | はい | ソース種別（値は [`_schema/enums.yml`](../../../_schema/enums.yml) の `source_type` を参照） |
 | `--limit` | int | いいえ | 取得件数。デフォルト: `rag_list_recent_limit`（config.toml） |
 | `--order` | str | いいえ | ソート順。`asc`（古い順）/ `desc`（新しい順、デフォルト） |
+| `--filters` | str | いいえ | メタデータフィルタ（`key=value` 形式、カンマ区切り）。MCP ツールの `filters` と同一形式 |
 
 MCP ツール `rag_list_recent` と同じバリデーション・振る舞いを適用する。出力形式も同一。
 
@@ -148,7 +152,7 @@ flowchart TD
     VALIDATE -->|不正| ERROR["エラー返却"]
     VALIDATE -->|正常| SERVICE
     SERVICE --> METADB
-    METADB -->|"source_type フィルタ + published_at ソート + COUNT"| SERVICE
+    METADB -->|"source_type + filters フィルタ + published_at ソート + COUNT"| SERVICE
     SERVICE --> FORMAT
     FORMAT --> RESPONSE
 ```
@@ -156,11 +160,11 @@ flowchart TD
 ### データ取得フロー
 
 1. MCP ツールまたは CLI からパラメータを受け取る
-2. `source_type`、`limit`、`order` のバリデーションを実行する
+2. `source_type`、`limit`、`order`、`filters` のバリデーションを実行する
 3. `rag_knowledge.py` の共通関数 `list_recent_sources` を呼び出す
 4. `MetadataDB` から以下の 2 クエリを発行する:
-   - 一覧取得: `source_type` + `status = 'active'` でフィルタし、`published_at` でソート（`order` に応じて昇順/降順）して `limit` 件取得
-   - 総件数取得: 同条件の `COUNT(*)` で該当 source_type の全件数を取得
+   - 一覧取得: `source_type` + `status = 'active'` + `filters`（指定時）でフィルタし、`published_at` でソート（`order` に応じて昇順/降順）して `limit` 件取得
+   - 総件数取得: 同条件の `COUNT(*)` で該当 source_type の全件数を取得（`filters` 指定時は絞り込み後の件数）
 5. 結果をテキスト形式にフォーマットして返却する（file_size は人間が読みやすい単位に変換）
 
 ### 関連ファイル
@@ -170,7 +174,8 @@ flowchart TD
 | `src/rag/server.py` | MCP ツール定義。パラメータ検証と共通関数呼び出し |
 | `src/rag/cli.py` | CLI サブコマンド定義。パラメータ検証と共通関数呼び出し |
 | `src/rag/rag_knowledge.py` | 共通ロジック。MetadataDB へのクエリとフォーマット処理 |
-| `src/rag/store/metadata_db.py` | MetadataDB。`source_type` フィルタ + `published_at` ソートのクエリ |
+| `src/rag/filter_parser.py` | `parse_filters()` — `key=value` 文字列のパース（`rag_search` と共通） |
+| `src/rag/store/metadata_db.py` | MetadataDB。`source_type` + メタデータフィルタ + `published_at` ソートのクエリ |
 | `src/rag/store/resolve.py` | `resolve_published_at()` — source_type ごとの公開日時解決 |
 | `src/rag/config.py` | `rag_list_recent_limit` 設定の定義 |
 | `config.toml` | `rag_list_recent_limit` のデフォルト値 |
@@ -187,6 +192,9 @@ flowchart TD
 | 論理削除済みソースが存在 | 一覧に含めない（`status = 'active'` のみ対象） |
 | `published_at` が同一の複数ソース | ソート順序は不定（同一タイムスタンプ内の順序は保証しない） |
 | `published_at` が空文字列（マイグレーション前のデータ） | マイグレーション時に `collected_at` で自動補完される |
+| `filters` 指定で該当ソースが0件 | `source_type: {type}（0件 / 全0件）` を返す |
+| `filters` のキー名が不正 | エラーメッセージを返す |
+| `filters` 未指定 | 既存の動作（全件返却）を維持する |
 
 ## 関連ドキュメント
 
