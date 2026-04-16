@@ -18,8 +18,9 @@ from __future__ import annotations
 import csv
 import io
 from pathlib import Path
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import AsyncMock
 
+import httpx
 import pytest
 
 from rag.store.source_store import SourceStore
@@ -84,11 +85,14 @@ def _mock_client(
     status_code: int = 200,
     content: bytes = b"<html><body>test</body></html>",
 ) -> AsyncMock:
-    """ConstrainedClient のモックを生成する."""
+    """ConstrainedClient のモックを生成する.
+
+    fetch_get の raise_for_status() が正しく動作するよう、
+    実 httpx.Response を返す。
+    """
     client = AsyncMock()
-    resp = MagicMock()
-    resp.status_code = status_code
-    resp.content = content
+    request = httpx.Request("GET", "https://example.com")
+    resp = httpx.Response(status_code, content=content, request=request)
     client.get = AsyncMock(return_value=resp)
     client.__aenter__ = AsyncMock(return_value=client)
     client.__aexit__ = AsyncMock(return_value=None)

@@ -18,7 +18,12 @@ from datetime import datetime
 from pathlib import Path
 from urllib.parse import urljoin, urlparse
 
-from rag.pipeline.ingesters._common import IngestResult, ProgressCallback, now_iso
+from rag.pipeline.ingesters._common import (
+    IngestResult,
+    ProgressCallback,
+    fetch_get,
+    now_iso,
+)
 from typing import TYPE_CHECKING, Any, Literal
 
 if TYPE_CHECKING:
@@ -342,7 +347,7 @@ class BlueskyIngester:
 
             from urllib.parse import urlencode
             url = f"{self._appview_url}/xrpc/app.bsky.feed.getAuthorFeed?{urlencode(params)}"
-            resp = await client.get(url)
+            resp = await fetch_get(client, url)
             data = resp.json()
 
             feed = data.get("feed", [])
@@ -521,7 +526,7 @@ class BlueskyIngester:
         # 画像 DL
         for idx, img_url in enumerate(image_urls):
             try:
-                resp = await client.get(img_url)
+                resp = await fetch_get(client, img_url)
                 content_type = resp.headers.get("content-type", "")
                 ext = _ext_from_content_type(content_type)
                 filename = f"image_{idx}{ext}"
@@ -694,6 +699,13 @@ class BlueskyIngester:
         CDN の 3xx リダイレクトに対応する。リダイレクト先のベースドメイン
         （eTLD+1 相当）が異なる場合はリダイレクト前のレスポンスをそのまま
         返す（SSRF 防止）。
+
+        fetch_get は使わない: fetch_get は非 2xx で例外化するため、
+        リダイレクト追従中の 3xx で中断してしまう。代わりに、リダイレクト
+        対象ステータス (`_REDIRECT_STATUSES`: 301/302/307/308) 以外の応答に
+        到達した時点で raise_for_status を呼ぶ。これにより 2xx は正常返却、
+        リダイレクト追従対象外の 3xx (300/303/304 等)・4xx・5xx は例外化
+        される。
         """
         original_parsed = urlparse(url)
         original_base = BlueskyIngester._base_domain(original_parsed.hostname)
@@ -701,6 +713,7 @@ class BlueskyIngester:
 
         for _ in range(_max_redirects):
             if resp.status_code not in BlueskyIngester._REDIRECT_STATUSES:
+                resp.raise_for_status()
                 return resp
             location = resp.headers.get("location", "")
             if not location:
@@ -721,6 +734,8 @@ class BlueskyIngester:
 
         if resp.status_code in BlueskyIngester._REDIRECT_STATUSES:
             logger.warning("リダイレクト回数上限に到達: %s", url)
+            return resp
+        resp.raise_for_status()
         return resp
 
     async def follow_urls(

@@ -15,7 +15,14 @@ import zipfile
 from pathlib import PurePosixPath
 from typing import TYPE_CHECKING, Any
 
-from rag.pipeline.ingesters._common import IngestResult, ProgressCallback, now_iso
+import httpx
+
+from rag.pipeline.ingesters._common import (
+    IngestResult,
+    ProgressCallback,
+    fetch_get,
+    now_iso,
+)
 
 if TYPE_CHECKING:
 
@@ -91,11 +98,13 @@ class AozoraIngester:
             raise ValueError("client (ConstrainedClient) が必要です")
 
         # CSV ZIP ダウンロード
-        resp = await client.get(CATALOG_ZIP_URL)
-        if resp.status_code < 200 or resp.status_code >= 300:
+        try:
+            resp = await fetch_get(client, CATALOG_ZIP_URL)
+        except httpx.HTTPStatusError as e:
             raise ValueError(
-                f"カタログ ZIP のダウンロードに失敗しました（status={resp.status_code}）"
-            )
+                "カタログ ZIP のダウンロードに失敗しました"
+                f"（url={CATALOG_ZIP_URL}, status={e.response.status_code}）"
+            ) from e
         zip_bytes = resp.content
 
         # ZIP 展開 + CSV 読み取り
@@ -397,15 +406,17 @@ class AozoraIngester:
         github_url = self._to_github_raw_url(xhtml_url)
 
         # ダウンロード（生データをそのまま保存、エンコーディング変換はコンバーターの責務）
-        resp = await client.get(github_url)
-        if resp.status_code < 200 or resp.status_code >= 300:
+        try:
+            resp = await fetch_get(client, github_url)
+        except httpx.HTTPStatusError as e:
+            status_code = e.response.status_code
             logger.error(
                 "XHTML ダウンロード失敗: book_id=%s status=%s url=%s",
-                book_id, resp.status_code, github_url,
+                book_id, status_code, github_url,
             )
             result.errors += 1
             result.error_details.append(
-                f"XHTML ダウンロード失敗: book_id={book_id}, status={resp.status_code}"
+                f"XHTML ダウンロード失敗: book_id={book_id}, status={status_code}"
             )
             return False
         raw_bytes: bytes = resp.content
