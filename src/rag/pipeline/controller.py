@@ -11,6 +11,7 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import inspect
+import json
 import logging
 import subprocess
 from collections.abc import Awaitable, Callable, Sequence
@@ -858,11 +859,15 @@ class PipelineController:
                 title = str(meta_data.get("title", ""))
                 if title:
                     now = datetime.now(timezone.utc).isoformat()
+                    meta_json = json.dumps(
+                        meta_data, ensure_ascii=False, default=str,
+                    )
                     try:
                         self.db.update_source(
                             source_id,
                             title=title,
                             updated_at=now,
+                            meta=meta_json,
                         )
                     except KeyError:
                         logger.warning(
@@ -904,6 +909,12 @@ class PipelineController:
             source_type, meta_dict, collected_at,
         )
 
+        meta_json = (
+            json.dumps(meta_dict, ensure_ascii=False, default=str)
+            if meta_dict
+            else "{}"
+        )
+
         self.db.register_source(
             source_id=source_id,
             source_type=source_type,
@@ -913,6 +924,7 @@ class PipelineController:
             collected_at=collected_at,
             updated_at=now,
             published_at=published_at,
+            meta=meta_json,
         )
 
     def _update_in_db(self, file_path: str) -> None:
