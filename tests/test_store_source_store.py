@@ -282,6 +282,46 @@ class TestListFiles:
         assert ".rebuild.lock" not in paths
         assert "local/a.md" in paths
 
+    def test_excludes_bluesky_media(self, store: SourceStore) -> None:
+        """BlueSky の media/ 配下はリストに含まれない."""
+        store.place_file(
+            source_type="bluesky",
+            data=b"post",
+            rel_path="bluesky/did/2026/04/rkey1.json",
+            metadata={
+                "source_type": "bluesky",
+                "title": "post",
+                "collected_at": "2026-04-01T00:00:00Z",
+                "at_uri": "at://did/app.bsky.feed.post/rkey1",
+            },
+        )
+        # media/ 配下に画像を直接配置（インジェスターの挙動を模倣）
+        media_dir = store.root_dir / "bluesky" / "did" / "2026" / "04" / "media" / "rkey1"
+        media_dir.mkdir(parents=True, exist_ok=True)
+        (media_dir / "image_0.webp").write_bytes(b"img0")
+        (media_dir / "image_1.jpg").write_bytes(b"img1")
+
+        # source_type 指定なし
+        all_files = store.list_files()
+        all_paths = [f.as_posix() for f in all_files]
+        assert "bluesky/did/2026/04/rkey1.json" in all_paths
+        assert not any("media/" in p for p in all_paths)
+
+        # source_type=bluesky 指定
+        bs_files = store.list_files(source_type="bluesky")
+        bs_paths = [f.as_posix() for f in bs_files]
+        assert "bluesky/did/2026/04/rkey1.json" in bs_paths
+        assert not any("media/" in p for p in bs_paths)
+
+    def test_local_media_dir_not_excluded(self, store: SourceStore) -> None:
+        """local の media/ ディレクトリは除外されない."""
+        store.place_file(
+            source_type="local", data=b"img", rel_path="local/media/photo.jpg",
+        )
+        files = store.list_files()
+        paths = [f.as_posix() for f in files]
+        assert "local/media/photo.jpg" in paths
+
 
 class TestSoftDelete:
     """論理削除テスト."""
