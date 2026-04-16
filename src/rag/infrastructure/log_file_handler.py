@@ -68,8 +68,10 @@ class SessionRotatingFileHandler(logging.FileHandler):
     def _should_rollover(self) -> bool:
         if self.stream is None:
             return False
-        # 親クラスの emit は書き込み末尾で flush するため、tell() は正確な現在位置を返す
-        return self.stream.tell() >= self._max_bytes
+        # TextIOWrapper.tell() はエンコーディング状態を含む不透明値のためサイズ判定に使えない。
+        # 実ファイルサイズで判定する（親クラスの emit が書き込み後に flush するため
+        # 次回 emit 時点でファイルサイズは正確）
+        return Path(self.baseFilename).stat().st_size >= self._max_bytes
 
     def _do_rollover(self) -> None:
         if self.stream is not None:

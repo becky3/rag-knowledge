@@ -1873,11 +1873,10 @@ def _attach_log_file_handler(
             started_at=datetime.now(),
             max_bytes=settings.rag_log_file_max_bytes,
         )
-    except Exception as exc:
-        logger.error(
-            "Failed to set up log file output (RAG_LOG_DIR=%s): %s",
+    except Exception:
+        logger.exception(
+            "Failed to set up log file output (RAG_LOG_DIR=%s)",
             settings.rag_log_dir,
-            exc,
         )
         raise
     file_handler.setFormatter(formatter)
