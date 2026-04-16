@@ -116,6 +116,33 @@ class TestZennRequestInterval:
             _make_settings(rag_zenn_request_interval=60.1)
 
 
+# --- ログファイル出力: rag_log_dir ---
+
+
+class TestRagLogDir:
+    """rag_log_dir のバリデーションテスト (#588)."""
+
+    def test_default_is_none(self) -> None:
+        """デフォルト値は None（ファイル出力無効）."""
+        settings = _make_settings()
+        assert settings.rag_log_dir is None
+
+    def test_valid_path(self) -> None:
+        """非空文字列のパスを設定できる."""
+        settings = _make_settings(rag_log_dir="./logs")
+        assert settings.rag_log_dir == "./logs"
+
+    def test_empty_string_raises_validation_error(self) -> None:
+        """空文字列は設定ミスとして起動時エラーになる."""
+        with pytest.raises(ValidationError, match="rag_log_dir"):
+            _make_settings(rag_log_dir="")
+
+    def test_whitespace_only_raises_validation_error(self) -> None:
+        """空白のみも設定ミスとして扱う."""
+        with pytest.raises(ValidationError, match="rag_log_dir"):
+            _make_settings(rag_log_dir="   ")
+
+
 # --- 3層分離バリデーション ---
 
 
@@ -181,6 +208,7 @@ rag_url_safety_cache_ttl = 300
 rag_url_safety_timeout = 5.0
 rag_stats_max_sources = 100
 rag_list_recent_limit = 20
+rag_log_file_max_bytes = 10485760
 rag_zenn_max_articles = 50
 rag_zenn_request_timeout = 30
 rag_zenn_request_interval = 1.0
