@@ -102,7 +102,8 @@ class AozoraIngester:
             resp = await fetch_get(client, CATALOG_ZIP_URL)
         except httpx.HTTPStatusError as e:
             raise ValueError(
-                f"カタログ ZIP のダウンロードに失敗しました（status={e.response.status_code}）"
+                "カタログ ZIP のダウンロードに失敗しました"
+                f"（url={CATALOG_ZIP_URL}, status={e.response.status_code}）"
             ) from e
         zip_bytes = resp.content
 

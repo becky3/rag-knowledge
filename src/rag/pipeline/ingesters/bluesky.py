@@ -700,10 +700,12 @@ class BlueskyIngester:
         （eTLD+1 相当）が異なる場合はリダイレクト前のレスポンスをそのまま
         返す（SSRF 防止）。
 
-        fetch_get は使わない: httpx の raise_for_status は 3xx でも
-        例外を送出するため、リダイレクト追従ロジックが走る前に
-        中断してしまう。代わりに非 3xx 応答に到達した時点で
-        raise_for_status を呼び、4xx/5xx のみを例外化する。
+        fetch_get は使わない: fetch_get は非 2xx で例外化するため、
+        リダイレクト追従中の 3xx で中断してしまう。代わりに、リダイレクト
+        対象ステータス (`_REDIRECT_STATUSES`: 301/302/307/308) 以外の応答に
+        到達した時点で raise_for_status を呼ぶ。これにより 2xx は正常返却、
+        リダイレクト追従対象外の 3xx (300/303/304 等)・4xx・5xx は例外化
+        される。
         """
         original_parsed = urlparse(url)
         original_base = BlueskyIngester._base_domain(original_parsed.hostname)

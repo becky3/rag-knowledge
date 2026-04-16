@@ -4,7 +4,9 @@
 
 テスト方針:
 - fetch_get が 2xx レスポンスをそのまま返すこと
-- fetch_get が 4xx・5xx レスポンスで httpx.HTTPStatusError を送出すること
+- fetch_get が 2xx 以外（3xx・4xx・5xx）で httpx.HTTPStatusError を送出すること
+  （契約: 非 2xx は全て例外化。3xx の例外化は「リダイレクト追従は fetch_get
+  ではなく媒体固有ヘルパーを使う」という設計の裏付けでもある）
 - 例外に URL とステータスコードが含まれること
 """
 
@@ -30,6 +32,19 @@ async def test_fetch_get_returns_response_on_2xx() -> None:
     client.get = AsyncMock(return_value=_make_response(200))
     resp = await fetch_get(client, "https://example.com")
     assert resp.status_code == 200
+
+
+async def test_fetch_get_raises_on_3xx() -> None:
+    """3xx レスポンスでも HTTPStatusError が送出されること.
+
+    リダイレクト追従が必要な用途は媒体固有ヘルパーを使う設計のため、
+    fetch_get は 3xx を例外化する契約。
+    """
+    client = AsyncMock()
+    client.get = AsyncMock(return_value=_make_response(302))
+    with pytest.raises(httpx.HTTPStatusError) as exc_info:
+        await fetch_get(client, "https://example.com")
+    assert exc_info.value.response.status_code == 302
 
 
 async def test_fetch_get_raises_on_4xx() -> None:
