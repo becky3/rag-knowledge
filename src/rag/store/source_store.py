@@ -11,6 +11,7 @@ from __future__ import annotations
 import hashlib
 import json
 import logging
+import os
 import shutil
 from datetime import datetime, timezone
 from pathlib import Path
@@ -285,6 +286,8 @@ class SourceStore:
         """source_store 内のファイルを列挙する.
 
         .meta ファイル、metadata.db、.git 配下、.gitignore、ロックファイルは除外する。
+        BlueSky の media/ 配下（添付画像・動画）は親投稿の変換時に参照されるため、
+        独立ソースとしては列挙しない。
 
         Args:
             source_type: 指定時はそのディレクトリのみ
@@ -300,12 +303,20 @@ class SourceStore:
         if not search_dir.exists():
             return []
 
-        import os
-
+        is_bluesky = source_type == "bluesky"
         result: list[Path] = []
         for dirpath, dirnames, filenames in os.walk(search_dir):
+            rel_dir = Path(dirpath).relative_to(self._root).as_posix()
             # .git ディレクトリを走査段階で除外（性能最適化）
-            dirnames[:] = [d for d in dirnames if d != ".git"]
+            # BlueSky の media/ ディレクトリも除外（添付メディアは親投稿変換時に参照）
+            dirnames[:] = [
+                d for d in dirnames
+                if d != ".git"
+                and not (
+                    d == "media"
+                    and (is_bluesky or rel_dir.startswith("bluesky/"))
+                )
+            ]
             for fname in filenames:
                 full = Path(dirpath) / fname
                 rel = full.relative_to(self._root)
