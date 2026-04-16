@@ -489,6 +489,11 @@ def main() -> None:
         default="desc",
         help="ソート順（asc: 古い順, desc: 新しい順。デフォルト: desc）",
     )
+    list_recent_parser.add_argument(
+        "--filters",
+        default=None,
+        help="メタデータフィルタ（key=value 形式、例: 'repository=rag-knowledge'）",
+    )
     _add_output_option(list_recent_parser)
 
     # search サブコマンド
@@ -1691,6 +1696,18 @@ def run_list_recent(args: argparse.Namespace) -> None:
     limit: int = args.limit if args.limit is not None else settings.rag_list_recent_limit
     ascending = args.order == "asc"
 
+    # filters パラメータのパース
+    parsed_filters: dict[str, str] | None = None
+    if args.filters is not None:
+        try:
+            parsed_filters = parse_filters(args.filters)
+        except ValueError as e:
+            if json_out:
+                _output_error(str(e))
+            else:
+                logger.error("エラー: %s", e)
+                sys.exit(1)
+
     if json_out:
         from .store.metadata_db import MetadataDB
         from .store.models import SourceType
@@ -1717,8 +1734,12 @@ def run_list_recent(args: argparse.Namespace) -> None:
         try:
             db.initialize()
             st = cast(SourceType, args.source_type)
-            sources = db.list_sources(source_type=st, limit=limit, ascending=ascending)
-            total = db.count_sources_by_type(source_type=st)
+            try:
+                sources = db.list_sources(source_type=st, limit=limit, ascending=ascending, filters=parsed_filters)
+                total = db.count_sources_by_type(source_type=st, filters=parsed_filters)
+            except ValueError as e:
+                _output_error(str(e))
+                return
         finally:
             db.close()
         _output_result({
@@ -1740,6 +1761,7 @@ def run_list_recent(args: argparse.Namespace) -> None:
         from .rag_knowledge import list_recent_sources
         print(list_recent_sources(
             settings.source_store_dir, args.source_type, limit, ascending=ascending,
+            filters=parsed_filters,
         ))
 
 

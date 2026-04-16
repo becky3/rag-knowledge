@@ -1379,6 +1379,7 @@ async def rag_list_recent(
     source_type: str,
     limit: int | None = None,
     order: str = "desc",
+    filters: str | None = None,
 ) -> str:
     """[rag-knowledge] List recent sources - 指定した source_type のソースを公開日時順で一覧取得する.
 
@@ -1390,6 +1391,10 @@ async def rag_list_recent(
         source_type: ソース種別: "web", "bluesky", "zenn", "youtube", "aozora", "local", "journal"
         limit: 取得件数（1〜100、未指定時は設定値を使用）
         order: ソート順（"desc": 新しい順（デフォルト）, "asc": 古い順）
+        filters: メタデータフィルタ（key=value 形式、カンマ区切りで複数指定可）。
+            .meta のカスタムフィールドで一覧を絞り込む。完全一致。
+            例: "repository=rag-knowledge" / "repository=rag-knowledge,tag=dev"
+            未指定時はフィルタなし。
 
     Returns:
         ソース一覧テキスト（タイトル、source_id、published_at、ファイルサイズ）
@@ -1408,6 +1413,8 @@ async def rag_list_recent(
     if limit is not None:
         args.extend(["--limit", str(limit)])
     args.extend(["--order", order])
+    if filters is not None:
+        args.extend(["--filters", filters])
 
     try:
         result = await _run_cli_subprocess("list-recent", args)
