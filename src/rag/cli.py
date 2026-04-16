@@ -1734,8 +1734,12 @@ def run_list_recent(args: argparse.Namespace) -> None:
         try:
             db.initialize()
             st = cast(SourceType, args.source_type)
-            sources = db.list_sources(source_type=st, limit=limit, ascending=ascending, filters=parsed_filters)
-            total = db.count_sources_by_type(source_type=st, filters=parsed_filters)
+            try:
+                sources = db.list_sources(source_type=st, limit=limit, ascending=ascending, filters=parsed_filters)
+                total = db.count_sources_by_type(source_type=st, filters=parsed_filters)
+            except ValueError as e:
+                _output_error(str(e))
+                return
         finally:
             db.close()
         _output_result({

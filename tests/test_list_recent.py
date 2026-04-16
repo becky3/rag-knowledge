@@ -352,6 +352,18 @@ class TestListRecentSources:
         result = list_recent_sources(str(source_store_dir), "journal", 10)
         assert "全2件" in result
 
+    def test_filters_invalid_key_returns_error(self, tmp_path: Path) -> None:
+        """filters のキー名が不正な場合、例外ではなくエラーメッセージを返す."""
+        from rag.rag_knowledge import list_recent_sources
+
+        source_store_dir = self._setup_db(tmp_path)
+
+        result = list_recent_sources(
+            str(source_store_dir), "journal", 10,
+            filters={"repo-name": "test"},
+        )
+        assert "エラー:" in result
+
 
 class TestFormatFileSize:
     """format_file_size のテスト."""

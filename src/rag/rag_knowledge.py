@@ -1010,7 +1010,7 @@ def list_recent_sources(
         source_type: ソース種別
         limit: 取得件数
         ascending: True で昇順（古い順）、False で降順（新しい順、デフォルト）
-        filters: メタデータフィルタ（key=value 形式）。meta JSON カラムで絞り込む
+        filters: メタデータフィルタ。パース済み辞書を受け取り meta JSON カラムで絞り込む
 
     Returns:
         フォーマット済みテキスト
@@ -1027,8 +1027,11 @@ def list_recent_sources(
         from .store.models import SourceType
 
         st = cast(SourceType, source_type)
-        sources = db.list_sources(source_type=st, limit=limit, ascending=ascending, filters=filters)
-        total = db.count_sources_by_type(source_type=st, filters=filters)
+        try:
+            sources = db.list_sources(source_type=st, limit=limit, ascending=ascending, filters=filters)
+            total = db.count_sources_by_type(source_type=st, filters=filters)
+        except ValueError as e:
+            return f"エラー: {e}"
     finally:
         db.close()
 
