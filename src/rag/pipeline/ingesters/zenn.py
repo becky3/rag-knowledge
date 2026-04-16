@@ -12,7 +12,12 @@ import json
 import logging
 from typing import TYPE_CHECKING, Any
 
-from rag.pipeline.ingesters._common import IngestResult, ProgressCallback, now_iso
+from rag.pipeline.ingesters._common import (
+    IngestResult,
+    ProgressCallback,
+    fetch_get,
+    now_iso,
+)
 
 if TYPE_CHECKING:
 
@@ -157,7 +162,7 @@ class ZennIngester:
 
                 # 記事詳細取得
                 url = f"{ZENN_API_BASE}/articles/{slug}"
-                resp = await client.get(url)
+                resp = await fetch_get(client, url)
                 data = resp.json()
                 article = data.get("article", data)
 
@@ -236,7 +241,7 @@ class ZennIngester:
 
                 # スクラップ詳細取得
                 url = f"{ZENN_API_BASE}/scraps/{slug}"
-                resp = await client.get(url)
+                resp = await fetch_get(client, url)
                 data = resp.json()
                 scrap = data.get("scrap", data)
                 json_data = json.dumps(scrap, ensure_ascii=False, indent=2)
@@ -303,7 +308,7 @@ class ZennIngester:
 
         while page <= MAX_PAGINATION_PAGES and len(slugs) < max_count:
             url = f"{ZENN_API_BASE}/{kind}?username={username}&order=latest&page={page}"
-            resp = await client.get(url)
+            resp = await fetch_get(client, url)
             data = resp.json()
 
             items = data.get(kind, [])

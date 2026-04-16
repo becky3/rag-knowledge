@@ -286,7 +286,7 @@ def _extract_pdf_pymupdf4llm(path: Path) -> str | None:
         return None
 
     try:
-        result = pymupdf4llm.to_markdown(str(path))
+        result: str = pymupdf4llm.to_markdown(str(path))
         logger.info("PDF extracted (pymupdf4llm): %s", path.name)
         return result
     except Exception:
