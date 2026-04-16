@@ -1327,6 +1327,53 @@ class TestGetFollowingSameOriginRedirect:
         mock_client.get.assert_called_once()
 
     @pytest.mark.asyncio()
+    async def test_real_httpx_response_302_then_200(
+        self, source_store: SourceStore,
+    ) -> None:
+        """実 httpx.Response で 302→200 を追従できる（raise_for_status 回帰テスト）.
+
+        httpx の raise_for_status は 3xx でも例外を送出する仕様のため、
+        リダイレクト追従中に途中の 3xx で例外化しないことを保証する。
+        """
+        import httpx as _httpx
+        req = _httpx.Request("GET", "https://video.bsky.app/playlist.m3u8")
+        redirect_resp = _httpx.Response(
+            302,
+            headers={"location": "https://video.cdn.bsky.app/final.m3u8"},
+            request=req,
+        )
+        final_resp = _httpx.Response(200, content=b"ok", request=req)
+
+        mock_client = AsyncMock()
+        mock_client.get.side_effect = [redirect_resp, final_resp]
+
+        ingester = make_bluesky_ingester(source_store)
+        resp = await ingester._get_following_same_origin_redirect(
+            mock_client, "https://video.bsky.app/playlist.m3u8",
+        )
+
+        assert resp.status_code == 200
+        assert resp.content == b"ok"
+
+    @pytest.mark.asyncio()
+    async def test_real_httpx_response_final_5xx_raises(
+        self, source_store: SourceStore,
+    ) -> None:
+        """最終レスポンスが 5xx の場合に HTTPStatusError を送出する."""
+        import httpx as _httpx
+        req = _httpx.Request("GET", "https://video.bsky.app/playlist.m3u8")
+        error_resp = _httpx.Response(503, content=b"err", request=req)
+
+        mock_client = AsyncMock()
+        mock_client.get.return_value = error_resp
+
+        ingester = make_bluesky_ingester(source_store)
+        with pytest.raises(_httpx.HTTPStatusError):
+            await ingester._get_following_same_origin_redirect(
+                mock_client, "https://video.bsky.app/playlist.m3u8",
+            )
+
+    @pytest.mark.asyncio()
     async def test_stops_at_max_redirects(
         self, source_store: SourceStore,
     ) -> None:

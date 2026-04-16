@@ -8,6 +8,12 @@ from __future__ import annotations
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    import httpx
+
+    from py_common_lib.httpx import ConstrainedClient
 
 ProgressCallback = Callable[[int, int, str], None]
 
@@ -42,3 +48,22 @@ class IngestResult:
 def now_iso() -> str:
     """現在時刻を ISO 8601 形式で返す."""
     return datetime.now(timezone.utc).isoformat()
+
+
+async def fetch_get(client: ConstrainedClient, url: str) -> httpx.Response:
+    """HTTP GET + ステータスチェックを統一的に行う共通ヘルパー.
+
+    仕様: docs/specs/ingesters/common.md
+
+    ConstrainedClient はサーキットブレーカーの責務と HTTP ステータスの責務を
+    分離する設計であり、呼び出し側がステータスチェックを行う必要がある。
+    本ヘルパーは「ConstrainedClient 経由で GET → レスポンスが非 2xx なら
+    httpx.HTTPStatusError を送出」という契約を提供し、ステータスチェック
+    漏れを構造的に防ぐ。
+
+    呼び出し側は例外を捕捉してログ出力（URL・ステータスコードを含む）の
+    うえ、媒体ごとの方針（スキップ継続 / 中断 / リトライ）を選択すること。
+    """
+    resp = await client.get(url)
+    resp.raise_for_status()
+    return resp

@@ -18,7 +18,12 @@ from datetime import datetime
 from pathlib import Path
 from urllib.parse import urljoin, urlparse
 
-from rag.pipeline.ingesters._common import IngestResult, ProgressCallback, now_iso
+from rag.pipeline.ingesters._common import (
+    IngestResult,
+    ProgressCallback,
+    fetch_get,
+    now_iso,
+)
 from typing import TYPE_CHECKING, Any, Literal
 
 if TYPE_CHECKING:
@@ -342,7 +347,7 @@ class BlueskyIngester:
 
             from urllib.parse import urlencode
             url = f"{self._appview_url}/xrpc/app.bsky.feed.getAuthorFeed?{urlencode(params)}"
-            resp = await client.get(url)
+            resp = await fetch_get(client, url)
             data = resp.json()
 
             feed = data.get("feed", [])
@@ -521,7 +526,7 @@ class BlueskyIngester:
         # 画像 DL
         for idx, img_url in enumerate(image_urls):
             try:
-                resp = await client.get(img_url)
+                resp = await fetch_get(client, img_url)
                 content_type = resp.headers.get("content-type", "")
                 ext = _ext_from_content_type(content_type)
                 filename = f"image_{idx}{ext}"
@@ -694,6 +699,11 @@ class BlueskyIngester:
         CDN の 3xx リダイレクトに対応する。リダイレクト先のベースドメイン
         （eTLD+1 相当）が異なる場合はリダイレクト前のレスポンスをそのまま
         返す（SSRF 防止）。
+
+        fetch_get は使わない: httpx の raise_for_status は 3xx でも
+        例外を送出するため、リダイレクト追従ロジックが走る前に
+        中断してしまう。代わりに非 3xx 応答に到達した時点で
+        raise_for_status を呼び、4xx/5xx のみを例外化する。
         """
         original_parsed = urlparse(url)
         original_base = BlueskyIngester._base_domain(original_parsed.hostname)
@@ -701,6 +711,7 @@ class BlueskyIngester:
 
         for _ in range(_max_redirects):
             if resp.status_code not in BlueskyIngester._REDIRECT_STATUSES:
+                resp.raise_for_status()
                 return resp
             location = resp.headers.get("location", "")
             if not location:
@@ -721,6 +732,8 @@ class BlueskyIngester:
 
         if resp.status_code in BlueskyIngester._REDIRECT_STATUSES:
             logger.warning("リダイレクト回数上限に到達: %s", url)
+            return resp
+        resp.raise_for_status()
         return resp
 
     async def follow_urls(
