@@ -19,7 +19,7 @@ rag_embedding_context_length = 512
 rag_worst_token_char_ratio = 0.7
 
 # 検索
-rag_retrieval_count = 3
+rag_retrieval_count = 10
 # rag_similarity_threshold = (未設定時は None)
 
 # ChromaDB コレクション名
