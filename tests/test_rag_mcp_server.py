@@ -234,7 +234,7 @@ class TestConfigureAndRun:
         ):
             _configure_and_run()
 
-        mock_log.assert_called_once_with("MCP server shut down")
+        mock_log.assert_any_call("MCP server shut down")
 
     def test_stdio_keyboard_interrupt_graceful_shutdown(self) -> None:
         """stdio モードでも KeyboardInterrupt で終了コード130で終了すること (#42)."""
@@ -252,7 +252,7 @@ class TestConfigureAndRun:
         ):
             _configure_and_run()
 
-        mock_log.assert_called_once_with("MCP server shut down")
+        mock_log.assert_any_call("MCP server shut down")
 
     def test_shutdown_log_on_normal_exit(self) -> None:
         """正常終了時もシャットダウンログが出力されること (#42)."""
@@ -267,7 +267,7 @@ class TestConfigureAndRun:
         ):
             _configure_and_run()
 
-        mock_log.assert_called_once_with("MCP server shut down")
+        mock_log.assert_any_call("MCP server shut down")
 
 
 class TestRagGetDocumentTool:

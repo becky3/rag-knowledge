@@ -62,6 +62,7 @@ def extract_pdf(path: Path, config: PdfBackendConfig) -> str | None:
     backend = config.backend
 
     if backend == "pymupdf4llm":
+        logger.info("PDF backend: pymupdf4llm (explicit): %s", path.name)
         return _extract_pdf_pymupdf4llm(path)
 
     if backend == "mineru":
@@ -71,6 +72,7 @@ def extract_pdf(path: Path, config: PdfBackendConfig) -> str | None:
                 "Install with: uv sync --extra mineru"
             )
             return None
+        logger.info("PDF backend: MinerU mode=ocr (explicit): %s", path.name)
         return _extract_pdf_mineru(path, config, mode="ocr")
 
     # backend == "auto": 事前判定フロー
@@ -284,7 +286,9 @@ def _extract_pdf_pymupdf4llm(path: Path) -> str | None:
         return None
 
     try:
-        return pymupdf4llm.to_markdown(str(path))  # type: ignore[no-any-return]
+        result = pymupdf4llm.to_markdown(str(path))
+        logger.info("PDF extracted (pymupdf4llm): %s", path.name)
+        return result
     except Exception:
         logger.exception("Failed to convert PDF to markdown: %s", path)
         return None
@@ -376,7 +380,10 @@ def _extract_pdf_mineru(
             pdf_info = middle_json["pdf_info"]
             md_content: str = pipeline_union_make(pdf_info, MakeMode.NLP_MD, "")
 
-        return md_content if md_content.strip() else None
+        if md_content.strip():
+            logger.info("PDF extracted (MinerU, mode=%s): %s", mode, path.name)
+            return md_content
+        return None
     except Exception:
         logger.exception("Failed to extract PDF with MinerU: %s", path)
         return None

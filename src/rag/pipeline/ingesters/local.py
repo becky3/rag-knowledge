@@ -102,6 +102,10 @@ class LocalIngester:
             result.errors = 1
             result.error_details.append(str(e))
             return result
+        logger.info(
+            "Document crawl: %d files found (dir=%s)",
+            len(files), dir_path,
+        )
         if not files:
             return result
         resolved_dir = Path(dir_path.strip()).resolve()
@@ -136,6 +140,10 @@ class LocalIngester:
 
             if progress_callback is not None:
                 progress_callback(file_idx + 1, len(files), str(fp))
+        logger.info(
+            "Document crawl completed: placed=%d, skipped=%d, errors=%d",
+            result.placed, result.skipped, result.errors,
+        )
         return result
 
     @staticmethod

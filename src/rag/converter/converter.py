@@ -180,6 +180,7 @@ class Converter:
         if is_passthrough:
             try:
                 passthrough_copy(source_path, converted_path)
+                logger.info("Passthrough copied: %s", file_path)
                 return converted_path
             except OSError:
                 logger.exception("Passthrough copy failed: %s", file_path)
@@ -213,6 +214,7 @@ class Converter:
         # 出力
         converted_path.parent.mkdir(parents=True, exist_ok=True)
         converted_path.write_text(normalized, encoding="utf-8")
+        logger.info("Converted: %s -> %s", file_path, converted_rel_path)
         return converted_path
 
     def delete(
@@ -230,7 +232,7 @@ class Converter:
         converted_path = converted_store_dir / converted_rel_path
         if converted_path.exists():
             converted_path.unlink()
-            logger.debug("Deleted converted file: %s", converted_path)
+            logger.info("Deleted converted file: %s", converted_rel_path)
 
     def clear(
         self,
@@ -285,6 +287,7 @@ class Converter:
         if self._media_analyzer is not None:
             self._media_analyzer.check_and_cache_availability()
 
+        logger.info("Convert batch started: %d files", len(file_paths))
         result = ConvertBatchResult()
         try:
             for file_path in file_paths:
@@ -304,6 +307,10 @@ class Converter:
             if self._media_analyzer is not None:
                 self._media_analyzer.clear_availability_cache()
 
+        logger.info(
+            "Convert batch completed: success=%d, skipped=%d, errors=%d",
+            result.success, result.skipped, result.errors,
+        )
         return result
 
     # --- 内部メソッド ---
@@ -400,12 +407,16 @@ class Converter:
             )
 
         if ext in IMAGE_EXTENSIONS:
+            media_type = "image"
             text = self._media_analyzer.analyze_image(source_path)
         elif ext in VIDEO_EXTENSIONS:
+            media_type = "video"
             text = self._media_analyzer.analyze_video(source_path)
         else:
             return None
 
+        if text:
+            logger.info("Media analyzed: %s (type=%s)", source_path.name, media_type)
         return text if text else None
 
     def _convert_json(

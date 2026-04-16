@@ -119,6 +119,10 @@ class JournalIngester:
             return result
 
         files = sorted(resolved_dir.glob("*.md"), key=lambda p: str(p))
+        logger.info(
+            "Journal import: %d files found (repository=%s)",
+            len(files), repository,
+        )
         if len(files) > MAX_FILES_HARD_LIMIT:
             logger.warning(
                 "File count %d exceeds limit %d, clamping to %d",
@@ -165,6 +169,10 @@ class JournalIngester:
                 result.errors += 1
                 result.error_details.append(str(fp))
 
+        logger.info(
+            "Journal import completed: placed=%d, skipped=%d, errors=%d",
+            result.placed, result.skipped, result.errors,
+        )
         return result
 
     @staticmethod

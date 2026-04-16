@@ -14,6 +14,7 @@ import inspect
 import json
 import logging
 import subprocess
+from collections import Counter
 from collections.abc import Awaitable, Callable, Sequence
 from datetime import datetime, timezone
 from pathlib import Path
@@ -129,6 +130,7 @@ class PipelineController:
         Returns:
             パイプライン処理結果サマリ
         """
+        logger.info("Ingest post-processing started: %s", message)
         self.commit(message)
         return await self.run_incremental(progress_callback=progress_callback)
 
@@ -140,6 +142,7 @@ class PipelineController:
         source_store に未コミットの変更がある場合は自動コミットし、
         last_commit_id と HEAD の差分を検知して変更ファイルのみをパイプライン処理する。
         """
+        logger.info("Incremental pipeline started")
         self._git.init_repo()
 
         # 未コミット変更の自動コミット
@@ -155,9 +158,13 @@ class PipelineController:
 
         last_commit_id = self.db.get_last_commit_id()
         head_commit = self._git.get_head_commit()
+        logger.info(
+            "Commit range: %s..%s", last_commit_id[:8], head_commit[:8],
+        )
 
         # last_commit_id == HEAD → 差分なし
         if last_commit_id == head_commit:
+            logger.info("No changes (last_commit_id == HEAD)")
             return PipelineSummary(
                 mode=PipelineMode.INCREMENTAL,
                 total_files=0,
@@ -184,6 +191,7 @@ class PipelineController:
             changes = self._classify_changes(raw_diff)
 
         if not changes:
+            logger.info("No changed files")
             return PipelineSummary(
                 mode=PipelineMode.INCREMENTAL,
                 total_files=0,
@@ -192,9 +200,23 @@ class PipelineController:
                 to_commit_id=head_commit,
             )
 
+        status_counts = Counter(e.status.value for e in changes)
+        logger.info(
+            "Changes detected: %d files (%s)",
+            len(changes),
+            ", ".join(f"{k}={v}" for k, v in sorted(status_counts.items())),
+        )
+
         summary = await self._process_changes(
             changes, PipelineMode.INCREMENTAL, last_commit_id, head_commit,
             progress_callback=progress_callback,
+        )
+        logger.info(
+            "Incremental pipeline completed: total=%d, processed=%d, errors=%d, warnings=%d",
+            summary.total_files,
+            summary.processed,
+            len(summary.errors),
+            len(summary.warnings),
         )
 
         # 正常完了時のみ pipeline_history に記録
@@ -228,6 +250,9 @@ class PipelineController:
         Raises:
             RuntimeError: source_store に未コミットの変更がある場合
         """
+        logger.info(
+            "Full rebuild started (source_type=%s)", source_type or "all",
+        )
         self._git.init_repo()
         self._check_uncommitted_changes(source_type)
 
@@ -254,6 +279,8 @@ class PipelineController:
             processed=0,
         )
 
+        logger.info("Target files: %d", len(records))
+
         if not records:
             return FullRebuildResult(convert=empty_convert, index=empty_index)
 
@@ -262,6 +289,7 @@ class PipelineController:
             to_commit = self._git.get_head_commit()
 
         # --- Phase 1: Convert ---
+        logger.info("Phase 1: Convert started (%d files)", len(records))
         self._converter.clear(self._converted_store_dir, source_type)
 
         def _convert_single(record: SourceRecord) -> None:
@@ -280,6 +308,12 @@ class PipelineController:
             log_prefix="全再構築(Convert)中に",
             progress_callback=progress_callback,
         )
+        logger.info(
+            "Phase 1: Convert completed: processed=%d, errors=%d, warnings=%d",
+            convert_summary.processed,
+            len(convert_summary.errors),
+            len(convert_summary.warnings),
+        )
 
         # --- Phase 2: Index (convert 成功分のみ) ---
         await self._indexer.clear(source_type)
@@ -295,6 +329,12 @@ class PipelineController:
                     "Convert warning の形式が不正なため index 除外対象外: %s", w,
                 )
         convert_excluded = convert_failed | convert_warned
+        if convert_excluded:
+            logger.info(
+                "Convert excluded: failed=%d, warned=%d",
+                len(convert_failed),
+                len(convert_warned),
+            )
         index_records = [r for r in records if r.source_id not in convert_excluded]
 
         if not index_records:
@@ -319,6 +359,7 @@ class PipelineController:
             metadata = self._build_metadata_from_record(record)
             await self._indexer.add(record.source_id, converted_path, metadata)
 
+        logger.info("Phase 2: Index started (%d files)", len(index_records))
         with self._indexer.bm25_deferred():
             index_summary = await self._run_processing_loop(
                 index_records,
@@ -332,6 +373,12 @@ class PipelineController:
                 to_commit_id=to_commit,
                 concurrency=concurrency,
             )
+        logger.info(
+            "Phase 2: Index completed: processed=%d, errors=%d, warnings=%d",
+            index_summary.processed,
+            len(index_summary.errors),
+            len(index_summary.warnings),
+        )
 
         # pipeline_history に記録（両フェーズともエラーなしの場合のみ）
         if not convert_summary.errors and not index_summary.errors and to_commit:
@@ -392,6 +439,10 @@ class PipelineController:
         Raises:
             RuntimeError: source_store に未コミットの変更がある場合
         """
+        logger.info(
+            "Convert-only rebuild started (source_type=%s)",
+            source_type or "all",
+        )
         self._git.init_repo()
         self._check_uncommitted_changes(source_type)
 
@@ -406,6 +457,8 @@ class PipelineController:
             )
             if r.source_id not in _PIPELINE_EXCLUDE_FILES
         ]
+
+        logger.info("Target files: %d", len(records))
 
         if not records:
             return PipelineSummary(
@@ -422,7 +475,7 @@ class PipelineController:
                 self._converted_store_dir,
             )
 
-        return await self._run_processing_loop(
+        summary = await self._run_processing_loop(
             records,
             process_fn=_convert_single,
             get_file_path=lambda r: r.source_id,
@@ -431,6 +484,13 @@ class PipelineController:
             log_prefix="コンバート再実行中に",
             progress_callback=progress_callback,
         )
+        logger.info(
+            "Convert-only rebuild completed: processed=%d, errors=%d, warnings=%d",
+            summary.processed,
+            len(summary.errors),
+            len(summary.warnings),
+        )
+        return summary
 
     async def run_index_only(
         self,
@@ -450,6 +510,10 @@ class PipelineController:
         Raises:
             RuntimeError: source_store に未コミットの変更がある場合
         """
+        logger.info(
+            "Index-only rebuild started (source_type=%s)",
+            source_type or "all",
+        )
         self._git.init_repo()
         self._check_uncommitted_changes(source_type)
 
@@ -464,6 +528,8 @@ class PipelineController:
             )
             if r.source_id not in _PIPELINE_EXCLUDE_FILES
         ]
+
+        logger.info("Target files: %d", len(records))
 
         if not records:
             return PipelineSummary(
@@ -498,6 +564,13 @@ class PipelineController:
                 progress_callback=progress_callback,
                 concurrency=concurrency,
             )
+
+        logger.info(
+            "Index-only rebuild completed: processed=%d, errors=%d, warnings=%d",
+            summary.processed,
+            len(summary.errors),
+            len(summary.warnings),
+        )
 
         # pipeline_history に記録（正常完了時のみ）
         if not summary.errors and to_commit:

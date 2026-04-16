@@ -1019,6 +1019,8 @@ async def _run_cli_subprocess(
         *(args or []),
     ]
 
+    logger.info("CLI subprocess: %s %s", command, " ".join(args or []))
+
     env = os.environ.copy()
     env["PYTHONIOENCODING"] = "utf-8"
 
@@ -1129,6 +1131,11 @@ async def _run_cli_subprocess(
             f"CLI サブプロセスが異常終了しました (exit_code={exit_code})\n{stderr_tail}"
         )
 
+    # 正常終了時の stderr をログに転送（警告やデバッグ情報の保全）
+    if stderr_text:
+        for line in stderr_lines:
+            logger.debug("[CLI] %s", line)
+
     # 結果パース
     if not result_line:
         raise CLISubprocessError("CLI サブプロセスの出力が空です")
@@ -1140,6 +1147,7 @@ async def _run_cli_subprocess(
             f"CLI サブプロセスの結果パースに失敗: {result_line}"
         ) from exc
 
+    logger.info("CLI subprocess completed: %s (exit_code=0)", command)
     return result
 
 
@@ -1642,6 +1650,7 @@ async def upload_document(request: Request) -> Response:
             import datetime as _dt
             _today = _dt.date.today()
             source_id = f"local/{_LOCAL_UPLOAD_DIR}/{_today.year}/{_today.month:02d}/{_today.day:02d}/{sanitized}"
+            logger.info("Document uploaded: %s", sanitized)
             return _upload_success(
                 f"ドキュメントを取り込みました: {sanitized}",
                 source_id=source_id,
@@ -1734,6 +1743,7 @@ async def upload_journal(request: Request) -> Response:
             # CLI の result から entry_id を取得（利用可能な場合）
             resolved_entry_id = cli_result.get("entry_id") or entry_id_str or title
             source_id = f"journal/{repository}/{resolved_entry_id}.md"
+            logger.info("Journal uploaded: %s/%s", repository, resolved_entry_id)
             return _upload_success(
                 f"ジャーナルエントリを登録しました: {repository}/{resolved_entry_id}",
                 source_id=source_id,
@@ -1835,7 +1845,24 @@ def _check_api_key_registered() -> str | None:
 
 def _configure_and_run() -> None:
     """トランスポート設定に基づいて MCP サーバーを起動する."""
+    # rag 名前空間ロガーの設定（uvicorn/FastMCP のルートロガーを上書きしない）
+    rag_logger = logging.getLogger("rag")
+    if not rag_logger.handlers:
+        handler = logging.StreamHandler(sys.__stderr__)
+        handler.setFormatter(
+            logging.Formatter("%(asctime)s %(name)s %(levelname)s %(message)s"),
+        )
+        rag_logger.addHandler(handler)
+    rag_logger.propagate = False
+
     settings = get_settings()
+
+    # ログレベル設定
+    log_level = logging.DEBUG if settings.rag_debug_log_enabled else logging.INFO
+    rag_logger.setLevel(log_level)
+    # uvicorn の dictConfig が parent chain を再構成するため、
+    # rag.server ロガーにも直接レベルを設定する
+    logger.setLevel(log_level)
     transport = settings.rag_transport
 
     # HTTP モードの事前検証（外部依存の起動前に設定の妥当性を確認する）
@@ -1880,6 +1907,14 @@ def _configure_and_run() -> None:
                     "transport_security is None; "
                     "cannot disable DNS rebinding protection"
                 )
+
+    if transport == "http":
+        logger.info(
+            "Starting MCP server: transport=%s, host=%s, port=%d",
+            transport, settings.rag_http_host, settings.rag_http_port,
+        )
+    else:
+        logger.info("Starting MCP server: transport=%s", transport)
 
     try:
         if transport == "http":
