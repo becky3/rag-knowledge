@@ -147,8 +147,13 @@ def resolve_attachment_parent(rel_path: str) -> str | None:
 def is_source_file(rel_path: str) -> bool:
     """相対パスが独立ソースに該当するかを判定する.
 
-    除外対象（sidecar・ロック・OS 生成ファイル・attachment 等）は False、
-    独立ソースに該当する場合は True を返す。
+    除外対象（sidecar・ロック・OS 生成ファイル・attachment・未知の source_type
+    プレフィックス等）は False、独立ソースに該当する場合は True を返す。
+
+    invariant として、`is_source_file(rel_path) == True` のとき
+    `detect_source_type(rel_path)` は必ず `SourceType` を返す（ValueError を
+    送出しない）。この保証のため、先頭ディレクトリが既知の source_type で
+    あることを検証する。
 
     Args:
         rel_path: source_store ルート基準の相対パス
@@ -160,6 +165,10 @@ def is_source_file(rel_path: str) -> bool:
     if _EXCLUDE_SPEC.match_file(normalized):
         return False
     if resolve_attachment_parent(normalized) is not None:
+        return False
+    # invariant 担保: detect_source_type が ValueError を送出するパスを False にする
+    first = normalized.split("/", 1)[0]
+    if first not in _SOURCE_TYPE_VALUES:
         return False
     return True
 
@@ -443,9 +452,18 @@ class SourceStore:
 
         result: list[Path] = []
         for dirpath, dirnames, filenames in os.walk(search_dir):
-            # .git ディレクトリは走査段階で除外（性能最適化。
-            # is_source_file でも除外されるが、内部ファイルを列挙しないよう早期カット）
-            dirnames[:] = [d for d in dirnames if d != ".git"]
+            # 走査段階での早期カット（性能最適化）。
+            # - .git: 任意階層の git 管理ディレクトリ
+            # - bluesky の media/: 複合ソースの attachment ディレクトリ
+            #   （投稿数 × attachment 数分の I/O を削減。is_source_file でも
+            #    最終的に除外されるが、os.walk 自体の I/O は発生するため）
+            rel_dir = Path(dirpath).relative_to(self._root)
+            in_bluesky_tree = rel_dir.parts[:1] == ("bluesky",)
+            dirnames[:] = [
+                d
+                for d in dirnames
+                if d != ".git" and not (in_bluesky_tree and d == "media")
+            ]
             for fname in filenames:
                 full = Path(dirpath) / fname
                 rel = full.relative_to(self._root)

@@ -631,6 +631,20 @@ class TestIsSourceFile:
         assert is_source_file("bluesky/did/2026/01/media/rkey/image_0.webp") is False
         assert is_source_file("bluesky/did/2026/01/media/rkey/video_0.ts") is False
 
+    def test_unknown_prefix_excluded(self) -> None:
+        """未知 source_type プレフィックスは False を返す（invariant 担保）.
+
+        `detect_source_type` が ValueError を送出するパスは `is_source_file` が
+        False を返すことで、以下の invariant が成立する:
+            is_source_file(p) == True  →  detect_source_type(p) は成功する
+        """
+        from rag.store.source_store import is_source_file
+
+        assert is_source_file("unknown/foo.md") is False
+        assert is_source_file("random/path/file.txt") is False
+        # ルート直下の単独ファイル（プレフィックスが source_type でない）も除外
+        assert is_source_file("orphan.md") is False
+
 
 class TestResolveAttachmentParent:
     """resolve_attachment_parent（純粋関数）のテスト."""
