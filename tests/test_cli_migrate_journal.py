@@ -189,7 +189,11 @@ class TestRunMigrateJournal:
         result = IngestResult()
         result.placed = 1
         result.errors = 1
-        result.error_details = ["/path/to/failed.md"]
+        result.error_details = [{
+            "category": "placement",
+            "target": "/path/to/failed.md",
+            "message": "permission denied",
+        }]
         mock_ingester_cls.return_value.import_directory.return_value = result
 
         args = self._make_args(str(journal_dir), "test-repo")

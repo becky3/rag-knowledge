@@ -151,6 +151,16 @@ def _output_error(message: str) -> None:
     sys.exit(1)
 
 
+def _error_detail_message(detail: dict[str, object]) -> str:
+    """error_details の dict から表示用メッセージを抽出する."""
+    message = detail.get("message")
+    if message:
+        return str(message)
+    target = detail.get("target", "")
+    category = detail.get("category", "unknown")
+    return f"[{category}] {target}" if target else f"[{category}]"
+
+
 def _output_result(data: dict[str, object]) -> None:
     """結果 JSON を出力する."""
     payload: dict[str, object] = {**data, "type": "result"}
@@ -1958,9 +1968,10 @@ async def run_add_journal(args: argparse.Namespace) -> None:
         )
 
         if ingest_result.errors > 0:
+            first_detail = _error_detail_message(ingest_result.error_details[0])
             if json_out:
-                _output_error(ingest_result.error_details[0])
-            print(f"エラー: {ingest_result.error_details[0]}", file=sys.stderr)
+                _output_error(first_detail)
+            print(f"エラー: {first_detail}", file=sys.stderr)
             raise SystemExit(1)
 
         pipeline_summary = await controller.ingest_and_index(
@@ -2382,6 +2393,7 @@ async def run_crawl_bluesky(args: argparse.Namespace) -> None:
                     placed_items,
                     youtube_ingester=youtube_ingester,
                     force_youtube_reingest=settings.rag_bluesky_force_youtube_reingest,
+                    result=ingest_result,
                 )
     except (ValueError, TypeError) as e:
         if json_out:
@@ -2594,9 +2606,10 @@ async def run_add_document(args: argparse.Namespace) -> None:
             print(f"取り込み対象がありませんでした: {display_name}")
             return
         if ingest_result.errors > 0:
+            first_detail = _error_detail_message(ingest_result.error_details[0])
             if json_out:
-                _output_error(ingest_result.error_details[0])
-            print(f"エラー: {ingest_result.error_details[0]}", file=sys.stderr)
+                _output_error(first_detail)
+            print(f"エラー: {first_detail}", file=sys.stderr)
             raise SystemExit(1)
 
         pipeline_summary = await controller.ingest_and_index(
@@ -2642,9 +2655,10 @@ async def run_crawl_documents(args: argparse.Namespace) -> None:
         print(f"対象ファイルが見つかりませんでした: {args.dir_path}")
         return
     if ingest_result.errors > 0 and ingest_result.placed == 0:
+        first_detail = _error_detail_message(ingest_result.error_details[0])
         if json_out:
-            _output_error(ingest_result.error_details[0])
-        print(f"エラー: {ingest_result.error_details[0]}", file=sys.stderr)
+            _output_error(first_detail)
+        print(f"エラー: {first_detail}", file=sys.stderr)
         raise SystemExit(1)
 
     pipeline_summary = await controller.ingest_and_index(

@@ -685,7 +685,19 @@ class TestFormatCliIngestResult:
         mod = import_module("rag.server")
         result = {
             "placed": 0, "skipped": 0, "overwritten": 0,
-            "errors": 2, "error_details": ["fail1", "fail2"],
+            "errors": 2,
+            "error_details": [
+                {
+                    "category": "metadata_fetch",
+                    "target": "fail1",
+                    "message": "first failure",
+                },
+                {
+                    "category": "placement",
+                    "target": "fail2",
+                    "message": "second failure",
+                },
+            ],
         }
         text = mod._format_cli_ingest_result(result)
         assert "エラー: 2件" in text

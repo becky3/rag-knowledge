@@ -92,7 +92,9 @@ Local インジェスターは、ローカルファイルシステム上のテ�
 | `.jpg`, `.jpeg`, `.png`, `.webp` | 画像ファイル（メディア解析モジュールで Vision モデルによるテキスト変換） |
 | `.mp4`, `.ts` | 動画ファイル（MPEG-TS。メディア解析モジュールでフレーム抽出 + Vision モデルによるテキスト変換） |
 
-対応拡張子は `config.toml` の `rag_document_supported_extensions` で管理する。テキスト系拡張子を追加した場合はプレーンテキストとしてコンバーターが処理する。画像・動画はメディア解析モジュール（[media-analysis.md](../infrastructure/media-analysis.md)）が Vision モデルでテキスト化する。LM Studio が停止中の場合、画像・動画の解析はスキップされる（テキストのみのソースとは異なり、インデックスには登録されない）。
+対応拡張子は `config.toml` の `rag_document_supported_extensions` で管理する。テキスト系拡張子を追加した場合はプレーンテキストとしてコンバーターが処理する。
+
+画像・動画はメディア解析モジュール（[media-analysis.md](../infrastructure/media-analysis.md)）が Vision モデルでテキスト化する。LM Studio が停止中の場合、画像・動画の解析はスキップされる（テキストのみのソースとは異なり、インデックスには登録されない）。
 
 ### source_id
 
@@ -292,7 +294,7 @@ flowchart TD
 | `filename` が空文字列 | コンテンツアップロード層でバリデーションエラーとして拒否する（`rag_add_document`） |
 | `filename` にディレクトリセパレータや `..` が含まれる | コンテンツアップロード層が `Path(filename).name` でファイル名部分のみ採用する。サニタイズ後が空文字列または `..` の場合はバリデーションエラーとして拒否する（`rag_add_document`） |
 | 対応していない拡張子 | バリデーションエラーとして拒否する（`rag_add_document` 単一取り込み時）。`rag_crawl_documents` 一括取り込み時はフィルタで除外する |
-| `upload_mode=fail` かつ同日に同名ファイルが存在する | エラーを返す（`rag_add_document`） |
+| `upload_mode=fail` かつ同日に同名ファイルが存在する | エラーを返す（`rag_add_document`）。`errors` に `placement` カテゴリで計上する |
 | `upload_mode=replace` かつ同日に同名ファイルが存在する | 上書きする（`rag_add_document`） |
 | ファイルが存在しない（CLI） | バリデーションエラーとして拒否する（CLI `add-document` コマンド） |
 | ディレクトリが存在しない（`rag_crawl_documents`） | バリデーションエラーとして拒否する |
@@ -304,7 +306,7 @@ flowchart TD
 | `pattern` に `..` が含まれる、または `Path(pattern).is_absolute()` が真 | バリデーションエラーとして拒否する |
 | glob マッチ結果が `dir_path` 配下でない | 該当ファイルを除外する |
 | コピー先ディレクトリが存在しない | 必要な中間ディレクトリを自動作成する |
-| ディスク容量不足 | OS エラーをそのまま伝播し、エラーログに記録する |
+| ディスク容量不足・配置時の I/O エラー | エラーログに記録し、`errors` に `placement` カテゴリで計上して処理を続行する（一括取り込み時: `rag_crawl_documents`）。単一取り込み時（`rag_add_document`）は呼び出し側で例外伝播する |
 | `dir_path` がルートディレクトリ（`/` や `C:\`） | バリデーションエラーとして拒否する |
 
 ## 関連ドキュメント

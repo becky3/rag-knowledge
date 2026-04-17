@@ -81,11 +81,19 @@ class JournalIngester:
             self.last_entry_id = entry_id
         except ValueError as e:
             result.errors = 1
-            result.error_details.append(str(e))
+            result.error_details.append({
+                "category": "placement",
+                "target": entry_id or title,
+                "message": str(e),
+            })
         except OSError as e:
             logger.exception("Failed to place journal entry")
             result.errors = 1
-            result.error_details.append(str(e))
+            result.error_details.append({
+                "category": "placement",
+                "target": entry_id or title,
+                "message": str(e),
+            })
         return result
 
     def import_directory(
@@ -105,17 +113,29 @@ class JournalIngester:
             self._validate_repository(repository)
         except ValueError as e:
             result.errors = 1
-            result.error_details.append(str(e))
+            result.error_details.append({
+                "category": "placement",
+                "target": dir_path,
+                "message": str(e),
+            })
             return result
 
         resolved_dir = Path(dir_path.strip()).resolve()
         if not resolved_dir.exists():
             result.errors = 1
-            result.error_details.append(f"Directory not found: {resolved_dir}")
+            result.error_details.append({
+                "category": "placement",
+                "target": str(resolved_dir),
+                "message": f"Directory not found: {resolved_dir}",
+            })
             return result
         if not resolved_dir.is_dir():
             result.errors = 1
-            result.error_details.append(f"Path is not a directory: {resolved_dir}")
+            result.error_details.append({
+                "category": "placement",
+                "target": str(resolved_dir),
+                "message": f"Path is not a directory: {resolved_dir}",
+            })
             return result
 
         files = sorted(resolved_dir.glob("*.md"), key=lambda p: str(p))
@@ -164,10 +184,14 @@ class JournalIngester:
                     metadata=metadata,
                 )
                 result.placed += 1
-            except OSError:
+            except OSError as exc:
                 logger.exception("Failed to import journal file: %s", fp)
                 result.errors += 1
-                result.error_details.append(str(fp))
+                result.error_details.append({
+                    "category": "placement",
+                    "target": str(fp),
+                    "message": str(exc),
+                })
 
         logger.info(
             "Journal import completed: placed=%d, skipped=%d, errors=%d",

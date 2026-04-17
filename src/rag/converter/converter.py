@@ -15,7 +15,7 @@ import logging
 import shutil
 from dataclasses import dataclass, field
 from pathlib import Path, PurePosixPath
-from typing import TYPE_CHECKING, Literal
+from typing import TYPE_CHECKING, Any, Literal
 
 if TYPE_CHECKING:
     from rag.media.analyzer import MediaAnalyzer
@@ -71,6 +71,14 @@ class ConversionSkippedError(Exception):
     """変換がスキップされた場合の例外."""
 
 
+class ConversionFailedError(Exception):
+    """変換が失敗した場合の例外.
+
+    JSON パースエラーなど、ファイルが壊れている可能性がある失敗を
+    `skipped` ではなく `errors` として計上するために使用する。
+    """
+
+
 @dataclass
 class ConvertBatchResult:
     """一括変換の結果サマリ."""
@@ -78,7 +86,7 @@ class ConvertBatchResult:
     success: int = 0
     skipped: int = 0
     errors: int = 0
-    error_files: list[str] = field(default_factory=list)
+    error_files: list[dict[str, Any]] = field(default_factory=list)
 
 
 class Converter:
@@ -301,7 +309,9 @@ class Converter:
                 except Exception:
                     logger.exception("Conversion error: %s", file_path)
                     result.errors += 1
-                    result.error_files.append(file_path)
+                    result.error_files.append(
+                        _build_error_entry(file_path, source_store_dir),
+                    )
         finally:
             self._regen_option = saved_option
             if self._media_analyzer is not None:
@@ -439,10 +449,17 @@ class Converter:
 
         try:
             raw = source_path.read_text(encoding="utf-8")
+        except (OSError, UnicodeDecodeError) as exc:
+            raise ConversionFailedError(
+                f"JSON read error: {file_path}",
+            ) from exc
+
+        try:
             parsed = json.loads(raw)
-        except (json.JSONDecodeError, OSError, UnicodeDecodeError):
-            logger.exception("Failed to read JSON: %s", file_path)
-            return None
+        except json.JSONDecodeError as exc:
+            raise ConversionFailedError(
+                f"JSON parse error: {file_path}",
+            ) from exc
 
         if not isinstance(parsed, dict):
             logger.warning(
@@ -482,6 +499,28 @@ class Converter:
             file_path,
         )
         return None
+
+
+def _build_error_entry(
+    file_path: str,
+    source_store_dir: Path,
+) -> dict[str, Any]:
+    """convert_batch の error_files に積む診断情報を組み立てる.
+
+    Args:
+        file_path: source_store 内の相対パス
+        source_store_dir: source_store のルートディレクトリ
+
+    Returns:
+        `{"path": <rel_path>, "size_bytes": <int | None>}` 形式の dict。
+        ファイル統計取得に失敗した場合 ``size_bytes`` は None。
+    """
+    source_path = source_store_dir / file_path
+    try:
+        size_bytes: int | None = source_path.stat().st_size
+    except OSError:
+        size_bytes = None
+    return {"path": file_path, "size_bytes": size_bytes}
 
 
 def get_converted_rel_path(file_path: str) -> str:

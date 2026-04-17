@@ -71,11 +71,19 @@ class LocalIngester:
             raise
         except ValueError as e:
             result.errors = 1
-            result.error_details.append(str(e))
+            result.error_details.append({
+                "category": "placement",
+                "target": filename,
+                "message": str(e),
+            })
         except OSError as e:
             logger.exception("Failed to place file: %s", filename)
             result.errors = 1
-            result.error_details.append(str(e))
+            result.error_details.append({
+                "category": "placement",
+                "target": filename,
+                "message": str(e),
+            })
         return result
 
     def crawl_documents(
@@ -100,7 +108,11 @@ class LocalIngester:
             files = self._collect_files(dir_path, pattern)
         except ValueError as e:
             result.errors = 1
-            result.error_details.append(str(e))
+            result.error_details.append({
+                "category": "placement",
+                "target": dir_path,
+                "message": str(e),
+            })
             return result
         logger.info(
             "Document crawl: %d files found (dir=%s)",
@@ -133,10 +145,14 @@ class LocalIngester:
                 data = fp.read_bytes()
                 self._store.place_file(source_type="local", data=data, rel_path=rel_path)
                 result.placed += 1
-            except OSError:
+            except OSError as exc:
                 logger.exception("Failed to copy file: %s", fp)
                 result.errors += 1
-                result.error_details.append(str(fp))
+                result.error_details.append({
+                    "category": "placement",
+                    "target": str(fp),
+                    "message": str(exc),
+                })
 
             if progress_callback is not None:
                 progress_callback(file_idx + 1, len(files), str(fp))

@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+from typing import Any
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
@@ -538,3 +539,112 @@ class TestSkipMode:
 
         assert result.placed == 1
         assert result.skipped == 1
+
+
+@pytest.mark.asyncio()
+class TestErrorDetailsStructured:
+    """error_details dict 化の検証."""
+
+    async def test_article_fetch_http_error_dict(
+        self, source_store: SourceStore
+    ) -> None:
+        """記事詳細 API の HTTP エラーで error_details に dict が積まれる."""
+        import httpx
+
+        # 一覧取得は成功、詳細取得で 500 エラー
+        list_resp = MagicMock()
+        list_resp.json.return_value = _make_article_list_response(["bad-slug"])
+        err_req = httpx.Request(
+            "GET", "https://zenn.dev/api/articles/bad-slug",
+        )
+        err_resp = httpx.Response(500, content=b"error", request=err_req)
+
+        client = AsyncMock()
+        call_count = [0]
+
+        async def _mock_get(url: str) -> Any:
+            call_count[0] += 1
+            if call_count[0] == 1:
+                return list_resp
+            return err_resp
+
+        client.get = AsyncMock(side_effect=_mock_get)
+
+        ingester = make_zenn_ingester(source_store, max_articles=3)
+        result = await ingester.crawl_zenn(
+            "testuser",
+            content_type="articles",
+            client=client,
+        )
+
+        assert result.errors == 1
+        detail = result.error_details[0]
+        assert detail["category"] == "metadata_fetch"
+        assert detail["target"] == "articles/bad-slug"
+        assert detail["status"] == 500
+        assert "url" in detail
+        assert "message" in detail
+
+    async def test_scrap_fetch_non_http_exception_dict(
+        self, source_store: SourceStore
+    ) -> None:
+        """HTTPStatusError 以外の例外でも error_details に dict が積まれる（status なし）."""
+        list_resp = MagicMock()
+        list_resp.json.return_value = _make_scrap_list_response(["bad-scrap"])
+
+        client = AsyncMock()
+        call_count = [0]
+
+        async def _mock_get(url: str) -> Any:
+            call_count[0] += 1
+            if call_count[0] == 1:
+                return list_resp
+            raise ValueError("Parse error")
+
+        client.get = AsyncMock(side_effect=_mock_get)
+
+        ingester = make_zenn_ingester(source_store, max_articles=3)
+        result = await ingester.crawl_zenn(
+            "testuser",
+            content_type="scraps",
+            client=client,
+        )
+
+        assert result.errors == 1
+        detail = result.error_details[0]
+        assert detail["category"] == "metadata_fetch"
+        assert detail["target"] == "scraps/bad-scrap"
+        # 非 HTTP 例外では status / url は付与されない
+        assert "status" not in detail
+        assert "Parse error" in detail["message"]
+
+    async def test_place_file_failure_category_is_placement(
+        self,
+        source_store: SourceStore,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """記事の place_file 失敗時は category='placement' で記録される."""
+        # 一覧 + 詳細取得は成功、place_file で OSError
+        client = _make_mock_client([
+            _make_article_list_response(["good-slug"]),
+            _make_article_detail_response("good-slug"),
+        ])
+
+        def _raise_oserror(**kwargs: object) -> None:
+            raise OSError("disk full")
+
+        monkeypatch.setattr(source_store, "place_file", _raise_oserror)
+
+        ingester = make_zenn_ingester(source_store, max_articles=3)
+        result = await ingester.crawl_zenn(
+            "testuser",
+            content_type="articles",
+            client=client,
+        )
+
+        assert result.errors == 1
+        assert result.placed == 0
+        detail = result.error_details[0]
+        assert detail["category"] == "placement"
+        assert detail["target"] == "zenn/testuser/articles/good-slug.json"
+        assert "disk full" in detail["message"]

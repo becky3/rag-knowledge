@@ -347,7 +347,10 @@ class TestHttpError:
         result = await ingester.add_work("001567", client=client)
         assert result.placed == 0
         assert result.errors == 1
-        assert "ダウンロード失敗" in result.error_details[0]
+        detail = result.error_details[0]
+        assert detail["category"] == "metadata_fetch"
+        assert detail["status"] == 404
+        assert "ダウンロード失敗" in detail["message"]
 
     @pytest.mark.asyncio()
     async def test_catalog_download_error(
@@ -496,3 +499,125 @@ class TestIngestWork:
         # person_id=000035 の作品 2 件のみ取り込み
         assert result.placed == 2
         assert result.errors == 0
+
+
+# === error_details 構造化テスト ===
+
+
+class TestErrorDetailsStructured:
+    """error_details dict 化の検証."""
+
+    @pytest.mark.asyncio()
+    async def test_xhtml_download_error_details_fields(
+        self, source_store: SourceStore
+    ) -> None:
+        """HTTP エラー時の error_details dict が仕様通りのフィールドを持つ."""
+        _write_catalog(source_store, [_make_record()])
+        ingester = make_aozora_ingester(source_store)
+        client = _mock_client(status_code=500)
+        result = await ingester.add_work("001567", client=client)
+        assert result.errors == 1
+        detail = result.error_details[0]
+        assert detail["category"] == "metadata_fetch"
+        assert detail["target"] == "book_id=001567"
+        assert detail["status"] == 500
+        assert "url" in detail
+        assert "message" in detail
+
+    @pytest.mark.asyncio()
+    async def test_missing_xhtml_url_error_details(
+        self, source_store: SourceStore
+    ) -> None:
+        """XHTML URL 欠落時の error_details dict."""
+        _write_catalog(source_store, [_make_record(xhtml_url="")])
+        ingester = make_aozora_ingester(source_store)
+        client = _mock_client()
+        # crawl_author 経由だと XHTML URL 欠落でスキップされるため add_work 経由でなく
+        # 直接 _ingest_work を呼ぶ
+        from rag.pipeline.ingesters._common import IngestResult
+
+        result = IngestResult()
+        record = _make_record(xhtml_url="")
+        await ingester._ingest_work(record, client, result)
+        assert result.errors == 1
+        detail = result.error_details[0]
+        assert detail["category"] == "metadata_fetch"
+        assert "book_id=" in detail["target"]
+        assert "XHTML URL missing" in detail["message"]
+
+    @pytest.mark.asyncio()
+    async def test_place_file_failure_category_is_placement(
+        self, source_store: SourceStore, monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """place_file 失敗時は category='placement' で記録される."""
+        _write_catalog(source_store, [_make_record()])
+        ingester = make_aozora_ingester(source_store)
+        client = _mock_client()
+
+        # place_file を OSError で失敗させる
+        def _raise_oserror(**kwargs: object) -> None:
+            raise OSError("disk full")
+
+        monkeypatch.setattr(source_store, "place_file", _raise_oserror)
+        result = await ingester.add_work("001567", client=client)
+        assert result.errors == 1
+        assert result.placed == 0
+        detail = result.error_details[0]
+        assert detail["category"] == "placement"
+        assert detail["target"] == "aozora/000035/001567.html"
+        assert "disk full" in detail["message"]
+
+
+# === サーキットブレーカーテスト ===
+
+
+class TestCircuitBreaker:
+    """crawl_author の 5 回連続失敗時のサーキット吸収検証."""
+
+    @pytest.mark.asyncio()
+    async def test_consecutive_failures_set_aborted(
+        self, source_store: SourceStore
+    ) -> None:
+        """5 回連続失敗で aborted=True, abort_reason が設定される."""
+        # 10 件の著作権フリー作品を登録（同じ person_id）
+        records = [
+            _make_record(
+                book_id=f"{i:06d}",
+                person_id="000035",
+                xhtml_url=f"https://www.aozora.gr.jp/cards/000035/files/{i}_100.html",
+            )
+            for i in range(10)
+        ]
+        _write_catalog(source_store, records)
+        ingester = make_aozora_ingester(source_store)
+        # 全て 500 エラーを返すモック
+        client = _mock_client(status_code=500)
+        result = await ingester.crawl_author("000035", client=client)
+
+        # 5 回連続失敗で break するため errors=5
+        assert result.errors == 5
+        assert result.placed == 0
+        assert result.aborted is True
+        assert result.abort_reason == "consecutive failures"
+
+    @pytest.mark.asyncio()
+    async def test_no_abort_on_few_failures(
+        self, source_store: SourceStore
+    ) -> None:
+        """4 件以下の失敗では aborted=False のまま."""
+        records = [
+            _make_record(
+                book_id=f"{i:06d}",
+                person_id="000035",
+                xhtml_url=f"https://www.aozora.gr.jp/cards/000035/files/{i}_100.html",
+            )
+            for i in range(3)
+        ]
+        _write_catalog(source_store, records)
+        ingester = make_aozora_ingester(source_store)
+        client = _mock_client(status_code=500)
+        result = await ingester.crawl_author("000035", client=client)
+
+        assert result.errors == 3
+        assert result.aborted is False
+        assert result.abort_reason is None

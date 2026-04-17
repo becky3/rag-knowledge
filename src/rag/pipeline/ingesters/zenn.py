@@ -12,6 +12,8 @@ import json
 import logging
 from typing import TYPE_CHECKING, Any
 
+import httpx
+
 from rag.pipeline.ingesters._common import (
     IngestResult,
     ProgressCallback,
@@ -150,14 +152,18 @@ class ZennIngester:
         )
 
         for i, slug in enumerate(slugs):
+            rel_path = f"zenn/{username}/articles/{slug}.json"
+
+            # 取得フェーズ（category="metadata_fetch"）
             try:
                 # スキップ判定: 既存ファイルがあり force でなければスキップ
-                rel_path = f"zenn/{username}/articles/{slug}.json"
                 if not force:
                     dest = self._store.root_dir / rel_path
                     if dest.exists():
                         logger.debug("既存ファイルのためスキップ: %s", rel_path)
                         result.skipped += 1
+                        if progress_callback is not None:
+                            progress_callback(i + 1, len(slugs), f"articles/{slug}")
                         continue
 
                 # 記事詳細取得
@@ -169,6 +175,8 @@ class ZennIngester:
                 if not article:
                     logger.info("article オブジェクトが空のためスキップ: %s", slug)
                     result.skipped += 1
+                    if progress_callback is not None:
+                        progress_callback(i + 1, len(slugs), f"articles/{slug}")
                     continue
 
                 # JSON として保存
@@ -195,7 +203,24 @@ class ZennIngester:
                     "closed": False,
                     "username": username,
                 }
+            except Exception as exc:
+                logger.exception("記事の取得に失敗しました: %s", slug)
+                result.errors += 1
+                fetch_detail: dict[str, Any] = {
+                    "category": "metadata_fetch",
+                    "target": f"articles/{slug}",
+                    "message": str(exc),
+                }
+                if isinstance(exc, httpx.HTTPStatusError):
+                    fetch_detail["status"] = exc.response.status_code
+                    fetch_detail["url"] = str(exc.request.url)
+                result.error_details.append(fetch_detail)
+                if progress_callback is not None:
+                    progress_callback(i + 1, len(slugs), f"articles/{slug}")
+                continue
 
+            # 配置フェーズ（category="placement"）
+            try:
                 self._store.place_file(
                     source_type="zenn",
                     data=json_bytes,
@@ -203,11 +228,14 @@ class ZennIngester:
                     metadata=metadata,
                 )
                 result.placed += 1
-
-            except Exception:
-                logger.exception("記事の取得・配置に失敗しました: %s", slug)
+            except Exception as exc:
+                logger.exception("記事の配置に失敗しました: %s", rel_path)
                 result.errors += 1
-                result.error_details.append(f"articles/{slug}")
+                result.error_details.append({
+                    "category": "placement",
+                    "target": rel_path,
+                    "message": str(exc),
+                })
 
             if progress_callback is not None:
                 progress_callback(i + 1, len(slugs), f"articles/{slug}")
@@ -229,14 +257,18 @@ class ZennIngester:
         )
 
         for i, slug in enumerate(slugs):
+            rel_path = f"zenn/{username}/scraps/{slug}.json"
+
+            # 取得フェーズ（category="metadata_fetch"）
             try:
                 # スキップ判定: 既存ファイルがあり force でなければスキップ
-                rel_path = f"zenn/{username}/scraps/{slug}.json"
                 if not force:
                     dest = self._store.root_dir / rel_path
                     if dest.exists():
                         logger.debug("既存ファイルのためスキップ: %s", rel_path)
                         result.skipped += 1
+                        if progress_callback is not None:
+                            progress_callback(i + 1, len(slugs), f"scraps/{slug}")
                         continue
 
                 # スクラップ詳細取得
@@ -267,7 +299,24 @@ class ZennIngester:
                     "closed": scrap.get("closed", False),
                     "username": username,
                 }
+            except Exception as exc:
+                logger.exception("スクラップの取得に失敗しました: %s", slug)
+                result.errors += 1
+                fetch_detail: dict[str, Any] = {
+                    "category": "metadata_fetch",
+                    "target": f"scraps/{slug}",
+                    "message": str(exc),
+                }
+                if isinstance(exc, httpx.HTTPStatusError):
+                    fetch_detail["status"] = exc.response.status_code
+                    fetch_detail["url"] = str(exc.request.url)
+                result.error_details.append(fetch_detail)
+                if progress_callback is not None:
+                    progress_callback(i + 1, len(slugs), f"scraps/{slug}")
+                continue
 
+            # 配置フェーズ（category="placement"）
+            try:
                 self._store.place_file(
                     source_type="zenn",
                     data=json_bytes,
@@ -275,11 +324,14 @@ class ZennIngester:
                     metadata=metadata,
                 )
                 result.placed += 1
-
-            except Exception:
-                logger.exception("スクラップの取得・配置に失敗しました: %s", slug)
+            except Exception as exc:
+                logger.exception("スクラップの配置に失敗しました: %s", rel_path)
                 result.errors += 1
-                result.error_details.append(f"scraps/{slug}")
+                result.error_details.append({
+                    "category": "placement",
+                    "target": rel_path,
+                    "message": str(exc),
+                })
 
             if progress_callback is not None:
                 progress_callback(i + 1, len(slugs), f"scraps/{slug}")

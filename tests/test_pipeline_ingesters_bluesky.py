@@ -21,8 +21,10 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
+from rag.pipeline.ingesters._common import IngestResult
 from rag.pipeline.ingesters.bluesky import (
     MAX_POSTS_HARD_LIMIT,
+    BlueskyIngester,
     _escape_did,
     _ext_from_content_type,
     _extract_media_urls,
@@ -478,7 +480,7 @@ class TestFollowUrls:
         ]
 
         ingester = make_bluesky_ingester(source_store)
-        with patch.object(ingester, "_fetch_web_urls", new_callable=AsyncMock, return_value=(1, 0)) as mock_fetch:
+        with patch.object(ingester, "_fetch_web_urls", new_callable=AsyncMock, return_value=(1, 0, [])) as mock_fetch:
             stats = await ingester.follow_urls(
                 [item],
                 youtube_ingester=None,
@@ -605,8 +607,19 @@ class TestFollowUrls:
         ]
 
         ingester = make_bluesky_ingester(source_store)
-        # _fetch_web_urls はバッチエラー隔離を行い、エラー件数を返す
-        with patch.object(ingester, "_fetch_web_urls", new_callable=AsyncMock, return_value=(0, 1)):
+        # _fetch_web_urls はバッチエラー隔離を行い、エラー件数と詳細を返す
+        error_detail = {
+            "category": "delegation",
+            "target": "https://example.com/fail",
+            "url": "https://example.com/fail",
+            "message": "site-ingest batch failed: boom",
+        }
+        with patch.object(
+            ingester,
+            "_fetch_web_urls",
+            new_callable=AsyncMock,
+            return_value=(0, 1, [error_detail]),
+        ):
             stats = await ingester.follow_urls(
                 [item],
                 youtube_ingester=None,
@@ -629,7 +642,7 @@ class TestFollowUrls:
         item2["post"]["record"]["facets"] = [facet]
 
         ingester = make_bluesky_ingester(source_store)
-        with patch.object(ingester, "_fetch_web_urls", new_callable=AsyncMock, return_value=(1, 0)) as mock_fetch:
+        with patch.object(ingester, "_fetch_web_urls", new_callable=AsyncMock, return_value=(1, 0, [])) as mock_fetch:
             stats = await ingester.follow_urls(
                 [item1, item2],
                 youtube_ingester=None,
@@ -1309,21 +1322,30 @@ class TestGetFollowingSameOriginRedirect:
     async def test_rejects_redirect_to_different_domain(
         self, source_store: SourceStore,
     ) -> None:
-        """異なるベースドメインへのリダイレクトは追従せず 302 を返す."""
+        """異なるベースドメインへのリダイレクトは HTTPStatusError を送出する.
+
+        旧実装では 302 レスポンスをそのまま返していたが、呼び出し側で
+        3xx 本文を正常レスポンスと誤認して処理されるリスクがあったため、
+        helper が契約として 2xx 以外を全て例外化する設計に変更。
+        """
+        import httpx as _httpx
+
+        req = _httpx.Request("GET", "https://video.bsky.app/360p/video0.ts")
         redirect_resp = MagicMock(
             status_code=302,
             headers={"location": "https://evil.example.com/steal"},
+            request=req,
         )
 
         mock_client = AsyncMock()
         mock_client.get.return_value = redirect_resp
 
         ingester = make_bluesky_ingester(source_store)
-        resp = await ingester._get_following_same_origin_redirect(
-            mock_client, "https://video.bsky.app/360p/video0.ts",
-        )
-
-        assert resp.status_code == 302
+        with pytest.raises(_httpx.HTTPStatusError) as exc_info:
+            await ingester._get_following_same_origin_redirect(
+                mock_client, "https://video.bsky.app/360p/video0.ts",
+            )
+        assert "cross-domain" in str(exc_info.value)
         mock_client.get.assert_called_once()
 
     @pytest.mark.asyncio()
@@ -1372,6 +1394,30 @@ class TestGetFollowingSameOriginRedirect:
             await ingester._get_following_same_origin_redirect(
                 mock_client, "https://video.bsky.app/playlist.m3u8",
             )
+
+    @pytest.mark.asyncio()
+    @pytest.mark.parametrize("status_code", [300, 303, 304])
+    async def test_non_redirect_3xx_raises(
+        self, source_store: SourceStore, status_code: int,
+    ) -> None:
+        """リダイレクト追従対象外の 3xx（300/303/304）で HTTPStatusError を送出する.
+
+        `raise_for_status()` は 3xx を例外化しないため、`is_success` ベースの
+        判定に統一している。3xx 本文を正常レスポンスと誤認させないための契約。
+        """
+        import httpx as _httpx
+        req = _httpx.Request("GET", "https://video.bsky.app/playlist.m3u8")
+        resp = _httpx.Response(status_code, content=b"err", request=req)
+
+        mock_client = AsyncMock()
+        mock_client.get.return_value = resp
+
+        ingester = make_bluesky_ingester(source_store)
+        with pytest.raises(_httpx.HTTPStatusError) as exc_info:
+            await ingester._get_following_same_origin_redirect(
+                mock_client, "https://video.bsky.app/playlist.m3u8",
+            )
+        assert exc_info.value.response.status_code == status_code
 
     @pytest.mark.asyncio()
     async def test_stops_at_max_redirects(
@@ -1438,15 +1484,19 @@ class TestDownloadHlsVideo:
 
         dest = tmp_path / "media" / "video_0.ts"
         ingester = make_bluesky_ingester(source_store)
+        result = IngestResult()
         await ingester._download_hls_video(
             "https://video.bsky.app/watch/playlist.m3u8",
             dest=dest,
             client=mock_client,
+            result=result,
+            rel_path="bluesky/did/2025/01/rkey.json",
         )
 
         assert dest.exists()
         assert dest.read_bytes() == seg0 + seg1
         assert mock_client.get.call_count == 4
+        assert result.partial_failures == 0
 
     @pytest.mark.asyncio()
     async def test_downloads_variant_playlist_directly(
@@ -1468,12 +1518,452 @@ class TestDownloadHlsVideo:
 
         dest = tmp_path / "media" / "video_0.ts"
         ingester = make_bluesky_ingester(source_store)
+        result = IngestResult()
         await ingester._download_hls_video(
             "https://video.bsky.app/360p/video.m3u8",
             dest=dest,
             client=mock_client,
+            result=result,
+            rel_path="bluesky/did/2025/01/rkey.json",
         )
 
         assert dest.exists()
         assert dest.read_bytes() == seg0
         assert mock_client.get.call_count == 2
+        assert result.partial_failures == 0
+
+
+class TestPartialFailureObservability:
+    """partial_failures 計上の観測性テスト.
+
+    仕様: docs/specs/ingesters/bluesky.md / docs/specs/ingesters/common.md
+
+    bluesky は画像・動画 DL 失敗、HLS バリアント選択不可、
+    異ドメインリダイレクト、リダイレクト上限到達を
+    `partial_failures` + `category="media_download"` として IngestResult に計上する。
+    """
+
+    @pytest.mark.asyncio()
+    async def test_image_download_failure_counted_as_partial_failure(
+        self, source_store: SourceStore, tmp_path: Path,
+    ) -> None:
+        """画像 DL の失敗が partial_failures に計上されること."""
+        import httpx as _httpx
+
+        item = _make_feed_item()
+        item["post"]["embed"] = {
+            "$type": "app.bsky.embed.images#view",
+            "images": [
+                {"fullsize": "https://cdn.bsky.app/img/feed_fullsize/broken.webp"},
+            ],
+        }
+
+        mock_client = AsyncMock()
+        request = _httpx.Request(
+            "GET", "https://cdn.bsky.app/img/feed_fullsize/broken.webp",
+        )
+        mock_client.get = AsyncMock(
+            return_value=_httpx.Response(500, content=b"", request=request),
+        )
+
+        ingester = make_bluesky_ingester(source_store)
+        result = IngestResult()
+        await ingester._download_media(
+            item,
+            media_dir=tmp_path / "media",
+            client=mock_client,
+            result=result,
+            rel_path="bluesky/did/2025/01/rkey.json",
+        )
+
+        assert result.partial_failures == 1
+        assert result.errors == 0
+        detail = result.partial_failure_details[0]
+        assert detail["category"] == "media_download"
+        assert detail["target"] == "bluesky/did/2025/01/rkey.json"
+        assert detail["url"] == "https://cdn.bsky.app/img/feed_fullsize/broken.webp"
+        assert detail["status"] == 500
+
+    @pytest.mark.asyncio()
+    async def test_video_download_failure_counted_as_partial_failure(
+        self, source_store: SourceStore, tmp_path: Path,
+    ) -> None:
+        """動画 DL の失敗が partial_failures に計上されること."""
+        import httpx as _httpx
+
+        item = _make_feed_item()
+        item["post"]["embed"] = {
+            "$type": "app.bsky.embed.video#view",
+            "playlist": "https://video.bsky.app/watch/playlist.m3u8",
+        }
+
+        mock_client = AsyncMock()
+        request = _httpx.Request(
+            "GET", "https://video.bsky.app/watch/playlist.m3u8",
+        )
+        mock_client.get = AsyncMock(
+            return_value=_httpx.Response(503, content=b"", request=request),
+        )
+
+        ingester = make_bluesky_ingester(source_store)
+        result = IngestResult()
+        await ingester._download_media(
+            item,
+            media_dir=tmp_path / "media",
+            client=mock_client,
+            result=result,
+            rel_path="bluesky/did/2025/01/rkey.json",
+        )
+
+        assert result.partial_failures == 1
+        assert result.errors == 0
+        detail = result.partial_failure_details[0]
+        assert detail["category"] == "media_download"
+        assert detail["url"] == "https://video.bsky.app/watch/playlist.m3u8"
+
+    @pytest.mark.asyncio()
+    async def test_hls_variant_not_selectable_counted_as_partial_failure(
+        self, source_store: SourceStore, tmp_path: Path,
+    ) -> None:
+        """マスタープレイリストからバリアントを選択できない場合に partial_failures 計上."""
+        # #EXT-X-STREAM-INF を含むが、直後にバリアント URL 行が無い不正なプレイリスト
+        master_text = (
+            "#EXTM3U\n"
+            "#EXT-X-STREAM-INF:BANDWIDTH=655600\n"
+        )
+
+        mock_client = AsyncMock()
+        mock_client.get.side_effect = [
+            MagicMock(text=master_text, status_code=200),
+        ]
+
+        dest = tmp_path / "media" / "video_0.ts"
+        ingester = make_bluesky_ingester(source_store)
+        result = IngestResult()
+        await ingester._download_hls_video(
+            "https://video.bsky.app/watch/playlist.m3u8",
+            dest=dest,
+            client=mock_client,
+            result=result,
+            rel_path="bluesky/did/2025/01/rkey.json",
+        )
+
+        assert not dest.exists()
+        assert result.partial_failures == 1
+        detail = result.partial_failure_details[0]
+        assert detail["category"] == "media_download"
+        assert "HLS variant" in detail["message"]
+
+    @pytest.mark.asyncio()
+    async def test_hls_playlist_without_segments_counted_as_partial_failure(
+        self, source_store: SourceStore, tmp_path: Path,
+    ) -> None:
+        """バリアントプレイリストに ts セグメント行が無い場合に partial_failures 計上.
+
+        `test_hls_variant_not_selectable_counted_as_partial_failure` と対称の経路で、
+        プレイリストは取得できるが ts セグメント URL 行が 1 つも無いケースをカバーする。
+        """
+        # ヘッダとコメントのみ。非コメント行（= ts セグメント URL 行）が存在しない
+        variant_text = (
+            "#EXTM3U\n"
+            "#EXT-X-VERSION:3\n"
+            "#EXT-X-TARGETDURATION:6\n"
+        )
+
+        mock_client = AsyncMock()
+        mock_client.get.side_effect = [
+            MagicMock(text=variant_text, status_code=200),
+        ]
+
+        dest = tmp_path / "media" / "video_0.ts"
+        ingester = make_bluesky_ingester(source_store)
+        result = IngestResult()
+        await ingester._download_hls_video(
+            "https://video.bsky.app/watch/playlist.m3u8",
+            dest=dest,
+            client=mock_client,
+            result=result,
+            rel_path="bluesky/did/2025/01/rkey.json",
+        )
+
+        assert not dest.exists()
+        assert result.partial_failures == 1
+        detail = result.partial_failure_details[0]
+        assert detail["category"] == "media_download"
+        assert "no ts segments" in detail["message"]
+
+    @pytest.mark.asyncio()
+    async def test_cross_domain_redirect_raises_from_helper(
+        self, source_store: SourceStore,
+    ) -> None:
+        """異ドメインリダイレクトは helper 内で HTTPStatusError が送出されること.
+
+        3xx レスポンスを呼び出し側に漏らさない契約を検証する（#587 の再発防止）。
+        """
+        import httpx as _httpx
+
+        request = _httpx.Request(
+            "GET", "https://video.bsky.app/watch/playlist.m3u8",
+        )
+        mock_client = AsyncMock()
+        mock_client.get = AsyncMock(
+            return_value=MagicMock(
+                status_code=302,
+                headers={"location": "https://evil.example.com/steal"},
+                request=request,
+            ),
+        )
+
+        with pytest.raises(_httpx.HTTPStatusError) as exc_info:
+            await BlueskyIngester._get_following_same_origin_redirect(
+                mock_client,
+                "https://video.bsky.app/watch/playlist.m3u8",
+            )
+        assert "cross-domain" in str(exc_info.value)
+
+    @pytest.mark.asyncio()
+    async def test_cross_domain_redirect_recorded_via_outer_except(
+        self, source_store: SourceStore, tmp_path: Path,
+    ) -> None:
+        """異ドメインリダイレクトの helper 例外が _download_media の outer except で
+        partial_failures として記録されること."""
+        import httpx as _httpx
+
+        item = _make_feed_item()
+        item["post"]["embed"] = {
+            "$type": "app.bsky.embed.video#view",
+            "playlist": "https://video.bsky.app/watch/playlist.m3u8",
+        }
+
+        request = _httpx.Request(
+            "GET", "https://video.bsky.app/watch/playlist.m3u8",
+        )
+        mock_client = AsyncMock()
+        mock_client.get = AsyncMock(
+            return_value=MagicMock(
+                status_code=302,
+                headers={"location": "https://evil.example.com/steal"},
+                request=request,
+            ),
+        )
+
+        ingester = make_bluesky_ingester(source_store)
+        result = IngestResult()
+        await ingester._download_media(
+            item,
+            media_dir=tmp_path / "media",
+            client=mock_client,
+            result=result,
+            rel_path="bluesky/did/2025/01/rkey.json",
+        )
+
+        assert result.partial_failures == 1
+        detail = result.partial_failure_details[0]
+        assert detail["category"] == "media_download"
+        assert detail["url"] == "https://video.bsky.app/watch/playlist.m3u8"
+        assert "cross-domain" in detail["message"]
+
+    @pytest.mark.asyncio()
+    async def test_redirect_limit_raises_from_helper(
+        self, source_store: SourceStore,
+    ) -> None:
+        """リダイレクト回数上限到達で helper が HTTPStatusError を送出すること."""
+        import httpx as _httpx
+
+        request = _httpx.Request(
+            "GET", "https://video.bsky.app/watch/playlist.m3u8",
+        )
+        mock_client = AsyncMock()
+        mock_client.get = AsyncMock(
+            return_value=MagicMock(
+                status_code=302,
+                headers={"location": "https://video.bsky.app/next"},
+                request=request,
+            ),
+        )
+
+        with pytest.raises(_httpx.HTTPStatusError) as exc_info:
+            await BlueskyIngester._get_following_same_origin_redirect(
+                mock_client,
+                "https://video.bsky.app/watch/playlist.m3u8",
+                _max_redirects=3,
+            )
+        assert "redirect limit" in str(exc_info.value)
+
+    @pytest.mark.asyncio()
+    async def test_redirect_limit_recorded_via_outer_except(
+        self, source_store: SourceStore, tmp_path: Path,
+    ) -> None:
+        """リダイレクト上限到達の helper 例外が _download_media の outer except で
+        partial_failures として記録されること."""
+        import httpx as _httpx
+
+        item = _make_feed_item()
+        item["post"]["embed"] = {
+            "$type": "app.bsky.embed.video#view",
+            "playlist": "https://video.bsky.app/watch/playlist.m3u8",
+        }
+
+        request = _httpx.Request(
+            "GET", "https://video.bsky.app/watch/playlist.m3u8",
+        )
+        mock_client = AsyncMock()
+        mock_client.get = AsyncMock(
+            return_value=MagicMock(
+                status_code=302,
+                headers={"location": "https://video.bsky.app/next"},
+                request=request,
+            ),
+        )
+
+        ingester = make_bluesky_ingester(source_store)
+        result = IngestResult()
+        await ingester._download_media(
+            item,
+            media_dir=tmp_path / "media",
+            client=mock_client,
+            result=result,
+            rel_path="bluesky/did/2025/01/rkey.json",
+        )
+
+        assert result.partial_failures == 1
+        detail = result.partial_failure_details[0]
+        assert detail["category"] == "media_download"
+        assert "redirect limit" in detail["message"]
+
+    @pytest.mark.asyncio()
+    async def test_redirect_without_location_raises(
+        self, source_store: SourceStore,
+    ) -> None:
+        """3xx なのに location ヘッダが欠落している場合、helper が例外を送出すること."""
+        import httpx as _httpx
+
+        request = _httpx.Request(
+            "GET", "https://video.bsky.app/watch/playlist.m3u8",
+        )
+        mock_client = AsyncMock()
+        mock_client.get = AsyncMock(
+            return_value=MagicMock(
+                status_code=302,
+                headers={},  # location なし
+                request=request,
+            ),
+        )
+
+        with pytest.raises(_httpx.HTTPStatusError) as exc_info:
+            await BlueskyIngester._get_following_same_origin_redirect(
+                mock_client,
+                "https://video.bsky.app/watch/playlist.m3u8",
+            )
+        assert "location" in str(exc_info.value)
+
+    @pytest.mark.asyncio()
+    async def test_delegation_failure_in_follow_urls_recorded_as_errors(
+        self, source_store: SourceStore,
+    ) -> None:
+        """follow_urls 経由の Web URL 委譲失敗が errors + category=delegation に計上されること."""
+        item = _make_feed_item()
+        item["post"]["record"]["facets"] = [
+            {
+                "features": [
+                    {
+                        "$type": "app.bsky.richtext.facet#link",
+                        "uri": "https://example.com/fail",
+                    },
+                ],
+            },
+        ]
+
+        ingester = make_bluesky_ingester(source_store)
+        error_detail = {
+            "category": "delegation",
+            "target": "https://example.com/fail",
+            "url": "https://example.com/fail",
+            "message": "site-ingest batch failed: boom",
+        }
+        result = IngestResult()
+        with patch.object(
+            ingester,
+            "_fetch_web_urls",
+            new_callable=AsyncMock,
+            return_value=(0, 1, [error_detail]),
+        ):
+            stats = await ingester.follow_urls(
+                [item],
+                youtube_ingester=None,
+                result=result,
+            )
+
+        assert stats["errors"] == 1
+        assert result.errors == 1
+        assert result.error_details == [error_detail]
+
+    @pytest.mark.asyncio()
+    async def test_youtube_delegation_failure_recorded_as_errors(
+        self, source_store: SourceStore,
+    ) -> None:
+        """follow_urls 経由の YouTube 委譲失敗が errors + category=delegation に計上されること."""
+        item = _make_feed_item()
+        item["post"]["record"]["facets"] = [
+            {
+                "features": [
+                    {
+                        "$type": "app.bsky.richtext.facet#link",
+                        "uri": "https://www.youtube.com/watch?v=broken",
+                    },
+                ],
+            },
+        ]
+
+        mock_yt = AsyncMock()
+        mock_yt.ingest_video = AsyncMock(side_effect=RuntimeError("boom"))
+        mock_yt.request_interval = 0
+
+        ingester = make_bluesky_ingester(source_store)
+        result = IngestResult()
+        await ingester.follow_urls(
+            [item],
+            youtube_ingester=mock_yt,
+            result=result,
+        )
+
+        assert result.errors == 1
+        assert result.error_details[0]["category"] == "delegation"
+        assert result.error_details[0]["url"] == (
+            "https://www.youtube.com/watch?v=broken"
+        )
+
+    @pytest.mark.asyncio()
+    async def test_placement_failure_uses_dict_error_detail(
+        self, source_store: SourceStore,
+    ) -> None:
+        """投稿配置失敗時、error_details に dict が追加されること."""
+        import httpx as _httpx
+
+        item = _make_feed_item()
+        mock_client = AsyncMock()
+        mock_client.get = AsyncMock(
+            return_value=_httpx.Response(
+                200,
+                json={"feed": [item], "cursor": None},
+                request=_httpx.Request(
+                    "GET", "https://example.com/xrpc/app.bsky.feed.getAuthorFeed",
+                ),
+            ),
+        )
+
+        ingester = make_bluesky_ingester(source_store)
+        with patch.object(
+            ingester._store,
+            "place_file",
+            side_effect=RuntimeError("disk full"),
+        ):
+            result, _ = await ingester.crawl_bluesky(
+                "alice.bsky.social",
+                max_posts=1,
+                client=mock_client,
+            )
+
+        assert result.errors == 1
+        assert result.error_details[0]["category"] == "placement"
+        assert result.error_details[0]["message"] == "disk full"

@@ -207,22 +207,26 @@ def _process_record(
             record.url,
         )
         result.ingest.errors += 1
-        result.ingest.error_details.append(
-            f"HTML not found: {record.url}",
-        )
+        result.ingest.error_details.append({
+            "category": "placement",
+            "target": record.url,
+            "message": "HTML not found",
+        })
         return
 
     try:
         data = html_path.read_bytes()
-    except OSError:
+    except OSError as exc:
         logger.exception(
             "JSONL 行 %d: HTML ファイル読み込みエラー: %s",
             line_num, html_path,
         )
         result.ingest.errors += 1
-        result.ingest.error_details.append(
-            f"Read error: {record.url}",
-        )
+        result.ingest.error_details.append({
+            "category": "placement",
+            "target": record.url,
+            "message": f"Read error: {exc}",
+        })
         return
 
     # .meta 辞書の構築
@@ -248,15 +252,17 @@ def _process_record(
             result.ingest.placed += 1
         else:
             result.ingest.overwritten += 1
-    except Exception:
+    except Exception as exc:
         logger.exception(
             "JSONL 行 %d: source_store 配置エラー: %s",
             line_num, record.url,
         )
         result.ingest.errors += 1
-        result.ingest.error_details.append(
-            f"Place error: {record.url}",
-        )
+        result.ingest.error_details.append({
+            "category": "placement",
+            "target": record.url,
+            "message": str(exc),
+        })
 
 
 def _resolve_html_path(record: JsonlRecord, html_dir: Path) -> Path | None:

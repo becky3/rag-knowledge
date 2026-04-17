@@ -649,14 +649,19 @@ AppView のベース URL は設定可能とし、デフォルトは `https://pub
 | URL 先が Safe Browsing で危険判定 | 複数 URL モードでは Safe Browsing チェックは実行されない（大量 URL への API 呼び出しは非現実的なため）。SSRF チェック（プライベート IP 拒否）のみ実行される |
 | YouTube URL の字幕取得に失敗 | YouTube インジェスターの既存のエラーハンドリングでスキップされる |
 | Web URL が 0 件の場合 | site_ingest 呼び出しをスキップする |
-| site_ingest subprocess が失敗 | エラーをログに記録し、Web URL の取り込みを失敗として計上する。BlueSky 投稿の取り込みには影響しない |
-| 画像の CDN URL が 404 | エラーをログに記録し、当該画像の DL をスキップする。投稿 JSON の取り込みには影響しない |
+| site_ingest subprocess が失敗 | エラーをログに記録し、`errors` に `delegation` カテゴリで計上する。BlueSky 投稿の取り込みには影響しない |
+| `--force` 時に上書き投稿の YouTube 再取り込みが `rag_bluesky_force_youtube_reingest` で抑制されている | 上書き投稿の YouTube URL をスキップし、Web URL とメディアのみ再取得する。新規投稿の YouTube URL は常に取り込む |
+| メディアが添付されていない投稿 | メディア DL フェーズをスキップし、JSON のみ配置する（既存動作と同じ） |
+
+以下の `media_download` 系失敗はすべて `partial_failures` に計上する。投稿 JSON 自体の取り込みには影響しない（親成功）:
+
+| ケース | 振る舞い |
+|--------|---------|
+| 画像の CDN URL が 404 / その他 HTTP エラー | エラーをログに記録し、当該画像の DL をスキップする |
 | HLS プレイリストの取得に失敗 | エラーをログに記録し、当該動画の DL をスキップする |
 | マスタープレイリストからバリアントを取得できない | 警告ログを出力し、当該動画の DL をスキップする |
 | CDN リダイレクト先が異なるベースドメイン | リダイレクトを追従せず、警告ログを出力する |
 | ts セグメントの一部が DL に失敗 | エラーをログに記録し、当該動画の DL をスキップする（部分的な動画は保存しない） |
-| `--force` 時に上書き投稿の YouTube 再取り込みが `rag_bluesky_force_youtube_reingest` で抑制されている | 上書き投稿の YouTube URL をスキップし、Web URL とメディアのみ再取得する。新規投稿の YouTube URL は常に取り込む |
-| メディアが添付されていない投稿 | メディア DL フェーズをスキップし、JSON のみ配置する（既存動作と同じ） |
 
 ## 関連ドキュメント
 

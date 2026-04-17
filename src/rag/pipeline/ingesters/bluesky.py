@@ -18,22 +18,24 @@ from datetime import datetime
 from pathlib import Path
 from urllib.parse import urljoin, urlparse
 
+import httpx
+
 from rag.pipeline.ingesters._common import (
     IngestResult,
     ProgressCallback,
+    extract_http_status,
     fetch_get,
     now_iso,
 )
 from typing import TYPE_CHECKING, Any, Literal
 
 if TYPE_CHECKING:
-    import httpx
-
     from py_common_lib.httpx import ConstrainedClient
     from rag.pipeline.ingesters.youtube import YoutubeIngester
     from rag.store.source_store import SourceStore
 
 logger = logging.getLogger(__name__)
+
 
 # ハードリミット: 投稿取得上限
 MAX_POSTS_HARD_LIMIT = 1000
@@ -472,10 +474,16 @@ class BlueskyIngester:
                     placed_items.append(
                         {**item, "_is_overwrite": is_overwrite},
                     )
-                except Exception:
+                except Exception as exc:
                     logger.exception("投稿の配置に失敗しました: %s", rel_path)
                     result.errors += 1
-                    result.error_details.append(rel_path)
+                    result.error_details.append(
+                        {
+                            "category": "placement",
+                            "target": rel_path,
+                            "message": str(exc),
+                        },
+                    )
                     continue
 
                 # メディア DL（画像・動画）
@@ -490,7 +498,11 @@ class BlueskyIngester:
                         / rkey
                     )
                     await self._download_media(
-                        item, media_dir=media_dir, client=client,
+                        item,
+                        media_dir=media_dir,
+                        client=client,
+                        result=result,
+                        rel_path=rel_path,
                     )
 
                 if progress_callback is not None:
@@ -513,6 +525,8 @@ class BlueskyIngester:
         *,
         media_dir: Path,
         client: ConstrainedClient,
+        result: IngestResult,
+        rel_path: str,
     ) -> None:
         """投稿に添付されたメディア（画像・動画）を DL して配置する.
 
@@ -520,6 +534,8 @@ class BlueskyIngester:
             item: フィードアイテム
             media_dir: メディア配置先ディレクトリ
             client: ConstrainedClient インスタンス
+            result: 失敗計上先の IngestResult
+            rel_path: 投稿ファイルの相対パス（partial_failure_details.target 用）
         """
         image_urls, playlist_url = _extract_media_urls(item)
 
@@ -538,8 +554,19 @@ class BlueskyIngester:
                         existing.unlink(missing_ok=True)
                 dest.write_bytes(resp.content)
                 logger.debug("画像を保存しました: %s", dest)
-            except Exception:
+            except Exception as exc:
                 logger.exception("画像の DL に失敗しました: %s", img_url)
+                result.partial_failures += 1
+                detail: dict[str, Any] = {
+                    "category": "media_download",
+                    "target": rel_path,
+                    "url": img_url,
+                    "message": str(exc),
+                }
+                status = extract_http_status(exc)
+                if status is not None:
+                    detail["status"] = status
+                result.partial_failure_details.append(detail)
 
         # 動画 DL（HLS ts セグメント結合）
         if playlist_url:
@@ -548,9 +575,22 @@ class BlueskyIngester:
                     playlist_url,
                     dest=media_dir / "video_0.ts",
                     client=client,
+                    result=result,
+                    rel_path=rel_path,
                 )
-            except Exception:
+            except Exception as exc:
                 logger.exception("動画の DL に失敗しました: %s", playlist_url)
+                result.partial_failures += 1
+                detail_video: dict[str, Any] = {
+                    "category": "media_download",
+                    "target": rel_path,
+                    "url": playlist_url,
+                    "message": str(exc),
+                }
+                status = extract_http_status(exc)
+                if status is not None:
+                    detail_video["status"] = status
+                result.partial_failure_details.append(detail_video)
 
     async def _download_hls_video(
         self,
@@ -558,6 +598,8 @@ class BlueskyIngester:
         *,
         dest: Path,
         client: ConstrainedClient,
+        result: IngestResult,
+        rel_path: str,
     ) -> None:
         """HLS プレイリストから ts セグメントを DL し、バイナリ結合して保存する.
 
@@ -565,10 +607,13 @@ class BlueskyIngester:
             playlist_url: HLS プレイリスト URL (.m3u8)
             dest: 保存先パス
             client: ConstrainedClient インスタンス
+            result: 失敗計上先の IngestResult
+            rel_path: 投稿ファイルの相対パス（partial_failure_details.target 用）
         """
-        # プレイリスト取得
+        # プレイリスト取得（2xx 以外はすべて HTTPStatusError として送出される）
         resp = await self._get_following_same_origin_redirect(
-            client, playlist_url,
+            client,
+            playlist_url,
         )
         playlist_text = resp.text
 
@@ -581,10 +626,20 @@ class BlueskyIngester:
                     "マスタープレイリストからバリアントを取得できません: %s",
                     playlist_url,
                 )
+                result.partial_failures += 1
+                result.partial_failure_details.append(
+                    {
+                        "category": "media_download",
+                        "target": rel_path,
+                        "url": playlist_url,
+                        "message": "HLS variant not selectable",
+                    },
+                )
                 return
             logger.debug("HLS バリアント選択: %s", variant_url)
             resp = await self._get_following_same_origin_redirect(
-                client, variant_url,
+                client,
+                variant_url,
             )
             playlist_text = resp.text
             playlist_url = variant_url
@@ -599,6 +654,15 @@ class BlueskyIngester:
 
         if not segment_urls:
             logger.warning("HLS プレイリストに ts セグメントが見つかりません: %s", playlist_url)
+            result.partial_failures += 1
+            result.partial_failure_details.append(
+                {
+                    "category": "media_download",
+                    "target": rel_path,
+                    "url": playlist_url,
+                    "message": "HLS playlist has no ts segments",
+                },
+            )
             return
 
         # ts セグメントを temp ファイルに逐次書き込み、全成功後に atomic rename
@@ -611,7 +675,8 @@ class BlueskyIngester:
             with open(tmp_fd, "wb") as f:
                 for seg_url in segment_urls:
                     seg_resp = await self._get_following_same_origin_redirect(
-                        client, seg_url,
+                        client,
+                        seg_url,
                     )
                     f.write(seg_resp.content)
             tmp_path.replace(dest)
@@ -696,16 +761,34 @@ class BlueskyIngester:
         """同一ベースドメインのリダイレクトのみ追従する GET リクエスト.
 
         ConstrainedClient の follow_redirects=False を維持しつつ、
-        CDN の 3xx リダイレクトに対応する。リダイレクト先のベースドメイン
-        （eTLD+1 相当）が異なる場合はリダイレクト前のレスポンスをそのまま
-        返す（SSRF 防止）。
+        CDN の 3xx リダイレクトに対応する。
 
-        fetch_get は使わない: fetch_get は非 2xx で例外化するため、
+        **契約**: 2xx レスポンスのみを返す。以下のケースはすべて
+        `httpx.HTTPStatusError` を送出する（3xx レスポンスを呼び出し側に
+        漏らさない）:
+
+        - 異ドメインへのリダイレクト（SSRF 防止）
+        - リダイレクト回数上限到達
+        - 3xx なのに `location` ヘッダが欠落
+        - リダイレクト対象外の 3xx（300 / 303 / 304 等）・4xx・5xx
+
+        **Why**: 3xx の本文（多くは HTML のエラーページ）が呼び出し側で
+        プレイリスト・ts セグメントとして解釈され、破損ファイルが source_store
+        に混入するリスクを構造的に排除するため。呼び出し側は `except Exception`
+        で捕捉し、`partial_failures` を記録すること。
+
+        `fetch_get` は使わない: `fetch_get` は非 2xx で例外化するため、
         リダイレクト追従中の 3xx で中断してしまう。代わりに、リダイレクト
         対象ステータス (`_REDIRECT_STATUSES`: 301/302/307/308) 以外の応答に
-        到達した時点で raise_for_status を呼ぶ。これにより 2xx は正常返却、
-        リダイレクト追従対象外の 3xx (300/303/304 等)・4xx・5xx は例外化
-        される。
+        到達した時点で `raise_for_status` を呼ぶ。
+
+        Args:
+            client: ConstrainedClient インスタンス
+            url: リクエスト先 URL
+            _max_redirects: リダイレクト追従の最大回数
+
+        Raises:
+            httpx.HTTPStatusError: 2xx 以外の応答に至ったすべての失敗経路
         """
         original_parsed = urlparse(url)
         original_base = BlueskyIngester._base_domain(original_parsed.hostname)
@@ -713,11 +796,24 @@ class BlueskyIngester:
 
         for _ in range(_max_redirects):
             if resp.status_code not in BlueskyIngester._REDIRECT_STATUSES:
-                resp.raise_for_status()
+                # `fetch_get` と同じ契約: 非 2xx はすべて例外化する。
+                # `raise_for_status` では 300 / 303 / 304 等のリダイレクト対象外
+                # 3xx を例外化できないため、`is_success` で判定する。
+                if not resp.is_success:
+                    raise httpx.HTTPStatusError(
+                        f"HTTP {resp.status_code} error for url '{url}'",
+                        request=resp.request,
+                        response=resp,
+                    )
                 return resp
             location = resp.headers.get("location", "")
             if not location:
-                return resp
+                # 3xx なのに location 欠落。以後追従できないため例外化
+                raise httpx.HTTPStatusError(
+                    f"redirect response without location header: {url}",
+                    request=resp.request,
+                    response=resp,
+                )
             # 相対 URL を解決
             resolved = urljoin(url, location)
             parsed = urlparse(resolved)
@@ -728,14 +824,29 @@ class BlueskyIngester:
                     url,
                     resolved,
                 )
-                return resp
+                raise httpx.HTTPStatusError(
+                    f"cross-domain redirect rejected: {url} -> {resolved}",
+                    request=resp.request,
+                    response=resp,
+                )
             url = resolved
             resp = await client.get(url)
 
+        # ループを抜けた時点で 3xx のままならリダイレクト回数上限
         if resp.status_code in BlueskyIngester._REDIRECT_STATUSES:
             logger.warning("リダイレクト回数上限に到達: %s", url)
-            return resp
-        resp.raise_for_status()
+            raise httpx.HTTPStatusError(
+                f"redirect limit exceeded: {url}",
+                request=resp.request,
+                response=resp,
+            )
+        # 非 2xx（raise_for_status でカバーされない 300/303/304 等を含む）は例外化
+        if not resp.is_success:
+            raise httpx.HTTPStatusError(
+                f"HTTP {resp.status_code} error for url '{url}'",
+                request=resp.request,
+                response=resp,
+            )
         return resp
 
     async def follow_urls(
@@ -744,6 +855,7 @@ class BlueskyIngester:
         *,
         youtube_ingester: YoutubeIngester | None = None,
         force_youtube_reingest: bool = False,
+        result: IngestResult | None = None,
     ) -> dict[str, int]:
         """配置済み投稿から URL を抽出し、site_ingest/YouTube インジェスターに委譲する.
 
@@ -760,6 +872,8 @@ class BlueskyIngester:
             placed_items: 配置済みフィードアイテムのリスト（``_is_overwrite`` フラグ付き）
             youtube_ingester: YoutubeIngester インスタンス
             force_youtube_reingest: 上書き投稿の YouTube URL を再取得するか
+            result: 委譲失敗の計上先 IngestResult。指定時は errors + category="delegation"
+                を追加する（従来の stats 返却は互換維持）
 
         Returns:
             {"web_placed": N, "youtube_placed": N, "skipped": N, "errors": N}
@@ -803,9 +917,14 @@ class BlueskyIngester:
 
         # Web URL をバッチ取得（site-ingest 複数 URL モード、download_only）
         if web_urls:
-            web_placed, web_errors = await self._fetch_web_urls(web_urls)
+            web_placed, web_errors, web_error_details = await self._fetch_web_urls(
+                web_urls,
+            )
             stats["web_placed"] = web_placed
             stats["errors"] += web_errors
+            if result is not None and web_error_details:
+                result.errors += len(web_error_details)
+                result.error_details.extend(web_error_details)
 
         # YouTube URL を個別取り込み（URL 間にレート制限スリープを挿入）
         # 上書き投稿の YouTube URL は force_youtube_reingest 設定に従う
@@ -833,9 +952,19 @@ class BlueskyIngester:
                         stats["youtube_placed"] += yt_result.placed
                         if yt_result.errors > 0:
                             stats["errors"] += yt_result.errors
-                    except Exception:
+                    except Exception as exc:
                         logger.exception("YouTube URL の取り込みに失敗: %s", url)
                         stats["errors"] += 1
+                        if result is not None:
+                            result.errors += 1
+                            result.error_details.append(
+                                {
+                                    "category": "delegation",
+                                    "target": url,
+                                    "url": url,
+                                    "message": f"youtube delegation failed: {exc}",
+                                },
+                            )
                     # リクエスト間隔待機（次の URL がある場合のみ）
                     if i < len(youtube_urls) - 1:
                         await asyncio.sleep(youtube_ingester.request_interval)
@@ -856,7 +985,9 @@ class BlueskyIngester:
     # URL あたり平均 ~80 文字 × 200 = ~16K文字で安全マージンを確保
     _URL_BATCH_SIZE = 200
 
-    async def _fetch_web_urls(self, urls: list[str]) -> tuple[int, int]:
+    async def _fetch_web_urls(
+        self, urls: list[str],
+    ) -> tuple[int, int, list[dict[str, Any]]]:
         """Web URL を site-ingest CLI subprocess（複数 URL モード）でバッチ取得する.
 
         Windows のコマンドライン長制限を考慮し、URL リストが大きい場合は
@@ -866,26 +997,37 @@ class BlueskyIngester:
             urls: 取得対象の Web URL リスト
 
         Returns:
-            (配置されたファイル数の合計, エラー件数)
+            (配置されたファイル数の合計, エラー件数, errors の dict リスト)。
+            errors は各 URL に対し category="delegation" の dict を 1 件ずつ生成する。
         """
         logger.info("site-ingest（複数 URL モード）で %d 件の Web URL を取り込みます", len(urls))
 
         total_placed = 0
         total_errors = 0
+        error_details: list[dict[str, Any]] = []
         for i in range(0, len(urls), self._URL_BATCH_SIZE):
             batch = urls[i:i + self._URL_BATCH_SIZE]
             try:
                 placed = await self._run_site_ingest_batch(batch)
                 total_placed += placed
-            except Exception:
+            except Exception as exc:
                 logger.exception(
                     "site-ingest バッチ処理に失敗（スキップして続行）: batch_size=%d",
                     len(batch),
                 )
                 total_errors += len(batch)
+                for url in batch:
+                    error_details.append(
+                        {
+                            "category": "delegation",
+                            "target": url,
+                            "url": url,
+                            "message": f"site-ingest batch failed: {exc}",
+                        },
+                    )
 
         logger.info("site-ingest 完了: 合計 %d 件配置, %d 件エラー", total_placed, total_errors)
-        return total_placed, total_errors
+        return total_placed, total_errors, error_details
 
     async def _run_site_ingest_batch(
         self, urls: list[str],
