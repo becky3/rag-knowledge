@@ -298,10 +298,13 @@ flowchart TB
 - **親ソースは独立ソースのパス規則に従って配置する**: 親ソースは各媒体の source_id 規則に従って配置し、`.meta` サイドカーを同階層に生成する
 - **attachment は親ソースと同じディレクトリ階層に attachment 専用サブディレクトリを作成して配置する**:
   パス規則は `<親ソースが配置されるディレクトリ>/<attachment 種別名>/<親識別子>/<attachment ファイル>`。
-  例（bluesky）: 親ソース `bluesky/{did}/{年}/{月}/{rkey}.json` に対する画像 attachment は `bluesky/{did}/{年}/{月}/media/{rkey}/image_0.webp`（親と同じ `{年}/{月}/` 配下に `media/{rkey}/` サブディレクトリを作成）
+  例（bluesky）: 親ソース `bluesky/{did}/{年}/{月}/{rkey}.json` に対する画像 attachment は `bluesky/{did}/{年}/{月}/media/{rkey}/image_0.{ext}`（親と同じ `{年}/{月}/` 配下に `media/{rkey}/` サブディレクトリを作成）。
+  拡張子は媒体ごとのルールで決定される（bluesky では CDN レスポンスに従い通常 `.webp`）
 - **attachment 自身の `.meta` は生成しない**: メタデータは親ソースの `.meta` に集約する
-- **attachment パスから親パスへの逆引きを実装する**: 各媒体のインジェスターは、attachment パスから親ソースパスを計算する resolver を [source-store.md](../source-store.md) の `resolve_attachment_parent` に登録する。
-  これにより パイプライン制御が attachment の変更を検出した際に、親ソースの再変換トリガーとして解釈できる
+- **attachment パスから親パスへの逆引きを実装する**: 各媒体は attachment パスから親ソースパスを計算する規則を定義し、source_store はその規則を `resolve_attachment_parent` に**静的に保持する**。
+  静的保持とは: プロセス起動時の初期化で一度だけ確定するか、`resolve_attachment_parent` の実装内に固定的に組み込む方式であり、実行時の動的登録・差し替えは行わない。
+  `resolve_attachment_parent` は attachment パスのみを入力として親ソースパスを返す純粋関数であり、入力以外の状態（グローバル変数・設定・登録済み resolver の動的変化など）に依存してはならない。
+  これにより パイプライン制御は attachment の変更検出時に、親ソースの再変換トリガーとして一意に解釈できる
 
 現時点で複合ソース構造を持つ媒体は BlueSky（投稿 JSON + `media/{rkey}/`）のみ。将来、他媒体で attachment 構造を追加する場合も本ルールに従う。
 

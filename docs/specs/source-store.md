@@ -263,7 +263,8 @@ flowchart TD
   bluesky の統合方式（`<image:N>` / `<video:N>` タグ埋め込み）の詳細は [converter.md](converter.md) の「BlueSky 投稿のメディア解析」セクションを参照。メディア解析モジュール自体の仕様は [infrastructure/media-analysis.md](infrastructure/media-analysis.md) を参照
 - **親の削除は attachment を伴う**: 親ソースの削除時、関連する attachment ディレクトリも再帰削除される
 
-attachment を伴う媒体は `resolve_attachment_parent` に source_type ごとの resolver を登録する方式で拡張する。現時点で複合ソースを持つ媒体は bluesky のみ。将来 zenn/YouTube 等で attachment 構造が必要になった場合、対応する resolver を追加することで同じ契約を満たす。
+attachment を伴う媒体は `resolve_attachment_parent` の実装内に source_type ごとの resolver を**静的に組み込む**方式で拡張する（実行時の動的登録・差し替えは行わない。詳細は [ingesters/common.md](ingesters/common.md) の「複合ソースの attachment 配置ルール」参照）。
+現時点で複合ソースを持つ媒体は bluesky のみ。将来 zenn/YouTube 等で attachment 構造が必要になった場合、対応する resolver を実装内に追加することで同じ契約を満たす。
 
 ### converted_store のディレクトリ構成
 

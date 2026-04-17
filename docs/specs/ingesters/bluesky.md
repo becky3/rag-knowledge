@@ -169,8 +169,8 @@ BlueSky 投稿は親ファイル（投稿 JSON）と attachment（画像・動�
 拡張子の決定規則は「メディア DL と配置」セクションを参照（現時点の実装では動画は `.ts` 固定、画像は CDN レスポンスの Content-Type に基づく）。
 
 - **独立ソースは親 JSON のみ**: 変換・インデックスの単位は親 JSON。attachment は [source-store.md](../source-store.md) の `is_source_file` で除外され、独立変換・独立インデックスの対象にならない
-- **attachment → 親の逆引き**: `bluesky/{did}/{年}/{月}/media/{rkey}/...` のパスから親 JSON を計算する resolver を [source-store.md](../source-store.md) の `resolve_attachment_parent` に登録する。
-  親パスは `bluesky/{did}/{年}/{月}/{rkey}.json` となる
+- **attachment → 親の逆引き**: `bluesky/{did}/{年}/{月}/media/{rkey}/...` のパスから親 JSON を計算する resolver を [source-store.md](../source-store.md) の `resolve_attachment_parent` 実装内に**静的に組み込む**。
+  実行時の動的登録は行わない（詳細は [common.md](common.md) の「複合ソースの attachment 配置ルール」参照）。親パスは `bluesky/{did}/{年}/{月}/{rkey}.json` となる
 - **親の削除は attachment を伴う**: 親 JSON を削除する場合、対応する `media/{rkey}/` サブディレクトリも再帰削除する（[source-store.md](../source-store.md) のファイル削除仕様参照）
 - **attachment 変更は親の再変換トリガー**: attachment が追加・変更された場合、パイプライン制御が親 JSON を `modified` として処理対象に追加する（[pipeline-controller.md](../pipeline-controller.md) の「ソース列挙経路 > attachment の扱い」参照）
 
@@ -213,6 +213,9 @@ source_store/
             abc456/
               video_0.ts
 ```
+
+上記ツリーは**現行実装の具体例**（画像は CDN が webp を返した場合、動画は HLS ts 結合で保存される場合）である。
+一般形としての attachment ファイル名は `image_N.{ext}` / `video_N.{ext}` であり、拡張子の決定規則は「メディア DL と配置」セクションを参照。
 
 年月の導出: `post.record.createdAt`（投稿日時）から年（4桁）と月（2桁ゼロ埋め）を抽出する。
 

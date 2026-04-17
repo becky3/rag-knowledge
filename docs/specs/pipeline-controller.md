@@ -280,9 +280,10 @@ sequenceDiagram
 いずれの経路も `is_source_file == False` のファイルを処理対象から除外する。除外対象には以下が含まれる:
 
 - `.meta` サイドカー（任意階層）
-- `/metadata.db*`・`.git/`・`/.gitignore`・`/.ingest.lock`・`/.rebuild.lock`（ルート直下のロック・管理ファイル）
+- `/metadata.db*`・`/.gitignore`・`/.ingest.lock`・`/.rebuild.lock`（ルート直下のロック・管理ファイル）
+- `.git/`（任意階層の `.git` ディレクトリ配下）
 - `/aozora/catalog.csv`・`/aozora/catalog.csv.meta`（aozora sidecar）
-- `.DS_Store`・`Thumbs.db`・`desktop.ini`（OS 生成ファイル）
+- `.DS_Store`・`Thumbs.db`・`desktop.ini`（OS 生成ファイル、任意階層）
 - 複合ソースの attachment（`resolve_attachment_parent` で親に解決されるパス）
 
 除外対象の全リストとパターン定義は [source-store.md](source-store.md) の「ソース判定 > 除外対象」を参照（SSoT）。
