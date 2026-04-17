@@ -199,10 +199,23 @@ CLI は `--output json` 指定時にこの callback 内で進捗 JSON を stdout
 
 | 項目 | 内容 |
 |------|------|
-| 総ファイル数 | source_store 内のデータファイル数（`.meta` ファイルを除く） |
-| 総サイズ | 全データファイルの合計サイズ |
-| 媒体別ファイル数 | `source_type` ごとのファイル数 |
+| 総ファイル数 | source_store 内の独立ソース数（[source-store.md](source-store.md) の `is_source_file` で `True` と判定されたファイルのみをカウント。`.meta` サイドカー・ロックファイル・OS 生成ファイル・複合ソースの attachment は除外される） |
+| 総サイズ | 全独立ソースの合計サイズ |
+| 媒体別ファイル数 | `source_type` ごとの独立ソース数 |
 | 媒体別サイズ | `source_type` ごとの合計サイズ |
+
+##### 件数の妥当性要件
+
+`rag_stats` が表示する件数は他のパイプライン経路（全再構築・差分更新等）と同じ除外判定を適用しなければならない。`rag_stats` の列挙経路（`run_stats`）は [pipeline-controller.md](pipeline-controller.md) の「ソース列挙経路」5 経路のうちの 1 つであり、他の経路と共通の `is_source_file` を使用する。
+
+以下は `source_type` フィルタを同条件で適用した場合に成立する件数一致である:
+
+- フィルタなしの `rag_stats` と `rag_rebuild --mode full`（`source_type` 指定なし）が対象とする総ファイル数は一致する
+- `source_type={T}` を指定した `rag_stats` の媒体別件数と、`rag_rebuild --mode full --source-type {T}` が対象とするファイル数は一致する
+- `rag_stats` が表示する媒体別件数は各 `source_type` ディレクトリ配下の独立ソース数と一致する（attachment・sidecar は含まない）
+- ロックファイル（`.ingest.lock`・`.rebuild.lock`）・`aozora/catalog.csv`・複合ソースの attachment は `rag_stats` に現れない
+
+5 経路の詳細・除外判定の SSoT は [pipeline-controller.md](pipeline-controller.md) の「ソース列挙経路」および [source-store.md](source-store.md) の「ソース判定」を参照。
 
 #### converted_store 統計
 
