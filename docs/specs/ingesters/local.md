@@ -92,7 +92,9 @@ Local インジェスターは、ローカルファイルシステム上のテ�
 | `.jpg`, `.jpeg`, `.png`, `.webp` | 画像ファイル（メディア解析モジュールで Vision モデルによるテキスト変換） |
 | `.mp4`, `.ts` | 動画ファイル（MPEG-TS。メディア解析モジュールでフレーム抽出 + Vision モデルによるテキスト変換） |
 
-対応拡張子は `config.toml` の `rag_document_supported_extensions` で管理する。テキスト系拡張子を追加した場合はプレーンテキストとしてコンバーターが処理する。画像・動画はメディア解析モジュール（[media-analysis.md](../infrastructure/media-analysis.md)）が Vision モデルでテキスト化する。LM Studio が停止中の場合、画像・動画の解析はスキップされる（テキストのみのソースとは異なり、インデックスには登録されない）。
+対応拡張子は `config.toml` の `rag_document_supported_extensions` で管理する。テキスト系拡張子を追加した場合はプレーンテキストとしてコンバーターが処理する。
+
+画像・動画はメディア解析モジュール（[media-analysis.md](../infrastructure/media-analysis.md)）が Vision モデルでテキスト化する。LM Studio が停止中の場合、画像・動画の解析はスキップされる（テキストのみのソースとは異なり、インデックスには登録されない）。
 
 ### source_id
 
