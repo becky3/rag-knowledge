@@ -138,7 +138,9 @@ git diff から取得する変更ファイルリストの各エントリが持�
 3. `last_commit_id` が null commit hash（初回）の場合は全ファイルを対象とする。通常のコミット ID の場合は `git diff` で変更ファイルを取得する
 4. ネット差分で検出されない中間変更を補完する。`git log --name-only` で中間コミットの全触ファイルを取得し、ネット差分に含まれないが HEAD に存在するファイルを `modified` として追加する。HEAD に存在しないファイル（一時的に追加→削除）は除外する
 5. 変更ファイルがなければ終了する
-6. 変更ファイルを種別（追加・変更 / 削除）ごとに分類する。BlueSky の `bluesky/.../media/{rkey}/` 配下のファイルが追加・変更された場合、media 自身は独立 ChangeEntry として登録せず、対応する親ファイル（`{rkey}.json`）のみを `modified` として処理対象に追加する（詳細はエッジケース表を参照）
+6. 変更ファイルを種別（追加・変更 / 削除）ごとに分類する。
+   複合ソースの attachment（例: `bluesky/.../media/{rkey}/` 配下）が追加・変更された場合、attachment 自身は独立 ChangeEntry として登録しない。
+   [source-store.md](source-store.md) の `find_existing_parent` で親ソースを解決し、親ソースのみを `modified` として処理対象に追加する（詳細はエッジケース表を参照）
 7. 追加・変更ファイルはコンバーターで変換後、インデクサーでインデックスに追加・更新する
 8. 削除ファイルはインデクサーでインデックスから削除し、metadata.db で論理削除する
 9. `pipeline_history` に実行履歴を追加する
@@ -261,17 +263,41 @@ sequenceDiagram
 
 変換不要なファイル（md/txt/adoc）はコンバーターが source_store から converted_store にそのままコピーする。これによりインデクサーは常に converted_store のみを参照すればよく、フォールバックロジックは不要。
 
-### パイプライン処理対象外ファイル
+### ソース列挙経路
 
-source_store 内の以下のファイルは、git diff で検出されてもパイプライン処理をスキップする。
+パイプライン制御と CLI `rag_stats` は、4 つの実装と 1 つの再利用の計 5 経路で source_store 内のソースを列挙する。
+除外判定（sidecar、ロックファイル、OS 生成ファイル、複合ソースの attachment 等）はすべて [source-store.md](source-store.md) の `is_source_file` に一元化する（SSoT）。
+各経路は列挙元のファイル一覧を `is_source_file` でフィルタしてから後続処理に渡す。
 
-| ファイル | 理由 |
-|---------|------|
-| `.gitignore` | git メタデータ |
-| `.ingest.lock` | インジェスト排他制御用ロックファイル |
-| `.rebuild.lock` | 再構築排他制御用ロックファイル |
-| `aozora/catalog.csv` | 青空文庫カタログ（検索用、インデックス対象外） |
-| `aozora/catalog.csv.meta` | カタログのメタデータ |
+| # | 経路 | 使用箇所 | 列挙元 |
+|---|------|----------|--------|
+| 1 | `source_store.list_files()` | 全再構築 / コンバートのみ再実行 / インデックスのみ再構築 | ファイルシステム走査 |
+| 2 | `_scan_all_as_added()` | 差分更新の初回（`last_commit_id` が null commit hash） | `git ls-tree HEAD` |
+| 3 | `_classify_changes()` | 差分更新（`git diff`） | `git diff --name-status` |
+| 4 | `_supplement_hidden_changes()` | 差分更新の中間コミット補完 | `git log --name-only` |
+| 5 | `run_stats()` | CLI / MCP `rag_stats` | `source_store.list_files()`（経路 1 を再利用） |
+
+いずれの経路も `is_source_file == False` のファイルを処理対象から除外する。除外対象には以下が含まれる:
+
+- `.meta` サイドカー（任意階層）
+- `/metadata.db*`・`.git/`・`/.gitignore`・`/.ingest.lock`・`/.rebuild.lock`（ルート直下のロック・管理ファイル）
+- `/aozora/catalog.csv`・`/aozora/catalog.csv.meta`（aozora sidecar）
+- `.DS_Store`・`Thumbs.db`・`desktop.ini`（OS 生成ファイル）
+- 複合ソースの attachment（`resolve_attachment_parent` で親に解決されるパス）
+
+除外対象の全リストとパターン定義は [source-store.md](source-store.md) の「ソース判定 > 除外対象」を参照（SSoT）。
+
+#### attachment の扱い
+
+複合ソースの attachment（bluesky media 等）は `is_source_file` で除外されるが、attachment の追加・変更は親ソースの再変換トリガーとして扱う必要がある。
+経路 3（`_classify_changes`）では attachment 変更を検出した場合、`find_existing_parent` で親ソースを解決し、親ソースを `modified` の ChangeEntry として処理対象に追加する。
+この挙動は [source-store.md](source-store.md) の「複合ソースの構造」契約（attachment の変更は親の再変換を伴う）を実装する。
+
+#### invariant（呼び出し順序）
+
+`is_source_file == True` を通過したファイルのみを下流処理（`detect_source_type` / コンバーター / インデクサー）に渡す。
+この invariant により、下流処理は未知パスや attachment を考慮しなくてよい。
+違反時の挙動は [source-store.md](source-store.md) の「ソース判定 > invariant」を参照。
 
 ### 変更種別と処理の対応
 
@@ -313,7 +339,8 @@ source_store 内の以下のファイルは、git diff で検出されてもパ�
 | 再構築操作（全再構築・コンバートのみ・インデックスのみ）時に source_store に未コミットの変更がある場合 | エラーとして再構築を拒否する |
 | 差分更新時に source_store に未コミットの変更がある場合 | 自動コミットを実行してから差分更新を続行する |
 | 差分更新の自動コミット時に git commit が失敗した場合 | エラーとして差分更新を拒否する（コミット失敗の原因をエラーメッセージに含める） |
-| BlueSky `bluesky/.../media/{rkey}/` 配下のファイルが追加・変更された場合 | 対応する親 JSON（`{rkey}.json`）のみを `modified` として処理対象に追加する。media ファイル自体は独立 ChangeEntry として登録しない（媒体 JSON の変換時に参照される添付ファイルで、独立変換すると二重変換になるため。[source-store.md](source-store.md) のファイル一覧仕様と同じ方針）。親 JSON が source_store に存在しない孤児 media の場合は何も処理しない |
+| 複合ソースの attachment が追加・変更された場合 | [source-store.md](source-store.md) の `find_existing_parent` で親ソースを解決し、親ソースのみを `modified` として処理対象に追加する。attachment ファイル自体は独立 ChangeEntry として登録しない（変換時に親から参照される添付ファイルで、独立変換すると二重変換になるため）。親ソースが source_store に存在しない孤児 attachment の場合は何も処理しない |
+| 複合ソースの attachment のみが削除された場合（親ソースは残存） | `find_existing_parent` で親ソースを解決し、親ソースを `modified` として処理対象に追加する（attachment 追加・変更と対称）。これにより、削除後の attachment 構成に従って親ソースが再変換される（削除された attachment への参照は消える）。attachment 自体は独立 ChangeEntry として登録しない。親ソースが source_store に存在しない（親と attachment が同時削除された）場合は、親ソース自体の削除 ChangeEntry によりインデックスからも除去されるため、attachment 側は何も処理しない |
 
 ### 設定項目
 

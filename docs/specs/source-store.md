@@ -13,6 +13,8 @@ metadata.db、converted_store、検索インデックスは全て source_store �
 - metadata.db によるメタデータの索引
 - source_id の決定規則
 - URL とファイルパスの双方向変換
+- ソース判定述語（`is_source_file`）とソース種別判定（`detect_source_type`）の提供
+- 複合ソースの親・attachment 対応関係の解決（`resolve_attachment_parent` / `find_existing_parent`）
 - 削除（物理削除 + 論理削除）
 
 スコープ外:
@@ -20,6 +22,18 @@ metadata.db、converted_store、検索インデックスは全て source_store �
 - converted_store の管理（コンバーター仕様の範疇）
 - git 操作の実行（パイプライン制御の範疇）
 - 検索インデックスの構築・更新（インデクサーの範疇）
+
+## 用語定義
+
+| 用語 | 意味 |
+|------|------|
+| 単純ソース | 1 ファイル = 1 独立ソースとして扱われる通常のファイル（local の Markdown、zenn の JSON 等） |
+| 複合ソース | 親ソースと attachment の集合からなる 1 論理ソース（例: bluesky 投稿 JSON + `media/{rkey}/` 配下の画像・動画） |
+| 親ソース | 複合ソースにおける独立ソースにあたるファイル。媒体により「親ファイル」「親 JSON」と呼ぶこともあるが、本仕様書では「親ソース」を正式名称とする |
+| attachment | 親ソースに付随し、単独では独立ソースとならないファイル（汎用語） |
+| media | bluesky の attachment 固有の呼称（画像・動画ファイル） |
+| 独立ソース | 変換・インデックスの単位として扱われるファイル。単純ソースおよび複合ソースの親ソースが該当する。attachment は独立ソースではない |
+| sidecar | 特定の独立ソースに付随するメタデータファイル（`.meta`）、または特定インジェスターの内部参照ファイル（例: `aozora/catalog.csv`）。独立ソースではない |
 
 ## 背景
 
@@ -72,15 +86,86 @@ metadata.db、converted_store、検索インデックスは全て source_store �
 
 ## インターフェース
 
+### ソース判定
+
+source_store 層は「このファイルは独立ソースか？」「どの source_type に属するか？」「複合ソースの attachment なら親はどれか？」の判定をアプリケーション全体に提供する。これらの述語・関数は source_store を SSoT とし、パイプライン制御・CLI・コンバーター等の全呼び出し元がこの層を経由して判定する。
+
+| 関数 | 入力 | 出力 | 振る舞い |
+|------|------|------|---------|
+| `is_source_file` | 相対パス（source_store ルート基準） | `bool` | 相対パスが独立ソースに該当するかを判定する。除外対象（sidecar、ロックファイル、OS 生成ファイル、複合ソースの attachment 等）に該当する場合は `False`、独立ソースに該当する場合は `True` を返す |
+| `resolve_attachment_parent` | 相対パス | 親ソース相対パス / `None` | **純粋関数**。attachment 形式のパスから対応する親ソースの相対パスを計算する。attachment パターンに該当しない場合は `None` を返す。ファイル存在確認は行わない |
+| `find_existing_parent` | 相対パス | 親ソース相対パス / `None` | **IO 付き関数**。`resolve_attachment_parent` を呼び、親ソースが source_store 上に実在する場合のみパスを返す。親が存在しない（孤児 attachment）場合は `None` を返す。incremental diff の `_classify_changes` 等、親実在を前提に処理を振り分ける経路で使用する |
+| `detect_source_type` | 相対パス | `SourceType` | 相対パスの先頭ディレクトリから source_type を判定する。先頭ディレクトリが [`_schema/enums.yml`](../../_schema/enums.yml) の `source_type` 値のいずれにも一致しない場合は `ValueError` を送出する |
+
+#### invariant（不変条件）
+
+以下を invariant として宣言し、全呼び出し元はこの前提で動作する:
+
+> **`is_source_file(rel_path) == True` のとき、`detect_source_type(rel_path)` は必ず `SourceType` を返す（`ValueError` を送出しない）**
+
+この invariant により、`is_source_file` を通過したファイルのみを `detect_source_type` / コンバーター / インデクサーに渡す運用が安全となる。
+万一 invariant が破れた場合（`is_source_file` の除外漏れ等）、`ValueError` は上位に伝播し処理結果サマリの errors に計上される（契約違反のバグとして可視化）。
+下位層での `try/except ValueError` による無視は禁止する。
+
+#### 除外対象（`is_source_file` が `False` を返す対象）
+
+以下のパターンに該当するファイルを独立ソースから除外する。パターンは [pathspec](https://pypi.org/project/pathspec/) の gitignore 形式で表現する。
+
+```
+# .meta サイドカー
+*.meta
+
+# SQLite 管理ファイル
+/metadata.db*
+
+# Git・ロックファイル
+/.gitignore
+/.ingest.lock
+/.rebuild.lock
+.git/
+
+# 青空文庫カタログ（aozora インジェスターの内部参照ファイル。sidecar 扱い）
+/aozora/catalog.csv
+/aozora/catalog.csv.meta
+
+# OS 生成ファイル
+.DS_Store
+Thumbs.db
+desktop.ini
+```
+
+加えて、`resolve_attachment_parent(rel_path) is not None` のとき（すなわち attachment と判定される場合）も除外する。
+
+**パターンの意味**（pathspec anchoring）:
+
+- 先頭 `/` でルート直下限定にアンカリングする。
+  例: `/.gitignore` はルート直下の `.gitignore` のみを除外し、ユーザー文書内の同名ファイル（`local/myproject/.gitignore`）は独立ソースとして扱う。
+  上記パターンでは `/metadata.db*` / `/.gitignore` / `/.ingest.lock` / `/.rebuild.lock` / `/aozora/catalog.csv(.meta)` が該当
+- 末尾 `/` でディレクトリ配下を表現する（例: `.git/` は任意階層の `.git` ディレクトリ配下を除外）
+- アンカーなしパターンは任意階層でファイル名マッチする。上記パターンでは `*.meta` / `.DS_Store` / `Thumbs.db` / `desktop.ini` が該当
+
+**設計判断（採用しないアプローチ）**:
+
+- 「`.` 始まりの包括除外」は採用しない。実運用パスの多くで効果が薄く、`.upload/` のような意図した独立配置を誤除外するリスクがあるため
+
+#### 既知の制約
+
+以下のパスは `is_source_file` で除外されず、ユーザーが `.gitignore` 等の運用で排除する前提とする:
+
+- サポート外拡張子のファイル（例: `local/foo.pyc`、`local/node_modules/` 配下の JS ファイル等）
+- OS 隠しファイルの `.DS_Store` 以外の亜種（例: macOS の `._` 始まりファイル）
+
+これらは独立ソースとして列挙されるが、後続のコンバーターで「未対応拡張子」としてスキップされるか、あるいは誤って取り込まれる可能性がある。運用側で source_store に配置しないことで予防する。
+
 ### ストア操作
 
 | 操作 | 入力 | 出力 | 振る舞い |
 |------|------|------|---------|
-| ファイル配置 | source_type、ファイルデータ、メタデータ | 配置先パス | source_type に応じたディレクトリにファイルを配置し、.meta を生成する（local 以外） |
+| ファイル配置 | source_type、ファイルデータ、メタデータ | 配置先パス | source_type に応じたディレクトリにファイルを配置し、.meta を生成する（local 以外）。独立ソースの配置のみを受け付け、`is_source_file` が `False` を返すパス（例: `.DS_Store`）は拒否する。複合ソースの attachment（例: bluesky の `media/{rkey}/` 配下）は本操作の対象外であり、各媒体のインジェスターが独自のパス規則で配置する |
 | .meta 読み取り | ファイルパス | メタデータ辞書 | 指定ファイルの .meta サイドカーを YAML として読み取る |
 | .meta 書き込み | ファイルパス、メタデータ辞書 | なし | 指定ファイルの .meta サイドカーを YAML として書き込む |
-| ファイル一覧 | source_type（任意） | ファイルパスのリスト | source_store 内のファイルを列挙する。source_type 指定時はそのディレクトリのみ。`.meta`、`metadata.db`、`.git/`、`.gitignore`、ロックファイル（`.ingest.lock`、`.rebuild.lock`）は除外する。BlueSky の `media/` 配下（添付画像・動画）は親投稿の変換時に参照されるため、独立ソースとしては列挙しない |
-| ファイル削除 | source_id | なし | source_id に対応するファイルと .meta サイドカーをディスクから削除する。BlueSky 投稿の場合は対応する `media/{rkey}/` サブディレクトリも再帰削除する。metadata.db の更新は行わない（パイプライン制御が git diff 経由で処理する）。呼び出し後にパイプライン制御の取り込み実行（[pipeline-controller.md](pipeline-controller.md) 参照）を実行することで、git commit → パイプラインによる論理削除・インデックス削除が行われる |
+| ファイル一覧 | source_type（任意） | ファイルパスのリスト | source_store 内のファイルを走査し、`is_source_file` で `True` と判定された独立ソースのみを列挙する。source_type 指定時はそのディレクトリのみ対象。除外されるファイル（sidecar、attachment、ロックファイル等）は「ソース判定 > 除外対象」を参照 |
+| ファイル削除 | source_id | なし | source_id に対応するファイルと .meta サイドカーをディスクから削除する。複合ソースの親（例: BlueSky 投稿 JSON）を削除する場合、対応する attachment ディレクトリ（例: `media/{rkey}/`）も再帰削除する。metadata.db の更新は行わない（パイプライン制御が git diff 経由で処理する）。呼び出し後にパイプライン制御の取り込み実行（[pipeline-controller.md](pipeline-controller.md) 参照）を実行することで、git commit → パイプラインによる論理削除・インデックス削除が行われる |
 | 論理削除 | source_id | なし | metadata.db のステータスを `deleted` に変更する。パイプライン制御の内部処理で使用 |
 | 論理削除解除 | source_id | なし | metadata.db のステータスを `active` に戻す |
 | ファイル取得 | source_id | ファイルデータ + メタデータ / `None` | source_id に対応するファイルと .meta を返す。物理削除済み（ファイル欠落）の場合は警告ログを出力して `None` を返す（復元が必要な場合は source_store の git リポジトリから `git checkout` で復元する） |
@@ -131,8 +216,12 @@ flowchart TD
     BS --> BS_DID["did：plc：xxx/"]
     BS_DID --> BS_YEAR["2026/"]
     BS_YEAR --> BS_MONTH["03/"]
-    BS_MONTH --> BS_POST["rkey.json"]
+    BS_MONTH --> BS_POST["rkey.json（親・独立ソース）"]
     BS_MONTH --> BS_POST_META["rkey.json.meta"]
+    BS_MONTH --> BS_MEDIA["media/"]
+    BS_MEDIA --> BS_MEDIA_RKEY["rkey/"]
+    BS_MEDIA_RKEY --> BS_IMG["image_0.webp（attachment・例）"]
+    BS_MEDIA_RKEY --> BS_VID["video_0.ts（attachment・例）"]
     ZENN --> Z_USER["username/"]
     Z_USER --> Z_ART["articles/"]
     Z_USER --> Z_SCR["scraps/"]
@@ -141,7 +230,7 @@ flowchart TD
     YT --> YT_CH["{channel_id}/"]
     YT_CH --> YT_VID["{video_id}.json"]
     YT_CH --> YT_VID_META["{video_id}.json.meta"]
-    AZ --> AZ_CAT["catalog.csv"]
+    AZ --> AZ_CAT["catalog.csv（sidecar）"]
     AZ --> AZ_CAT_META["catalog.csv.meta"]
     AZ --> AZ_PERSON["{person_id}/"]
     AZ_PERSON --> AZ_BOOK["{book_id}.html"]
@@ -156,11 +245,25 @@ flowchart TD
 - **.git/**: git リポジトリ管理ディレクトリ
 - **local/**: ユーザーが手動で自由にファイル・フォルダを配置する領域
 - **web/**: site_ingest が URL ベースのパス構成で自動配置
-- **bluesky/**: BlueSky インジェスターが DID + 年月で階層化して自動配置
+- **bluesky/**: BlueSky インジェスターが DID + 年月で階層化して自動配置。投稿 JSON が親ソース（独立）で、`media/{rkey}/` 配下の画像・動画が attachment（独立ソースではない）。両者を合わせて 1 つの複合ソースを構成する
 - **zenn/**: Zenn インジェスターがユーザー名 + コンテンツ種別（articles/scraps）で階層化して自動配置
 - **youtube/**: YouTube インジェスターがチャンネル ID で階層化して自動配置
-- **aozora/**: 青空文庫インジェスターがカタログ + 著者 ID で階層化して自動配置
+- **aozora/**: 青空文庫インジェスターが著者 ID で階層化して自動配置。`aozora/catalog.csv` は aozora インジェスター内部の参照ファイル（sidecar）であり、独立ソースではない
 - **journal/**: Journal インジェスターがリポジトリ名で階層化して自動配置
+
+### 複合ソースの構造
+
+複合ソースは「親ソース + 1 つ以上の attachment」からなる 1 論理ソースである。以下の契約を満たす:
+
+- **親のみが独立ソース**: 変換・インデックスの単位は親ソース。attachment は `is_source_file` で除外され、独立ソースとしては列挙されない
+- **attachment のパスから親を逆引き可能**: `resolve_attachment_parent` が純粋関数として attachment パス → 親ソースパスを計算する
+- **attachment の内容は親の変換時に参照され、親の変換結果に統合される**:
+  コンバーターは親ソースを変換する際、関連する attachment（画像・動画等）をメディア解析モジュール（LM Studio Vision）でテキスト化し、親ソースの変換結果に埋め込み統合する。
+  attachment 単体の変換結果は converted_store に独立出力されない（converted_store に現れるのは親ソース 1 ファイルの変換結果のみ）。
+  bluesky の統合方式（`<image:N>` / `<video:N>` タグ埋め込み）の詳細は [converter.md](converter.md) の「BlueSky 投稿のメディア解析」セクションを参照。メディア解析モジュール自体の仕様は [infrastructure/media-analysis.md](infrastructure/media-analysis.md) を参照
+- **親の削除は attachment を伴う**: 親ソースの削除時、関連する attachment ディレクトリも再帰削除される
+
+attachment を伴う媒体は `resolve_attachment_parent` に source_type ごとの resolver を登録する方式で拡張する。現時点で複合ソースを持つ媒体は bluesky のみ。将来 zenn/YouTube 等で attachment 構造が必要になった場合、対応する resolver を追加することで同じ契約を満たす。
 
 ### converted_store のディレクトリ構成
 
@@ -181,8 +284,12 @@ source_store 層では `file_path` として、metadata_db 以上の層では `s
 | bluesky | `bluesky/{escaped_did}/{年}/{月}/{rkey}.json` | `bluesky/did：plc：xxx/2026/03/rkey.json` |
 | zenn | `zenn/{username}/{articles\|scraps}/{slug}.json` | `zenn/alice/articles/sample-article.json` |
 | youtube | `youtube/{channel_id}/{video_id}.json` | `youtube/UCxxxxxxxx/xxxxxxxxxxx.json` |
-| aozora | `aozora/{person_id}/{book_id}.html` / `aozora/catalog.csv` | `aozora/000035/001567.html` |
+| aozora | `aozora/{person_id}/{book_id}.html` | `aozora/000035/001567.html` |
 | journal | `journal/{repository}/{entry_id}.md` | `journal/rag-knowledge/20260323-143000-session-summary.md` |
+
+`aozora/catalog.csv` は aozora インジェスター内部で参照される検索用カタログファイルであり、独立ソースではない（sidecar 扱い）。source_id テーブルに登場しないため、変換・インデックス対象にもならない。aozora インジェスターでの位置付けは [ingesters/aozora.md](ingesters/aozora.md) を参照。
+
+bluesky の attachment（`bluesky/{did}/{年}/{月}/media/{rkey}/` 配下）は独立ソースではないため source_id を持たない。attachment パスから親ソース（`{rkey}.json`）の source_id への逆引きは `resolve_attachment_parent` / `find_existing_parent`（「ソース判定」セクション参照）で行う。
 
 元 URL は .meta の `url` フィールド（web, zenn, youtube, aozora, bluesky）に保持される。bluesky は追加で `at_uri` フィールド（AT Protocol 識別子）も持つ。これらは検索インデックスでは `custom:url` / `custom:at_uri` のメタデータキーとして保持される。
 

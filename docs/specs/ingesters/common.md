@@ -291,6 +291,20 @@ flowchart TB
 
 生成タイミング: データファイルの配置直後に同階層に .meta を生成する。正常時はデータファイルと .meta がペアで存在する。.meta の書き込みに失敗した場合は欠落し得る（フォールバック動作は [source-store.md](../source-store.md) のエッジケースに定義済み）。
 
+### 複合ソースの attachment 配置ルール
+
+複数のファイルを 1 つの論理ソースとして扱う媒体（複合ソース、[source-store.md](../source-store.md) の「用語定義」参照）では、親ソースと attachment を以下のルールで配置する。
+
+- **親ソースは独立ソースのパス規則に従って配置する**: 親ソースは各媒体の source_id 規則に従って配置し、`.meta` サイドカーを同階層に生成する
+- **attachment は親ソースと同じディレクトリ階層に attachment 専用サブディレクトリを作成して配置する**:
+  パス規則は `<親ソースが配置されるディレクトリ>/<attachment 種別名>/<親識別子>/<attachment ファイル>`。
+  例（bluesky）: 親ソース `bluesky/{did}/{年}/{月}/{rkey}.json` に対する画像 attachment は `bluesky/{did}/{年}/{月}/media/{rkey}/image_0.webp`（親と同じ `{年}/{月}/` 配下に `media/{rkey}/` サブディレクトリを作成）
+- **attachment 自身の `.meta` は生成しない**: メタデータは親ソースの `.meta` に集約する
+- **attachment パスから親パスへの逆引きを実装する**: 各媒体のインジェスターは、attachment パスから親ソースパスを計算する resolver を [source-store.md](../source-store.md) の `resolve_attachment_parent` に登録する。
+  これにより パイプライン制御が attachment の変更を検出した際に、親ソースの再変換トリガーとして解釈できる
+
+現時点で複合ソース構造を持つ媒体は BlueSky（投稿 JSON + `media/{rkey}/`）のみ。将来、他媒体で attachment 構造を追加する場合も本ルールに従う。
+
 ### 重複検出方式
 
 インジェスターは metadata.db に依存せず、ファイルシステムのみで重複を検出する。

@@ -6,6 +6,9 @@ BlueSky（AT Protocol）の投稿を API 経由で取得し、source_store に�
 
 インジェスターの責務は「source_store へのファイル配置 + .meta サイドカーファイルの生成」に限定される。テキスト変換・チャンキング・インデックス構築は後続ステージ（コンバーター・インデクサー）が行う。
 
+BlueSky 投稿は**複合ソース**として扱われる。投稿 JSON が親ソース（独立ソース）、`media/{rkey}/` 配下の画像・動画が attachment（独立ソースではない）として 1 論理ソースを構成する。
+詳細は [source-store.md](../source-store.md) の「用語定義」「複合ソースの構造」を、複合ソース全般のルールは [common.md](common.md) の「複合ソースの attachment 配置ルール」を参照。
+
 スコープ:
 
 - 指定ユーザーの統一タイムラインの取得（投稿・引用リポスト・リポスト・リプライ）
@@ -153,12 +156,32 @@ flowchart TB
 | BlueskyIngester | BlueSky 投稿取り込み用インジェスター。AT Protocol API 経由で投稿を取得し、source_store に JSON ファイルを配置する |
 | ConstrainedClient (py-common-lib) | 全外部 HTTP リクエストのゲートウェイ。ハードリミット・バジェット・サーキットブレーカーを統合する |
 
+### 複合ソース構造
+
+BlueSky 投稿は親ファイル（投稿 JSON）と attachment（画像・動画）からなる複合ソースとして扱われる。
+
+| 要素 | 位置付け | パス規則 | 独立ソース | `.meta` |
+|------|---------|---------|-----------|---------|
+| 投稿 JSON | 親 | `bluesky/{did}/{年}/{月}/{rkey}.json` | はい | `{rkey}.json.meta` に生成 |
+| 画像 | attachment（media） | `bluesky/{did}/{年}/{月}/media/{rkey}/image_N.{ext}` | いいえ | 生成しない |
+| 動画 | attachment（media） | `bluesky/{did}/{年}/{月}/media/{rkey}/video_N.{ext}` | いいえ | 生成しない |
+
+拡張子の決定規則は「メディア DL と配置」セクションを参照（現時点の実装では動画は `.ts` 固定、画像は CDN レスポンスの Content-Type に基づく）。
+
+- **独立ソースは親 JSON のみ**: 変換・インデックスの単位は親 JSON。attachment は [source-store.md](../source-store.md) の `is_source_file` で除外され、独立変換・独立インデックスの対象にならない
+- **attachment → 親の逆引き**: `bluesky/{did}/{年}/{月}/media/{rkey}/...` のパスから親 JSON を計算する resolver を [source-store.md](../source-store.md) の `resolve_attachment_parent` に登録する。
+  親パスは `bluesky/{did}/{年}/{月}/{rkey}.json` となる
+- **親の削除は attachment を伴う**: 親 JSON を削除する場合、対応する `media/{rkey}/` サブディレクトリも再帰削除する（[source-store.md](../source-store.md) のファイル削除仕様参照）
+- **attachment 変更は親の再変換トリガー**: attachment が追加・変更された場合、パイプライン制御が親 JSON を `modified` として処理対象に追加する（[pipeline-controller.md](../pipeline-controller.md) の「ソース列挙経路 > attachment の扱い」参照）
+
 ### source_id（ファイルパス）
 
-source_store 内の相対パスを使用する: `bluesky/{did}/{year}/{month}/{rkey}.json`
+独立ソース（親 JSON）の source_store 内の相対パス: `bluesky/{did}/{year}/{month}/{rkey}.json`
 
 - `did`: `post.author.did` から取得した DID（例: `did:plc:xxx`）。リポストの場合は元投稿者の DID。コロンは全角に置換
 - `rkey`: `post.uri` の末尾パス（`at://did:plc:xxx/app.bsky.feed.post/{rkey}` の `{rkey}` 部分）
+
+attachment（`media/{rkey}/` 配下の画像・動画）は独立ソースではないため source_id を持たない。
 
 AT URI は .meta の `at_uri` フィールドに格納する。AT URI を安定した識別子として .meta に保持する理由:
 
@@ -390,8 +413,8 @@ flowchart TD
 4. ts セグメントを DL し、バイナリ結合（単純連結）して保存する
 
 - Vision 解析用途のため、低画質（BANDWIDTH 最小）のバリアントで十分
-- 保存形式: ts セグメント結合のまま保存（mp4 変換は行わない）
-- ファイル名: `video_0.ts`
+- 保存形式: HLS の ts セグメント結合の場合は `.ts` のまま保存（mp4 変換は行わない）。将来、プレイリスト由来以外の動画形式に対応した場合は CDN レスポンスの Content-Type から決定される拡張子を用いる
+- ファイル名: `video_0.{ext}`, `video_1.{ext}`, ...（0-indexed、拡張子は保存形式に対応。現時点の実装では全動画が `.ts` 固定）
 - HLS 関連リクエスト（プレイリスト取得・セグメント DL）では CDN の 3xx リダイレクトに追従する。ただし SSRF 防止のため、リダイレクト先は元 URL と同一ベースドメイン（eTLD+1 相当）に限定し、異なるドメインへのリダイレクトは拒否する。リダイレクト追従の上限は 5 回
 
 #### メディア配置先
@@ -399,10 +422,12 @@ flowchart TD
 投稿 JSON と同階層の `media/{rkey}/` ディレクトリに配置する:
 
 ```
-{year}/{month}/media/{rkey}/image_0.webp
-{year}/{month}/media/{rkey}/image_1.webp
-{year}/{month}/media/{rkey}/video_0.ts
+{year}/{month}/media/{rkey}/image_0.{ext}
+{year}/{month}/media/{rkey}/image_1.{ext}
+{year}/{month}/media/{rkey}/video_0.{ext}
 ```
+
+画像の拡張子は CDN レスポンスの Content-Type で決定される（通常 `.webp`、他形式もあり得る）。動画の拡張子は現時点の実装で `.ts` 固定。
 
 #### recordWithMedia 時のメディア URL
 
