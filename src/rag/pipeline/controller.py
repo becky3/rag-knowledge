@@ -21,7 +21,6 @@ from pathlib import Path
 from typing import TypeVar
 
 from rag.converter.converter import ConversionSkippedError, get_converted_rel_path
-from rag.infrastructure.file_lock import INGEST_LOCK_FILENAME, REBUILD_LOCK_FILENAME
 from rag.pipeline.git_ops import GitOperations
 from rag.pipeline.models import (
     PHASE_CONVERT,
@@ -32,7 +31,6 @@ from rag.pipeline.models import (
     FullRebuildResult,
     PipelineMode,
     PipelineSummary,
-    detect_source_type,
 )
 from rag.pipeline.protocols import ConverterProtocol, IndexerProtocol
 from rag.store.meta import meta_path_for, read_meta
@@ -44,25 +42,18 @@ from rag.store.models import (
     SourceType,
 )
 from rag.store.resolve import resolve_published_at, resolve_title
-from rag.store.source_store import SourceStore
+from rag.store.source_store import (
+    NO_META_TYPES,
+    SourceStore,
+    detect_source_type,
+    is_source_file,
+)
 
 from rag.pipeline.ingesters._common import ProgressCallback
 
 logger = logging.getLogger(__name__)
 
 _T = TypeVar("_T")
-
-# .meta を持たない媒体
-_NO_META_TYPES: frozenset[SourceType] = frozenset({"local"})
-
-# パイプライン処理対象外のファイル（git メタデータ等）
-_PIPELINE_EXCLUDE_FILES: frozenset[str] = frozenset({
-    ".gitignore",
-    INGEST_LOCK_FILENAME,
-    REBUILD_LOCK_FILENAME,
-    "aozora/catalog.csv",
-    "aozora/catalog.csv.meta",
-})
 
 
 class PipelineController:
@@ -259,14 +250,12 @@ class PipelineController:
         # 1. metadata.db 再構築
         self._source_store.rebuild_db(source_type)
 
-        # 2. active ファイルをスキャン（パイプライン対象外ファイルを除外）
-        records = [
-            r for r in self.db.search_sources(
-                source_type=source_type,
-                status="active",
-            )
-            if r.source_id not in _PIPELINE_EXCLUDE_FILES
-        ]
+        # 2. active レコードを取得（rebuild_db が list_files 経由で登録するため、
+        # is_source_file=False のファイルは DB に登録されない）
+        records = list(self.db.search_sources(
+            source_type=source_type,
+            status="active",
+        ))
 
         empty_convert = PipelineSummary(
             mode=PipelineMode.CONVERT_ONLY,
@@ -449,14 +438,12 @@ class PipelineController:
         # 1. converted_store クリア
         self._converter.clear(self._converted_store_dir, source_type)
 
-        # 2. active ファイルをスキャン（パイプライン対象外ファイルを除外）
-        records = [
-            r for r in self.db.search_sources(
-                source_type=source_type,
-                status="active",
-            )
-            if r.source_id not in _PIPELINE_EXCLUDE_FILES
-        ]
+        # 2. active レコードを取得（is_source_file=False のファイルは rebuild_db で
+        # 登録されないため、DB 側フィルタは不要）
+        records = list(self.db.search_sources(
+            source_type=source_type,
+            status="active",
+        ))
 
         logger.info("Target files: %d", len(records))
 
@@ -520,14 +507,12 @@ class PipelineController:
         # 1. インデックスクリア
         await self._indexer.clear(source_type)
 
-        # 2. active なレコードを取得（パイプライン対象外ファイルを除外）
-        records = [
-            r for r in self.db.search_sources(
-                source_type=source_type,
-                status="active",
-            )
-            if r.source_id not in _PIPELINE_EXCLUDE_FILES
-        ]
+        # 2. active なレコードを取得（is_source_file=False のファイルは DB に登録
+        # されないため、フィルタは不要）
+        records = list(self.db.search_sources(
+            source_type=source_type,
+            status="active",
+        ))
 
         logger.info("Target files: %d", len(records))
 
@@ -586,17 +571,15 @@ class PipelineController:
     # --- 変更ファイルの特定 ---
 
     def _scan_all_as_added(self) -> list[ChangeEntry]:
-        """全追跡ファイルを「追加」として返す."""
+        """全追跡ファイルを「追加」として返す.
+
+        `is_source_file` で独立ソースのみを対象とする（sidecar・ロック・
+        attachment は除外）。
+        """
         all_files = self._git.list_all_files()
         entries: list[ChangeEntry] = []
         for f in all_files:
-            if f in _PIPELINE_EXCLUDE_FILES:
-                continue
-            if f.endswith(".meta"):
-                continue
-            # BlueSky media/ 配下は親 JSON の変換時に参照される添付ファイル。
-            # 独立ソースとして登録すると二重変換になるため除外する（#597）。
-            if self._resolve_media_parent_json(f) is not None:
+            if not is_source_file(f):
                 continue
             entries.append(ChangeEntry(
                 status=ChangeStatus.ADDED,
@@ -614,6 +597,9 @@ class PipelineController:
         git diff（ネット差分）では「削除→同一内容再追加」が差分ゼロになる。
         git log で中間コミットの全触ファイルを取得し、ネット差分に含まれないが
         HEAD に存在するファイルを MODIFIED として追加する。
+
+        `is_source_file` で独立ソースのみを補完対象とする（sidecar・attachment は
+        `_classify_changes` 側の処理に任せ、ここでは生成しない）。
         """
         touched = self._git.get_files_touched_in_range(from_commit_id)
         if not touched:
@@ -628,14 +614,17 @@ class PipelineController:
         supplemented = list(raw_diff)
         added_count = 0
         for file_path in sorted(hidden):
-            if file_path in head_files:
-                logger.debug(
-                    "中間コミットで変更されたがネット差分に出ないファイルを"
-                    "MODIFIED として追加: %s",
-                    file_path,
-                )
-                supplemented.append(("M", file_path, ""))
-                added_count += 1
+            if file_path not in head_files:
+                continue
+            if not is_source_file(file_path):
+                continue
+            logger.debug(
+                "中間コミットで変更されたがネット差分に出ないファイルを"
+                "MODIFIED として追加: %s",
+                file_path,
+            )
+            supplemented.append(("M", file_path, ""))
+            added_count += 1
         if added_count:
             logger.info(
                 "中間コミットで変更されたがネット差分に出ないファイルを"
@@ -651,76 +640,61 @@ class PipelineController:
         """git diff の生出力を ChangeEntry に分類する.
 
         .meta ファイルのみの変更を meta_only として検出する。
-        BlueSky の media/ 配下のファイル変更時は対応する親 JSON を再変換対象に含める。
+        複合ソースの attachment（例: BlueSky の media/）の変更時は
+        `find_existing_parent` で親ソースを解決し、親ソースを再変換対象に含める。
         """
         data_entries: dict[str, ChangeEntry] = {}
         meta_files: list[tuple[str, str, str]] = []
-        media_parent_jsons: set[str] = set()
+        # 再変換が必要な親ソース（attachment 変更に連動）
+        attachment_parents: set[str] = set()
 
         for status_char, file_path, old_path in raw_diff:
-            if file_path in _PIPELINE_EXCLUDE_FILES:
-                continue
             if file_path.endswith(".meta"):
                 meta_files.append((status_char, file_path, old_path))
-            else:
-                # リネーム時は旧パスの media 親 JSON も再変換対象に追加する。
-                # media が別 rkey/ディレクトリへ移動した場合、旧親 JSON が
-                # 参照を失うため再変換が必要（converted に古い埋め込みが残るのを防止）
-                if status_char == "R" and old_path:
-                    old_parent_json = self._resolve_media_parent_json(old_path)
-                    if old_parent_json is not None:
-                        media_parent_jsons.add(old_parent_json)
-                # media/ 配下のファイルは対応する親 JSON を再変換対象に追加し、
-                # 自身は独立 ChangeEntry として登録しない（二重変換防止、#597）
-                parent_json = self._resolve_media_parent_json(file_path)
-                if parent_json is not None:
-                    media_parent_jsons.add(parent_json)
-                    continue
-                entry = self._map_status(status_char, file_path, old_path)
-                data_entries[file_path] = entry
+                continue
+            # リネーム時は旧パスの attachment 親も再変換対象に追加する。
+            # attachment が別 rkey/ディレクトリへ移動した場合、旧親ソースが
+            # 参照を失うため再変換が必要（converted に古い埋め込みが残るのを防止）
+            if status_char == "R" and old_path:
+                old_parent = self._source_store.find_existing_parent(old_path)
+                if old_parent is not None:
+                    attachment_parents.add(old_parent)
+            # attachment の変更は親ソースの再変換トリガー。attachment 自身は
+            # 独立 ChangeEntry として登録しない（仕様: pipeline-controller.md
+            # 「attachment の扱い」）
+            parent = self._source_store.find_existing_parent(file_path)
+            if parent is not None:
+                attachment_parents.add(parent)
+                continue
+            # 独立ソース以外（sidecar / ロック / OS 生成 / 孤児 attachment 等）は
+            # 処理対象から除外する
+            if not is_source_file(file_path):
+                continue
+            entry = self._map_status(status_char, file_path, old_path)
+            data_entries[file_path] = entry
 
-        # media/ 変更に対応する親 JSON を MODIFIED として追加
-        for json_path in media_parent_jsons:
-            if json_path not in data_entries:
-                source_path = self._source_store.root_dir / json_path
-                if source_path.exists():
-                    data_entries[json_path] = ChangeEntry(
-                        status=ChangeStatus.MODIFIED,
-                        file_path=json_path,
-                    )
+        # attachment 変更に対応する親ソースを MODIFIED として追加
+        for parent_path in attachment_parents:
+            if parent_path in data_entries:
+                continue
+            data_entries[parent_path] = ChangeEntry(
+                status=ChangeStatus.MODIFIED,
+                file_path=parent_path,
+            )
 
-        # .meta のみの変更を検出
+        # .meta のみの変更を検出（対応する独立ソースのみ）
         for _status_char, meta_path, _old_path in meta_files:
             data_path = meta_path.removesuffix(".meta")
-            if data_path not in data_entries:
-                data_entries[data_path] = ChangeEntry(
-                    status=ChangeStatus.META_ONLY,
-                    file_path=data_path,
-                )
+            if data_path in data_entries:
+                continue
+            if not is_source_file(data_path):
+                continue
+            data_entries[data_path] = ChangeEntry(
+                status=ChangeStatus.META_ONLY,
+                file_path=data_path,
+            )
 
         return list(data_entries.values())
-
-    @staticmethod
-    def _resolve_media_parent_json(file_path: str) -> str | None:
-        """BlueSky media/ 配下のファイルパスから対応する親 JSON パスを導出する.
-
-        パス構造: bluesky/{did}/{year}/{month}/media/{rkey}/{filename}
-        親 JSON:  bluesky/{did}/{year}/{month}/{rkey}.json
-        """
-        normalized = file_path.replace("\\", "/")
-        if not normalized.startswith("bluesky/"):
-            return None
-        parts = normalized.split("/")
-        try:
-            media_idx = parts.index("media")
-        except ValueError:
-            return None
-        # media の次が rkey、その前が {year}/{month} を含む親ディレクトリ
-        if media_idx + 1 >= len(parts):
-            return None
-        rkey = parts[media_idx + 1]
-        parent_parts = parts[:media_idx]
-        return "/".join(parent_parts) + f"/{rkey}.json"
 
     @staticmethod
     def _map_status(
@@ -937,7 +911,7 @@ class PipelineController:
         source_type = detect_source_type(entry.file_path)
 
         # metadata.db 更新
-        if source_type not in _NO_META_TYPES:
+        if source_type not in NO_META_TYPES:
             full_path = self._source_store.root_dir / entry.file_path
             meta_file = meta_path_for(full_path)
             if meta_file.exists():
@@ -1041,7 +1015,7 @@ class PipelineController:
     def _read_meta_dict(self, file_path: str) -> dict[str, str] | None:
         """ファイルの .meta を読み込む."""
         source_type = detect_source_type(file_path)
-        if source_type in _NO_META_TYPES:
+        if source_type in NO_META_TYPES:
             return None
         full_path = self._source_store.root_dir / file_path
         meta_file = meta_path_for(full_path)

@@ -49,7 +49,9 @@
 
 ### カタログファイルのパイプライン除外
 
-`aozora/catalog.csv` はメタデータ管理用のファイルであり、RAG の検索対象コンテンツではない。パイプライン処理（コンバーター・インデクサー）の対象から除外する。
+`aozora/catalog.csv` はメタデータ管理用のファイルであり、RAG の検索対象コンテンツではない。
+sidecar（独立ソースではない）として扱い、パイプライン処理（コンバーター・インデクサー）の対象から除外する。
+source_store への配置は `place_file` API を経由せず、データファイルと `.meta` を直接書き込む（source_id を持たず metadata.db にも登録されない）。
 
 ### 外部 HTTP リクエスト
 
@@ -187,10 +189,12 @@ source_store/
 
 | 対象 | source_id | 例 |
 |------|-----------|-----|
-| カタログ | `aozora/catalog.csv` | — |
 | 作品 | `aozora/{person_id}/{book_id}.html` | `aozora/000035/001567.html` |
 
 source_id は source_store 内の相対パスである。作品のファイルパスは `person_id` と `book_id` のみで構成し、`file_id` は含めない（同一作品に対するファイルパスの一意性を `book_id` で担保するため）。作品の元 URL は .meta の `url` フィールドに格納する。
+
+カタログ CSV（`aozora/catalog.csv`）は aozora インジェスター内部の参照ファイル（sidecar）であり、**独立ソースではない**ため source_id を持たず、metadata.db への登録も行わない。
+`is_source_file` によって列挙経路から除外される（詳細は [source-store.md](../source-store.md) の「ソース判定 > 除外対象」を参照）。
 
 ### URL 変換規則
 
@@ -279,7 +283,7 @@ flowchart TD
 1. 青空文庫公式サイトから CSV ZIP をダウンロードする（URL: `https://www.aozora.gr.jp/index_pages/list_person_all_extended_utf8.zip`）
 2. ZIP を展開し、CSV を UTF-8（BOM 付き）でデコードする
 3. 前回のカタログファイルが source_store に存在する場合、作品 ID ベースで差分を検出する
-4. 新しいカタログを `aozora/catalog.csv` に配置し、.meta を生成する
+4. 新しいカタログを `aozora/catalog.csv` に直接配置し、`.meta` を同階層に書き込む（sidecar 扱いのため `place_file` API は経由せず、metadata.db への登録も行わない）
 5. カタログ配置はパイプライン制御に通知しない（カタログはパイプライン処理対象外のため）
 6. 差分結果（新着数、更新数、総作品数）を返却する
 

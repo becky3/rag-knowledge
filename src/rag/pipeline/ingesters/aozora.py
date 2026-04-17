@@ -23,6 +23,7 @@ from rag.pipeline.ingesters._common import (
     fetch_get,
     now_iso,
 )
+from rag.store.meta import write_meta
 
 if TYPE_CHECKING:
 
@@ -127,19 +128,18 @@ class AozoraIngester:
                 if book_id in prev_by_id and record != prev_by_id[book_id]:
                     updated_count += 1
 
-        # source_store に配置
+        # カタログは sidecar 扱い（独立ソースではない）のため、
+        # place_file ではなく直接配置する（仕様: source-store.md 複合ソース・sidecar）。
+        # metadata.db への登録も行わない。
         csv_bytes = csv_text.encode("utf-8")
-        metadata = {
+        catalog_path = self._store.root_dir / CATALOG_REL_PATH
+        catalog_path.parent.mkdir(parents=True, exist_ok=True)
+        catalog_path.write_bytes(csv_bytes)
+        write_meta(catalog_path, {
             "source_type": "aozora",
             "title": "Aozora Bunko Catalog",
             "collected_at": now_iso(),
-        }
-        self._store.place_file(
-            source_type="aozora",
-            data=csv_bytes,
-            rel_path=CATALOG_REL_PATH,
-            metadata=metadata,
-        )
+        })
 
         total = len(new_records)
         if prev_records is None:

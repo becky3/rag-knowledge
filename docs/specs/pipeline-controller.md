@@ -342,6 +342,7 @@ sequenceDiagram
 | 差分更新の自動コミット時に git commit が失敗した場合 | エラーとして差分更新を拒否する（コミット失敗の原因をエラーメッセージに含める） |
 | 複合ソースの attachment が追加・変更された場合 | [source-store.md](source-store.md) の `find_existing_parent` で親ソースを解決し、親ソースのみを `modified` として処理対象に追加する。attachment ファイル自体は独立 ChangeEntry として登録しない（変換時に親から参照される添付ファイルで、独立変換すると二重変換になるため）。親ソースが source_store に存在しない孤児 attachment の場合は何も処理しない |
 | 複合ソースの attachment のみが削除された場合（親ソースは残存） | `find_existing_parent` で親ソースを解決し、親ソースを `modified` として処理対象に追加する（attachment 追加・変更と対称）。これにより、削除後の attachment 構成に従って親ソースが再変換される（削除された attachment への参照は消える）。attachment 自体は独立 ChangeEntry として登録しない。親ソースが source_store に存在しない（親と attachment が同時削除された）場合は、親ソース自体の削除 ChangeEntry によりインデックスからも除去されるため、attachment 側は何も処理しない |
+| 複合ソースの attachment が中間コミットで「削除→同一内容再追加」された場合（net-diff ゼロの hidden 変更） | 中間コミット補完（`_supplement_hidden_changes`）は attachment を独立 ChangeEntry として生成しない（`is_source_file == False` で除外）ため、親ソースの再変換は発動しない。通常の独立ソースにおける「削除→同一内容再追加」の扱い（net-diff ゼロ＝内容同一で再処理不要）と対称の挙動である。attachment の内容が実質同一であれば親ソース変換結果も同一となる前提で追加処理は行わない。Vision 解析の非決定性等で結果の同一性が疑われる場合は、`run_full_rebuild` 等の明示再構築で対処する |
 
 ### 設定項目
 

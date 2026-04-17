@@ -13,9 +13,12 @@ import json
 import logging
 import os
 import shutil
+from collections.abc import Callable
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
+
+import pathspec
 
 from rag.infrastructure.file_lock import INGEST_LOCK_FILENAME, REBUILD_LOCK_FILENAME
 from rag.store.meta import meta_path_for, read_meta, write_meta
@@ -31,8 +34,143 @@ from rag.store.resolve import resolve_published_at, resolve_title
 
 logger = logging.getLogger(__name__)
 
-# .meta を持たない媒体
-_NO_META_TYPES: frozenset[SourceType] = frozenset({"local"})
+# .meta を持たない媒体（source_store が SSoT）
+NO_META_TYPES: frozenset[SourceType] = frozenset({"local"})
+
+# --- ソース判定 ---
+#
+# is_source_file / resolve_attachment_parent / find_existing_parent /
+# detect_source_type は source_store 層を SSoT とするソース判定 API。
+# 仕様は docs/specs/source-store.md「ソース判定」セクションを参照。
+
+# 除外パターン（gitignore 形式、pathspec で判定）
+_EXCLUDE_PATTERNS: tuple[str, ...] = (
+    # .meta サイドカー（任意階層）
+    "*.meta",
+    # SQLite 管理ファイル（ルート直下のみ、-wal / -shm も含む）
+    "/metadata.db*",
+    # Git・ロックファイル（ルート直下のみ）
+    "/.gitignore",
+    f"/{INGEST_LOCK_FILENAME}",
+    f"/{REBUILD_LOCK_FILENAME}",
+    ".git/",
+    # 青空文庫カタログ（aozora インジェスターの内部参照ファイル、sidecar 扱い）
+    "/aozora/catalog.csv",
+    "/aozora/catalog.csv.meta",
+    # OS 生成ファイル（任意階層）
+    ".DS_Store",
+    "Thumbs.db",
+    "desktop.ini",
+)
+
+_EXCLUDE_SPEC: pathspec.PathSpec = pathspec.PathSpec.from_lines(
+    "gitignore", _EXCLUDE_PATTERNS,
+)
+
+# source_type 値の集合（_schema/enums.yml が SSoT）
+_SOURCE_TYPE_VALUES: frozenset[SourceType] = frozenset(
+    {"web", "bluesky", "zenn", "youtube", "aozora", "local", "journal"},
+)
+
+
+def detect_source_type(rel_path: str) -> SourceType:
+    """相対パスから source_type を判定する.
+
+    先頭ディレクトリが _schema/enums.yml の source_type 値に一致しない場合は
+    ValueError を送出する。
+
+    Args:
+        rel_path: source_store ルート基準の相対パス
+
+    Returns:
+        SourceType
+
+    Raises:
+        ValueError: 先頭ディレクトリが既知の source_type でない場合
+    """
+    normalized = rel_path.replace("\\", "/")
+    first = normalized.split("/", 1)[0]
+    if first in _SOURCE_TYPE_VALUES:
+        # Literal への narrowing
+        return first  # type: ignore[return-value]
+    msg = f"未知の source_type プレフィックス: {rel_path!r}"
+    raise ValueError(msg)
+
+
+def _resolve_bluesky_attachment_parent(rel_path: str) -> str | None:
+    """BlueSky の attachment パスから親 JSON パスを導出する.
+
+    パス構造: bluesky/{escaped_did}/{year}/{month}/media/{rkey}/{filename}
+    親 JSON:  bluesky/{escaped_did}/{year}/{month}/{rkey}.json
+    """
+    if not rel_path.startswith("bluesky/"):
+        return None
+    parts = rel_path.split("/")
+    try:
+        media_idx = parts.index("media")
+    except ValueError:
+        return None
+    if media_idx + 1 >= len(parts):
+        return None
+    rkey = parts[media_idx + 1]
+    parent_parts = parts[:media_idx]
+    return "/".join(parent_parts) + f"/{rkey}.json"
+
+
+# source_type ごとの attachment → 親ソース resolver を静的に組み込む
+# （仕様: ingesters/common.md「複合ソースの attachment 配置ルール」）。
+# 実行時の動的登録は行わず、純粋関数として固定リストに保持する。
+_ATTACHMENT_RESOLVERS: tuple[Callable[[str], str | None], ...] = (
+    _resolve_bluesky_attachment_parent,
+)
+
+
+def resolve_attachment_parent(rel_path: str) -> str | None:
+    """attachment パスから親ソース相対パスを計算する（純粋関数・IO なし）.
+
+    attachment パターンに該当しない場合は None を返す。
+
+    Args:
+        rel_path: source_store ルート基準の相対パス
+
+    Returns:
+        親ソースの相対パス。attachment でない場合は None。
+    """
+    normalized = rel_path.replace("\\", "/")
+    for resolver in _ATTACHMENT_RESOLVERS:
+        parent = resolver(normalized)
+        if parent is not None:
+            return parent
+    return None
+
+
+def is_source_file(rel_path: str) -> bool:
+    """相対パスが独立ソースに該当するかを判定する.
+
+    除外対象（sidecar・ロック・OS 生成ファイル・attachment・未知の source_type
+    プレフィックス等）は False、独立ソースに該当する場合は True を返す。
+
+    invariant として、`is_source_file(rel_path) == True` のとき
+    `detect_source_type(rel_path)` は必ず `SourceType` を返す（ValueError を
+    送出しない）。この保証のため、先頭ディレクトリが既知の source_type で
+    あることを検証する。
+
+    Args:
+        rel_path: source_store ルート基準の相対パス
+
+    Returns:
+        独立ソースなら True、除外対象なら False
+    """
+    normalized = rel_path.replace("\\", "/")
+    if _EXCLUDE_SPEC.match_file(normalized):
+        return False
+    if resolve_attachment_parent(normalized) is not None:
+        return False
+    # invariant 担保: detect_source_type が ValueError を送出するパスを False にする
+    first = normalized.split("/", 1)[0]
+    if first not in _SOURCE_TYPE_VALUES:
+        return False
+    return True
 
 
 class SourceStore:
@@ -106,8 +244,17 @@ class SourceStore:
             )
             raise ValueError(msg)
 
+        # 独立ソース以外（attachment, .DS_Store, sidecar 等）の配置を拒否。
+        # 複合ソースの attachment は各媒体のインジェスターが place_file を経由せず
+        # 独自のパス規則で配置する（仕様: source-store.md ストア操作セクション）。
+        if not is_source_file(rel_path):
+            msg = (
+                f"独立ソースではないパスは place_file で配置できません: {rel_path}"
+            )
+            raise ValueError(msg)
+
         # 非 local 媒体は metadata 必須
-        if source_type not in _NO_META_TYPES and metadata is None:
+        if source_type not in NO_META_TYPES and metadata is None:
             msg = f"metadata は {source_type} 媒体で必須です (rel_path={rel_path})"
             raise ValueError(msg)
 
@@ -116,7 +263,7 @@ class SourceStore:
         dest.write_bytes(data)
 
         # .meta 生成（local 以外）
-        if source_type not in _NO_META_TYPES and metadata is not None:
+        if source_type not in NO_META_TYPES and metadata is not None:
             write_meta(dest, metadata)
 
         # metadata.db 登録
@@ -204,7 +351,7 @@ class SourceStore:
         """
         extra: dict[str, Any] = {}
         collected_at = record.collected_at
-        if record.source_type not in _NO_META_TYPES:
+        if record.source_type not in NO_META_TYPES:
             file_path = self._root / record.source_id
             meta_file = meta_path_for(file_path)
             if meta_file.exists():
@@ -283,17 +430,17 @@ class SourceStore:
         *,
         source_type: SourceType | None = None,
     ) -> list[Path]:
-        """source_store 内のファイルを列挙する.
+        """source_store 内の独立ソースを列挙する.
 
-        .meta ファイル、metadata.db、.git 配下、.gitignore、ロックファイルは除外する。
-        BlueSky の media/ 配下（添付画像・動画）は親投稿の変換時に参照されるため、
-        独立ソースとしては列挙しない。
+        `is_source_file` で独立ソース判定を行い、除外対象（sidecar、ロックファイル、
+        attachment 等）はスキップする。除外対象の全リストは
+        docs/specs/source-store.md「ソース判定 > 除外対象」を参照。
 
         Args:
             source_type: 指定時はそのディレクトリのみ
 
         Returns:
-            ファイルパスのリスト（source_store ルートからの相対パス）
+            独立ソースのパスリスト（source_store ルートからの相対パス）
         """
         if source_type:
             search_dir = self._root / source_type
@@ -303,36 +450,49 @@ class SourceStore:
         if not search_dir.exists():
             return []
 
-        is_bluesky = source_type == "bluesky"
         result: list[Path] = []
         for dirpath, dirnames, filenames in os.walk(search_dir):
-            rel_dir = Path(dirpath).relative_to(self._root).as_posix()
-            # .git ディレクトリを走査段階で除外（性能最適化）
-            # BlueSky の media/ ディレクトリも除外（添付メディアは親投稿変換時に参照）
+            # 走査段階での早期カット（性能最適化）。
+            # - .git: 任意階層の git 管理ディレクトリ
+            # - bluesky の media/: 複合ソースの attachment ディレクトリ
+            #   （投稿数 × attachment 数分の I/O を削減。is_source_file でも
+            #    最終的に除外されるが、os.walk 自体の I/O は発生するため）
+            rel_dir = Path(dirpath).relative_to(self._root)
+            in_bluesky_tree = rel_dir.parts[:1] == ("bluesky",)
             dirnames[:] = [
-                d for d in dirnames
-                if d != ".git"
-                and not (
-                    d == "media"
-                    and (is_bluesky or rel_dir.startswith("bluesky/"))
-                )
+                d
+                for d in dirnames
+                if d != ".git" and not (in_bluesky_tree and d == "media")
             ]
             for fname in filenames:
                 full = Path(dirpath) / fname
                 rel = full.relative_to(self._root)
-                rel_str = rel.as_posix()
-                # 除外: .meta, metadata.db 関連, .gitignore, .lock
-                if rel_str.endswith(".meta"):
-                    continue
-                if rel_str == "metadata.db" or rel_str.startswith("metadata.db"):
-                    continue
-                if fname == ".gitignore":
-                    continue
-                if fname in (INGEST_LOCK_FILENAME, REBUILD_LOCK_FILENAME):
+                if not is_source_file(rel.as_posix()):
                     continue
                 result.append(rel)
 
         return sorted(result)
+
+    def find_existing_parent(self, rel_path: str) -> str | None:
+        """attachment パスから親ソース相対パスを返す（親が実在する場合のみ）.
+
+        `resolve_attachment_parent` で導出した親ソースが source_store 上に
+        実在するときのみパスを返す。親が存在しない（孤児 attachment）場合は
+        None を返す。
+
+        Args:
+            rel_path: source_store ルート基準の相対パス
+
+        Returns:
+            実在する親ソースの相対パス。attachment でない・親が存在しない場合は None。
+        """
+        parent = resolve_attachment_parent(rel_path)
+        if parent is None:
+            return None
+        parent_path = self._root / parent
+        if not parent_path.exists():
+            return None
+        return parent
 
     # --- 削除 ---
 
@@ -421,10 +581,10 @@ class SourceStore:
             data = full_path.read_bytes()
             content_hash = hashlib.sha256(data).hexdigest()
 
-            detected_type = self._detect_source_type(rel_str)
+            detected_type = detect_source_type(rel_str)
             meta_dict: dict[str, Any] = {}
 
-            if detected_type not in _NO_META_TYPES:
+            if detected_type not in NO_META_TYPES:
                 meta_file = meta_path_for(full_path)
                 if meta_file.exists():
                     meta_dict = read_meta(full_path)
@@ -490,23 +650,6 @@ class SourceStore:
         if not resolved.is_relative_to(root_resolved):
             msg = f"source_store 外へのパスは許可されていません: {rel_path}"
             raise ValueError(msg)
-
-    @staticmethod
-    def _detect_source_type(rel_path: str) -> SourceType:
-        """相対パスから source_type を判定する."""
-        if rel_path.startswith("web/"):
-            return "web"
-        if rel_path.startswith("bluesky/"):
-            return "bluesky"
-        if rel_path.startswith("zenn/"):
-            return "zenn"
-        if rel_path.startswith("youtube/"):
-            return "youtube"
-        if rel_path.startswith("aozora/"):
-            return "aozora"
-        if rel_path.startswith("journal/"):
-            return "journal"
-        return "local"
 
     @staticmethod
     def _resolve_title(

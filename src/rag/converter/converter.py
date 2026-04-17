@@ -30,9 +30,9 @@ from rag.converter.handlers import (
 )
 from rag.converter.normalize import normalize_text
 from rag.converter.pdf_extractor import PdfBackendConfig, extract_pdf
-from rag.pipeline.models import detect_source_type
 from rag.store.meta import read_meta
 from rag.store.models import SourceType
+from rag.store.source_store import detect_source_type
 
 logger = logging.getLogger(__name__)
 

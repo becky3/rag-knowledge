@@ -53,6 +53,7 @@
 | Web クローラー（大規模サイト） | Scrapy |
 | multipart フォーム解析 | python-multipart |
 | YAML パーサー | PyYAML |
+| gitignore パターン判定 | pathspec |
 | Vision モデル（メディア解析） | LM Studio (OpenAI 互換 API) + Gemma 4 等 |
 | 動画フレーム抽出 | ffmpeg |
 | 画像処理 | Pillow |

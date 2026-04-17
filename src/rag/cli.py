@@ -1515,6 +1515,9 @@ def run_stats(args: argparse.Namespace) -> None:
     stats_data: dict[str, object] = {}
 
     # source_store
+    # 列挙は SourceStore.list_files() 経由とし、is_source_file 判定で
+    # sidecar・ロックファイル・attachment 等を一元的に除外する
+    # （仕様: pipeline-controller.md「ソース列挙経路」）
     source_store_data: dict[str, object] = {}
     if not settings.source_store_dir:
         source_store_data["status"] = "unconfigured"
@@ -1523,28 +1526,28 @@ def run_stats(args: argparse.Namespace) -> None:
         if not source_store_dir.exists():
             source_store_data["status"] = "not_found"
         else:
+            from .store.source_store import SourceStore, detect_source_type
+
+            store = SourceStore(source_store_dir)
+            try:
+                rel_paths = store.list_files()
+            finally:
+                store.close()
+
             total_files = 0
             total_size = 0
             by_type: dict[str, dict[str, int]] = {}
-            from .pipeline.models import detect_source_type
-            for file in source_store_dir.rglob("*"):
-                if not file.is_file():
+            for rel in rel_paths:
+                full = source_store_dir / rel
+                try:
+                    size = full.stat().st_size
+                except OSError:
                     continue
-                rel = file.relative_to(source_store_dir)
-                rel_posix = rel.as_posix()
-                if (
-                    rel_posix == ".git"
-                    or rel_posix.startswith(".git/")
-                    or rel_posix == ".gitignore"
-                ):
-                    continue
-                name = file.name
-                if name.endswith(".meta") or name.startswith("metadata.db"):
-                    continue
-                size = file.stat().st_size
                 total_files += 1
                 total_size += size
-                st = detect_source_type(rel_posix)
+                # invariant: is_source_file == True のファイルのみが列挙されるため
+                # detect_source_type は必ず SourceType を返す
+                st = detect_source_type(rel.as_posix())
                 if st not in by_type:
                     by_type[st] = {"files": 0, "size": 0}
                 by_type[st]["files"] += 1
