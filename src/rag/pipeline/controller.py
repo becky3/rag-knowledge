@@ -594,6 +594,10 @@ class PipelineController:
                 continue
             if f.endswith(".meta"):
                 continue
+            # BlueSky media/ 配下は親 JSON の変換時に参照される添付ファイル。
+            # 独立ソースとして登録すると二重変換になるため除外する（#597）。
+            if self._resolve_media_parent_json(f) is not None:
+                continue
             entries.append(ChangeEntry(
                 status=ChangeStatus.ADDED,
                 file_path=f,
@@ -659,10 +663,12 @@ class PipelineController:
             if file_path.endswith(".meta"):
                 meta_files.append((status_char, file_path, old_path))
             else:
-                # media/ 配下のファイルは対応する親 JSON を再変換対象に追加
+                # media/ 配下のファイルは対応する親 JSON を再変換対象に追加し、
+                # 自身は独立 ChangeEntry として登録しない（二重変換防止、#597）
                 parent_json = self._resolve_media_parent_json(file_path)
                 if parent_json is not None:
                     media_parent_jsons.add(parent_json)
+                    continue
                 entry = self._map_status(status_char, file_path, old_path)
                 data_entries[file_path] = entry
 

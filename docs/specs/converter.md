@@ -155,7 +155,6 @@ source_store のディレクトリ構成をミラーする。source_store 内の
 | `local/my-notes/note.txt` | `local/my-notes/note.txt` |
 | `local/docs/guide.adoc` | `local/docs/guide.adoc` |
 | `local/photos/image.jpg` | `local/photos/image.md` |
-| `bluesky/did：plc：xxx/2026/03/media/rkey/image_0.webp` | `bluesky/did：plc：xxx/2026/03/media/rkey/image_0.md` |
 | `journal/rag-knowledge/entry.md` | `journal/rag-knowledge/entry.md` |
 
 ### HTML → Markdown 変換
@@ -416,13 +415,22 @@ Zenn スクラップの JSON（`scrap` オブジェクト）から `comments` �
 
 画像ファイル（`.webp`, `.jpg`, `.jpeg`, `.png`）および動画ファイル（`.ts`, `.mp4`）をメディア解析モジュールでテキスト化する。メディア解析モジュールの詳細は [infrastructure/media-analysis.md](infrastructure/media-analysis.md) を参照。
 
+メディアの扱いは source_type によって異なる:
+
+- `source_type=local`: メディアファイルを単体で変換対象とする（「画像ファイルの変換」「動画ファイルの変換」セクション参照）
+- `source_type=bluesky`: メディアファイル（`media/{rkey}/` 配下）は独立変換せず、親投稿 JSON の変換時に `<image:N>` / `<video:N>` タグとして埋め込む（「BlueSky 投稿のメディア解析」セクション参照）
+
 #### 画像ファイルの変換
+
+本セクションは `source_type=local` を対象とする。
 
 1. メディア解析モジュールの利用可能チェックを行う
 2. 利用可能な場合、画像解析 API を呼び出してテキストを取得する
 3. 取得したテキストを Markdown 形式で出力する
 
 #### 動画ファイルの変換
+
+本セクションは `source_type=local` を対象とする。
 
 1. メディア解析モジュールの利用可能チェックを行う
 2. 利用可能な場合、動画解析 API を呼び出してテキストを取得する
