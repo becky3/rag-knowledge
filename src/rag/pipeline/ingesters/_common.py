@@ -26,11 +26,14 @@ class IngestResult:
 
     | フィールド | 必須 | 内容 |
     |---|:-:|---|
-    | `category` | 必須 | 失敗種別（`metadata_fetch` / `media_download` / `placement` / `delegation` 等） |
+    | `category` | 必須 | 失敗種別。以下のいずれか: `metadata_fetch` / `media_download` / `placement` / `delegation` |
     | `target` | 必須 | 識別子（`rel_path` / `source_id` / `slug` / `book_id` 等） |
     | `status` | 任意 | HTTP ステータスコード |
     | `url` | 任意 | 失敗した URL |
     | `message` | 任意 | 追加説明（例外メッセージ等） |
+
+    `category` は全媒体で上記 4 種に統一する（仕様: `docs/specs/ingesters/common.md`）。
+    列挙外の値は使用しない。集計・再取り込み判定で信頼できる集合として扱えるようにするため。
     """
 
     placed: int = 0

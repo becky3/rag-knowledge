@@ -796,7 +796,15 @@ class BlueskyIngester:
 
         for _ in range(_max_redirects):
             if resp.status_code not in BlueskyIngester._REDIRECT_STATUSES:
-                resp.raise_for_status()
+                # `fetch_get` と同じ契約: 非 2xx はすべて例外化する。
+                # `raise_for_status` では 300 / 303 / 304 等のリダイレクト対象外
+                # 3xx を例外化できないため、`is_success` で判定する。
+                if not resp.is_success:
+                    raise httpx.HTTPStatusError(
+                        f"HTTP {resp.status_code} error for url '{url}'",
+                        request=resp.request,
+                        response=resp,
+                    )
                 return resp
             location = resp.headers.get("location", "")
             if not location:
@@ -832,7 +840,13 @@ class BlueskyIngester:
                 request=resp.request,
                 response=resp,
             )
-        resp.raise_for_status()
+        # 非 2xx（raise_for_status でカバーされない 300/303/304 等を含む）は例外化
+        if not resp.is_success:
+            raise httpx.HTTPStatusError(
+                f"HTTP {resp.status_code} error for url '{url}'",
+                request=resp.request,
+                response=resp,
+            )
         return resp
 
     async def follow_urls(

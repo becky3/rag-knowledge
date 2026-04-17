@@ -1396,6 +1396,30 @@ class TestGetFollowingSameOriginRedirect:
             )
 
     @pytest.mark.asyncio()
+    @pytest.mark.parametrize("status_code", [300, 303, 304])
+    async def test_non_redirect_3xx_raises(
+        self, source_store: SourceStore, status_code: int,
+    ) -> None:
+        """リダイレクト追従対象外の 3xx（300/303/304）で HTTPStatusError を送出する.
+
+        `raise_for_status()` は 3xx を例外化しないため、`is_success` ベースの
+        判定に統一している。3xx 本文を正常レスポンスと誤認させないための契約。
+        """
+        import httpx as _httpx
+        req = _httpx.Request("GET", "https://video.bsky.app/playlist.m3u8")
+        resp = _httpx.Response(status_code, content=b"err", request=req)
+
+        mock_client = AsyncMock()
+        mock_client.get.return_value = resp
+
+        ingester = make_bluesky_ingester(source_store)
+        with pytest.raises(_httpx.HTTPStatusError) as exc_info:
+            await ingester._get_following_same_origin_redirect(
+                mock_client, "https://video.bsky.app/playlist.m3u8",
+            )
+        assert exc_info.value.response.status_code == status_code
+
+    @pytest.mark.asyncio()
     async def test_stops_at_max_redirects(
         self, source_store: SourceStore,
     ) -> None:
