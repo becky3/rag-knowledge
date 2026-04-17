@@ -1239,13 +1239,13 @@ class TestResolveMediaParentJson:
 class TestClassifyChangesMedia:
     """_classify_changes の media 親 JSON 検出テスト."""
 
-    def test_media_added_triggers_parent_json(
+    def test_media_added_triggers_parent_json_and_excludes_self(
         self,
         controller: tuple[PipelineController, StubConverter, StubIndexer],
         workspace: dict[str, Path],
     ) -> None:
+        """media 追加時、親 JSON のみが ChangeEntry として返ることを検証する（#597）."""
         ctrl, _, _ = controller
-        # 親 JSON を source_store に配置
         _place_local_file(
             workspace["source"],
             "bluesky/did/2026/04/rkey1.json",
@@ -1253,29 +1253,45 @@ class TestClassifyChangesMedia:
         )
         raw = [
             ("A", "bluesky/did/2026/04/media/rkey1/image_0.webp", ""),
-            ("M", "bluesky/did/2026/04/rkey1.json.meta", ""),
         ]
         changes = ctrl._classify_changes(raw)
         paths = {c.file_path: c.status.value for c in changes}
-        # media ファイル自体が ADDED として含まれる
-        assert "bluesky/did/2026/04/media/rkey1/image_0.webp" in paths
-        # 親 JSON が MODIFIED として追加される
-        assert paths["bluesky/did/2026/04/rkey1.json"] == "modified"
+        assert "bluesky/did/2026/04/media/rkey1/image_0.webp" not in paths
+        assert paths == {"bluesky/did/2026/04/rkey1.json": "modified"}
 
-    def test_media_added_no_parent_json_file(
+    def test_media_added_no_parent_json_file_yields_no_changes(
         self,
         controller: tuple[PipelineController, StubConverter, StubIndexer],
     ) -> None:
+        """親 JSON が存在しない孤児 media は ChangeEntry を生成しない（#597）."""
         ctrl, _, _ = controller
-        # 親 JSON が source_store に存在しない場合
         raw = [
             ("A", "bluesky/did/2026/04/media/rkey1/image_0.webp", ""),
         ]
         changes = ctrl._classify_changes(raw)
         paths = {c.file_path for c in changes}
-        # media ファイルのみ、親 JSON は追加されない
-        assert "bluesky/did/2026/04/media/rkey1/image_0.webp" in paths
+        assert "bluesky/did/2026/04/media/rkey1/image_0.webp" not in paths
         assert "bluesky/did/2026/04/rkey1.json" not in paths
+
+    def test_media_modified_with_existing_parent_triggers_parent_only(
+        self,
+        controller: tuple[PipelineController, StubConverter, StubIndexer],
+        workspace: dict[str, Path],
+    ) -> None:
+        """media 変更時、親 JSON のみ MODIFIED として返り media 自身は除外される（#597）."""
+        ctrl, _, _ = controller
+        _place_local_file(
+            workspace["source"],
+            "bluesky/did/2026/04/rkey1.json",
+            '{"post": {}}',
+        )
+        raw = [
+            ("M", "bluesky/did/2026/04/media/rkey1/image_0.webp", ""),
+        ]
+        changes = ctrl._classify_changes(raw)
+        paths = {c.file_path: c.status.value for c in changes}
+        assert "bluesky/did/2026/04/media/rkey1/image_0.webp" not in paths
+        assert paths == {"bluesky/did/2026/04/rkey1.json": "modified"}
 
     def test_parent_json_already_in_diff(
         self,
@@ -1297,6 +1313,115 @@ class TestClassifyChangesMedia:
         json_entries = [c for c in changes if c.file_path == "bluesky/did/2026/04/rkey1.json"]
         assert len(json_entries) == 1
         assert json_entries[0].status.value == "modified"
+
+    def test_media_renamed_across_rkey_triggers_both_parents(
+        self,
+        controller: tuple[PipelineController, StubConverter, StubIndexer],
+        workspace: dict[str, Path],
+    ) -> None:
+        """media が別 rkey へリネームされた場合、新旧両方の親 JSON が再変換対象になる（#597 Copilot 指摘）."""
+        ctrl, _, _ = controller
+        _place_local_file(
+            workspace["source"],
+            "bluesky/did/2026/04/rkey_old.json",
+            '{"post": {}}',
+        )
+        _place_local_file(
+            workspace["source"],
+            "bluesky/did/2026/04/rkey_new.json",
+            '{"post": {}}',
+        )
+        raw = [
+            (
+                "R",
+                "bluesky/did/2026/04/media/rkey_new/image_0.webp",
+                "bluesky/did/2026/04/media/rkey_old/image_0.webp",
+            ),
+        ]
+        changes = ctrl._classify_changes(raw)
+        paths = {c.file_path: c.status.value for c in changes}
+        assert "bluesky/did/2026/04/media/rkey_new/image_0.webp" not in paths
+        assert "bluesky/did/2026/04/media/rkey_old/image_0.webp" not in paths
+        assert paths.get("bluesky/did/2026/04/rkey_old.json") == "modified"
+        assert paths.get("bluesky/did/2026/04/rkey_new.json") == "modified"
+
+    def test_media_renamed_to_nonmedia_preserves_new_path_processing(
+        self,
+        controller: tuple[PipelineController, StubConverter, StubIndexer],
+        workspace: dict[str, Path],
+    ) -> None:
+        """media → 非 media へのリネーム時、旧親 JSON は再変換対象、新パスは通常通り登録される."""
+        ctrl, _, _ = controller
+        _place_local_file(
+            workspace["source"],
+            "bluesky/did/2026/04/rkey_old.json",
+            '{"post": {}}',
+        )
+        raw = [
+            (
+                "R",
+                "local/moved_image.webp",
+                "bluesky/did/2026/04/media/rkey_old/image_0.webp",
+            ),
+        ]
+        changes = ctrl._classify_changes(raw)
+        paths = {c.file_path: c.status.value for c in changes}
+        assert paths.get("bluesky/did/2026/04/rkey_old.json") == "modified"
+        assert paths.get("local/moved_image.webp") == "renamed"
+
+
+class TestScanAllAsAdded:
+    """_scan_all_as_added のテスト."""
+
+    def test_excludes_bluesky_media(
+        self,
+        controller: tuple[PipelineController, StubConverter, StubIndexer],
+        workspace: dict[str, Path],
+    ) -> None:
+        """初回スキャン経路で bluesky media が独立 ChangeEntry として返らない（#597）."""
+        ctrl, _, _ = controller
+        _place_local_file(
+            workspace["source"],
+            "bluesky/did/2026/04/rkey1.json",
+            '{"post": {}}',
+        )
+        _place_local_file(
+            workspace["source"],
+            "bluesky/did/2026/04/media/rkey1/image_0.webp",
+            "dummy",
+        )
+        _place_local_file(
+            workspace["source"],
+            "bluesky/did/2026/04/media/rkey1/video_0.ts",
+            "dummy",
+        )
+        ctrl.init_repo()
+        ctrl.commit("initial")
+
+        entries = ctrl._scan_all_as_added()
+        paths = {e.file_path for e in entries}
+        assert "bluesky/did/2026/04/rkey1.json" in paths
+        assert "bluesky/did/2026/04/media/rkey1/image_0.webp" not in paths
+        assert "bluesky/did/2026/04/media/rkey1/video_0.ts" not in paths
+
+    def test_excludes_meta_and_pipeline_exclude_files(
+        self,
+        controller: tuple[PipelineController, StubConverter, StubIndexer],
+        workspace: dict[str, Path],
+    ) -> None:
+        """初回スキャンで .meta と _PIPELINE_EXCLUDE_FILES も除外する（既存挙動の回帰防止）."""
+        ctrl, _, _ = controller
+        _place_local_file(workspace["source"], "local/a.txt", "content")
+        _place_local_file(workspace["source"], "local/a.txt.meta", "{}")
+        _place_local_file(workspace["source"], "aozora/catalog.csv", "data")
+        ctrl.init_repo()
+        ctrl.commit("initial")
+
+        entries = ctrl._scan_all_as_added()
+        paths = {e.file_path for e in entries}
+        assert "local/a.txt" in paths
+        assert "local/a.txt.meta" not in paths
+        assert "aozora/catalog.csv" not in paths
 
 
 class TestRenamedLocalSourceId:
