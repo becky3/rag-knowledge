@@ -5,6 +5,7 @@ Issue: #249
 """
 
 from rag.converter.converter import (
+    ConversionFailedError,
     ConversionSkippedError,
     ConvertBatchResult,
     Converter,
@@ -13,6 +14,7 @@ from rag.converter.converter import (
 )
 
 __all__ = [
+    "ConversionFailedError",
     "ConversionSkippedError",
     "ConvertBatchResult",
     "Converter",

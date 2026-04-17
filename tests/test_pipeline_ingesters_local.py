@@ -194,6 +194,28 @@ class TestUploadPath:
         assert (date_dir / "sample.md").exists()
 
 
+class TestErrorDetailsStructured:
+    """error_details dict 化の検証."""
+
+    def test_add_document_empty_data_dict(self, ingester: LocalIngester) -> None:
+        """空データで error_details に dict が積まれる."""
+        result = ingester.add_document(b"", "empty.md")
+        assert result.errors == 1
+        detail = result.error_details[0]
+        assert detail["category"] == "placement"
+        assert detail["target"] == "empty.md"
+        assert "空" in detail["message"]
+
+    def test_crawl_nonexistent_dir_dict(self, ingester: LocalIngester) -> None:
+        """存在しないディレクトリで error_details に dict が積まれる."""
+        result = ingester.crawl_documents("/nonexistent/dir")
+        assert result.errors == 1
+        detail = result.error_details[0]
+        assert detail["category"] == "placement"
+        assert "/nonexistent/dir" in detail["target"]
+        assert "message" in detail
+
+
 class TestCrawlHttpModeRestriction:
     """crawl_documents の HTTP モード制限テスト."""
 

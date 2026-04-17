@@ -167,7 +167,11 @@ class YoutubeIngester:
                 raise
             logger.error("メタデータ取得失敗 (video_id=%s): %s", video_id, e)
             result.errors += 1
-            result.error_details.append(f"メタデータ取得失敗: {video_id}: {e}")
+            result.error_details.append({
+                "category": "metadata_fetch",
+                "target": video_id,
+                "message": f"メタデータ取得失敗: {e}",
+            })
             return result
 
         # 動画長チェック（duration 不明時はスキップ — 長時間音声DL防止）
@@ -194,7 +198,11 @@ class YoutubeIngester:
         if not raw_channel_id:
             logger.error("channel_id が取得できません (video_id=%s)", video_id)
             result.errors += 1
-            result.error_details.append(f"channel_id 取得失敗: {video_id}")
+            result.error_details.append({
+                "category": "metadata_fetch",
+                "target": video_id,
+                "message": "channel_id missing",
+            })
             return result
         # パストラバーサル防止: 安全な文字のみ許可
         channel_id = re.sub(r"[^A-Za-z0-9_-]", "_", raw_channel_id)
@@ -210,7 +218,11 @@ class YoutubeIngester:
                 raise
             logger.error("字幕/文字起こし失敗 (video_id=%s): %s", video_id, e)
             result.errors += 1
-            result.error_details.append(f"字幕/文字起こし失敗: {video_id}: {e}")
+            result.error_details.append({
+                "category": "metadata_fetch",
+                "target": video_id,
+                "message": f"字幕/文字起こし失敗: {e}",
+            })
             return result
 
         # JSON データ構築
@@ -260,10 +272,14 @@ class YoutubeIngester:
                 rel_path=rel_path,
                 metadata=meta_dict,
             )
-        except Exception:
+        except Exception as exc:
             logger.exception("動画の配置に失敗しました: %s", rel_path)
             result.errors += 1
-            result.error_details.append(f"配置失敗: {rel_path}")
+            result.error_details.append({
+                "category": "placement",
+                "target": rel_path,
+                "message": str(exc),
+            })
             return result
 
         if is_overwrite:
@@ -315,7 +331,11 @@ class YoutubeIngester:
                 raise
             logger.error("プレイリスト展開失敗: %s", e)
             result.errors += 1
-            result.error_details.append(f"プレイリスト展開失敗: {e}")
+            result.error_details.append({
+                "category": "metadata_fetch",
+                "target": playlist_id,
+                "message": f"プレイリスト展開失敗: {e}",
+            })
             return result
 
         logger.info(
@@ -333,13 +353,19 @@ class YoutubeIngester:
             video_id = entry.get("id", "")
             if not video_id:
                 result.errors += 1
-                result.error_details.append(f"動画 ID が取得できません: entry #{i}")
+                result.error_details.append({
+                    "category": "metadata_fetch",
+                    "target": f"entry_{i}",
+                    "message": "video_id missing",
+                })
                 consecutive_errors += 1
                 if consecutive_errors >= CIRCUIT_BREAKER_THRESHOLD:
                     logger.error(
                         "サーキットブレーカー発動: %d 回連続失敗",
                         CIRCUIT_BREAKER_THRESHOLD,
                     )
+                    result.aborted = True
+                    result.abort_reason = "circuit breaker"
                     break
                 continue
 
@@ -363,7 +389,11 @@ class YoutubeIngester:
             except Exception as e:
                 logger.error("動画処理失敗 (video_id=%s): %s", video_id, e)
                 result.errors += 1
-                result.error_details.append(f"動画処理失敗: {video_id}: {e}")
+                result.error_details.append({
+                    "category": "metadata_fetch",
+                    "target": video_id,
+                    "message": f"動画処理失敗: {e}",
+                })
                 consecutive_errors += 1
 
             if consecutive_errors >= CIRCUIT_BREAKER_THRESHOLD:
@@ -371,6 +401,8 @@ class YoutubeIngester:
                     "サーキットブレーカー発動: %d 回連続失敗",
                     CIRCUIT_BREAKER_THRESHOLD,
                 )
+                result.aborted = True
+                result.abort_reason = "circuit breaker"
                 break
 
             if progress_callback is not None:

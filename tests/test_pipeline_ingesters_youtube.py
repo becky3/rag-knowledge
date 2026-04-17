@@ -209,7 +209,10 @@ class TestIngestVideo:
             result = await ingester.ingest_video("https://www.youtube.com/watch?v=JV3KOJ_Z4Vs")
 
         assert result.errors == 1
-        assert "メタデータ取得失敗" in result.error_details[0]
+        detail = result.error_details[0]
+        assert detail["category"] == "metadata_fetch"
+        assert detail["target"] == "JV3KOJ_Z4Vs"
+        assert "メタデータ取得失敗" in detail["message"]
 
     @pytest.mark.asyncio()
     async def test_missing_channel_id_causes_error(self, source_store: Any) -> None:
@@ -224,7 +227,10 @@ class TestIngestVideo:
 
         assert result.placed == 0
         assert result.errors == 1
-        assert "channel_id" in result.error_details[0]
+        detail = result.error_details[0]
+        assert detail["category"] == "metadata_fetch"
+        assert detail["target"] == "JV3KOJ_Z4Vs"
+        assert "channel_id" in detail["message"]
 
     @pytest.mark.asyncio()
     async def test_whisper_model_recorded(self, source_store: Any) -> None:
@@ -406,7 +412,16 @@ class TestCrawlPlaylist:
         ingester = make_youtube_ingester(source_store, max_videos=10, request_interval=0.1)
 
         entries = [{"id": f"vid_{i:011d}", "url": f"vid_{i:011d}"} for i in range(10)]
-        error_result = IngestResult(errors=1, error_details=["test error"])
+
+        def _make_error_result() -> IngestResult:
+            return IngestResult(
+                errors=1,
+                error_details=[{
+                    "category": "metadata_fetch",
+                    "target": "test",
+                    "message": "test error",
+                }],
+            )
 
         with (
             patch.object(
@@ -419,7 +434,7 @@ class TestCrawlPlaylist:
                 ingester,
                 "ingest_video",
                 new_callable=AsyncMock,
-                return_value=error_result,
+                side_effect=lambda *args, **kwargs: _make_error_result(),
             ),
         ):
             result = await ingester.crawl_playlist(
@@ -429,6 +444,8 @@ class TestCrawlPlaylist:
         # サーキットブレーカー発動で 5 件で停止
         assert result.errors == 5
         assert result.placed == 0
+        assert result.aborted is True
+        assert result.abort_reason == "circuit breaker"
 
     @pytest.mark.asyncio()
     async def test_empty_playlist(self, source_store: Any) -> None:
@@ -447,3 +464,47 @@ class TestCrawlPlaylist:
 
         assert result.placed == 0
         assert result.errors == 0
+
+    @pytest.mark.asyncio()
+    async def test_playlist_expand_error_dict(self, source_store: Any) -> None:
+        """プレイリスト展開失敗時の error_details dict 構造を検証する."""
+        ingester = make_youtube_ingester(source_store)
+
+        with patch.object(
+            ingester,
+            "_expand_playlist",
+            new_callable=AsyncMock,
+            side_effect=Exception("Playlist API error"),
+        ):
+            result = await ingester.crawl_playlist(
+                "https://www.youtube.com/playlist?list=PLtest123"
+            )
+
+        assert result.errors == 1
+        detail = result.error_details[0]
+        assert detail["category"] == "metadata_fetch"
+        assert detail["target"] == "PLtest123"
+        assert "Playlist API error" in detail["message"]
+
+    @pytest.mark.asyncio()
+    async def test_missing_video_id_in_entry_dict(self, source_store: Any) -> None:
+        """entry に video_id がない場合の error_details dict."""
+        ingester = make_youtube_ingester(source_store, max_videos=10)
+
+        entries = [{"id": "", "url": ""}]
+
+        with patch.object(
+            ingester,
+            "_expand_playlist",
+            new_callable=AsyncMock,
+            return_value=entries,
+        ):
+            result = await ingester.crawl_playlist(
+                "https://www.youtube.com/playlist?list=PLtest123"
+            )
+
+        assert result.errors == 1
+        detail = result.error_details[0]
+        assert detail["category"] == "metadata_fetch"
+        assert detail["target"] == "entry_0"
+        assert "video_id missing" in detail["message"]

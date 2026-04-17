@@ -162,7 +162,9 @@ class TestAddEntry:
             title="T", body="B", repository="../evil",
         )
         assert result.errors == 1
-        assert ".." in result.error_details[0] or "不正" in result.error_details[0]
+        detail = result.error_details[0]
+        assert detail["category"] == "placement"
+        assert ".." in detail["message"] or "不正" in detail["message"]
 
     def test_repository_path_traversal_slash(self, ingester: JournalIngester) -> None:
         result = ingester.add_entry(
@@ -373,6 +375,38 @@ class TestImportDirectory:
         result = ingester.import_directory(str(d), "../evil")
         assert result.errors == 1
         assert result.placed == 0
+
+
+class TestErrorDetailsStructured:
+    """error_details dict 化の検証."""
+
+    def test_empty_title_error_dict(self, ingester: JournalIngester) -> None:
+        """空 title で error_details に dict が積まれる."""
+        result = ingester.add_entry(title="", body="content", repository="repo")
+        assert result.errors == 1
+        detail = result.error_details[0]
+        assert detail["category"] == "placement"
+        assert "title" in detail["message"]
+
+    def test_repository_traversal_error_dict(self, ingester: JournalIngester) -> None:
+        """不正な repository で error_details に dict が積まれる."""
+        result = ingester.add_entry(
+            title="T", body="B", repository="../evil",
+        )
+        assert result.errors == 1
+        detail = result.error_details[0]
+        assert detail["category"] == "placement"
+        assert "message" in detail
+
+    def test_import_nonexistent_dir_error_dict(
+        self, ingester: JournalIngester,
+    ) -> None:
+        """存在しないディレクトリ import で error_details に dict が積まれる."""
+        result = ingester.import_directory("/nonexistent/path", "repo")
+        assert result.errors == 1
+        detail = result.error_details[0]
+        assert detail["category"] == "placement"
+        assert "Directory not found" in detail["message"]
 
 
 class TestSourceTypeIntegration:

@@ -12,6 +12,8 @@ import json
 import logging
 from typing import TYPE_CHECKING, Any
 
+import httpx
+
 from rag.pipeline.ingesters._common import (
     IngestResult,
     ProgressCallback,
@@ -204,10 +206,18 @@ class ZennIngester:
                 )
                 result.placed += 1
 
-            except Exception:
+            except Exception as exc:
                 logger.exception("記事の取得・配置に失敗しました: %s", slug)
                 result.errors += 1
-                result.error_details.append(f"articles/{slug}")
+                detail: dict[str, Any] = {
+                    "category": "metadata_fetch",
+                    "target": f"articles/{slug}",
+                    "message": str(exc),
+                }
+                if isinstance(exc, httpx.HTTPStatusError):
+                    detail["status"] = exc.response.status_code
+                    detail["url"] = str(exc.request.url)
+                result.error_details.append(detail)
 
             if progress_callback is not None:
                 progress_callback(i + 1, len(slugs), f"articles/{slug}")
@@ -276,10 +286,18 @@ class ZennIngester:
                 )
                 result.placed += 1
 
-            except Exception:
+            except Exception as exc:
                 logger.exception("スクラップの取得・配置に失敗しました: %s", slug)
                 result.errors += 1
-                result.error_details.append(f"scraps/{slug}")
+                detail: dict[str, Any] = {
+                    "category": "metadata_fetch",
+                    "target": f"scraps/{slug}",
+                    "message": str(exc),
+                }
+                if isinstance(exc, httpx.HTTPStatusError):
+                    detail["status"] = exc.response.status_code
+                    detail["url"] = str(exc.request.url)
+                result.error_details.append(detail)
 
             if progress_callback is not None:
                 progress_callback(i + 1, len(slugs), f"scraps/{slug}")

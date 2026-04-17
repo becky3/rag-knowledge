@@ -13,7 +13,7 @@ import io
 import logging
 import zipfile
 from pathlib import PurePosixPath
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, Literal
 
 import httpx
 
@@ -340,24 +340,33 @@ class AozoraIngester:
         for work_idx, record in enumerate(targets):
             book_id = record.get(COL_BOOK_ID, "?")
             try:
-                placed = await self._ingest_work(record, client, result)
-                if placed:
-                    consecutive_failures = 0
+                outcome = await self._ingest_work(record, client, result)
+                if outcome == "error":
+                    consecutive_failures += 1
                 else:
-                    # スキップ（重複）の場合はリセット
                     consecutive_failures = 0
-            except Exception:
+            except Exception as exc:
                 logger.exception("作品の取得・配置に失敗しました: %s", book_id)
                 result.errors += 1
-                result.error_details.append(f"book_id={book_id}")
+                detail: dict[str, Any] = {
+                    "category": "metadata_fetch",
+                    "target": f"book_id={book_id}",
+                    "message": str(exc),
+                }
+                if isinstance(exc, httpx.HTTPStatusError):
+                    detail["status"] = exc.response.status_code
+                    detail["url"] = str(exc.request.url)
+                result.error_details.append(detail)
                 consecutive_failures += 1
 
-                if consecutive_failures >= 5:
-                    logger.warning(
-                        "5回連続失敗のためサーキットブレーカー発動。"
-                        "操作を中断します"
-                    )
-                    break
+            if consecutive_failures >= 5:
+                logger.warning(
+                    "5回連続失敗のためサーキットブレーカー発動。"
+                    "操作を中断します"
+                )
+                result.aborted = True
+                result.abort_reason = "consecutive failures"
+                break
 
             if progress_callback is not None:
                 progress_callback(work_idx + 1, len(targets), f"book_id={book_id}")
@@ -377,11 +386,11 @@ class AozoraIngester:
         record: dict[str, str],
         client: Any,
         result: IngestResult,
-    ) -> bool:
+    ) -> Literal["placed", "skipped", "error"]:
         """1作品を取得し配置する.
 
         Returns:
-            True if placed, False if skipped.
+            "placed": 配置成功 / "skipped": 重複スキップ / "error": 取得・配置失敗
         """
         book_id = record.get(COL_BOOK_ID, "")
         person_id = record.get(COL_PERSON_ID, "")
@@ -390,8 +399,12 @@ class AozoraIngester:
         if not xhtml_url:
             logger.warning("XHTML URL が欠落: book_id=%s", book_id)
             result.errors += 1
-            result.error_details.append(f"XHTML URL 欠落: book_id={book_id}")
-            return False
+            result.error_details.append({
+                "category": "metadata_fetch",
+                "target": f"book_id={book_id}",
+                "message": "XHTML URL missing",
+            })
+            return "error"
 
         # ファイルパス導出
         rel_path = f"aozora/{person_id}/{book_id}.html"
@@ -400,7 +413,7 @@ class AozoraIngester:
         full_path = self._store.root_dir / rel_path
         if full_path.exists():
             result.skipped += 1
-            return False
+            return "skipped"
 
         # GitHub Raw URL に変換
         github_url = self._to_github_raw_url(xhtml_url)
@@ -415,10 +428,14 @@ class AozoraIngester:
                 book_id, status_code, github_url,
             )
             result.errors += 1
-            result.error_details.append(
-                f"XHTML ダウンロード失敗: book_id={book_id}, status={status_code}"
-            )
-            return False
+            result.error_details.append({
+                "category": "metadata_fetch",
+                "target": f"book_id={book_id}",
+                "status": status_code,
+                "url": github_url,
+                "message": f"XHTML ダウンロード失敗: {e}",
+            })
+            return "error"
         raw_bytes: bytes = resp.content
 
         # 元 URL の正規化（http → https）
@@ -447,7 +464,7 @@ class AozoraIngester:
             metadata=metadata,
         )
         result.placed += 1
-        return True
+        return "placed"
 
     def _load_catalog(self) -> list[dict[str, str]] | None:
         """source_store からカタログ CSV を読み込む.

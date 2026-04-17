@@ -129,13 +129,26 @@ ConstrainedClient はサーキットブレーカーの責務（HTTP レスポン
 
 | フィールド | 必須 | 内容 |
 |---|:-:|---|
-| `category` | 必須 | 失敗種別（媒体ごとに定義: `metadata_fetch` / `media_download` / `placement` / `delegation` 等） |
+| `category` | 必須 | 失敗種別（下記 4 種のいずれか） |
 | `target` | 必須 | 失敗対象の識別子（`rel_path` / `source_id` / `slug` / `book_id` 等） |
 | `status` | 任意 | HTTP ステータスコード（HTTP 系失敗のみ） |
 | `url` | 任意 | 失敗した URL（HTTP 系失敗のみ） |
-| `message` | 任意 | 追加説明（例外メッセージ等） |
+| `message` | 任意（例外由来では推奨） | 追加説明（例外メッセージ等。例外由来の失敗では `str(exc)` を記録することを推奨） |
 
-**Why**: 従来の `error_details: list[str]` は運用者が目視する前提の人間可読文字列だったが、スケジューラや再取り込みツールが機械的に処理できるよう構造化する。`category` により再取り込み方針が自動判定可能になる。
+`category` は全媒体で以下の 4 種に統一する。集計・再取り込み判定で信頼できる集合として扱えるようにするため、列挙外の値は使用しない。
+
+| 値 | 用途 |
+|---|---|
+| `metadata_fetch` | テキスト系 API からのメタデータ・本文取得の失敗（Zenn 記事 API の 404、aozora XHTML DL 失敗、YouTube メタデータ取得失敗等） |
+| `media_download` | バイナリメディア（BlueSky の画像 CDN / HLS セグメント等）のダウンロード失敗 |
+| `placement` | ファイル配置（source_store への書き込み・コピー）失敗 |
+| `delegation` | 他インジェスターへの委譲失敗（BlueSky → site-ingest / YouTube 等） |
+
+##### サマリ表示
+
+`IngestResult.summary()` は `error_details` / `partial_failure_details` の各 dict を一行ずつ出力し、`target` と `category` を併記する（具体的な整形フォーマットは実装詳細）。
+
+**Why**: `error_details` は運用者の目視だけでなくスケジューラや再取り込みツールが機械的に処理できる形を要求されるため、構造化 dict としている。`category` を固定列挙にすることで、再取り込み方針（`media_download` は force 再取得で回復、`metadata_fetch` は原因調査が必要、等）の自動判定が可能になる。
 
 #### 中断系エラーの扱い
 
@@ -152,13 +165,13 @@ ConstrainedClient はサーキットブレーカーの責務（HTTP レスポン
 
 この種の不整合は下流のコンバーターで検出する:
 
-- 画像・動画ファイルの Vision 解析失敗は `ConvertBatchResult.errors` に計上し、`error_files` に相対パスを残す
-- JSON ファイルのパースエラーは `ConvertBatchResult.errors` に計上する（従来 `skipped` 扱いだったが、壊れファイル検出のため `errors` 昇格）
-- `error_files` には「ファイルサイズ」「先頭バイト列の判定（HTML 検出等）」の診断情報を付与する
+- 画像・動画ファイルの Vision 解析失敗は `ConvertBatchResult.errors` に計上し、`error_files` に診断情報を残す
+- JSON ファイルのパースエラーは `ConvertBatchResult.errors` に計上する（`skipped` ではなく `errors` 扱い。詳細は [converter.md](../converter.md) の「スキップと失敗の区別」セクション参照）
+- `error_files` は対象ファイルの相対パスとサイズ（`{path, size_bytes}`）を診断情報として保持する。サイズ取得に失敗した場合 `size_bytes` は None
 
 **Why**: インジェスター（取得）とコンバーター（変換）で責務を分離しつつ、配信サーバーの異常による壊れファイルは必ずどちらかで検出する多層防御とする。
 
-既に source_store に配置された壊れファイルの検出は `rebuild --mode full` または `convert_batch` の再実行で発動する。独立した事後スキャン CLI の要否は運用データに基づいて別 Issue で判断する。
+既に source_store に配置された壊れファイルの検出は `rebuild --mode full` の再実行で発動する。独立した事後スキャン CLI の要否は運用データに基づいて別 Issue で判断する。
 
 ## インターフェース
 

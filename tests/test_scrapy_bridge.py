@@ -459,7 +459,10 @@ class TestImportToSourceStore:
 
         assert result.ingest.placed == 0
         assert result.ingest.errors == 1
-        assert any("HTML not found" in d for d in result.ingest.error_details)
+        assert any(
+            "HTML not found" in d.get("message", "")
+            for d in result.ingest.error_details
+        )
 
     def test_missing_filepath_field(
         self,
