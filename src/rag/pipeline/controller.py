@@ -663,6 +663,13 @@ class PipelineController:
             if file_path.endswith(".meta"):
                 meta_files.append((status_char, file_path, old_path))
             else:
+                # リネーム時は旧パスの media 親 JSON も再変換対象に追加する。
+                # media が別 rkey/ディレクトリへ移動した場合、旧親 JSON が
+                # 参照を失うため再変換が必要（converted に古い埋め込みが残るのを防止）
+                if status_char == "R" and old_path:
+                    old_parent_json = self._resolve_media_parent_json(old_path)
+                    if old_parent_json is not None:
+                        media_parent_jsons.add(old_parent_json)
                 # media/ 配下のファイルは対応する親 JSON を再変換対象に追加し、
                 # 自身は独立 ChangeEntry として登録しない（二重変換防止、#597）
                 parent_json = self._resolve_media_parent_json(file_path)

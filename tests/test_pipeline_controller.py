@@ -1314,6 +1314,61 @@ class TestClassifyChangesMedia:
         assert len(json_entries) == 1
         assert json_entries[0].status.value == "modified"
 
+    def test_media_renamed_across_rkey_triggers_both_parents(
+        self,
+        controller: tuple[PipelineController, StubConverter, StubIndexer],
+        workspace: dict[str, Path],
+    ) -> None:
+        """media が別 rkey へリネームされた場合、新旧両方の親 JSON が再変換対象になる（#597 Copilot 指摘）."""
+        ctrl, _, _ = controller
+        _place_local_file(
+            workspace["source"],
+            "bluesky/did/2026/04/rkey_old.json",
+            '{"post": {}}',
+        )
+        _place_local_file(
+            workspace["source"],
+            "bluesky/did/2026/04/rkey_new.json",
+            '{"post": {}}',
+        )
+        raw = [
+            (
+                "R",
+                "bluesky/did/2026/04/media/rkey_new/image_0.webp",
+                "bluesky/did/2026/04/media/rkey_old/image_0.webp",
+            ),
+        ]
+        changes = ctrl._classify_changes(raw)
+        paths = {c.file_path: c.status.value for c in changes}
+        assert "bluesky/did/2026/04/media/rkey_new/image_0.webp" not in paths
+        assert "bluesky/did/2026/04/media/rkey_old/image_0.webp" not in paths
+        assert paths.get("bluesky/did/2026/04/rkey_old.json") == "modified"
+        assert paths.get("bluesky/did/2026/04/rkey_new.json") == "modified"
+
+    def test_media_renamed_to_nonmedia_preserves_new_path_processing(
+        self,
+        controller: tuple[PipelineController, StubConverter, StubIndexer],
+        workspace: dict[str, Path],
+    ) -> None:
+        """media → 非 media へのリネーム時、旧親 JSON は再変換対象、新パスは通常通り登録される."""
+        ctrl, _, _ = controller
+        _place_local_file(
+            workspace["source"],
+            "bluesky/did/2026/04/rkey_old.json",
+            '{"post": {}}',
+        )
+        raw = [
+            (
+                "R",
+                "local/moved_image.webp",
+                "bluesky/did/2026/04/media/rkey_old/image_0.webp",
+            ),
+        ]
+        changes = ctrl._classify_changes(raw)
+        paths = {c.file_path: c.status.value for c in changes}
+        assert paths.get("bluesky/did/2026/04/rkey_old.json") == "modified"
+        assert paths.get("local/moved_image.webp") == "renamed"
+
 
 class TestScanAllAsAdded:
     """_scan_all_as_added のテスト."""
