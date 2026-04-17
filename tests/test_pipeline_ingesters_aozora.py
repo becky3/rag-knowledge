@@ -545,6 +545,28 @@ class TestErrorDetailsStructured:
         assert "book_id=" in detail["target"]
         assert "XHTML URL missing" in detail["message"]
 
+    @pytest.mark.asyncio()
+    async def test_place_file_failure_category_is_placement(
+        self, source_store: SourceStore, monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """place_file 失敗時は category='placement' で記録される."""
+        _write_catalog(source_store, [_make_record()])
+        ingester = make_aozora_ingester(source_store)
+        client = _mock_client()
+
+        # place_file を OSError で失敗させる
+        def _raise_oserror(**kwargs: object) -> None:
+            raise OSError("disk full")
+
+        monkeypatch.setattr(source_store, "place_file", _raise_oserror)
+        result = await ingester.add_work("001567", client=client)
+        assert result.errors == 1
+        assert result.placed == 0
+        detail = result.error_details[0]
+        assert detail["category"] == "placement"
+        assert detail["target"] == "aozora/000035/001567.html"
+        assert "disk full" in detail["message"]
+
 
 # === サーキットブレーカーテスト ===
 

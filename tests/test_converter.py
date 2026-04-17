@@ -1804,3 +1804,45 @@ class TestConvertJsonParseError:
         converter = Converter(**make_converter_args())
         with pytest.raises(ConversionSkippedError):
             converter.convert("local/empty.md", source_dir, converted_dir)
+
+    def test_convert_raises_failed_error_on_unicode_decode_error(
+        self, tmp_path: Path,
+    ) -> None:
+        """UTF-8 として不正なバイト列の JSON は ConversionFailedError を送出する."""
+        # UTF-8 として不正なバイト列（BOM なし・Shift_JIS 的な 0x82 等）
+        invalid_utf8 = b"\x82\xa0\x82\xa2"
+        source_dir, converted_dir = _setup_source(
+            tmp_path,
+            "bluesky/did/2026/03/rkey.json",
+            invalid_utf8,
+        )
+        converter = Converter(**make_converter_args())
+        with pytest.raises(ConversionFailedError):
+            converter.convert(
+                "bluesky/did/2026/03/rkey.json", source_dir, converted_dir,
+            )
+
+    def test_batch_json_read_error_counted_as_error(
+        self, tmp_path: Path,
+    ) -> None:
+        """JSON 読み込み失敗（UnicodeDecodeError）は errors に計上される."""
+        invalid_utf8 = b"\x82\xa0"
+        source_dir, converted_dir = _setup_source(
+            tmp_path,
+            "zenn/user/articles/slug.json",
+            invalid_utf8,
+        )
+        converter = Converter(**make_converter_args())
+        result = converter.convert_batch(
+            ["zenn/user/articles/slug.json"],
+            source_dir,
+            converted_dir,
+        )
+
+        assert result.success == 0
+        assert result.skipped == 0
+        assert result.errors == 1
+        assert len(result.error_files) == 1
+        entry = result.error_files[0]
+        assert entry["path"] == "zenn/user/articles/slug.json"
+        assert entry["size_bytes"] == len(invalid_utf8)

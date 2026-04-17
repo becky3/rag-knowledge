@@ -449,14 +449,14 @@ class Converter:
 
         try:
             raw = source_path.read_text(encoding="utf-8")
-        except (OSError, UnicodeDecodeError):
-            logger.exception("Failed to read JSON: %s", file_path)
-            return None
+        except (OSError, UnicodeDecodeError) as exc:
+            raise ConversionFailedError(
+                f"JSON read error: {file_path}",
+            ) from exc
 
         try:
             parsed = json.loads(raw)
         except json.JSONDecodeError as exc:
-            logger.exception("Failed to parse JSON: %s", file_path)
             raise ConversionFailedError(
                 f"JSON parse error: {file_path}",
             ) from exc

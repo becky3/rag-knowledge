@@ -617,3 +617,34 @@ class TestErrorDetailsStructured:
         # 非 HTTP 例外では status / url は付与されない
         assert "status" not in detail
         assert "Parse error" in detail["message"]
+
+    async def test_place_file_failure_category_is_placement(
+        self,
+        source_store: SourceStore,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """記事の place_file 失敗時は category='placement' で記録される."""
+        # 一覧 + 詳細取得は成功、place_file で OSError
+        client = _make_mock_client([
+            _make_article_list_response(["good-slug"]),
+            _make_article_detail_response("good-slug"),
+        ])
+
+        def _raise_oserror(**kwargs: object) -> None:
+            raise OSError("disk full")
+
+        monkeypatch.setattr(source_store, "place_file", _raise_oserror)
+
+        ingester = make_zenn_ingester(source_store, max_articles=3)
+        result = await ingester.crawl_zenn(
+            "testuser",
+            content_type="articles",
+            client=client,
+        )
+
+        assert result.errors == 1
+        assert result.placed == 0
+        detail = result.error_details[0]
+        assert detail["category"] == "placement"
+        assert detail["target"] == "zenn/testuser/articles/good-slug.json"
+        assert "disk full" in detail["message"]

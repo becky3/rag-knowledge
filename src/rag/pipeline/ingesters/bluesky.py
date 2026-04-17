@@ -18,6 +18,8 @@ from datetime import datetime
 from pathlib import Path
 from urllib.parse import urljoin, urlparse
 
+import httpx
+
 from rag.pipeline.ingesters._common import (
     IngestResult,
     ProgressCallback,
@@ -28,8 +30,6 @@ from rag.pipeline.ingesters._common import (
 from typing import TYPE_CHECKING, Any, Literal
 
 if TYPE_CHECKING:
-    import httpx
-
     from py_common_lib.httpx import ConstrainedClient
     from rag.pipeline.ingesters.youtube import YoutubeIngester
     from rag.store.source_store import SourceStore
@@ -610,12 +610,10 @@ class BlueskyIngester:
             result: 失敗計上先の IngestResult
             rel_path: 投稿ファイルの相対パス（partial_failure_details.target 用）
         """
-        # プレイリスト取得
+        # プレイリスト取得（2xx 以外はすべて HTTPStatusError として送出される）
         resp = await self._get_following_same_origin_redirect(
             client,
             playlist_url,
-            result=result,
-            rel_path=rel_path,
         )
         playlist_text = resp.text
 
@@ -642,8 +640,6 @@ class BlueskyIngester:
             resp = await self._get_following_same_origin_redirect(
                 client,
                 variant_url,
-                result=result,
-                rel_path=rel_path,
             )
             playlist_text = resp.text
             playlist_url = variant_url
@@ -681,8 +677,6 @@ class BlueskyIngester:
                     seg_resp = await self._get_following_same_origin_redirect(
                         client,
                         seg_url,
-                        result=result,
-                        rel_path=rel_path,
                     )
                     f.write(seg_resp.content)
             tmp_path.replace(dest)
@@ -762,35 +756,43 @@ class BlueskyIngester:
         client: ConstrainedClient,
         url: str,
         *,
-        result: IngestResult | None = None,
-        rel_path: str | None = None,
         _max_redirects: int = 5,
     ) -> httpx.Response:
         """同一ベースドメインのリダイレクトのみ追従する GET リクエスト.
 
         ConstrainedClient の follow_redirects=False を維持しつつ、
-        CDN の 3xx リダイレクトに対応する。リダイレクト先のベースドメイン
-        （eTLD+1 相当）が異なる場合はリダイレクト前のレスポンスをそのまま
-        返す（SSRF 防止）。
+        CDN の 3xx リダイレクトに対応する。
 
-        fetch_get は使わない: fetch_get は非 2xx で例外化するため、
+        **契約**: 2xx レスポンスのみを返す。以下のケースはすべて
+        `httpx.HTTPStatusError` を送出する（3xx レスポンスを呼び出し側に
+        漏らさない）:
+
+        - 異ドメインへのリダイレクト（SSRF 防止）
+        - リダイレクト回数上限到達
+        - 3xx なのに `location` ヘッダが欠落
+        - リダイレクト対象外の 3xx（300 / 303 / 304 等）・4xx・5xx
+
+        **Why**: 3xx の本文（多くは HTML のエラーページ）が呼び出し側で
+        プレイリスト・ts セグメントとして解釈され、破損ファイルが source_store
+        に混入するリスクを構造的に排除するため。呼び出し側は `except Exception`
+        で捕捉し、`partial_failures` を記録すること。
+
+        `fetch_get` は使わない: `fetch_get` は非 2xx で例外化するため、
         リダイレクト追従中の 3xx で中断してしまう。代わりに、リダイレクト
         対象ステータス (`_REDIRECT_STATUSES`: 301/302/307/308) 以外の応答に
-        到達した時点で raise_for_status を呼ぶ。これにより 2xx は正常返却、
-        リダイレクト追従対象外の 3xx (300/303/304 等)・4xx・5xx は例外化
-        される。
+        到達した時点で `raise_for_status` を呼ぶ。
 
         Args:
             client: ConstrainedClient インスタンス
             url: リクエスト先 URL
-            result: 異ドメイン拒否・リダイレクト上限到達時の計上先
-            rel_path: partial_failure_details.target に入れる投稿識別子
             _max_redirects: リダイレクト追従の最大回数
+
+        Raises:
+            httpx.HTTPStatusError: 2xx 以外の応答に至ったすべての失敗経路
         """
         original_parsed = urlparse(url)
         original_base = BlueskyIngester._base_domain(original_parsed.hostname)
         resp = await client.get(url)
-        original_url = url
 
         for _ in range(_max_redirects):
             if resp.status_code not in BlueskyIngester._REDIRECT_STATUSES:
@@ -798,7 +800,12 @@ class BlueskyIngester:
                 return resp
             location = resp.headers.get("location", "")
             if not location:
-                return resp
+                # 3xx なのに location 欠落。以後追従できないため例外化
+                raise httpx.HTTPStatusError(
+                    f"redirect response without location header: {url}",
+                    request=resp.request,
+                    response=resp,
+                )
             # 相対 URL を解決
             resolved = urljoin(url, location)
             parsed = urlparse(resolved)
@@ -809,37 +816,22 @@ class BlueskyIngester:
                     url,
                     resolved,
                 )
-                if result is not None:
-                    result.partial_failures += 1
-                    result.partial_failure_details.append(
-                        {
-                            "category": "media_download",
-                            "target": rel_path or original_url,
-                            "url": url,
-                            "status": resp.status_code,
-                            "message": (
-                                f"cross-domain redirect rejected: {url} -> {resolved}"
-                            ),
-                        },
-                    )
-                return resp
+                raise httpx.HTTPStatusError(
+                    f"cross-domain redirect rejected: {url} -> {resolved}",
+                    request=resp.request,
+                    response=resp,
+                )
             url = resolved
             resp = await client.get(url)
 
+        # ループを抜けた時点で 3xx のままならリダイレクト回数上限
         if resp.status_code in BlueskyIngester._REDIRECT_STATUSES:
             logger.warning("リダイレクト回数上限に到達: %s", url)
-            if result is not None:
-                result.partial_failures += 1
-                result.partial_failure_details.append(
-                    {
-                        "category": "media_download",
-                        "target": rel_path or original_url,
-                        "url": url,
-                        "status": resp.status_code,
-                        "message": "redirect limit exceeded",
-                    },
-                )
-            return resp
+            raise httpx.HTTPStatusError(
+                f"redirect limit exceeded: {url}",
+                request=resp.request,
+                response=resp,
+            )
         resp.raise_for_status()
         return resp
 

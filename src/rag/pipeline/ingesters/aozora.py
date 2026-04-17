@@ -457,12 +457,22 @@ class AozoraIngester:
         }
 
         # source_store に配置
-        self._store.place_file(
-            source_type="aozora",
-            data=raw_bytes,
-            rel_path=rel_path,
-            metadata=metadata,
-        )
+        try:
+            self._store.place_file(
+                source_type="aozora",
+                data=raw_bytes,
+                rel_path=rel_path,
+                metadata=metadata,
+            )
+        except Exception as exc:
+            logger.exception("作品の配置に失敗しました: %s", rel_path)
+            result.errors += 1
+            result.error_details.append({
+                "category": "placement",
+                "target": rel_path,
+                "message": str(exc),
+            })
+            return "error"
         result.placed += 1
         return "placed"
 

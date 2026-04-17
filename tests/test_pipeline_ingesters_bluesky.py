@@ -1322,21 +1322,30 @@ class TestGetFollowingSameOriginRedirect:
     async def test_rejects_redirect_to_different_domain(
         self, source_store: SourceStore,
     ) -> None:
-        """異なるベースドメインへのリダイレクトは追従せず 302 を返す."""
+        """異なるベースドメインへのリダイレクトは HTTPStatusError を送出する.
+
+        旧実装では 302 レスポンスをそのまま返していたが、呼び出し側で
+        3xx 本文を正常レスポンスと誤認して処理されるリスクがあったため、
+        helper が契約として 2xx 以外を全て例外化する設計に変更。
+        """
+        import httpx as _httpx
+
+        req = _httpx.Request("GET", "https://video.bsky.app/360p/video0.ts")
         redirect_resp = MagicMock(
             status_code=302,
             headers={"location": "https://evil.example.com/steal"},
+            request=req,
         )
 
         mock_client = AsyncMock()
         mock_client.get.return_value = redirect_resp
 
         ingester = make_bluesky_ingester(source_store)
-        resp = await ingester._get_following_same_origin_redirect(
-            mock_client, "https://video.bsky.app/360p/video0.ts",
-        )
-
-        assert resp.status_code == 302
+        with pytest.raises(_httpx.HTTPStatusError) as exc_info:
+            await ingester._get_following_same_origin_redirect(
+                mock_client, "https://video.bsky.app/360p/video0.ts",
+            )
+        assert "cross-domain" in str(exc_info.value)
         mock_client.get.assert_called_once()
 
     @pytest.mark.asyncio()
@@ -1660,22 +1669,66 @@ class TestPartialFailureObservability:
         assert "no ts segments" in detail["message"]
 
     @pytest.mark.asyncio()
-    async def test_cross_domain_redirect_counted_as_partial_failure(
+    async def test_cross_domain_redirect_raises_from_helper(
         self, source_store: SourceStore,
     ) -> None:
-        """異ドメインリダイレクトが partial_failures に計上されること."""
+        """異ドメインリダイレクトは helper 内で HTTPStatusError が送出されること.
+
+        3xx レスポンスを呼び出し側に漏らさない契約を検証する（#587 の再発防止）。
+        """
+        import httpx as _httpx
+
+        request = _httpx.Request(
+            "GET", "https://video.bsky.app/watch/playlist.m3u8",
+        )
         mock_client = AsyncMock()
         mock_client.get = AsyncMock(
             return_value=MagicMock(
                 status_code=302,
                 headers={"location": "https://evil.example.com/steal"},
+                request=request,
             ),
         )
 
+        with pytest.raises(_httpx.HTTPStatusError) as exc_info:
+            await BlueskyIngester._get_following_same_origin_redirect(
+                mock_client,
+                "https://video.bsky.app/watch/playlist.m3u8",
+            )
+        assert "cross-domain" in str(exc_info.value)
+
+    @pytest.mark.asyncio()
+    async def test_cross_domain_redirect_recorded_via_outer_except(
+        self, source_store: SourceStore, tmp_path: Path,
+    ) -> None:
+        """異ドメインリダイレクトの helper 例外が _download_media の outer except で
+        partial_failures として記録されること."""
+        import httpx as _httpx
+
+        item = _make_feed_item()
+        item["post"]["embed"] = {
+            "$type": "app.bsky.embed.video#view",
+            "playlist": "https://video.bsky.app/watch/playlist.m3u8",
+        }
+
+        request = _httpx.Request(
+            "GET", "https://video.bsky.app/watch/playlist.m3u8",
+        )
+        mock_client = AsyncMock()
+        mock_client.get = AsyncMock(
+            return_value=MagicMock(
+                status_code=302,
+                headers={"location": "https://evil.example.com/steal"},
+                request=request,
+            ),
+        )
+
+        ingester = make_bluesky_ingester(source_store)
         result = IngestResult()
-        await BlueskyIngester._get_following_same_origin_redirect(
-            mock_client,
-            "https://video.bsky.app/watch/playlist.m3u8",
+        await ingester._download_media(
+            item,
+            media_dir=tmp_path / "media",
+            client=mock_client,
             result=result,
             rel_path="bluesky/did/2025/01/rkey.json",
         )
@@ -1683,35 +1736,102 @@ class TestPartialFailureObservability:
         assert result.partial_failures == 1
         detail = result.partial_failure_details[0]
         assert detail["category"] == "media_download"
+        assert detail["url"] == "https://video.bsky.app/watch/playlist.m3u8"
         assert "cross-domain" in detail["message"]
 
     @pytest.mark.asyncio()
-    async def test_redirect_limit_counted_as_partial_failure(
+    async def test_redirect_limit_raises_from_helper(
         self, source_store: SourceStore,
     ) -> None:
-        """リダイレクト回数上限到達が partial_failures に計上されること."""
+        """リダイレクト回数上限到達で helper が HTTPStatusError を送出すること."""
+        import httpx as _httpx
+
+        request = _httpx.Request(
+            "GET", "https://video.bsky.app/watch/playlist.m3u8",
+        )
         mock_client = AsyncMock()
-        # 同一ドメイン内で無限ループするリダイレクト（異ドメインチェックを回避）
         mock_client.get = AsyncMock(
             return_value=MagicMock(
                 status_code=302,
                 headers={"location": "https://video.bsky.app/next"},
+                request=request,
             ),
         )
 
+        with pytest.raises(_httpx.HTTPStatusError) as exc_info:
+            await BlueskyIngester._get_following_same_origin_redirect(
+                mock_client,
+                "https://video.bsky.app/watch/playlist.m3u8",
+                _max_redirects=3,
+            )
+        assert "redirect limit" in str(exc_info.value)
+
+    @pytest.mark.asyncio()
+    async def test_redirect_limit_recorded_via_outer_except(
+        self, source_store: SourceStore, tmp_path: Path,
+    ) -> None:
+        """リダイレクト上限到達の helper 例外が _download_media の outer except で
+        partial_failures として記録されること."""
+        import httpx as _httpx
+
+        item = _make_feed_item()
+        item["post"]["embed"] = {
+            "$type": "app.bsky.embed.video#view",
+            "playlist": "https://video.bsky.app/watch/playlist.m3u8",
+        }
+
+        request = _httpx.Request(
+            "GET", "https://video.bsky.app/watch/playlist.m3u8",
+        )
+        mock_client = AsyncMock()
+        mock_client.get = AsyncMock(
+            return_value=MagicMock(
+                status_code=302,
+                headers={"location": "https://video.bsky.app/next"},
+                request=request,
+            ),
+        )
+
+        ingester = make_bluesky_ingester(source_store)
         result = IngestResult()
-        await BlueskyIngester._get_following_same_origin_redirect(
-            mock_client,
-            "https://video.bsky.app/watch/playlist.m3u8",
+        await ingester._download_media(
+            item,
+            media_dir=tmp_path / "media",
+            client=mock_client,
             result=result,
             rel_path="bluesky/did/2025/01/rkey.json",
-            _max_redirects=3,
         )
 
         assert result.partial_failures == 1
         detail = result.partial_failure_details[0]
         assert detail["category"] == "media_download"
         assert "redirect limit" in detail["message"]
+
+    @pytest.mark.asyncio()
+    async def test_redirect_without_location_raises(
+        self, source_store: SourceStore,
+    ) -> None:
+        """3xx なのに location ヘッダが欠落している場合、helper が例外を送出すること."""
+        import httpx as _httpx
+
+        request = _httpx.Request(
+            "GET", "https://video.bsky.app/watch/playlist.m3u8",
+        )
+        mock_client = AsyncMock()
+        mock_client.get = AsyncMock(
+            return_value=MagicMock(
+                status_code=302,
+                headers={},  # location なし
+                request=request,
+            ),
+        )
+
+        with pytest.raises(_httpx.HTTPStatusError) as exc_info:
+            await BlueskyIngester._get_following_same_origin_redirect(
+                mock_client,
+                "https://video.bsky.app/watch/playlist.m3u8",
+            )
+        assert "location" in str(exc_info.value)
 
     @pytest.mark.asyncio()
     async def test_delegation_failure_in_follow_urls_recorded_as_errors(
