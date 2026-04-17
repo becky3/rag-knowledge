@@ -8,8 +8,6 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from enum import Enum
 
-from rag.store.models import SourceType
-
 
 class ChangeStatus(Enum):
     """git diff から検出された変更種別."""
@@ -67,20 +65,3 @@ PHASE_FETCH = "Fetch"
 PHASE_CONVERT = "Convert"
 PHASE_INDEX = "Index"
 PHASE_CONVERT_AND_INDEX = "Convert & Index"
-
-
-def detect_source_type(rel_path: str) -> SourceType:
-    """相対パスから source_type を判定する."""
-    if rel_path.startswith("web/"):
-        return "web"
-    if rel_path.startswith("bluesky/"):
-        return "bluesky"
-    if rel_path.startswith("zenn/"):
-        return "zenn"
-    if rel_path.startswith("youtube/"):
-        return "youtube"
-    if rel_path.startswith("aozora/"):
-        return "aozora"
-    if rel_path.startswith("journal/"):
-        return "journal"
-    return "local"

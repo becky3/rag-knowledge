@@ -413,18 +413,14 @@ class TestSourceTypeIntegration:
     """source_type "journal" の統合テスト."""
 
     def test_detect_source_type_from_path(self, source_store: SourceStore) -> None:
-        """source_store が journal/ プレフィックスを正しく判定すること."""
-        assert source_store._detect_source_type("journal/repo/entry.md") == "journal"
-
-    def test_detect_source_type_pipeline_models(self) -> None:
-        """pipeline/models.py の detect_source_type も journal を判定すること."""
-        from rag.pipeline.models import detect_source_type
+        """source_store の detect_source_type が journal/ プレフィックスを判定すること."""
+        from rag.store.source_store import detect_source_type
         assert detect_source_type("journal/repo/entry.md") == "journal"
 
     def test_journal_not_in_no_meta_types(self) -> None:
-        """journal は _NO_META_TYPES に含まれないこと（.meta を持つ）."""
-        from rag.store.source_store import _NO_META_TYPES
-        assert "journal" not in _NO_META_TYPES
+        """journal は NO_META_TYPES に含まれないこと（.meta を持つ）."""
+        from rag.store.source_store import NO_META_TYPES
+        assert "journal" not in NO_META_TYPES
 
     def test_list_files_by_source_type(
         self, ingester: JournalIngester, source_store: SourceStore,

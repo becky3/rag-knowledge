@@ -37,25 +37,29 @@ def source_store(tmp_path: Path) -> SourceStore:
 
 
 def _write_catalog(store: SourceStore, records: list[dict[str, str]]) -> None:
-    """テスト用カタログ CSV を source_store に書き込む."""
+    """テスト用カタログ CSV を source_store に書き込む.
+
+    catalog.csv は sidecar（独立ソースでない）のため place_file を経由せず、
+    本番コードと同様に直接配置する。
+    """
     if not records:
         return
+    from rag.store.meta import write_meta
+
     fieldnames = list(records[0].keys())
     buf = io.StringIO()
     writer = csv.DictWriter(buf, fieldnames=fieldnames)
     writer.writeheader()
     writer.writerows(records)
     csv_bytes = buf.getvalue().encode("utf-8")
-    store.place_file(
-        source_type="aozora",
-        data=csv_bytes,
-        rel_path="aozora/catalog.csv",
-        metadata={
-            "source_type": "aozora",
-            "title": "Aozora Bunko Catalog",
-            "collected_at": "2026-01-01T00:00:00+09:00",
-        },
-    )
+    catalog_path = store.root_dir / "aozora" / "catalog.csv"
+    catalog_path.parent.mkdir(parents=True, exist_ok=True)
+    catalog_path.write_bytes(csv_bytes)
+    write_meta(catalog_path, {
+        "source_type": "aozora",
+        "title": "Aozora Bunko Catalog",
+        "collected_at": "2026-01-01T00:00:00+09:00",
+    })
 
 
 def _make_record(

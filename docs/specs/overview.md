@@ -37,30 +37,7 @@ RAG Knowledge は、外部 Web ページから収集した知識をベクトル 
 
 ## 3. 技術スタック
 
-| カテゴリ | 技術 |
-|---------|------|
-| 言語 | Python 3.11+ |
-| パッケージ管理 | uv |
-| MCP SDK | FastMCP |
-| HTTP クライアント | httpx |
-| 制約付き HTTP クライアント | py-common-lib (ConstrainedClient) |
-| ベクトル DB | ChromaDB（client/server 構成、HttpClient 接続） |
-| キーワード検索 | BM25s |
-| Embedding | OpenAI SDK / LM Studio (OpenAI 互換 API) |
-| HTML 解析 | BeautifulSoup4 |
-| HTML→Markdown 変換 | markdownify |
-| PDF テキスト抽出 | pymupdf4llm / MinerU（CUDA 環境、未インストール時は pymupdf4llm にフォールバック） |
-| YouTube 字幕取得 | youtube-transcript-api |
-| YouTube メタデータ・音声DL | yt-dlp |
-| 音声文字起こし | faster-whisper |
-| Web クローラー（大規模サイト） | Scrapy |
-| multipart フォーム解析 | python-multipart |
-| YAML パーサー | PyYAML |
-| Vision モデル（メディア解析） | LM Studio (OpenAI 互換 API) + Gemma 4 等 |
-| 動画フレーム抽出 | ffmpeg |
-| 画像処理 | Pillow |
-| プロセス間排他制御 | ファイルベースロック（fcntl/msvcrt） |
-| 設定管理 | pydantic-settings (.env + config.toml) |
+技術スタックの一覧は [README.md の「技術スタック」セクション](../../README.md#技術スタック) を参照（SSoT）。
 
 ## 4. 開発方針
 

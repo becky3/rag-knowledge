@@ -1206,36 +1206,6 @@ class TestClassifyChanges:
         assert changes[0].file_path == "local/test.txt"
 
 
-class TestResolveMediaParentJson:
-    """_resolve_media_parent_json のテスト."""
-
-    def test_bluesky_media_image(self) -> None:
-        path = "bluesky/did/2026/04/media/rkey1/image_0.webp"
-        result = PipelineController._resolve_media_parent_json(path)
-        assert result == "bluesky/did/2026/04/rkey1.json"
-
-    def test_bluesky_media_video(self) -> None:
-        path = "bluesky/did/2026/04/media/rkey1/video_0.ts"
-        result = PipelineController._resolve_media_parent_json(path)
-        assert result == "bluesky/did/2026/04/rkey1.json"
-
-    def test_non_media_path(self) -> None:
-        path = "bluesky/did/2026/04/rkey1.json"
-        result = PipelineController._resolve_media_parent_json(path)
-        assert result is None
-
-    def test_local_non_media(self) -> None:
-        path = "local/test.txt"
-        result = PipelineController._resolve_media_parent_json(path)
-        assert result is None
-
-    def test_local_media_dir_ignored(self) -> None:
-        """local/ 配下の media ディレクトリは BlueSky 専用のため無視する."""
-        path = "local/media/image.jpg"
-        result = PipelineController._resolve_media_parent_json(path)
-        assert result is None
-
-
 class TestClassifyChangesMedia:
     """_classify_changes の media 親 JSON 検出テスト."""
 
@@ -1404,12 +1374,16 @@ class TestScanAllAsAdded:
         assert "bluesky/did/2026/04/media/rkey1/image_0.webp" not in paths
         assert "bluesky/did/2026/04/media/rkey1/video_0.ts" not in paths
 
-    def test_excludes_meta_and_pipeline_exclude_files(
+    def test_excludes_meta_and_sidecar_files(
         self,
         controller: tuple[PipelineController, StubConverter, StubIndexer],
         workspace: dict[str, Path],
     ) -> None:
-        """初回スキャンで .meta と _PIPELINE_EXCLUDE_FILES も除外する（既存挙動の回帰防止）."""
+        """初回スキャンで .meta・sidecar（aozora/catalog.csv 等）も除外する.
+
+        除外ロジックは `is_source_file` に一元化されており、ここでは
+        独立ソース以外が ChangeEntry に混入しないことを検証する。
+        """
         ctrl, _, _ = controller
         _place_local_file(workspace["source"], "local/a.txt", "content")
         _place_local_file(workspace["source"], "local/a.txt.meta", "{}")
@@ -1598,3 +1572,158 @@ class TestUncommittedChanges:
         # source_type="local" で rebuild → web の変更は無視されるので成功する
         result = await ctrl.run_full_rebuild(source_type="local")
         assert result.convert.mode == PipelineMode.CONVERT_ONLY
+
+
+class TestBlueSkyMediaNotIndependentlyConverted:
+    """複合ソース attachment が独立変換されないこと（#601 E2E）.
+
+    bluesky 投稿 + attachment media を配置し、5 列挙経路すべてで media が
+    独立変換・インデックス登録されないことを検証する。
+    """
+
+    async def test_full_rebuild_excludes_media(
+        self,
+        controller: tuple[PipelineController, StubConverter, StubIndexer],
+        workspace: dict[str, Path],
+    ) -> None:
+        """全再構築経路で media は独立変換されない."""
+        ctrl, converter, indexer = controller
+
+        # BlueSky 投稿 JSON（親ソース）
+        _place_local_file(
+            workspace["source"],
+            "bluesky/did/2026/04/rkey1.json",
+            '{"post": {"text": "body"}}',
+        )
+        # .meta は bluesky では必須
+        meta_path = (
+            workspace["source"]
+            / "bluesky" / "did" / "2026" / "04" / "rkey1.json.meta"
+        )
+        meta_path.write_text(
+            'source_type: bluesky\ntitle: "post"\n'
+            'collected_at: "2026-04-01T00:00:00+00:00"\n'
+            'at_uri: "at://did/app.bsky.feed.post/rkey1"\n',
+            encoding="utf-8",
+        )
+        # attachment（media/ 配下）
+        _place_local_file(
+            workspace["source"],
+            "bluesky/did/2026/04/media/rkey1/image_0.webp",
+            "imgdata",
+        )
+        _place_local_file(
+            workspace["source"],
+            "bluesky/did/2026/04/media/rkey1/video_0.ts",
+            "viddata",
+        )
+        ctrl.commit("initial")
+
+        result = await ctrl.run_full_rebuild()
+
+        # 独立変換は親 JSON 1 件のみ（media は attachment として除外）
+        assert result.convert.processed == 1
+        assert converter.converted == ["bluesky/did/2026/04/rkey1.json"]
+        # 変換対象は 1 件のみ、media は含まれない
+        assert result.convert.total_files == 1
+        # index フェーズも 1 件のみが対象（media は対象外）
+        assert result.index.total_files == 1
+        # media パスが indexer に独立で登録されることはない
+        # （StubConverter は .json → .md 変換を再現しないため index フェーズは
+        #  ConversionSkipped になり得るが、その場合でも media は混入しない）
+        for source_id in indexer.added:
+            assert "media/" not in source_id
+
+    async def test_incremental_null_commit_excludes_media(
+        self,
+        controller: tuple[PipelineController, StubConverter, StubIndexer],
+        workspace: dict[str, Path],
+    ) -> None:
+        """差分更新の初回（null commit）経路で media は独立変換されない."""
+        ctrl, converter, indexer = controller
+
+        _place_local_file(
+            workspace["source"],
+            "bluesky/did/2026/04/rkey1.json",
+            '{"post": {"text": "body"}}',
+        )
+        meta_path = (
+            workspace["source"]
+            / "bluesky" / "did" / "2026" / "04" / "rkey1.json.meta"
+        )
+        meta_path.write_text(
+            'source_type: bluesky\ntitle: "post"\n'
+            'collected_at: "2026-04-01T00:00:00+00:00"\n'
+            'at_uri: "at://did/app.bsky.feed.post/rkey1"\n',
+            encoding="utf-8",
+        )
+        _place_local_file(
+            workspace["source"],
+            "bluesky/did/2026/04/media/rkey1/image_0.webp",
+            "imgdata",
+        )
+        ctrl.commit("initial")
+
+        summary = await ctrl.run_incremental()
+
+        # 処理対象は親 JSON のみ（.meta は meta_only で親に集約）
+        converted_set = set(converter.converted)
+        # 親 JSON は変換対象
+        assert "bluesky/did/2026/04/rkey1.json" in converted_set
+        # media は独立変換されない
+        for path in converted_set:
+            assert "media/" not in path
+        # インデクサーに media は登録されない
+        for source_id in indexer.added:
+            assert "media/" not in source_id
+        assert summary.errors == []
+
+    async def test_incremental_diff_excludes_media(
+        self,
+        controller: tuple[PipelineController, StubConverter, StubIndexer],
+        workspace: dict[str, Path],
+    ) -> None:
+        """差分更新の diff 経路で新規 media は独立変換されず親のみ再変換."""
+        ctrl, converter, indexer = controller
+
+        # 初回: 親 JSON のみ
+        _place_local_file(
+            workspace["source"],
+            "bluesky/did/2026/04/rkey1.json",
+            '{"post": {"text": "body"}}',
+        )
+        meta_path = (
+            workspace["source"]
+            / "bluesky" / "did" / "2026" / "04" / "rkey1.json.meta"
+        )
+        meta_path.write_text(
+            'source_type: bluesky\ntitle: "post"\n'
+            'collected_at: "2026-04-01T00:00:00+00:00"\n'
+            'at_uri: "at://did/app.bsky.feed.post/rkey1"\n',
+            encoding="utf-8",
+        )
+        ctrl.commit("initial")
+        await ctrl.run_incremental()
+
+        converter.converted.clear()
+        indexer.added.clear()
+
+        # 2 コミット目: media を追加
+        _place_local_file(
+            workspace["source"],
+            "bluesky/did/2026/04/media/rkey1/image_0.webp",
+            "imgdata",
+        )
+        ctrl.commit("add media")
+        summary = await ctrl.run_incremental()
+
+        assert summary.errors == []
+        # media 自身は独立変換されない
+        for path in converter.converted:
+            assert "media/" not in path
+        # 親 JSON の再変換（attachment 追加トリガー）は MODIFIED として発動する
+        assert "bluesky/did/2026/04/rkey1.json" in converter.converted
+        assert "bluesky/did/2026/04/rkey1.json" in indexer.updated
+        # media は独立では add / update されない
+        for source_id in indexer.added + indexer.updated:
+            assert "media/" not in source_id
