@@ -198,7 +198,7 @@ async def rag_search(
         result = await _run_cli_subprocess("search", args)
         return _format_cli_search_result(result)
     except CLISubprocessError as e:
-        return f"エラー: 検索に失敗しました ({e})"
+        return e.format_mcp_error("検索に失敗しました")
 
 
 _VALID_DOCUMENT_FORMATS: frozenset[str] = frozenset({"text", "original"})
@@ -236,7 +236,7 @@ async def rag_get_document(
         result = await _run_cli_subprocess("get-document", args)
         return _format_cli_document_result(result)
     except CLISubprocessError as e:
-        return f"エラー: ドキュメント取得に失敗しました ({e})"
+        return e.format_mcp_error("ドキュメント取得に失敗しました")
 
 
 _VALID_ZENN_CONTENT_TYPES: frozenset[str] = frozenset({"articles", "scraps", "all"})
@@ -277,9 +277,7 @@ async def rag_crawl_zenn(
         result = await _run_cli_subprocess("crawl-zenn", args, ctx=ctx)
         return _format_cli_ingest_result(result, context=f"ユーザー: {username}")
     except CLISubprocessError as e:
-        if e.lock_conflict:
-            return "エラー: 別のインジェストが実行中です。しばらく待ってから再試行してください"
-        return f"エラー: Zenn 記事の取り込みに失敗しました（ユーザー: {username}） ({e})"
+        return e.format_mcp_error(f"Zenn 記事の取り込みに失敗しました（ユーザー: {username}）")
     except Exception:
         logger.exception("Failed to crawl Zenn articles for user: %s", username)
         return f"エラー: Zenn 記事の取り込みに失敗しました（ユーザー: {username}）"
@@ -320,9 +318,7 @@ async def rag_crawl_bluesky(
         result = await _run_cli_subprocess("crawl-bluesky", args, ctx=ctx)
         return _format_cli_ingest_result(result, context=f"ハンドル: {handle}")
     except CLISubprocessError as e:
-        if e.lock_conflict:
-            return "エラー: 別のインジェストが実行中です。しばらく待ってから再試行してください"
-        return f"エラー: BlueSky 投稿の取り込みに失敗しました（ハンドル: {handle}） ({e})"
+        return e.format_mcp_error(f"BlueSky 投稿の取り込みに失敗しました（ハンドル: {handle}）")
     except Exception:
         logger.exception(
             "Failed to crawl BlueSky posts for handle: %s", handle
@@ -350,9 +346,7 @@ async def rag_add_youtube(
         result = await _run_cli_subprocess("ingest-youtube", [video_url], ctx=ctx)
         return _format_cli_ingest_result(result, context=f"動画: {video_url}")
     except CLISubprocessError as e:
-        if e.lock_conflict:
-            return "エラー: 別のインジェストが実行中です。しばらく待ってから再試行してください"
-        return f"エラー: YouTube 動画の取り込みに失敗しました: {video_url} ({e})"
+        return e.format_mcp_error(f"YouTube 動画の取り込みに失敗しました: {video_url}")
     except Exception:
         logger.exception(
             "Failed to ingest YouTube video: %s", video_url
@@ -386,9 +380,7 @@ async def rag_crawl_youtube(
         result = await _run_cli_subprocess("ingest-youtube-playlist", args, ctx=ctx)
         return _format_cli_ingest_result(result, context=f"プレイリスト: {playlist_url}")
     except CLISubprocessError as e:
-        if e.lock_conflict:
-            return "エラー: 別のインジェストが実行中です。しばらく待ってから再試行してください"
-        return f"エラー: YouTube プレイリストの取り込みに失敗しました: {playlist_url} ({e})"
+        return e.format_mcp_error(f"YouTube プレイリストの取り込みに失敗しました: {playlist_url}")
     except Exception:
         logger.exception(
             "Failed to crawl YouTube playlist: %s", playlist_url
@@ -448,9 +440,7 @@ async def rag_add_document(
         )
         return _format_cli_ingest_result(result, context=sanitized_filename)
     except CLISubprocessError as e:
-        if e.lock_conflict:
-            return "エラー: 別のインジェストが実行中です。しばらく待ってから再試行してください"
-        return f"エラー: ファイルの取り込みに失敗しました: {sanitized_filename} ({e})"
+        return e.format_mcp_error(f"ファイルの取り込みに失敗しました: {sanitized_filename}")
     except Exception:
         logger.exception("Failed to add document: %s", sanitized_filename)
         return f"エラー: ファイルの取り込みに失敗しました: {sanitized_filename}"
@@ -501,9 +491,7 @@ async def rag_add_journal(
             result, context=f"journal: {repository}/{entry_id or title}",
         )
     except CLISubprocessError as e:
-        if e.lock_conflict:
-            return "エラー: 別のインジェストが実行中です。しばらく待ってから再試行してください"
-        return f"エラー: ジャーナルエントリの登録に失敗しました: {title} ({e})"
+        return e.format_mcp_error(f"ジャーナルエントリの登録に失敗しました: {title}")
     except Exception:
         logger.exception("Failed to add journal entry: %s/%s", repository, title)
         return f"エラー: ジャーナルエントリの登録に失敗しました: {title}"
@@ -545,9 +533,7 @@ async def rag_crawl_documents(
         result = await _run_cli_subprocess("crawl-documents", args, ctx=ctx)
         return _format_cli_ingest_result(result, context=f"ディレクトリ: {dir_path}")
     except CLISubprocessError as e:
-        if e.lock_conflict:
-            return "エラー: 別のインジェストが実行中です。しばらく待ってから再試行してください"
-        return f"エラー: ドキュメントの取り込みに失敗しました（ディレクトリ: {dir_path}） ({e})"
+        return e.format_mcp_error(f"ドキュメントの取り込みに失敗しました（ディレクトリ: {dir_path}）")
     except Exception:
         logger.exception("Failed to crawl documents: %s", dir_path)
         return f"エラー: ドキュメントの取り込みに失敗しました（ディレクトリ: {dir_path}）"
@@ -649,9 +635,7 @@ async def rag_site_ingest(
         result = await _run_cli_subprocess("site-ingest", cli_args, ctx=ctx)
         return _format_cli_ingest_result(result, context=f"サイト: {display_url}")
     except CLISubprocessError as e:
-        if e.lock_conflict:
-            return "エラー: 別のインジェストが実行中です。しばらく待ってから再試行してください"
-        return f"エラー: サイト取り込みに失敗しました（{display_url}） ({e})"
+        return e.format_mcp_error(f"サイト取り込みに失敗しました（{display_url}）")
     except Exception:
         logger.exception("Failed to site-ingest: %s", display_url)
         return f"エラー: サイト取り込みに失敗しました（{display_url}）"
@@ -674,9 +658,7 @@ async def rag_update_aozora_catalog(
         result = await _run_cli_subprocess("update-aozora-catalog", ctx=ctx)
         return str(result.get("message", "カタログ更新完了"))
     except CLISubprocessError as e:
-        if e.lock_conflict:
-            return "エラー: 別のインジェストが実行中です。しばらく待ってから再試行してください"
-        return f"エラー: 青空文庫カタログの更新に失敗しました ({e})"
+        return e.format_mcp_error("青空文庫カタログの更新に失敗しました")
     except Exception:
         logger.exception("Failed to update Aozora catalog")
         return "エラー: 青空文庫カタログの更新に失敗しました"
@@ -713,7 +695,7 @@ async def rag_search_aozora(
         result = await _run_cli_subprocess("search-aozora", args)
         return _format_cli_search_aozora_result(result)
     except CLISubprocessError as e:
-        return f"エラー: 青空文庫カタログ検索に失敗しました ({e})"
+        return e.format_mcp_error("青空文庫カタログ検索に失敗しました")
 
 
 @mcp.tool()
@@ -736,9 +718,7 @@ async def rag_add_aozora(
         result = await _run_cli_subprocess("ingest-aozora", [book_id], ctx=ctx)
         return _format_cli_ingest_result(result, context=f"作品ID: {book_id}")
     except CLISubprocessError as e:
-        if e.lock_conflict:
-            return "エラー: 別のインジェストが実行中です。しばらく待ってから再試行してください"
-        return f"エラー: 青空文庫作品の取り込みに失敗しました（作品ID: {book_id}） ({e})"
+        return e.format_mcp_error(f"青空文庫作品の取り込みに失敗しました（作品ID: {book_id}）")
     except Exception:
         logger.exception("Failed to add Aozora work: %s", book_id)
         return f"エラー: 青空文庫作品の取り込みに失敗しました（作品ID: {book_id}）"
@@ -770,9 +750,7 @@ async def rag_crawl_aozora(
         result = await _run_cli_subprocess("ingest-aozora-author", args, ctx=ctx)
         return _format_cli_ingest_result(result, context=f"人物ID: {person_id}")
     except CLISubprocessError as e:
-        if e.lock_conflict:
-            return "エラー: 別のインジェストが実行中です。しばらく待ってから再試行してください"
-        return f"エラー: 青空文庫作品の取り込みに失敗しました（人物ID: {person_id}） ({e})"
+        return e.format_mcp_error(f"青空文庫作品の取り込みに失敗しました（人物ID: {person_id}）")
     except Exception:
         logger.exception(
             "Failed to crawl Aozora works for person_id: %s", person_id
@@ -811,9 +789,7 @@ async def rag_delete(source_id: str, ctx: MCPContext | None = None) -> str:
                 return f"削除しましたが、パイプラインでエラーが発生しました: {source_id} ({errors_text})"
         return f"削除しました: {source_id}"
     except CLISubprocessError as e:
-        if e.lock_conflict:
-            return "エラー: 別の操作が実行中です。しばらく待ってから再試行してください"
-        return f"エラー: 削除に失敗しました。source_id: {source_id} ({e})"
+        return e.format_mcp_error(f"削除に失敗しました。source_id: {source_id}")
     except Exception:
         logger.exception("Failed to delete: %s", source_id)
         return f"エラー: 削除に失敗しました。source_id: {source_id}"
@@ -964,34 +940,41 @@ async def rag_rebuild(
             return _format_rebuild_summary(summary, elapsed)
         return "再構築完了（結果の解析に失敗）"
     except CLISubprocessError as e:
-        if e.lock_conflict:
-            return "エラー: 別の再構築が実行中です"
-        return f"エラー: 再構築中にエラーが発生しました ({e})"
+        return e.format_mcp_error("再構築中にエラーが発生しました")
     except Exception:
         logger.exception("再構築中にエラーが発生しました")
         return "エラー: 再構築中にエラーが発生しました"
 
 
-# --- ロック競合判定キーワード ---
-_LOCK_CONFLICT_KEYWORDS: frozenset[str] = frozenset({
-    "ロック競合",
-    "lock conflict",
-    "already locked",
-})
-
-
-def _is_lock_conflict_error(message: str) -> bool:
-    """エラーメッセージがロック競合を示すかを判定する."""
-    lower = message.lower()
-    return any(kw in lower for kw in _LOCK_CONFLICT_KEYWORDS)
-
-
 class CLISubprocessError(Exception):
     """CLI サブプロセスの実行エラー."""
 
-    def __init__(self, message: str, *, lock_conflict: bool = False) -> None:
+    _LOCK_CONFLICT_MESSAGE = (
+        "エラー: 別のプロセスがロックを保持しています。"
+        "しばらく待ってから再試行してください"
+    )
+
+    def __init__(
+        self,
+        message: str,
+        *,
+        code: str | None = None,
+    ) -> None:
         super().__init__(message)
-        self.lock_conflict = lock_conflict
+        self.code = code
+
+    @property
+    def lock_conflict(self) -> bool:
+        """ロック競合エラーであるかを判定する."""
+        return self.code == "LOCK_CONFLICT"
+
+    def format_mcp_error(self, context: str = "") -> str:
+        """MCP ツール用のエラーメッセージを生成する."""
+        if self.lock_conflict:
+            return self._LOCK_CONFLICT_MESSAGE
+        if context:
+            return f"エラー: {context} ({self})"
+        return f"エラー: {self}"
 
 
 def _sanitize_log_value(value: str, *, max_length: int = 200) -> str:
@@ -1025,7 +1008,7 @@ async def _run_cli_subprocess(
 
     Raises:
         CLISubprocessError: サブプロセスの異常終了・クラッシュ・結果パース失敗時。
-            lock_conflict=True の場合はロック競合エラー。
+            code 属性に CLI エラーコード（CliErrorCode の値）を保持する。
     """
     cmd = [
         sys.executable, "-m", "rag.cli",
@@ -1143,9 +1126,10 @@ async def _run_cli_subprocess(
                 f"CLI サブプロセスのエラー行パースに失敗: {error_line}"
             ) from exc
         error_msg = error_data.get("message", "不明なエラー")
+        error_code = error_data.get("code")
         raise CLISubprocessError(
             error_msg,
-            lock_conflict=_is_lock_conflict_error(error_msg),
+            code=error_code,
         )
 
     if not result_line:
@@ -1451,7 +1435,7 @@ async def rag_list_recent(
         result = await _run_cli_subprocess("list-recent", args)
         return _format_cli_list_recent_result(result)
     except CLISubprocessError as e:
-        return f"エラー: ソース一覧の取得に失敗しました ({e})"
+        return e.format_mcp_error("ソース一覧の取得に失敗しました")
 
 
 @mcp.tool()
@@ -1471,7 +1455,7 @@ async def rag_stats() -> str:
         result = await _run_cli_subprocess("stats")
         return _format_cli_stats_result(result)
     except CLISubprocessError as e:
-        return f"エラー: 統計情報の取得に失敗しました ({e})"
+        return e.format_mcp_error("統計情報の取得に失敗しました")
 
 
 # --- Upload HTTP API ---

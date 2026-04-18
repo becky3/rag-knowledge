@@ -334,7 +334,7 @@ class TestIngestLockConflict:
         with patch(
             "rag.server._run_cli_subprocess",
             new_callable=AsyncMock,
-            side_effect=CLISubprocessError("ロック競合", lock_conflict=True),
+            side_effect=CLISubprocessError("ロック競合", code="LOCK_CONFLICT"),
         ):
             resp = await client.post(
                 "/upload/document",
@@ -350,7 +350,7 @@ class TestIngestLockConflict:
         with patch(
             "rag.server._run_cli_subprocess",
             new_callable=AsyncMock,
-            side_effect=CLISubprocessError("ロック競合", lock_conflict=True),
+            side_effect=CLISubprocessError("ロック競合", code="LOCK_CONFLICT"),
         ):
             resp = await client.post(
                 "/upload/journal",
@@ -407,7 +407,7 @@ class TestMCPToolIngestLock:
         with patch(
             "rag.server._run_cli_subprocess",
             new_callable=AsyncMock,
-            side_effect=CLISubprocessError("ロック競合", lock_conflict=True),
+            side_effect=CLISubprocessError("ロック競合", code="LOCK_CONFLICT"),
         ):
             result = await rag_add_document(
                 content="test",
@@ -416,7 +416,7 @@ class TestMCPToolIngestLock:
                 upload_mode="fail",
             )
 
-        assert "別のインジェスト" in result
+        assert "ロックを保持しています" in result
 
     @pytest.mark.asyncio
     async def test_rag_add_journal_lock_conflict(self) -> None:
@@ -426,7 +426,7 @@ class TestMCPToolIngestLock:
         with patch(
             "rag.server._run_cli_subprocess",
             new_callable=AsyncMock,
-            side_effect=CLISubprocessError("ロック競合", lock_conflict=True),
+            side_effect=CLISubprocessError("ロック競合", code="LOCK_CONFLICT"),
         ):
             result = await rag_add_journal(
                 title="Test",
@@ -435,7 +435,7 @@ class TestMCPToolIngestLock:
                 repository="test-repo",
             )
 
-        assert "別のインジェスト" in result
+        assert "ロックを保持しています" in result
 
 
 # --- レスポンス形式テスト ---

@@ -227,7 +227,7 @@ class TestMcpSiteIngestCliDelegation:
         mod = import_module("rag.server")
         with (
             patch.object(mod, "_get_safe_browsing_client", return_value=None),
-            patch.object(mod, "_run_cli_subprocess", new_callable=AsyncMock, side_effect=CLISubprocessError("lock", lock_conflict=True)),
+            patch.object(mod, "_run_cli_subprocess", new_callable=AsyncMock, side_effect=CLISubprocessError("lock", code="LOCK_CONFLICT")),
         ):
             result = await mod.rag_site_ingest(
                 url="https://example.com",
@@ -235,7 +235,7 @@ class TestMcpSiteIngestCliDelegation:
                 force=False,
             )
             assert "エラー" in result
-            assert "実行中" in result
+            assert "ロックを保持しています" in result
 
 
 # --- CLI コマンド site-ingest テスト ---

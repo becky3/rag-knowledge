@@ -101,6 +101,7 @@ def main() -> None:
     data = _load_enums_yml(enums_path)
 
     # Python 定義をインポート
+    from rag.errors import CliErrorCode  # type: ignore[import-untyped]
     from rag.pipeline.models import PipelineMode  # type: ignore[import-untyped]
     from rag.store.models import SourceType  # type: ignore[import-untyped]
 
@@ -116,6 +117,12 @@ def main() -> None:
     yml_pipeline_modes = _extract_yml_values(data, "pipeline_mode")
     python_pipeline_modes = _extract_enum_values(PipelineMode)
     if not _check_match("pipeline_mode (PipelineMode)", yml_pipeline_modes, python_pipeline_modes):
+        ok = False
+
+    # cli_error_code: Enum クラス
+    yml_error_codes = _extract_yml_values(data, "cli_error_code")
+    python_error_codes = _extract_enum_values(CliErrorCode)
+    if not _check_match("cli_error_code (CliErrorCode)", yml_error_codes, python_error_codes):
         ok = False
 
     if not ok:

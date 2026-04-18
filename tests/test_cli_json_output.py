@@ -22,6 +22,7 @@ from rag.cli import (
     _output_progress,
     _output_result,
 )
+from rag.errors import CliErrorCode
 
 
 class TestJsonHelpers:
@@ -51,15 +52,36 @@ class TestJsonHelpers:
 
     def test_output_error_exits_with_code_1(self, capsys: pytest.CaptureFixture[str]) -> None:
         with pytest.raises(SystemExit) as exc_info:
-            _output_error("something went wrong")
+            _output_error(CliErrorCode.INTERNAL_ERROR, "something went wrong")
         assert exc_info.value.code == 1
         captured = capsys.readouterr()
         parsed = json.loads(captured.out.strip())
         assert parsed == {
             "type": "error",
             "error": True,
+            "code": "INTERNAL_ERROR",
             "message": "something went wrong",
         }
+
+    def test_output_error_with_details(self, capsys: pytest.CaptureFixture[str]) -> None:
+        with pytest.raises(SystemExit) as exc_info:
+            _output_error(
+                CliErrorCode.VALIDATION_ERROR,
+                "invalid value",
+                details={"field": "mode", "value": "invalid"},
+            )
+        assert exc_info.value.code == 1
+        captured = capsys.readouterr()
+        parsed = json.loads(captured.out.strip())
+        assert parsed["code"] == "VALIDATION_ERROR"
+        assert parsed["details"] == {"field": "mode", "value": "invalid"}
+
+    def test_output_error_without_details_omits_key(self, capsys: pytest.CaptureFixture[str]) -> None:
+        with pytest.raises(SystemExit):
+            _output_error(CliErrorCode.LOCK_CONFLICT, "locked")
+        captured = capsys.readouterr()
+        parsed = json.loads(captured.out.strip())
+        assert "details" not in parsed
 
     def test_output_result_format(self, capsys: pytest.CaptureFixture[str]) -> None:
         _output_result({"placed": 1, "skipped": 0})
@@ -109,6 +131,7 @@ class TestJsonAwareArgumentParser:
         parsed = json.loads(captured.out.strip())
         assert parsed["type"] == "error"
         assert parsed["error"] is True
+        assert parsed["code"] == "VALIDATION_ERROR"
         assert "invalid choice" in parsed["message"]
 
     def test_json_equals_form_exits_with_1(
@@ -341,13 +364,14 @@ class TestJsonOutputProtocolCompatibility:
         assert parsed["type"] == "progress"
 
     def test_error_has_required_fields(self, capsys: pytest.CaptureFixture[str]) -> None:
-        """error メッセージが worker.py と同じフィールドを持つ."""
+        """error メッセージが必須フィールド（type, error, code, message）を持つ."""
         with pytest.raises(SystemExit):
-            _output_error("test error")
+            _output_error(CliErrorCode.INTERNAL_ERROR, "test error")
         captured = capsys.readouterr()
         parsed = json.loads(captured.out.strip())
         assert parsed["type"] == "error"
         assert parsed["error"] is True
+        assert parsed["code"] == "INTERNAL_ERROR"
         assert "message" in parsed
 
     def test_result_has_type_field(self, capsys: pytest.CaptureFixture[str]) -> None:

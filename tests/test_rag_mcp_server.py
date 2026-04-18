@@ -581,11 +581,11 @@ class TestRagCrawlZennTool:
 
         with patch.object(
             mod, "_run_cli_subprocess", new_callable=AsyncMock,
-            side_effect=mod.CLISubprocessError("ロック取得失敗", lock_conflict=True),
+            side_effect=mod.CLISubprocessError("ロック取得失敗", code="LOCK_CONFLICT"),
         ):
             result = await mod.rag_crawl_zenn("testuser")
 
-        assert "別のインジェストが実行中" in result
+        assert "ロックを保持しています" in result
 
     @pytest.mark.asyncio
     async def test_crawl_zenn_cli_error(self) -> None:
@@ -605,56 +605,53 @@ class TestRagCrawlZennTool:
 # --- CLI サブプロセス基盤テスト（#409） ---
 
 
-class TestIsLockConflictError:
-    """_is_lock_conflict_error のテスト."""
-
-    def test_detects_lock_conflict_english(self) -> None:
-        """'lock conflict' を含むメッセージでTrue."""
-        mod = import_module("rag.server")
-        assert mod._is_lock_conflict_error("lock conflict detected") is True
-
-    def test_detects_already_locked(self) -> None:
-        """'already locked' を含むメッセージでTrue."""
-        mod = import_module("rag.server")
-        assert mod._is_lock_conflict_error("file is already locked") is True
-
-    def test_detects_japanese_lock_conflict(self) -> None:
-        """'ロック競合' を含むメッセージでTrue."""
-        mod = import_module("rag.server")
-        assert mod._is_lock_conflict_error("別のインジェストが実行中です（ロック競合）") is True
-
-    def test_case_insensitive(self) -> None:
-        """大文字小文字を区別しないこと."""
-        mod = import_module("rag.server")
-        assert mod._is_lock_conflict_error("LOCK CONFLICT detected") is True
-
-    def test_no_false_positive_on_lock_alone(self) -> None:
-        """'lock' 単独では誤判定しないこと."""
-        mod = import_module("rag.server")
-        assert mod._is_lock_conflict_error("unlock failed") is False
-        assert mod._is_lock_conflict_error("file lock acquisition failed") is False
-
-    def test_no_match(self) -> None:
-        """ロック関連キーワードを含まないメッセージでFalse."""
-        mod = import_module("rag.server")
-        assert mod._is_lock_conflict_error("general error occurred") is False
-
-
 class TestCLISubprocessError:
     """CLISubprocessError のテスト."""
 
-    def test_default_lock_conflict_false(self) -> None:
-        """lock_conflict のデフォルトが False."""
+    def test_default_code_none(self) -> None:
+        """code のデフォルトが None で lock_conflict が False."""
         mod = import_module("rag.server")
         err = mod.CLISubprocessError("test error")
+        assert err.code is None
         assert err.lock_conflict is False
         assert str(err) == "test error"
 
-    def test_lock_conflict_true(self) -> None:
-        """lock_conflict=True が設定されること."""
+    def test_lock_conflict_from_code(self) -> None:
+        """code=LOCK_CONFLICT のとき lock_conflict が True."""
         mod = import_module("rag.server")
-        err = mod.CLISubprocessError("lock failed", lock_conflict=True)
+        err = mod.CLISubprocessError("lock failed", code="LOCK_CONFLICT")
+        assert err.code == "LOCK_CONFLICT"
         assert err.lock_conflict is True
+
+    def test_non_lock_conflict_code(self) -> None:
+        """LOCK_CONFLICT 以外の code では lock_conflict が False."""
+        mod = import_module("rag.server")
+        err = mod.CLISubprocessError("validation error", code="VALIDATION_ERROR")
+        assert err.code == "VALIDATION_ERROR"
+        assert err.lock_conflict is False
+
+    def test_format_mcp_error_lock_conflict(self) -> None:
+        """lock_conflict 時は統一メッセージを返す."""
+        mod = import_module("rag.server")
+        err = mod.CLISubprocessError("raw msg", code="LOCK_CONFLICT")
+        result = err.format_mcp_error("取り込みに失敗しました")
+        assert "ロックを保持しています" in result
+        assert "取り込み" not in result
+
+    def test_format_mcp_error_with_context(self) -> None:
+        """一般エラー時はコンテキスト付きメッセージを返す."""
+        mod = import_module("rag.server")
+        err = mod.CLISubprocessError("詳細メッセージ")
+        result = err.format_mcp_error("Zenn 記事の取り込みに失敗しました")
+        assert "Zenn 記事の取り込みに失敗しました" in result
+        assert "詳細メッセージ" in result
+
+    def test_format_mcp_error_without_context(self) -> None:
+        """コンテキストなしの場合はエラーメッセージのみ."""
+        mod = import_module("rag.server")
+        err = mod.CLISubprocessError("something failed")
+        result = err.format_mcp_error()
+        assert result == "エラー: something failed"
 
 
 class TestRunCliSubprocess:
@@ -724,7 +721,7 @@ class TestRunCliSubprocess:
     async def test_error_line_raises_cli_subprocess_error(self) -> None:
         """type: error 行がある場合は CLISubprocessError を raise する."""
         mod = import_module("rag.server")
-        error_payload = '{"type": "error", "message": "バリデーション失敗"}'
+        error_payload = '{"type": "error", "code": "VALIDATION_ERROR", "message": "バリデーション失敗"}'
         mock_process = self._make_mock_process([error_payload], exit_code=1)
 
         with patch("asyncio.create_subprocess_exec", return_value=mock_process):
@@ -732,6 +729,7 @@ class TestRunCliSubprocess:
                 await mod._run_cli_subprocess("rebuild")
 
         assert "バリデーション失敗" in str(exc_info.value)
+        assert exc_info.value.code == "VALIDATION_ERROR"
         assert exc_info.value.lock_conflict is False
 
     @pytest.mark.asyncio
@@ -740,7 +738,7 @@ class TestRunCliSubprocess:
         mod = import_module("rag.server")
         stdout_lines = [
             '{"type": "result", "placed": 1}',
-            '{"type": "error", "message": "後から発生したエラー"}',
+            '{"type": "error", "code": "INTERNAL_ERROR", "message": "後から発生したエラー"}',
         ]
         mock_process = self._make_mock_process(stdout_lines, exit_code=0)
 
@@ -780,15 +778,16 @@ class TestRunCliSubprocess:
 
     @pytest.mark.asyncio
     async def test_lock_conflict_detected_from_error_line(self) -> None:
-        """ロック競合エラーの場合 lock_conflict=True が設定される."""
+        """ロック競合エラーの場合 code="LOCK_CONFLICT" が設定される."""
         mod = import_module("rag.server")
-        error_payload = '{"type": "error", "message": "lock conflict: already held"}'
+        error_payload = '{"type": "error", "code": "LOCK_CONFLICT", "message": "別の再構築が実行中です（ロック競合）"}'
         mock_process = self._make_mock_process([error_payload], exit_code=1)
 
         with patch("asyncio.create_subprocess_exec", return_value=mock_process):
             with pytest.raises(mod.CLISubprocessError) as exc_info:
                 await mod._run_cli_subprocess("rebuild")
 
+        assert exc_info.value.code == "LOCK_CONFLICT"
         assert exc_info.value.lock_conflict is True
 
 
@@ -888,11 +887,11 @@ class TestRagDeleteTool:
         mod = import_module("rag.server")
         with patch.object(
             mod, "_run_cli_subprocess", new_callable=AsyncMock,
-            side_effect=mod.CLISubprocessError("排他制御エラー", lock_conflict=True),
+            side_effect=mod.CLISubprocessError("排他制御エラー", code="LOCK_CONFLICT"),
         ):
             result = await mod.rag_delete("https://example.com/page")
 
-        assert "別の操作が実行中" in result
+        assert "ロックを保持しています" in result
 
 
 class TestRagRebuildTool:
@@ -948,11 +947,11 @@ class TestRagRebuildTool:
         mod = import_module("rag.server")
         with patch.object(
             mod, "_run_cli_subprocess", new_callable=AsyncMock,
-            side_effect=mod.CLISubprocessError("lock conflict", lock_conflict=True),
+            side_effect=mod.CLISubprocessError("lock conflict", code="LOCK_CONFLICT"),
         ):
             result = await mod.rag_rebuild("full")
 
-        assert "別の再構築が実行中" in result
+        assert "ロックを保持しています" in result
 
     @pytest.mark.asyncio
     async def test_cli_error(self) -> None:

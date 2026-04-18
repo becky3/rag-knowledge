@@ -156,7 +156,7 @@ CLI は `--output json` 指定時に JSON Lines 形式で stdout に出力する
 |-----------|-------------|-----------|
 | `progress` | ファイル処理完了ごと | `processed`（int）、`total`（int）、`current`（str: 処理済みファイルパス） |
 | `result` | 処理完了時（最終行） | コマンド固有のフィールド（`mode`, `total_files`, `processed`, `errors`, `warnings`, `elapsed` 等。`full` モードは `convert` / `index` オブジェクトに分割）。`errors` は [pipeline-controller.md](pipeline-controller.md) の `PipelineSummary.errors` スキーマに従う構造化 dict のリスト（`{path, size_bytes, message, phase}`）を出力する。ingest 系コマンドでは `IngestResult` の全観測性フィールド（`partial_failures` / `aborted` 等）も併せて含める（[ingesters/common.md](ingesters/common.md) の「JSON シリアライズ」参照） |
-| `error` | エラー時（最終行） | `error`（bool, 常に `true`）、`message`（str） |
+| `error` | エラー時（最終行） | `error`（bool, 常に `true`）、`code`（str: エラー種別コード、[`_schema/enums.yml`](../../_schema/enums.yml) の `cli_error_code` 参照）、`message`（str）、`details`（dict, 任意: 種別固有の付加情報） |
 
 MCP サーバー（server.py）は stdout を行単位で読み取り、`progress` 行を MCP 通知に変換し、`result` / `error` 行で処理結果を確定する。
 
@@ -187,7 +187,7 @@ Python 標準の argparse はバリデーション失敗時に exit code 2 を�
 | 優先 | 検出対象 | 動作 |
 |------|----------|------|
 | 1 | `exit_code in _SEGFAULT_EXIT_CODES` | `CLISubprocessError("SEGFAULT, exit_code={code}")` を raise |
-| 2 | stdout に `type: "error"` 行 | `message` を取り出して `CLISubprocessError(message)` を raise（ロック競合判定は `_is_lock_conflict_error` が message 内のキーワード有無で実施。詳細は `src/rag/server.py`） |
+| 2 | stdout に `type: "error"` 行 | `message` と `code` を取り出して `CLISubprocessError(message, code=code)` を raise。ロック競合判定は `code == "LOCK_CONFLICT"` で実施（キーワードマッチは廃止） |
 | 3 | stdout に `type: "result"` 行 | JSON をパースして dict を返す（`errors>0` でも `aborted=true` でも返却） |
 | 4 | 出力なし | `CLISubprocessError("出力が空 (exit_code={code})")` を raise（stderr tail を付加） |
 
