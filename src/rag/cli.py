@@ -20,7 +20,7 @@ from typing import TYPE_CHECKING, TypedDict
 from urllib.parse import urldefrag
 
 from .filter_parser import parse_filters
-from .pipeline.models import PHASE_FETCH
+from .pipeline.models import PipelinePhase, format_pipeline_error as _format_pipeline_error
 from .evaluation import (
     EvaluationReport,
     FailureTag,
@@ -176,13 +176,20 @@ def _ingest_result_to_dict(
     ingest_result: "IngestResult",
     pipeline_summary: "PipelineSummary | None",
 ) -> dict[str, object]:
-    """IngestResult + PipelineSummary を JSON 出力用 dict に変換する."""
+    """IngestResult + PipelineSummary を JSON 出力用 dict に変換する.
+
+    仕様: docs/specs/ingesters/common.md「JSON シリアライズ」
+    """
     data: dict[str, object] = {
         "placed": ingest_result.placed,
         "skipped": ingest_result.skipped,
         "overwritten": ingest_result.overwritten,
         "errors": ingest_result.errors,
         "error_details": ingest_result.error_details,
+        "partial_failures": ingest_result.partial_failures,
+        "partial_failure_details": ingest_result.partial_failure_details,
+        "aborted": ingest_result.aborted,
+        "abort_reason": ingest_result.abort_reason,
     }
     if pipeline_summary is not None:
         data["pipeline"] = {
@@ -217,8 +224,8 @@ def _log_phase_summary(phase: str, summary: "PipelineSummary") -> None:
     )
     for warn in summary.warnings:
         logger.warning("  [%s] 警告: %s", phase, warn)
-    for err_file in summary.errors:
-        logger.error("  [%s] エラーファイル: %s", phase, err_file)
+    for entry in summary.errors:
+        logger.error("  [%s] エラー: %s", phase, _format_pipeline_error(entry))
 
 
 def _add_output_option(parser: argparse.ArgumentParser) -> None:
@@ -1429,7 +1436,9 @@ async def run_rebuild(args: argparse.Namespace) -> None:
                 if all_errors:
                     has_error = True
                     if if_needed:
-                        error_files = ", ".join(all_errors)
+                        error_files = ", ".join(
+                            _format_pipeline_error(e) for e in all_errors
+                        )
                         _show_error_dialog(
                             f"rebuild --mode {mode} でエラーが発生しました。\n"
                             f"エラーファイル: {error_files}"
@@ -1449,7 +1458,9 @@ async def run_rebuild(args: argparse.Namespace) -> None:
                 if summary.errors:
                     has_error = True
                     if if_needed:
-                        error_files = ", ".join(summary.errors)
+                        error_files = ", ".join(
+                            _format_pipeline_error(e) for e in summary.errors
+                        )
                         _show_error_dialog(
                             f"rebuild --mode {mode} でエラーが発生しました。\n"
                             f"エラーファイル: {error_files}"
@@ -1468,8 +1479,8 @@ async def run_rebuild(args: argparse.Namespace) -> None:
                     logger.warning("  警告: %s", warn)
             if summary.errors:
                 has_error = True
-                for err_file in summary.errors:
-                    logger.error("  エラーファイル: %s", err_file)
+                for entry in summary.errors:
+                    logger.error("  エラー: %s", _format_pipeline_error(entry))
     except Exception as e:
         has_error = True
         if if_needed:
@@ -1483,7 +1494,7 @@ async def run_rebuild(args: argparse.Namespace) -> None:
                 if mode == "full"
                 else summary.errors
             )
-            error_files = ", ".join(all_err)
+            error_files = ", ".join(_format_pipeline_error(e) for e in all_err)
             _show_error_dialog(
                 f"rebuild --mode {mode} でエラーが発生しました。\n"
                 f"エラーファイル: {error_files}"
@@ -1913,8 +1924,8 @@ async def run_delete(args: argparse.Namespace) -> None:
             print(f"  - {warn}")
     if summary.errors:
         print(f"パイプラインエラー: {len(summary.errors)}件")
-        for err in summary.errors:
-            print(f"  - {err}")
+        for entry in summary.errors:
+            print(f"  - {_format_pipeline_error(entry)}")
     print(f"削除しました: {source_id}")
 
 
@@ -2242,8 +2253,8 @@ def _print_ingest_result(
                 print(f"  - {warn}")
         if pipeline_summary.errors:
             print(f"パイプラインエラー: {len(pipeline_summary.errors)}件")
-            for err in pipeline_summary.errors:
-                print(f"  - {err}")
+            for entry in pipeline_summary.errors:
+                print(f"  - {_format_pipeline_error(entry)}")
 
 
 async def run_ingest_youtube(args: argparse.Namespace) -> None:
@@ -2312,7 +2323,7 @@ async def run_ingest_youtube_playlist(args: argparse.Namespace) -> None:
         ingest_result = await youtube_ingester.crawl_playlist(
             args.playlist_url,
             max_videos=max_videos,
-            progress_callback=_wrap_progress(progress_cb, PHASE_FETCH),
+            progress_callback=_wrap_progress(progress_cb, PipelinePhase.FETCH.display),
         )
     except (ValueError, TypeError) as e:
         if json_out:
@@ -2385,7 +2396,7 @@ async def run_crawl_bluesky(args: argparse.Namespace) -> None:
                 include_reposts=include_reposts,
                 force=force,
                 client=client,
-                progress_callback=_wrap_progress(progress_cb, PHASE_FETCH),
+                progress_callback=_wrap_progress(progress_cb, PipelinePhase.FETCH.display),
             )
 
             # 投稿内 URL の自動取り込み
@@ -2461,7 +2472,7 @@ async def run_crawl_zenn(args: argparse.Namespace) -> None:
                 content_type=args.content_type,
                 force=args.force,
                 client=client,
-                progress_callback=_wrap_progress(progress_cb, PHASE_FETCH),
+                progress_callback=_wrap_progress(progress_cb, PipelinePhase.FETCH.display),
             )
     except (ValueError, TypeError) as e:
         if json_out:
@@ -2470,13 +2481,11 @@ async def run_crawl_zenn(args: argparse.Namespace) -> None:
         sys.exit(1)
 
     if ingest_result.placed == 0 and ingest_result.errors == 0:
-        if json_out:
-            _output_result(_ingest_result_to_dict(ingest_result, None))
-            return
-        if ingest_result.skipped > 0:
-            print(f"全 {ingest_result.skipped} 件のコンテンツがスキップされました（ユーザー: {args.username}）。上書きするには --force を指定してください")
-        else:
-            print(f"コンテンツが見つかりませんでした（ユーザー: {args.username}）")
+        _print_ingest_result(
+            ingest_result, None, context=f"ユーザー: {args.username}", json_output=json_out,
+        )
+        if not json_out and ingest_result.skipped > 0:
+            print("（上書きするには --force を指定してください）")
         return
 
     pipeline_summary = await controller.ingest_and_index(
@@ -2603,10 +2612,9 @@ async def run_add_document(args: argparse.Namespace) -> None:
             raise SystemExit(1)
 
         if ingest_result.placed == 0 and ingest_result.errors == 0:
-            if json_out:
-                _output_result(_ingest_result_to_dict(ingest_result, None))
-                return
-            print(f"取り込み対象がありませんでした: {display_name}")
+            _print_ingest_result(
+                ingest_result, None, context=display_name, json_output=json_out,
+            )
             return
         if ingest_result.errors > 0:
             first_detail = _error_detail_message(ingest_result.error_details[0])
@@ -2648,16 +2656,17 @@ async def run_crawl_documents(args: argparse.Namespace) -> None:
 
     ingest_result = local_ingester.crawl_documents(
         args.dir_path, args.pattern, upload_mode=args.upload_mode,
-        progress_callback=_wrap_progress(progress_cb, PHASE_FETCH),
+        progress_callback=_wrap_progress(progress_cb, PipelinePhase.FETCH.display),
     )
 
     if ingest_result.placed == 0 and ingest_result.errors == 0:
-        if json_out:
-            _output_result(_ingest_result_to_dict(ingest_result, None))
-            return
-        print(f"対象ファイルが見つかりませんでした: {args.dir_path}")
+        _print_ingest_result(
+            ingest_result, None, context=f"ディレクトリ: {args.dir_path}",
+            json_output=json_out,
+        )
         return
     if ingest_result.errors > 0 and ingest_result.placed == 0:
+        # 早期終了: エラー詳細を先頭 1 件だけ表示してから exit
         first_detail = _error_detail_message(ingest_result.error_details[0])
         if json_out:
             _output_error(first_detail)
@@ -2819,20 +2828,15 @@ async def run_site_ingest(args: argparse.Namespace) -> None:
             data["scrapy_exit_code"] = crawl_result.exit_code
         _output_result(data)
     else:
-        # text 出力
-        print(
-            f"サイト取り込み完了: {bridge_result.ingest.placed}件新規配置"
-            f", {bridge_result.ingest.overwritten}件上書き"
-            f", {bridge_result.ingest.skipped}件スキップ"
-            f", {bridge_result.ingest.errors}件エラー"
+        _print_ingest_result(
+            bridge_result.ingest,
+            pipeline_summary,
+            context=f"サイト: {display_url}",
+            json_output=False,
         )
         print(f"所要時間: {elapsed:.1f}秒")
         if args.download_only:
             print("パイプライン処理: スキップ（download_only）")
-        elif pipeline_summary is not None:
-            print(f"パイプライン: {pipeline_summary.processed}件処理")
-            if pipeline_summary.errors:
-                print(f"パイプラインエラー: {len(pipeline_summary.errors)}件")
         if not crawl_result.success:
             print(f"Scrapy exit_code={crawl_result.exit_code}（部分的な結果）")
 
@@ -2991,7 +2995,7 @@ async def run_ingest_aozora_author(args: argparse.Namespace) -> None:
                 args.person_id,
                 max_works=max_works,
                 client=client,
-                progress_callback=_wrap_progress(progress_cb, PHASE_FETCH),
+                progress_callback=_wrap_progress(progress_cb, PipelinePhase.FETCH.display),
             )
     except (ValueError, TypeError) as e:
         if json_out:

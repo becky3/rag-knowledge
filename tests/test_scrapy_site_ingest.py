@@ -434,6 +434,79 @@ class TestCliSiteIngestFlow:
         mock_pipeline_summary = MagicMock()
         mock_pipeline_summary.processed = 5
         mock_pipeline_summary.errors = []
+        mock_pipeline_summary.warnings = []
+
+        mock_controller = MagicMock()
+        mock_controller.source_store = MagicMock()
+        mock_controller.ingest_and_index = AsyncMock(return_value=mock_pipeline_summary)
+
+        args = argparse.Namespace(url=["https://example.com"], url_pattern="", max_pages=10, force=False, download_only=False)
+
+        with (
+            patch.object(ScrapyRunner, "run", new_callable=AsyncMock, return_value=mock_crawl_result),
+            patch("rag.cli._build_cli_pipeline_controller", return_value=(mock_controller, _make_cli_mock_settings())),
+            patch("rag.scrapy.bridge.import_to_source_store", return_value=mock_bridge_result),
+        ):
+            from rag.cli import run_site_ingest
+
+            # exit code は 2 値（0=成功 / 1=致命的失敗）のため errors>0 でも exit 0
+            # 3 値 exit code 化（aborted/errors を exit に反映）は Issue #605 で実装
+            await run_site_ingest(args)
+            captured = capsys.readouterr()
+            # site-ingest の text 出力は IngestResult.summary() 経由で統一される
+            # (仕様: docs/specs/ingesters/common.md)
+            assert "完了: 5件配置" in captured.out
+            assert "上書き: 3件" in captured.out
+            assert "スキップ: 2件" in captured.out
+            assert "エラー: 1件" in captured.out
+            assert "パイプライン: 5件処理" in captured.out
+
+    @pytest.mark.asyncio
+    async def test_text_output_uses_ingest_result_summary(
+        self, tmp_path: Path, capsys: pytest.CaptureFixture[str],
+    ) -> None:
+        """site-ingest の text 出力が IngestResult.summary() を経由すること.
+
+        他 ingest コマンドと同じく _print_ingest_result 経由で出力される
+        ことにより、partial_failures / aborted 等の観測性フィールドが
+        欠落なく表示される。
+        """
+        import json
+
+        from rag.pipeline.ingesters._common import IngestResult
+        from rag.scrapy.bridge import BridgeResult
+        from rag.scrapy.runner import CrawlResult, ScrapyRunner
+
+        jsonl_path = tmp_path / "metadata.jsonl"
+        jsonl_path.write_text(
+            json.dumps({"url": "https://example.com/p", "title": "T", "status": 200, "depth": 0, "collected_at": "2025-01-01T00:00:00Z", "filepath": "p.html"}) + "\n",
+            encoding="utf-8",
+        )
+
+        mock_crawl_result = CrawlResult(
+            exit_code=0,
+            output_dir=tmp_path,
+            jsonl_path=jsonl_path,
+            success=True,
+        )
+
+        mock_bridge_result = BridgeResult(
+            ingest=IngestResult(
+                placed=2,
+                skipped=0,
+                partial_failures=1,
+                partial_failure_details=[
+                    {"target": "https://example.com/img.png", "category": "media_download"},
+                ],
+            ),
+            total_lines=2,
+            parse_errors=0,
+        )
+
+        mock_pipeline_summary = MagicMock()
+        mock_pipeline_summary.processed = 2
+        mock_pipeline_summary.errors = []
+        mock_pipeline_summary.warnings = []
 
         mock_controller = MagicMock()
         mock_controller.source_store = MagicMock()
@@ -450,11 +523,10 @@ class TestCliSiteIngestFlow:
 
             await run_site_ingest(args)
             captured = capsys.readouterr()
-            assert "5件新規配置" in captured.out
-            assert "3件上書き" in captured.out
-            assert "2件スキップ" in captured.out
-            assert "1件エラー" in captured.out
-            assert "パイプライン: 5件処理" in captured.out
+            # summary() の特徴的な出力（partial_failures が IngestResult.summary で可視化される）
+            assert "部分失敗: 1件" in captured.out
+            # context（サイト: ...）が summary に含まれる
+            assert "サイト:" in captured.out
 
     @pytest.mark.asyncio
     async def test_cleanup_on_success(self, tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:

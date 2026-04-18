@@ -69,13 +69,19 @@ class TestFormatRebuildSummary:
             mode=PipelineMode.INDEX_ONLY,
             total_files=5,
             processed=3,
-            errors=["file1.txt", "file2.txt"],
+            errors=[
+                {"path": "file1.txt", "size_bytes": 100, "message": "parse error", "phase": "convert"},
+                {"path": "file2.txt", "size_bytes": None, "message": "read error", "phase": "convert"},
+            ],
         )
         result = _format_rebuild_summary(summary, 5.0)
         assert "インデックスのみ再構築" in result
         assert "エラー: 2" in result
         assert "file1.txt" in result
         assert "file2.txt" in result
+        # 構造化詳細（size_bytes / message）も出力されること
+        assert "parse error" in result
+        assert "read error" in result
 
     def test_all_non_full_modes(self) -> None:
         mode_labels = {
@@ -95,7 +101,7 @@ class TestFormatRebuildSummary:
             mode=PipelineMode.CONVERT_ONLY,
             total_files=10,
             processed=8,
-            errors=["bad.txt"],
+            errors=[{"path": "bad.txt", "size_bytes": 50, "message": "boom", "phase": "convert"}],
             warnings=["warn.txt: skipped"],
         )
         index = PipelineSummary(
@@ -206,6 +212,45 @@ class TestRagRebuild:
         mock_subprocess.assert_called_once_with(
             "rebuild", ["--mode", "incremental"], ctx=None,
         )
+
+    @pytest.mark.asyncio
+    async def test_structured_errors_reach_mcp_response(self) -> None:
+        """構造化エラー情報が CLI JSON → MCP レスポンスへ透過すること.
+
+        PR #596 の観測性強化（壊れファイル検出時の size_bytes / message）を
+        production 出力経路に届けるための要件（Issue #602 問題 3+4）。
+        仕様: docs/specs/pipeline-controller.md
+        """
+        from rag.server import rag_rebuild
+
+        mock_cli_result: dict[str, object] = {
+            "type": "result",
+            "mode": "incremental",
+            "total_files": 2,
+            "processed": 1,
+            "errors": [
+                {
+                    "path": "zenn/user/articles/broken.json",
+                    "size_bytes": 15,
+                    "message": "JSON parse error: zenn/user/articles/broken.json",
+                    "phase": "convert_and_index",
+                },
+            ],
+            "warnings": [],
+            "elapsed": 0.4,
+        }
+
+        with patch(
+            "rag.server._run_cli_subprocess",
+            new_callable=AsyncMock,
+            return_value=mock_cli_result,
+        ):
+            result = await rag_rebuild(mode="incremental")
+
+        # path / size_bytes / message がすべて MCP レスポンスに含まれること
+        assert "zenn/user/articles/broken.json" in result
+        assert "15 bytes" in result
+        assert "JSON parse error" in result
 
     @pytest.mark.asyncio
     async def test_lock_conflict_returns_error(self) -> None:

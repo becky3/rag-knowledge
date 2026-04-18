@@ -20,16 +20,19 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import TypeVar
 
-from rag.converter.converter import ConversionSkippedError, get_converted_rel_path
+from rag.converter.converter import (
+    ConversionFailedError,
+    ConversionSkippedError,
+    get_converted_rel_path,
+)
 from rag.pipeline.git_ops import GitOperations
 from rag.pipeline.models import (
-    PHASE_CONVERT,
-    PHASE_CONVERT_AND_INDEX,
-    PHASE_INDEX,
     ChangeEntry,
     ChangeStatus,
     FullRebuildResult,
+    PipelineErrorEntry,
     PipelineMode,
+    PipelinePhase,
     PipelineSummary,
 )
 from rag.pipeline.protocols import ConverterProtocol, IndexerProtocol
@@ -292,7 +295,7 @@ class PipelineController:
             records,
             process_fn=_convert_single,
             get_file_path=lambda r: r.source_id,
-            phase=PHASE_CONVERT,
+            phase=PipelinePhase.CONVERT,
             mode=PipelineMode.CONVERT_ONLY,
             log_prefix="全再構築(Convert)中に",
             progress_callback=progress_callback,
@@ -307,7 +310,7 @@ class PipelineController:
         # --- Phase 2: Index (convert 成功分のみ) ---
         await self._indexer.clear(source_type)
 
-        convert_failed = set(convert_summary.errors)
+        convert_failed = convert_summary.failed_paths()
         convert_warned: set[str] = set()
         for w in convert_summary.warnings:
             source_id, sep, _reason = w.partition(": ")
@@ -354,7 +357,7 @@ class PipelineController:
                 index_records,
                 process_fn=_index_single,
                 get_file_path=lambda r: r.source_id,
-                phase=PHASE_INDEX,
+                phase=PipelinePhase.INDEX,
                 mode=PipelineMode.INDEX_ONLY,
                 log_prefix="全再構築(Index)中に",
                 progress_callback=progress_callback,
@@ -466,7 +469,7 @@ class PipelineController:
             records,
             process_fn=_convert_single,
             get_file_path=lambda r: r.source_id,
-            phase=PHASE_CONVERT,
+            phase=PipelinePhase.CONVERT,
             mode=PipelineMode.CONVERT_ONLY,
             log_prefix="コンバート再実行中に",
             progress_callback=progress_callback,
@@ -543,7 +546,7 @@ class PipelineController:
                 records,
                 process_fn=_index_single,
                 get_file_path=lambda r: r.source_id,
-                phase=PHASE_INDEX,
+                phase=PipelinePhase.INDEX,
                 mode=PipelineMode.INDEX_ONLY,
                 log_prefix="インデックス再構築中に",
                 progress_callback=progress_callback,
@@ -720,7 +723,7 @@ class PipelineController:
         *,
         process_fn: Callable[[_T], Awaitable[None]] | Callable[[_T], None],
         get_file_path: Callable[[_T], str],
-        phase: str,
+        phase: PipelinePhase,
         mode: PipelineMode,
         log_prefix: str,
         progress_callback: ProgressCallback | None = None,
@@ -745,7 +748,7 @@ class PipelineController:
 
         sem = asyncio.Semaphore(concurrency)
         processed = 0
-        errors: list[str] = []
+        errors: list[PipelineErrorEntry] = []
         warnings: list[str] = []
         lock = asyncio.Lock()
 
@@ -767,19 +770,31 @@ class PipelineController:
                     )
                     async with lock:
                         warnings.append(f"{file_path}: {e}")
-                except Exception:
+                except ConversionFailedError as e:
+                    logger.error(
+                        "%s変換失敗: %s (%s)", log_prefix, file_path, e,
+                    )
+                    entry = self._build_error_entry(
+                        file_path, str(e), phase,
+                    )
+                    async with lock:
+                        errors.append(entry)
+                except Exception as e:
                     logger.exception(
                         "%sエラー: %s", log_prefix, file_path,
                     )
+                    entry = self._build_error_entry(
+                        file_path, str(e), phase,
+                    )
                     async with lock:
-                        errors.append(file_path)
+                        errors.append(entry)
                 if progress_callback is not None:
                     async with lock:
                         completed = processed + len(errors) + len(warnings)
                     try:
                         progress_callback(
                             completed, len(items),
-                            f"[{phase}] {file_path}",
+                            f"[{phase.display}] {file_path}",
                         )
                     except Exception:
                         logger.debug(
@@ -799,6 +814,41 @@ class PipelineController:
             to_commit_id=to_commit_id,
         )
 
+    def _build_error_entry(
+        self,
+        file_path: str,
+        message: str,
+        phase: PipelinePhase,
+    ) -> PipelineErrorEntry:
+        """PipelineSummary.errors に追加する構造化エントリを生成する.
+
+        仕様: docs/specs/pipeline-controller.md の `PipelineSummary.errors`
+
+        size_bytes の取得元は phase に応じて切り替える:
+        - CONVERT / CONVERT_AND_INDEX: source_store 側のファイルサイズ
+          （壊れファイル検出時に元データのサイズを残す）
+        - INDEX: converted_store 側のファイルサイズ
+          （index 失敗時は変換済みテキストのサイズが診断に有用）
+        - FETCH / その他: source_store 側（デフォルト）
+
+        取得失敗時（権限エラー・未配置等）は `size_bytes=None` とする。
+        """
+        if phase is PipelinePhase.INDEX:
+            converted_rel = get_converted_rel_path(file_path)
+            target_path = self._converted_store_dir / converted_rel
+        else:
+            target_path = self._source_store.root_dir / file_path
+        try:
+            size_bytes: int | None = target_path.stat().st_size
+        except OSError:
+            size_bytes = None
+        return PipelineErrorEntry(
+            path=file_path,
+            size_bytes=size_bytes,
+            message=message,
+            phase=phase.error_key,
+        )
+
     # --- 変更処理 ---
 
     async def _process_changes(
@@ -815,7 +865,7 @@ class PipelineController:
                 changes,
                 process_fn=self._process_single_change,
                 get_file_path=lambda e: e.file_path,
-                phase=PHASE_CONVERT_AND_INDEX,
+                phase=PipelinePhase.CONVERT_AND_INDEX,
                 mode=mode,
                 log_prefix="パイプライン処理中に",
                 progress_callback=progress_callback,

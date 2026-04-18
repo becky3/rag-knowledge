@@ -102,13 +102,34 @@ class TestAddOutputOption:
 class TestIngestResultToDict:
     """_ingest_result_to_dict のテスト."""
 
+    @staticmethod
+    def _make_ingest_result(
+        *,
+        placed: int = 0,
+        skipped: int = 0,
+        overwritten: int = 0,
+        errors: int = 0,
+        error_details: list[dict[str, object]] | None = None,
+        partial_failures: int = 0,
+        partial_failure_details: list[dict[str, object]] | None = None,
+        aborted: bool = False,
+        abort_reason: str | None = None,
+    ) -> MagicMock:
+        """IngestResult のモックを生成する."""
+        mock = MagicMock()
+        mock.placed = placed
+        mock.skipped = skipped
+        mock.overwritten = overwritten
+        mock.errors = errors
+        mock.error_details = error_details or []
+        mock.partial_failures = partial_failures
+        mock.partial_failure_details = partial_failure_details or []
+        mock.aborted = aborted
+        mock.abort_reason = abort_reason
+        return mock
+
     def test_without_pipeline_summary(self) -> None:
-        ingest_result = MagicMock()
-        ingest_result.placed = 2
-        ingest_result.skipped = 1
-        ingest_result.overwritten = 0
-        ingest_result.errors = 0
-        ingest_result.error_details = []
+        ingest_result = self._make_ingest_result(placed=2, skipped=1)
 
         result = _ingest_result_to_dict(ingest_result, None)
         assert result == {
@@ -117,15 +138,14 @@ class TestIngestResultToDict:
             "overwritten": 0,
             "errors": 0,
             "error_details": [],
+            "partial_failures": 0,
+            "partial_failure_details": [],
+            "aborted": False,
+            "abort_reason": None,
         }
 
     def test_with_pipeline_summary(self) -> None:
-        ingest_result = MagicMock()
-        ingest_result.placed = 1
-        ingest_result.skipped = 0
-        ingest_result.overwritten = 0
-        ingest_result.errors = 0
-        ingest_result.error_details = []
+        ingest_result = self._make_ingest_result(placed=1)
 
         pipeline_summary = MagicMock()
         pipeline_summary.mode.value = "incremental"
@@ -140,6 +160,43 @@ class TestIngestResultToDict:
         assert result["pipeline"]["mode"] == "incremental"
         assert result["pipeline"]["processed"] == 3
         assert "skipped" not in result["pipeline"]
+
+    def test_includes_observability_fields_with_values(self) -> None:
+        """partial_failures / aborted 等がゼロ値でない場合も正しくシリアライズされる.
+
+        失敗の観測性（仕様: docs/specs/ingesters/common.md）を production 出力に
+        届けるため、IngestResult の全観測性フィールドを JSON に含めなければならない。
+        """
+        partial_details = [{"target": "a.png", "category": "media_download"}]
+        ingest_result = self._make_ingest_result(
+            placed=10,
+            partial_failures=2,
+            partial_failure_details=partial_details,
+            aborted=True,
+            abort_reason="circuit breaker open",
+        )
+
+        result = _ingest_result_to_dict(ingest_result, None)
+        assert result["partial_failures"] == 2
+        assert result["partial_failure_details"] == partial_details
+        assert result["aborted"] is True
+        assert result["abort_reason"] == "circuit breaker open"
+
+    def test_aborted_false_is_preserved(self) -> None:
+        """aborted が False でも省略されず False として出力される.
+
+        スケジューラが `.get("aborted", False)` で補完に依存せず、
+        常にキーが存在する前提で判定できるようにする。
+        """
+        ingest_result = self._make_ingest_result()
+
+        result = _ingest_result_to_dict(ingest_result, None)
+        assert "aborted" in result
+        assert result["aborted"] is False
+        assert "abort_reason" in result
+        assert result["abort_reason"] is None
+        assert "partial_failures" in result
+        assert "partial_failure_details" in result
 
 
 class TestCommandsHaveOutputOption:

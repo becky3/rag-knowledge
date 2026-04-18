@@ -150,6 +150,14 @@ ConstrainedClient はサーキットブレーカーの責務（HTTP レスポン
 
 **Why**: `error_details` は運用者の目視だけでなくスケジューラや再取り込みツールが機械的に処理できる形を要求されるため、構造化 dict としている。`category` を固定列挙にすることで、再取り込み方針（`media_download` は force 再取得で回復、`metadata_fetch` は原因調査が必要、等）の自動判定が可能になる。
 
+##### JSON シリアライズ
+
+CLI `--output json` および MCP レスポンスでは、`IngestResult` の観測性フィールドを欠落なく JSON に含めなければならない。
+スケジューラや再取り込みツールが親失敗・部分失敗・中断を独立して判定できるよう、
+`placed` / `skipped` / `overwritten` / `errors` / `error_details` /
+`partial_failures` / `partial_failure_details` / `aborted` / `abort_reason`
+の全項目をゼロ値・空リスト・`None` も省略せず常に出力する。
+
 #### 中断系エラーの扱い
 
 中断系エラー（回復不能な処理停止）は以下のように扱う:

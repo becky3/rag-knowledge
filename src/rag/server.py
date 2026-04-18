@@ -55,7 +55,7 @@ with contextlib.redirect_stdout(io.StringIO()):
     from .upload import sanitize_filename as sanitize_upload_filename
     from .pipeline.ingesters.local import _UPLOAD_DIR as _LOCAL_UPLOAD_DIR
 
-    from .pipeline.models import PipelineMode, PipelineSummary
+    from .pipeline.models import PipelineMode, PipelineSummary, format_pipeline_error as _format_pipeline_error
 from .safe_browsing import (
     SafeBrowsingClient,
     SafeBrowsingConfigError,
@@ -127,7 +127,9 @@ def _format_ingest_response(
             details = "; ".join(pipeline_summary.warnings[:5])
             parts.append(f"パイプライン警告: {len(pipeline_summary.warnings)}件 ({details})")
         if pipeline_summary.errors:
-            details = "; ".join(pipeline_summary.errors[:5])
+            details = "; ".join(
+                _format_pipeline_error(e) for e in pipeline_summary.errors[:5]
+            )
             parts.append(f"パイプラインエラー: {len(pipeline_summary.errors)}件 ({details})")
     return " / ".join(parts)
 
@@ -803,7 +805,9 @@ async def rag_delete(source_id: str, ctx: MCPContext | None = None) -> str:
         if pipeline_data:
             pipeline_summary = _parse_pipeline_summary(pipeline_data)
             if pipeline_summary and pipeline_summary.errors:
-                errors_text = "; ".join(pipeline_summary.errors)
+                errors_text = "; ".join(
+                    _format_pipeline_error(e) for e in pipeline_summary.errors
+                )
                 return f"削除しましたが、パイプラインでエラーが発生しました: {source_id} ({errors_text})"
         return f"削除しました: {source_id}"
     except CLISubprocessError as e:
@@ -840,9 +844,9 @@ def _format_phase_summary(phase: str, summary: PipelineSummary) -> list[str]:
         if len(summary.warnings) > 10:
             parts.append(f"      ... 他 {len(summary.warnings) - 10} 件")
     if summary.errors:
-        parts.append("    エラーファイル:")
-        for err_file in summary.errors[:10]:
-            parts.append(f"      - {err_file}")
+        parts.append("    エラー:")
+        for entry in summary.errors[:10]:
+            parts.append(f"      - {_format_pipeline_error(entry)}")
         if len(summary.errors) > 10:
             parts.append(f"      ... 他 {len(summary.errors) - 10} 件")
     return parts
@@ -871,9 +875,9 @@ def _format_rebuild_summary(summary: PipelineSummary, elapsed: float) -> str:
         if len(summary.warnings) > 10:
             parts.append(f"    ... 他 {len(summary.warnings) - 10} 件")
     if summary.errors:
-        parts.append("  エラーファイル:")
-        for err_file in summary.errors[:10]:
-            parts.append(f"    - {err_file}")
+        parts.append("  エラー:")
+        for entry in summary.errors[:10]:
+            parts.append(f"    - {_format_pipeline_error(entry)}")
         if len(summary.errors) > 10:
             parts.append(f"    ... 他 {len(summary.errors) - 10} 件")
 
@@ -1170,6 +1174,10 @@ def _format_cli_ingest_result(
 
     _run_cli_subprocess の戻り値（IngestResult + PipelineSummary の dict 表現）を
     既存の _format_ingest_response と同等のフォーマットに変換する。
+
+    IngestResult の全観測性フィールド（partial_failures / aborted 等）は
+    CLI が JSON に含める契約（仕様: docs/specs/ingesters/common.md）に従い、
+    ここでは常にキーが存在する前提で再構築する。
     """
     ingest_result = IngestResult(
         placed=result.get("placed", 0),
@@ -1177,6 +1185,10 @@ def _format_cli_ingest_result(
         overwritten=result.get("overwritten", 0),
         errors=result.get("errors", 0),
         error_details=result.get("error_details", []),
+        partial_failures=result.get("partial_failures", 0),
+        partial_failure_details=result.get("partial_failure_details", []),
+        aborted=result.get("aborted", False),
+        abort_reason=result.get("abort_reason"),
     )
 
     pipeline_data = result.get("pipeline")
@@ -1188,6 +1200,8 @@ def _format_cli_ingest_result(
 def _parse_pipeline_summary(data: dict[str, Any]) -> PipelineSummary | None:
     """JSON dict から PipelineSummary を復元する.
 
+    `errors` は `{path, size_bytes, message, phase?}` スキーマを持つ dict の
+    リストとして渡される前提（仕様: docs/specs/pipeline-controller.md）。
     パース失敗時は None を返す。
     """
     try:

@@ -61,10 +61,32 @@
 | `mode` | str | 実行モード（`incremental`, `convert`, `index`） |
 | `total_files` | int | 処理対象ファイル総数 |
 | `processed` | int | 正常処理されたファイル数 |
-| `errors` | list[str] | 予期しない例外が発生したファイルパスのリスト |
+| `errors` | list[dict] | 予期しない例外が発生したファイルの構造化詳細（スキーマは下記） |
 | `warnings` | list[str] | 非致命的スキップの詳細リスト（ファイルパス + 理由） |
 | `from_commit_id` | str | 処理開始時点のコミット ID |
 | `to_commit_id` | str | 処理終了時点のコミット ID |
+
+`errors` の各エントリは `PipelineErrorEntry` TypedDict で定義されたスキーマに従う。path 文字列のみを返す `failed_paths()` アクセサも併せて提供する。
+
+| フィールド | 型 | 必須 | 内容 |
+|---|---|:-:|---|
+| `path` | str | 必須 | エラー発生ファイルの rel_path |
+| `size_bytes` | int \| None | 必須 | ファイルサイズ（取得できない場合は `None`）。取得元は phase で切り替わる: convert / convert_and_index は source_store 側、index は converted_store 側 |
+| `message` | str | 必須 | 例外メッセージ（`str(exc)`） |
+| `phase` | str | 必須 | フェーズ識別子。`PipelinePhase` Enum の `error_key`（`"convert"` / `"index"` / `"convert_and_index"` / `"fetch"`） |
+
+`PipelineSummary.failed_paths()` は `errors` の各エントリから `path` を抽出した `set[str]` を返すアクセサ。集合演算（差分更新での convert 失敗分除外等）に使う consumer 側が dict 構造を意識しないようにするため。
+
+`PipelinePhase` は処理フェーズを表す Enum で、以下の 2 属性を持つ:
+
+- `display`: progress 通知用の人間向け表示名
+- `error_key`: `PipelineErrorEntry.phase` に記録される snake_case キー
+
+メンバーは `FETCH` / `CONVERT` / `INDEX` / `CONVERT_AND_INDEX`。未知フェーズは型で排除される（string literal ではなく Enum を使うため）。
+
+**Why（構造化スキーマ）**: 例外メッセージ・ファイルサイズ等の診断情報を保持し、壊れファイル検出（JSON パースエラー等）の原因追跡と再取り込み判断を production 出力経路（CLI JSON / MCP レスポンス）に届けるため。`ConvertBatchResult.error_files`（converter）と `IngestResult.error_details`（インジェスター）の構造化と同方針で揃える。
+
+**Why（`size_bytes` の phase 別取得）**: convert 側のエラー（JSON パース失敗等）では元データ（source_store）のサイズが原因追跡に有用。index 側のエラー（トークン超過等）では変換済みテキスト（converted_store）のサイズが診断に有用。phase ごとに「そのフェーズが扱っていたファイル」のサイズを返すことで、エラーの文脈に沿った診断情報を提供する。
 
 全操作は `progress_callback`（任意）を受け取り、ファイル処理完了ごとにコールバックを呼び出す。callback シグネチャ: `(processed: int, total: int, current: str) -> None`。未指定時は進捗通知なし。詳細は [rebuild-stats.md](rebuild-stats.md) の CLI サブプロセス進捗通知セクションを参照。
 
@@ -332,7 +354,7 @@ sequenceDiagram
 | ネット差分で検出されない中間変更（削除→同一内容再追加等） | `git log --name-only` で中間コミットの全触ファイルを取得し、ネット差分に含まれないが HEAD に存在するファイルを `modified` として追加する。HEAD に存在しないファイル（一時的に追加→削除）は除外する |
 | パイプライン処理中にエラーが発生した場合 | エラーが発生したファイルをスキップし、残りのファイルの処理を続行する。pipeline_history にレコードを追加しないことで `last_commit_id` が前回値のまま保持される（次回再実行で再処理される） |
 | コンバーターが変換スキップを返したファイル（空テキスト、0バイト、未対応拡張子等） | 該当ファイルをスキップし、処理結果サマリの `warnings` に記録する（`errors` ではない）。非致命的なスキップであり、パイプライン全体の成否には影響しない |
-| コンバーターが予期しない例外を発生させたファイル | 該当ファイルのインデックス追加をスキップし、処理結果サマリの `errors` に記録する |
+| コンバーターが予期しない例外を発生させたファイル | 該当ファイルのインデックス追加をスキップし、処理結果サマリの `errors` に `PipelineErrorEntry`（`{path, size_bytes, message, phase}`）として記録する。`ConversionFailedError`（JSON パースエラー等、ファイルが壊れている可能性がある失敗）は同じ `errors` 経路で捕捉するが、スタックトレース不要の想定される業務的失敗として `logger.error` で記録する（予期しない `Exception` は `logger.exception` でスタックトレース付き）。例外メッセージには `path` を含めず、`PipelineErrorEntry.path` フィールドと重複させない |
 | 大量のファイルが一度に変更された場合 | 全件を順次処理する。バッチサイズ制限は設けない |
 | source_store の git リポジトリが未初期化 | パイプライン初回実行時に `git init` を自動実行する |
 | .meta ファイルのみが変更された場合 | 拡張子 `.meta` で .meta ファイルを判定する。metadata.db のメタデータを更新する。コンバーターの再処理は行わない（データ本体に変更がないため）。インデックス側にメタデータ（title 等）を保持している場合は、インデクサーにメタデータ更新を指示する（チャンクの再生成は不要、メタデータのみ upsert） |

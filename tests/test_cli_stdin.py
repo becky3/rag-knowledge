@@ -366,6 +366,12 @@ class TestAddDocumentFilenamePriority:
         mock.overwritten = 0
         mock.errors = 0
         mock.error_details = []
+        # 観測性フィールド（JSON 出力に含めるため明示的に値を設定。
+        # MagicMock の自動属性生成に任せると JSON シリアライズ時にエラーになる）
+        mock.partial_failures = 0
+        mock.partial_failure_details = []
+        mock.aborted = False
+        mock.abort_reason = None
         return mock
 
     @staticmethod

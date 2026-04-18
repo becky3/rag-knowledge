@@ -39,6 +39,8 @@ class StubConverter:
         self.deleted: list[str] = []
         self.cleared: list[SourceType | None] = []
         self.fail_on: set[str] = set()
+        # ConversionFailedError を送出させたいパス（convert 系のエラー経路検証用）
+        self.fail_on_with_failed_error: set[str] = set()
 
     def convert(
         self,
@@ -46,6 +48,10 @@ class StubConverter:
         source_store_dir: Path,
         converted_store_dir: Path,
     ) -> Path:
+        if file_path in self.fail_on_with_failed_error:
+            from rag.converter.converter import ConversionFailedError
+
+            raise ConversionFailedError("stub conversion failure")
         if file_path in self.fail_on:
             msg = f"converter error: {file_path}"
             raise RuntimeError(msg)
@@ -199,6 +205,33 @@ def _place_web_file(
 
 
 # --- テスト ---
+
+
+class TestPipelineSummaryFailedPaths:
+    """PipelineSummary.failed_paths() アクセサのテスト."""
+
+    def test_returns_empty_when_no_errors(self) -> None:
+        from rag.pipeline.models import PipelineMode, PipelineSummary
+
+        summary = PipelineSummary(
+            mode=PipelineMode.INCREMENTAL, total_files=0, processed=0,
+        )
+        assert summary.failed_paths() == set()
+
+    def test_extracts_paths_from_error_dicts(self) -> None:
+        """errors の dict から path のみを抽出する."""
+        from rag.pipeline.models import PipelineMode, PipelineSummary
+
+        summary = PipelineSummary(
+            mode=PipelineMode.CONVERT_ONLY,
+            total_files=3,
+            processed=1,
+            errors=[
+                {"path": "a.txt", "size_bytes": 10, "message": "x", "phase": "convert"},
+                {"path": "b.txt", "size_bytes": None, "message": "y", "phase": "convert"},
+            ],
+        )
+        assert summary.failed_paths() == {"a.txt", "b.txt"}
 
 
 class TestCommit:
@@ -418,9 +451,41 @@ class TestRunIncremental:
         assert summary.processed == 1
         assert len(summary.errors) == 1
 
+        # 構造化エラー情報が保持されていること（仕様: pipeline-controller.md）
+        entry = summary.errors[0]
+        assert entry["path"] == "local/bad.txt"
+        assert entry["size_bytes"] is not None and entry["size_bytes"] > 0
+        assert "converter error" in entry["message"]
+        assert entry["phase"] == "convert_and_index"
+
+        # failed_paths() アクセサが path 集合を返すこと
+        assert summary.failed_paths() == {"local/bad.txt"}
+
         # pipeline_history は記録されない
         history = ctrl.db.get_pipeline_history()
         assert len(history) == 0
+
+    async def test_conversion_failed_preserves_message(
+        self,
+        controller: tuple[PipelineController, StubConverter, StubIndexer],
+        workspace: dict[str, Path],
+    ) -> None:
+        """ConversionFailedError のメッセージが errors に保持されること.
+
+        PR #596 の観測性強化の目的（壊れファイル検出時の原因追跡）を
+        production 出力経路（PipelineSummary.errors）に届けるための要件。
+        """
+        ctrl, converter, _ = controller
+        _place_local_file(workspace["source"], "local/corrupt.txt")
+        ctrl.commit("first")
+
+        converter.fail_on_with_failed_error.add("local/corrupt.txt")
+
+        summary = await ctrl.run_incremental()
+        assert len(summary.errors) == 1
+        entry = summary.errors[0]
+        assert entry["path"] == "local/corrupt.txt"
+        assert "stub conversion failure" in entry["message"]
 
     async def test_invalid_last_commit_processes_all(
         self,
@@ -905,7 +970,7 @@ class TestRunFullRebuild:
         # convert: 1 成功, 1 エラー
         assert result.convert.processed == 1
         assert len(result.convert.errors) == 1
-        assert "local/bad.txt" in result.convert.errors
+        assert "local/bad.txt" in result.convert.failed_paths()
 
         # index: convert 成功分のみ
         assert result.index.total_files == 1
