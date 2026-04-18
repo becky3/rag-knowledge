@@ -1200,7 +1200,7 @@ def _format_cli_ingest_result(
 def _parse_pipeline_summary(data: dict[str, Any]) -> PipelineSummary | None:
     """JSON dict から PipelineSummary を復元する.
 
-    `errors` は `{path, size_bytes, message, phase?}` スキーマを持つ dict の
+    `errors` は `{path, size_bytes, message, phase}` スキーマを持つ dict の
     リストとして渡される前提（仕様: docs/specs/pipeline-controller.md）。
     パース失敗時は None を返す。
     """

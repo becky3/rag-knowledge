@@ -7,7 +7,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from enum import Enum
-from typing import NotRequired, TypedDict
+from typing import TypedDict
 
 
 class ChangeStatus(Enum):
@@ -71,7 +71,7 @@ class PipelineErrorEntry(TypedDict):
     """
 
     path: str
-    size_bytes: NotRequired[int | None]
+    size_bytes: int | None
     message: str
     phase: str
 
@@ -81,15 +81,15 @@ def format_pipeline_error(entry: PipelineErrorEntry) -> str:
 
     MCP レスポンス・CLI テキスト出力の両方で使用する共通フォーマッタ。
     `{path (size_bytes bytes) [phase]: message}` のフォーマットで返す。
-    size_bytes が None または未設定の場合はバイト数表示を省略する。
-    phase が空文字の場合は phase 表示を省略する。
+    size_bytes が None の場合はバイト数表示を省略する。
+    phase が空文字の場合は phase 表示を省略する（通常は常にセットされる）。
     """
-    path = entry.get("path", "")
-    message = entry.get("message", "")
-    phase = entry.get("phase", "")
-    size_bytes = entry.get("size_bytes")
+    path = entry["path"]
+    message = entry["message"]
+    phase = entry["phase"]
+    size_bytes = entry["size_bytes"]
 
-    size_part = f" ({size_bytes} bytes)" if isinstance(size_bytes, int) else ""
+    size_part = f" ({size_bytes} bytes)" if size_bytes is not None else ""
     phase_part = f" [{phase}]" if phase else ""
     return f"{path}{size_part}{phase_part}: {message}"
 
