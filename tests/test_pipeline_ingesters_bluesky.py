@@ -940,12 +940,13 @@ class TestForceMode:
         assert result2.skipped == 1
         assert result2.placed == 0
 
-        # 3 回目: force=True → 上書き
+        # 3 回目: force=True → 上書き（排他計上: placed=0, overwritten=1）
         client3 = _make_mock_client([{"feed": [item]}])
         result3, _ = await ingester.crawl_bluesky(
             "alice.bsky.social", force=True, client=client3,
         )
-        assert result3.placed == 1
+        assert result3.placed == 0
+        assert result3.overwritten == 1
         assert result3.skipped == 0
 
     async def test_force_triggers_media_download(
@@ -987,7 +988,9 @@ class TestForceMode:
             "alice.bsky.social", force=True, client=client2,
         )
 
-        assert result.placed == 1
+        # 排他計上: 既存ファイル上書きなので overwritten=1, placed=0
+        assert result.placed == 0
+        assert result.overwritten == 1
         escaped = _escape_did("did:plc:abc123")
         media_dir = (
             source_store.root_dir / "bluesky" / escaped / "2026" / "01"

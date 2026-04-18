@@ -246,7 +246,7 @@ class YoutubeIngester:
         json_str = json.dumps(json_data, ensure_ascii=False, indent=2)
         data_bytes = json_str.encode("utf-8")
 
-        # 重複チェック（上書き方式なので overwritten を記録。書き込み前に判定）
+        # 重複チェック（上書き方式。placed と overwritten は排他計上。書き込み前に判定）
         dest = self._store.root_dir / rel_path
         is_overwrite = dest.exists()
 
@@ -284,8 +284,8 @@ class YoutubeIngester:
 
         if is_overwrite:
             result.overwritten += 1
-
-        result.placed += 1
+        else:
+            result.placed += 1
         logger.info(
             "配置完了: %s (source=%s, snippets=%d)",
             rel_path,

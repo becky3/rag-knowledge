@@ -264,7 +264,7 @@ flowchart TD
 | repository に `/` や `\` が含まれる | バリデーションエラーとして拒否する（パストラバーサル防止） |
 | entry_id に `..` が含まれる | バリデーションエラーとして拒否する（パストラバーサル防止） |
 | entry_id に `/` や `\` が含まれる | バリデーションエラーとして拒否する（パストラバーサル防止） |
-| 同一 entry_id で再登録 | 上書き更新する |
+| 同一 entry_id で再登録 | 上書き更新する。`overwritten` に計上する（`placed` には計上しない。[common.md](common.md) の「`placed` と `overwritten` の排他関係」参照） |
 | entry_id 未指定 | `YYYYMMDD-HHMMSS-{topic}` 形式で自動生成する |
 | 日本語のみのタイトルで entry_id 自動生成 | topic 部分が空になり `YYYYMMDD-HHMMSS` のみとなる |
 | マイグレーション対象ディレクトリが空 | 0 件処理として正常終了する |

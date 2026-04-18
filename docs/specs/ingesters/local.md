@@ -75,7 +75,7 @@ Local インジェスターは、ローカルファイルシステム上のテ�
 |-----------|-----|------|------|
 | `dir_path` | 文字列 | はい | 取り込み対象ディレクトリのパス（絶対パスまたは相対パス） |
 | `pattern` | 文字列 | いいえ | glob パターン。デフォルト: `**/*`（再帰的に全対応ファイルを検索） |
-| `upload_mode` | 文字列 | いいえ | 同一配置先が存在する場合の動作。`fail`（デフォルト）: スキップして warning ログ出力、`replace`: 上書き |
+| `upload_mode` | 文字列 | いいえ | 同一配置先が存在する場合の動作。`fail`（デフォルト）: スキップして warning ログ出力（`skipped` に計上）、`replace`: 上書き（`overwritten` に計上。[common.md](common.md) の「`placed` と `overwritten` の排他関係」参照） |
 
 パターンのバリデーション: `pattern` に `..` が含まれる場合、または絶対パス（`Path(pattern).is_absolute()` で判定。`/` 始まりおよび Windows ドライブレター形式の両方を検出）の場合はバリデーションエラーとして拒否する。加えて、glob マッチ結果の各ファイルを `Path.resolve()` で正規化した後、`dir_path` の配下であることを検証し、配下でないファイルは除外する。
 
@@ -295,7 +295,7 @@ flowchart TD
 | `filename` にディレクトリセパレータや `..` が含まれる | コンテンツアップロード層が `Path(filename).name` でファイル名部分のみ採用する。サニタイズ後が空文字列または `..` の場合はバリデーションエラーとして拒否する（`rag_add_document`） |
 | 対応していない拡張子 | バリデーションエラーとして拒否する（`rag_add_document` 単一取り込み時）。`rag_crawl_documents` 一括取り込み時はフィルタで除外する |
 | `upload_mode=fail` かつ同日に同名ファイルが存在する | エラーを返す（`rag_add_document`）。`errors` に `placement` カテゴリで計上する |
-| `upload_mode=replace` かつ同日に同名ファイルが存在する | 上書きする（`rag_add_document`） |
+| `upload_mode=replace` かつ同日に同名ファイルが存在する | 上書きする（`rag_add_document`）。`overwritten` に計上する（`placed` には計上しない。[common.md](common.md) の「`placed` と `overwritten` の排他関係」参照） |
 | ファイルが存在しない（CLI） | バリデーションエラーとして拒否する（CLI `add-document` コマンド） |
 | ディレクトリが存在しない（`rag_crawl_documents`） | バリデーションエラーとして拒否する |
 | ファイルサイズが 0 バイト（`rag_crawl_documents`） | 該当ファイルをスキップする（スキップ数としてサマリーに計上）。空ファイルの配置は行わない |

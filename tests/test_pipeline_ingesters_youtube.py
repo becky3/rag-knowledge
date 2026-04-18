@@ -259,13 +259,16 @@ class TestIngestVideo:
 
     @pytest.mark.asyncio()
     async def test_overwritten_count_on_reingest(self, source_store: Any) -> None:
-        """同一動画を 2 回取り込んだ時に overwritten がカウントされることを検証する."""
+        """同一動画を 2 回取り込んだ時に overwritten がカウントされること（排他計上）を検証する.
+
+        仕様: docs/specs/ingesters/common.md「placed と overwritten の排他関係」
+        """
         ingester = make_youtube_ingester(source_store, max_duration=14400)
 
         metadata = _make_metadata()
         snippets = _make_snippets()
 
-        # 1 回目: dest.exists() が False → overwritten=0
+        # 1 回目: dest.exists() が False → placed=1, overwritten=0
         with (
             patch.object(ingester, "_fetch_metadata", new_callable=AsyncMock, return_value=metadata),
             patch.object(ingester, "_fetch_transcript", new_callable=AsyncMock, return_value=(snippets, "subtitle", "ja")),
@@ -284,7 +287,8 @@ class TestIngestVideo:
             patch.object(ingester, "_fetch_transcript", new_callable=AsyncMock, return_value=(snippets, "subtitle", "ja")),
         ):
             result2 = await ingester.ingest_video("https://www.youtube.com/watch?v=JV3KOJ_Z4Vs")
-        assert result2.placed == 1
+        # 排他計上: 既存ファイル上書き時は placed=0, overwritten=1
+        assert result2.placed == 0
         assert result2.overwritten == 1
 
 

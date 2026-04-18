@@ -130,8 +130,8 @@ class ZennIngester:
             )
 
         logger.info(
-            "Zenn crawl completed: placed=%d, skipped=%d, errors=%d",
-            result.placed, result.skipped, result.errors,
+            "Zenn crawl completed: placed=%d, overwritten=%d, skipped=%d, errors=%d",
+            result.placed, result.overwritten, result.skipped, result.errors,
         )
         return result
 
@@ -153,18 +153,18 @@ class ZennIngester:
 
         for i, slug in enumerate(slugs):
             rel_path = f"zenn/{username}/articles/{slug}.json"
+            dest = self._store.root_dir / rel_path
+            is_overwrite = dest.exists()
 
             # 取得フェーズ（category="metadata_fetch"）
             try:
                 # スキップ判定: 既存ファイルがあり force でなければスキップ
-                if not force:
-                    dest = self._store.root_dir / rel_path
-                    if dest.exists():
-                        logger.debug("既存ファイルのためスキップ: %s", rel_path)
-                        result.skipped += 1
-                        if progress_callback is not None:
-                            progress_callback(i + 1, len(slugs), f"articles/{slug}")
-                        continue
+                if is_overwrite and not force:
+                    logger.debug("既存ファイルのためスキップ: %s", rel_path)
+                    result.skipped += 1
+                    if progress_callback is not None:
+                        progress_callback(i + 1, len(slugs), f"articles/{slug}")
+                    continue
 
                 # 記事詳細取得
                 url = f"{ZENN_API_BASE}/articles/{slug}"
@@ -227,7 +227,10 @@ class ZennIngester:
                     rel_path=rel_path,
                     metadata=metadata,
                 )
-                result.placed += 1
+                if is_overwrite:
+                    result.overwritten += 1
+                else:
+                    result.placed += 1
             except Exception as exc:
                 logger.exception("記事の配置に失敗しました: %s", rel_path)
                 result.errors += 1
@@ -258,18 +261,18 @@ class ZennIngester:
 
         for i, slug in enumerate(slugs):
             rel_path = f"zenn/{username}/scraps/{slug}.json"
+            dest = self._store.root_dir / rel_path
+            is_overwrite = dest.exists()
 
             # 取得フェーズ（category="metadata_fetch"）
             try:
                 # スキップ判定: 既存ファイルがあり force でなければスキップ
-                if not force:
-                    dest = self._store.root_dir / rel_path
-                    if dest.exists():
-                        logger.debug("既存ファイルのためスキップ: %s", rel_path)
-                        result.skipped += 1
-                        if progress_callback is not None:
-                            progress_callback(i + 1, len(slugs), f"scraps/{slug}")
-                        continue
+                if is_overwrite and not force:
+                    logger.debug("既存ファイルのためスキップ: %s", rel_path)
+                    result.skipped += 1
+                    if progress_callback is not None:
+                        progress_callback(i + 1, len(slugs), f"scraps/{slug}")
+                    continue
 
                 # スクラップ詳細取得
                 url = f"{ZENN_API_BASE}/scraps/{slug}"
@@ -323,7 +326,10 @@ class ZennIngester:
                     rel_path=rel_path,
                     metadata=metadata,
                 )
-                result.placed += 1
+                if is_overwrite:
+                    result.overwritten += 1
+                else:
+                    result.placed += 1
             except Exception as exc:
                 logger.exception("スクラップの配置に失敗しました: %s", rel_path)
                 result.errors += 1
