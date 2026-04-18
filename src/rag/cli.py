@@ -19,6 +19,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, TypedDict
 from urllib.parse import urldefrag
 
+from .errors import CliErrorCode
 from .filter_parser import parse_filters
 from .pipeline.models import PipelinePhase, format_pipeline_error as _format_pipeline_error
 from .evaluation import (
@@ -145,9 +146,21 @@ def _wrap_progress(
     return wrapped
 
 
-def _output_error(message: str) -> None:
+def _output_error(
+    code: CliErrorCode,
+    message: str,
+    details: dict[str, object] | None = None,
+) -> None:
     """エラー JSON を出力し、exit code 1 で終了する."""
-    _output_json({"type": "error", "error": True, "message": message})
+    payload: dict[str, object] = {
+        "type": "error",
+        "error": True,
+        "code": code.value,
+        "message": message,
+    }
+    if details is not None:
+        payload["details"] = details
+    _output_json(payload)
     sys.exit(1)
 
 
@@ -167,7 +180,7 @@ class _JsonAwareArgumentParser(argparse.ArgumentParser):
 
     def error(self, message: str) -> None:  # type: ignore[override]
         if self._output_json_requested():
-            _output_error(f"{self.prog}: {message}")
+            _output_error(CliErrorCode.VALIDATION_ERROR, f"{self.prog}: {message}")
         # text モード: argparse 標準の usage + エラーメッセージを stderr に出す
         self.print_usage(sys.stderr)
         self.exit(1, f"{self.prog}: error: {message}\n")
@@ -1248,7 +1261,7 @@ def run_get_document(args: argparse.Namespace) -> None:
 
     if result.error:
         if json_out:
-            _output_error(result.error)
+            _output_error(CliErrorCode.NOT_FOUND, result.error)
         else:
             print(f"エラー: {result.error}", file=sys.stderr)
             sys.exit(1)
@@ -1337,7 +1350,7 @@ async def run_rebuild(args: argparse.Namespace) -> None:
     # incremental + source_type のバリデーション
     if mode == "incremental" and source_type is not None:
         if json_out:
-            _output_error("incremental モードでは source_type を指定できません")
+            _output_error(CliErrorCode.VALIDATION_ERROR, "incremental モードでは source_type を指定できません")
         logger.error(
             "incremental モードでは source_type を指定できません"
         )
@@ -1347,7 +1360,7 @@ async def run_rebuild(args: argparse.Namespace) -> None:
     if if_needed and mode not in ("index", "full"):
         msg = "--if-needed は --mode index または --mode full でのみ使用できます"
         if json_out:
-            _output_error(msg)
+            _output_error(CliErrorCode.VALIDATION_ERROR, msg)
         logger.error(msg)
         sys.exit(1)
 
@@ -1355,12 +1368,12 @@ async def run_rebuild(args: argparse.Namespace) -> None:
 
     if not settings.source_store_dir:
         if json_out:
-            _output_error("SOURCE_STORE_DIR が設定されていません")
+            _output_error(CliErrorCode.CONFIG_MISSING, "SOURCE_STORE_DIR が設定されていません")
         logger.error("SOURCE_STORE_DIR が設定されていません")
         sys.exit(1)
     if not settings.converted_store_dir:
         if json_out:
-            _output_error("CONVERTED_STORE_DIR が設定されていません")
+            _output_error(CliErrorCode.CONFIG_MISSING, "CONVERTED_STORE_DIR が設定されていません")
         logger.error("CONVERTED_STORE_DIR が設定されていません")
         sys.exit(1)
 
@@ -1368,7 +1381,7 @@ async def run_rebuild(args: argparse.Namespace) -> None:
     if not source_store_dir.exists():
         msg = f"source_store ディレクトリが存在しません: {source_store_dir}"
         if json_out:
-            _output_error(msg)
+            _output_error(CliErrorCode.CONFIG_MISSING, msg)
         logger.error(
             "source_store ディレクトリが存在しません: %s", source_store_dir,
         )
@@ -1399,7 +1412,7 @@ async def run_rebuild(args: argparse.Namespace) -> None:
     except LockAcquisitionError:
         msg = "別の再構築が実行中です（ロック競合）"
         if json_out:
-            _output_error(msg)
+            _output_error(CliErrorCode.LOCK_CONFLICT, msg)
         print(f"エラー: {msg}", file=sys.stderr)
         if if_needed:
             _show_error_dialog(msg)
@@ -1432,7 +1445,7 @@ async def run_rebuild(args: argparse.Namespace) -> None:
         if args.concurrency is not None and args.concurrency < 1:
             msg = "--concurrency は 1 以上を指定してください"
             if json_out:
-                _output_error(msg)
+                _output_error(CliErrorCode.VALIDATION_ERROR, msg)
             logger.error(msg)
             sys.exit(1)
 
@@ -1763,7 +1776,7 @@ def run_list_recent(args: argparse.Namespace) -> None:
             parsed_filters = parse_filters(args.filters)
         except ValueError as e:
             if json_out:
-                _output_error(str(e))
+                _output_error(CliErrorCode.VALIDATION_ERROR, str(e))
             else:
                 logger.error("エラー: %s", e)
                 sys.exit(1)
@@ -1798,7 +1811,7 @@ def run_list_recent(args: argparse.Namespace) -> None:
                 sources = db.list_sources(source_type=st, limit=limit, ascending=ascending, filters=parsed_filters)
                 total = db.count_sources_by_type(source_type=st, filters=parsed_filters)
             except ValueError as e:
-                _output_error(str(e))
+                _output_error(CliErrorCode.VALIDATION_ERROR, str(e))
                 return
         finally:
             db.close()
@@ -1885,7 +1898,7 @@ def run_search(args: argparse.Namespace) -> None:
             parsed_filters = parse_filters(args.filters)
         except ValueError as e:
             if json_out:
-                _output_error(str(e))  # sys.exit(1) で終了
+                _output_error(CliErrorCode.VALIDATION_ERROR, str(e))
             else:
                 logger.error("エラー: %s", e)
                 sys.exit(1)
@@ -1940,7 +1953,7 @@ async def run_delete(args: argparse.Namespace) -> None:
     except Exception:
         logger.exception("削除パイプライン実行に失敗: %s", source_id)
         if json_out:
-            _output_error(f"削除に失敗しました: {source_id}")
+            _output_error(CliErrorCode.INTERNAL_ERROR, f"削除に失敗しました: {source_id}")
         print(
             f"エラー: 削除に失敗しました: {source_id}",
             file=sys.stderr,
@@ -1984,14 +1997,14 @@ async def run_add_journal(args: argparse.Namespace) -> None:
         body = sys.stdin.read()
         if not body:
             if json_out:
-                _output_error("stdin からの入力が空です")
+                _output_error(CliErrorCode.VALIDATION_ERROR, "stdin からの入力が空です")
             print("エラー: stdin からの入力が空です", file=sys.stderr)
             raise SystemExit(1)
     else:
         file_path = Path(args.file)
         if not file_path.is_file():
             if json_out:
-                _output_error(f"ファイルが見つかりません: {file_path}")
+                _output_error(CliErrorCode.NOT_FOUND, f"ファイルが見つかりません: {file_path}")
             print(f"エラー: ファイルが見つかりません: {file_path}", file=sys.stderr)
             raise SystemExit(1)
         body = file_path.read_text(encoding="utf-8")
@@ -2003,7 +2016,7 @@ async def run_add_journal(args: argparse.Namespace) -> None:
     except LockAcquisitionError:
         msg = "別のインジェストが実行中です（ロック競合）"
         if json_out:
-            _output_error(msg)
+            _output_error(CliErrorCode.LOCK_CONFLICT, msg)
         print(f"エラー: {msg}", file=sys.stderr)
         raise SystemExit(1)
 
@@ -2020,7 +2033,7 @@ async def run_add_journal(args: argparse.Namespace) -> None:
         if ingest_result.errors > 0:
             first_detail = _error_detail_message(ingest_result.error_details[0])
             if json_out:
-                _output_error(first_detail)
+                _output_error(CliErrorCode.INTERNAL_ERROR, first_detail)
             print(f"エラー: {first_detail}", file=sys.stderr)
             raise SystemExit(1)
 
@@ -2317,7 +2330,7 @@ async def run_ingest_youtube(args: argparse.Namespace) -> None:
         ingest_result = await youtube_ingester.ingest_video(args.video_url)
     except (ValueError, TypeError) as e:
         if json_out:
-            _output_error(str(e))
+            _output_error(CliErrorCode.DEPENDENCY_UNAVAILABLE, str(e))
         logger.error("エラー: %s", e)
         sys.exit(1)
 
@@ -2363,7 +2376,7 @@ async def run_ingest_youtube_playlist(args: argparse.Namespace) -> None:
         )
     except (ValueError, TypeError) as e:
         if json_out:
-            _output_error(str(e))
+            _output_error(CliErrorCode.DEPENDENCY_UNAVAILABLE, str(e))
         logger.error("エラー: %s", e)
         sys.exit(1)
 
@@ -2447,7 +2460,7 @@ async def run_crawl_bluesky(args: argparse.Namespace) -> None:
                 )
     except (ValueError, TypeError) as e:
         if json_out:
-            _output_error(str(e))
+            _output_error(CliErrorCode.DEPENDENCY_UNAVAILABLE, str(e))
         logger.error("エラー: %s", e)
         sys.exit(1)
 
@@ -2512,7 +2525,7 @@ async def run_crawl_zenn(args: argparse.Namespace) -> None:
             )
     except (ValueError, TypeError) as e:
         if json_out:
-            _output_error(str(e))
+            _output_error(CliErrorCode.DEPENDENCY_UNAVAILABLE, str(e))
         logger.error("エラー: %s", e)
         sys.exit(1)
 
@@ -2555,7 +2568,7 @@ async def run_add_document(args: argparse.Namespace) -> None:
         if not filename:
             msg = "--stdin 使用時は --filename が必須です"
             if json_out:
-                _output_error(msg)
+                _output_error(CliErrorCode.VALIDATION_ERROR, msg)
             print(f"エラー: {msg}", file=sys.stderr)
             raise SystemExit(1)
 
@@ -2563,7 +2576,7 @@ async def run_add_document(args: argparse.Namespace) -> None:
         if not raw_input:
             msg = "stdin からの入力が空です"
             if json_out:
-                _output_error(msg)
+                _output_error(CliErrorCode.VALIDATION_ERROR, msg)
             print(f"エラー: {msg}", file=sys.stderr)
             raise SystemExit(1)
 
@@ -2573,7 +2586,7 @@ async def run_add_document(args: argparse.Namespace) -> None:
             data = decode_upload_content(raw_input, encoding)
         except ValueError as e:
             if json_out:
-                _output_error(str(e))
+                _output_error(CliErrorCode.VALIDATION_ERROR, str(e))
             print(f"エラー: {e}", file=sys.stderr)
             raise SystemExit(1)
 
@@ -2582,7 +2595,7 @@ async def run_add_document(args: argparse.Namespace) -> None:
         if ext not in supported_extensions:
             msg = f"対応していないファイル形式です: {ext!r}（対応: {', '.join(supported_extensions)}）"
             if json_out:
-                _output_error(msg)
+                _output_error(CliErrorCode.VALIDATION_ERROR, msg)
             print(f"エラー: {msg}", file=sys.stderr)
             raise SystemExit(1)
         display_name = filename
@@ -2591,18 +2604,18 @@ async def run_add_document(args: argparse.Namespace) -> None:
         file_path_str = args.file_path
         if not file_path_str or not file_path_str.strip():
             if json_out:
-                _output_error("file_path が空です")
+                _output_error(CliErrorCode.VALIDATION_ERROR, "file_path が空です")
             print("エラー: file_path が空です", file=sys.stderr)
             raise SystemExit(1)
         resolved = Path(file_path_str.strip()).resolve()
         if not resolved.exists():
             if json_out:
-                _output_error(f"ファイルが見つかりません: {resolved}")
+                _output_error(CliErrorCode.NOT_FOUND, f"ファイルが見つかりません: {resolved}")
             print(f"エラー: ファイルが見つかりません: {resolved}", file=sys.stderr)
             raise SystemExit(1)
         if resolved.is_dir():
             if json_out:
-                _output_error(f"パスはファイルではなくディレクトリです: {resolved}")
+                _output_error(CliErrorCode.VALIDATION_ERROR, f"パスはファイルではなくディレクトリです: {resolved}")
             print(f"エラー: パスはファイルではなくディレクトリです: {resolved}", file=sys.stderr)
             raise SystemExit(1)
         data = resolved.read_bytes()
@@ -2612,7 +2625,7 @@ async def run_add_document(args: argparse.Namespace) -> None:
         if ext not in supported_extensions:
             msg = f"対応していないファイル形式です: {ext!r}（対応: {', '.join(supported_extensions)}）"
             if json_out:
-                _output_error(msg)
+                _output_error(CliErrorCode.VALIDATION_ERROR, msg)
             print(f"エラー: {msg}", file=sys.stderr)
             raise SystemExit(1)
         display_name = file_path_str
@@ -2624,7 +2637,7 @@ async def run_add_document(args: argparse.Namespace) -> None:
     except LockAcquisitionError:
         msg = "別のインジェストが実行中です（ロック競合）"
         if json_out:
-            _output_error(msg)
+            _output_error(CliErrorCode.LOCK_CONFLICT, msg)
         print(f"エラー: {msg}", file=sys.stderr)
         raise SystemExit(1)
 
@@ -2643,7 +2656,7 @@ async def run_add_document(args: argparse.Namespace) -> None:
         except FileExistsError as e:
             msg = f"同名ファイルが既に存在します: {filename} ({e})"
             if json_out:
-                _output_error(msg)
+                _output_error(CliErrorCode.VALIDATION_ERROR, msg)
             print(f"エラー: {msg}", file=sys.stderr)
             raise SystemExit(1)
 
@@ -2655,7 +2668,7 @@ async def run_add_document(args: argparse.Namespace) -> None:
         if ingest_result.errors > 0:
             first_detail = _error_detail_message(ingest_result.error_details[0])
             if json_out:
-                _output_error(first_detail)
+                _output_error(CliErrorCode.INTERNAL_ERROR, first_detail)
             print(f"エラー: {first_detail}", file=sys.stderr)
             raise SystemExit(1)
 
@@ -2705,7 +2718,7 @@ async def run_crawl_documents(args: argparse.Namespace) -> None:
         # 早期終了: エラー詳細を先頭 1 件だけ表示してから exit
         first_detail = _error_detail_message(ingest_result.error_details[0])
         if json_out:
-            _output_error(first_detail)
+            _output_error(CliErrorCode.INTERNAL_ERROR, first_detail)
         print(f"エラー: {first_detail}", file=sys.stderr)
         raise SystemExit(1)
 
@@ -2740,7 +2753,7 @@ async def run_site_ingest(args: argparse.Namespace) -> None:
             validated_urls.append(validated)
         except ValueError as e:
             if json_out:
-                _output_error(str(e))
+                _output_error(CliErrorCode.VALIDATION_ERROR, str(e))
             logger.error("エラー: %s", e)
             sys.exit(1)
 
@@ -2750,7 +2763,7 @@ async def run_site_ingest(args: argparse.Namespace) -> None:
             re.compile(args.url_pattern)
         except re.error as e:
             if json_out:
-                _output_error(f"無効な正規表現パターン: {e}")
+                _output_error(CliErrorCode.VALIDATION_ERROR, f"無効な正規表現パターン: {e}")
             logger.error("無効な正規表現パターン: %s", e)
             sys.exit(1)
 
@@ -2900,7 +2913,7 @@ async def run_update_aozora_catalog(args: argparse.Namespace) -> None:
             result_text = await aozora_ingester.update_catalog(client=client)
     except (ValueError, TypeError) as e:
         if json_out:
-            _output_error(str(e))
+            _output_error(CliErrorCode.DEPENDENCY_UNAVAILABLE, str(e))
         logger.error("エラー: %s", e)
         sys.exit(1)
 
@@ -2934,7 +2947,7 @@ def run_search_aozora(args: argparse.Namespace) -> None:
         )
     except (ValueError, TypeError) as e:
         if json_out:
-            _output_error(str(e))
+            _output_error(CliErrorCode.DEPENDENCY_UNAVAILABLE, str(e))
         logger.error("エラー: %s", e)
         sys.exit(1)
 
@@ -2992,7 +3005,7 @@ async def run_ingest_aozora(args: argparse.Namespace) -> None:
             )
     except (ValueError, TypeError) as e:
         if json_out:
-            _output_error(str(e))
+            _output_error(CliErrorCode.DEPENDENCY_UNAVAILABLE, str(e))
         logger.error("エラー: %s", e)
         sys.exit(1)
 
@@ -3035,7 +3048,7 @@ async def run_ingest_aozora_author(args: argparse.Namespace) -> None:
             )
     except (ValueError, TypeError) as e:
         if json_out:
-            _output_error(str(e))
+            _output_error(CliErrorCode.DEPENDENCY_UNAVAILABLE, str(e))
         logger.error("エラー: %s", e)
         sys.exit(1)
 

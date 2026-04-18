@@ -30,3 +30,19 @@ pipeline_mode:
       description: 変換のみ（インデックス構築なし）
     - value: index
       description: インデックス構築のみ（変換なし）
+
+cli_error_code:
+  description: CLI JSON エラー出力のエラー種別コード
+  values:
+    - value: VALIDATION_ERROR
+      description: パラメータ検証失敗（argparse バリデーション、組合せ違反等）
+    - value: LOCK_CONFLICT
+      description: ロック競合（別プロセスが実行中）
+    - value: CONFIG_MISSING
+      description: 環境変数・設定不備
+    - value: DEPENDENCY_UNAVAILABLE
+      description: 外部依存エラー（LM Studio 接続失敗、ChromaDB 未起動等）
+    - value: NOT_FOUND
+      description: ソース・リソース不在
+    - value: INTERNAL_ERROR
+      description: 想定外例外（上記いずれにも該当しない）
