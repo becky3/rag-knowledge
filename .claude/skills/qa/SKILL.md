@@ -376,10 +376,12 @@ MCP 対応: `rag_stats` / `rag_list_recent` (+ filters) / `rag_search` / `rag_ge
 
 ### I) Obs（観測性）
 
-PR #596 の観測性機能（構造化エラー情報）が production 出力経路（CLI JSON / MCP レスポンス）に届いていることを検証する。
-仕様: [docs/specs/pipeline-controller.md](../../../docs/specs/pipeline-controller.md) の `PipelineSummary.errors`。
+PR #596 の観測性機能（構造化エラー情報）が production 出力経路（CLI JSON / MCP レスポンス）に届いていること、および #605 で確定した CLI exit code 体系（2 値）・MCP 応答契約（result line 優先）が正しく動作することを検証する。
 
-> **TODO:#605** exit code 体系（`echo $?` での判定）および MCP 応答経路との整合は #605 で設計確定後に追加する。
+仕様:
+
+- [docs/specs/pipeline-controller.md](../../../docs/specs/pipeline-controller.md) の `PipelineSummary.errors`
+- [docs/specs/rebuild-stats.md](../../../docs/specs/rebuild-stats.md) の「CLI exit code 体系」「MCP 応答契約」
 
 #### グループ準備
 
@@ -390,9 +392,18 @@ PR #596 の観測性機能（構造化エラー情報）が production 出力経
 |---|----------------|---------|---------|
 | 1 | 壊れた JSON を `<SOURCE_STORE_DIR>/zenn/obs_test/articles/broken.json` に配置（`echo '<!DOCTYPE html>' > …`）し、source_store で `git add -A && git commit` | 壊れた JSON の配置・コミットが成功 | `none` |
 | 2 | `rebuild --mode incremental --output json` を実行し、最終 JSON 行を `tail -1 \| jq '.errors'` で確認 | JSON 出力の `errors` が構造化 dict のリストで、`path` / `size_bytes` / `message` / `phase` を含む | `none` |
-| 3 | 壊れた JSON を削除し source_store で `git add -A && git commit` | 片付け成功 | `none` |
+| 3 | 直前コマンドの `echo $?` を実行 | **exit code = 0**（workload で `errors > 0` であっても CLI は完走扱い。2 値契約に従う） | `none` |
+| 4 | 壊れた JSON を削除し source_store で `git add -A && git commit` | 片付け成功 | `none` |
+| 5 | バリデーション失敗コマンドを実行: `rebuild --mode incremental --source-type web --output json`（`_output_error` 経路を通る組合せ違反） | stdout に `{"type": "error", "message": "incremental モードでは source_type を指定できません"}` が出力される | `none` |
+| 6 | 直前コマンドの `echo $?` を実行 | **exit code = 1**（2 値契約に従う。argparse バリデーション失敗も `_JsonAwareArgumentParser` で exit 1 に統一される） | `none` |
 
-MCP 対応: ステップ 2 は `rag_rebuild(mode="incremental")` のレスポンステキストに `path`・`size_bytes`・`message`・`phase` が含まれることで確認する（CLI JSON → MCP テキスト変換経路の動作確認）。
+MCP 対応:
+
+MCP 経路では `echo $?` を直接検証できないため、代替として以下を確認する:
+
+- ステップ 2: `rag_rebuild(mode="incremental")` のレスポンステキストに `path`・`size_bytes`・`message`・`phase` が含まれることで確認する（CLI JSON → MCP テキスト変換経路の動作確認）
+- ステップ 3 の代替: MCP 経路では `_run_cli_subprocess` が result 行を優先してパースするため、workload の `errors > 0` でも MCP クライアントは構造化サマリを受け取る（例外として失敗しない）。ステップ 2 でサマリが正しく返れば exit code 契約の動作も保証される
+- ステップ 5 の代替: `rag_rebuild(mode="incremental", source_type="web")` が `CLISubprocessError` として伝播し、エラーメッセージが MCP レスポンスに含まれる
 
 ### 7. クリーンアップ
 

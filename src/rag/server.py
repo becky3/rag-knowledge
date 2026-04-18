@@ -1058,9 +1058,10 @@ async def _run_cli_subprocess(
             process.stdin.close()
             await process.stdin.wait_closed()
 
-    async def _read_stdout() -> str:
-        """stdout を行単位で読み、progress 通知を処理し、最終 result/error 行を返す."""
+    async def _read_stdout() -> tuple[str, str]:
+        """stdout を行単位で読み、progress を処理し、最終 result 行・error 行を返す."""
         _result_line = ""
+        _error_line = ""
         assert process.stdout is not None  # noqa: S101
         while True:
             raw = await process.stdout.readline()
@@ -1070,7 +1071,6 @@ async def _run_cli_subprocess(
             if not line:
                 continue
 
-            # JSON パースを試みて type フィールドで分岐
             try:
                 data = json.loads(line)
                 if isinstance(data, dict):
@@ -1085,13 +1085,13 @@ async def _run_cli_subprocess(
                                 message=current,
                             )
                         continue
-                    # result/error のみ最終結果として保持
-                    if msg_type in {"result", "error"}:
+                    if msg_type == "error":
+                        _error_line = line
+                    elif msg_type == "result":
                         _result_line = line
             except json.JSONDecodeError:
-                # 非 JSON 行（ログ等）は result_line を上書きしない
                 pass
-        return _result_line
+        return _result_line, _error_line
 
     async def _drain_stderr() -> bytes:
         """stderr を並行に drain する（パイプバッファ溢れ防止）."""
@@ -1101,7 +1101,7 @@ async def _run_cli_subprocess(
 
     # stdout と stderr を並行に読み取る（パイプバッファのデッドロック防止）
     try:
-        result_line, stderr_bytes = await asyncio.gather(
+        (result_line, error_line), stderr_bytes = await asyncio.gather(
             _read_stdout(),
             _drain_stderr(),
         )
@@ -1122,37 +1122,36 @@ async def _run_cli_subprocess(
     stderr_lines = stderr_text.rstrip().splitlines()
     stderr_tail = "\n".join(stderr_lines[-10:])
 
-    # SEGFAULT 検出
+    if stderr_text:
+        for line in stderr_lines:
+            logger.debug("[CLI] %s", line)
+    logger.debug("CLI subprocess %s exit_code=%d", command, exit_code)
+
+    # 判定は優先順位「SEGFAULT > error line > result line > 出力なし」。
+    # exit_code は判定に使わない（CLI の 2 値契約: 0=完走 / 1=致命、
+    # workload の errors/aborted は result JSON で表現する）。
     if exit_code in _SEGFAULT_EXIT_CODES:
         raise CLISubprocessError(
             f"CLI サブプロセスがクラッシュしました (SEGFAULT, exit_code={exit_code})"
         )
 
-    # エラー処理
-    if exit_code != 0:
-        if result_line:
-            try:
-                error_data = json.loads(result_line)
-                if error_data.get("error") or error_data.get("type") == "error":
-                    error_msg = error_data.get("message", "不明なエラー")
-                    raise CLISubprocessError(
-                        error_msg,
-                        lock_conflict=_is_lock_conflict_error(error_msg),
-                    )
-            except json.JSONDecodeError:
-                pass
+    if error_line:
+        try:
+            error_data = json.loads(error_line)
+        except json.JSONDecodeError as exc:
+            raise CLISubprocessError(
+                f"CLI サブプロセスのエラー行パースに失敗: {error_line}"
+            ) from exc
+        error_msg = error_data.get("message", "不明なエラー")
         raise CLISubprocessError(
-            f"CLI サブプロセスが異常終了しました (exit_code={exit_code})\n{stderr_tail}"
+            error_msg,
+            lock_conflict=_is_lock_conflict_error(error_msg),
         )
 
-    # 正常終了時の stderr をログに転送（警告やデバッグ情報の保全）
-    if stderr_text:
-        for line in stderr_lines:
-            logger.debug("[CLI] %s", line)
-
-    # 結果パース
     if not result_line:
-        raise CLISubprocessError("CLI サブプロセスの出力が空です")
+        raise CLISubprocessError(
+            f"CLI サブプロセスの出力が空です (exit_code={exit_code})\n{stderr_tail}"
+        )
 
     try:
         result: dict[str, Any] = json.loads(result_line)
@@ -1161,7 +1160,7 @@ async def _run_cli_subprocess(
             f"CLI サブプロセスの結果パースに失敗: {result_line}"
         ) from exc
 
-    logger.info("CLI subprocess completed: %s (exit_code=0)", command)
+    logger.info("CLI subprocess completed: %s (exit_code=%d)", command, exit_code)
     return result
 
 

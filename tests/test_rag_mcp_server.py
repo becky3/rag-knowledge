@@ -657,6 +657,141 @@ class TestCLISubprocessError:
         assert err.lock_conflict is True
 
 
+class TestRunCliSubprocess:
+    """_run_cli_subprocess の判定ロジック（result line 優先、exit code は判定に使わない）."""
+
+    @staticmethod
+    def _make_mock_process(
+        stdout_lines: list[str],
+        *,
+        exit_code: int = 0,
+        stderr: str = "",
+    ) -> AsyncMock:
+        """stdout/stderr を非同期 readline で返すモックプロセスを作成する."""
+        mock_process = AsyncMock()
+        mock_process.returncode = exit_code
+        mock_process.wait = AsyncMock(return_value=exit_code)
+
+        lines_iter = iter([line.encode("utf-8") + b"\n" for line in stdout_lines] + [b""])
+        stdout = AsyncMock()
+
+        async def _readline() -> bytes:
+            return next(lines_iter, b"")
+
+        stdout.readline = _readline
+        mock_process.stdout = stdout
+
+        stderr_mock = AsyncMock()
+        stderr_mock.read = AsyncMock(return_value=stderr.encode("utf-8"))
+        mock_process.stderr = stderr_mock
+        return mock_process
+
+    @pytest.mark.asyncio
+    async def test_result_line_returns_parsed_result(self) -> None:
+        """type: result 行がある場合、exit code 0 でパース済み結果を返す."""
+        mod = import_module("rag.server")
+        result_payload = '{"type": "result", "placed": 3, "errors": 0}'
+        mock_process = self._make_mock_process([result_payload], exit_code=0)
+
+        with patch("asyncio.create_subprocess_exec", return_value=mock_process):
+            result = await mod._run_cli_subprocess("rebuild")
+
+        assert result["type"] == "result"
+        assert result["placed"] == 3
+        assert result["errors"] == 0
+
+    @pytest.mark.asyncio
+    async def test_result_line_with_nonzero_exit_returns_result(self) -> None:
+        """非ゼロ exit でも type: result 行があればパース成功を返す.
+
+        これが本 Issue の核となる変更: exit code は判定に使わず、
+        workload の errors/aborted は result JSON で表現する。
+        """
+        mod = import_module("rag.server")
+        result_payload = (
+            '{"type": "result", "placed": 0, "errors": 2, '
+            '"error_details": [{"path": "a.md", "message": "x"}]}'
+        )
+        mock_process = self._make_mock_process([result_payload], exit_code=2)
+
+        with patch("asyncio.create_subprocess_exec", return_value=mock_process):
+            result = await mod._run_cli_subprocess("rebuild")
+
+        assert result["errors"] == 2
+        assert result["error_details"][0]["path"] == "a.md"
+
+    @pytest.mark.asyncio
+    async def test_error_line_raises_cli_subprocess_error(self) -> None:
+        """type: error 行がある場合は CLISubprocessError を raise する."""
+        mod = import_module("rag.server")
+        error_payload = '{"type": "error", "message": "バリデーション失敗"}'
+        mock_process = self._make_mock_process([error_payload], exit_code=1)
+
+        with patch("asyncio.create_subprocess_exec", return_value=mock_process):
+            with pytest.raises(mod.CLISubprocessError) as exc_info:
+                await mod._run_cli_subprocess("rebuild")
+
+        assert "バリデーション失敗" in str(exc_info.value)
+        assert exc_info.value.lock_conflict is False
+
+    @pytest.mark.asyncio
+    async def test_error_line_priority_over_result_line(self) -> None:
+        """error 行と result 行が両方ある場合、error 行が優先される."""
+        mod = import_module("rag.server")
+        stdout_lines = [
+            '{"type": "result", "placed": 1}',
+            '{"type": "error", "message": "後から発生したエラー"}',
+        ]
+        mock_process = self._make_mock_process(stdout_lines, exit_code=0)
+
+        with patch("asyncio.create_subprocess_exec", return_value=mock_process):
+            with pytest.raises(mod.CLISubprocessError) as exc_info:
+                await mod._run_cli_subprocess("rebuild")
+
+        assert "後から発生したエラー" in str(exc_info.value)
+
+    @pytest.mark.asyncio
+    async def test_no_output_raises_with_exit_code(self) -> None:
+        """出力が空の場合、exit_code を含む CLISubprocessError を raise する."""
+        mod = import_module("rag.server")
+        mock_process = self._make_mock_process([], exit_code=1, stderr="fatal error")
+
+        with patch("asyncio.create_subprocess_exec", return_value=mock_process):
+            with pytest.raises(mod.CLISubprocessError) as exc_info:
+                await mod._run_cli_subprocess("rebuild")
+
+        msg = str(exc_info.value)
+        assert "出力が空" in msg
+        assert "exit_code=1" in msg
+
+    @pytest.mark.asyncio
+    async def test_segfault_exit_code_raises_segfault_error(self) -> None:
+        """SEGFAULT 扱いの exit_code では result 行の有無にかかわらず raise する."""
+        mod = import_module("rag.server")
+        segfault_code = next(iter(mod._SEGFAULT_EXIT_CODES))
+        result_payload = '{"type": "result", "placed": 1}'
+        mock_process = self._make_mock_process([result_payload], exit_code=segfault_code)
+
+        with patch("asyncio.create_subprocess_exec", return_value=mock_process):
+            with pytest.raises(mod.CLISubprocessError) as exc_info:
+                await mod._run_cli_subprocess("rebuild")
+
+        assert "SEGFAULT" in str(exc_info.value)
+
+    @pytest.mark.asyncio
+    async def test_lock_conflict_detected_from_error_line(self) -> None:
+        """ロック競合エラーの場合 lock_conflict=True が設定される."""
+        mod = import_module("rag.server")
+        error_payload = '{"type": "error", "message": "lock conflict: already held"}'
+        mock_process = self._make_mock_process([error_payload], exit_code=1)
+
+        with patch("asyncio.create_subprocess_exec", return_value=mock_process):
+            with pytest.raises(mod.CLISubprocessError) as exc_info:
+                await mod._run_cli_subprocess("rebuild")
+
+        assert exc_info.value.lock_conflict is True
+
+
 class TestFormatCliIngestResult:
     """_format_cli_ingest_result のテスト."""
 

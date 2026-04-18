@@ -151,6 +151,38 @@ def _output_error(message: str) -> None:
     sys.exit(1)
 
 
+class _JsonAwareArgumentParser(argparse.ArgumentParser):
+    """argparse のバリデーションエラーを CLI 2 値契約（0/1）に統一する.
+
+    標準の argparse はバリデーション失敗で exit code 2（POSIX usage error 慣習）を
+    返すが、これは CLI exit code の 2 値契約（0=完走 / 1=致命、仕様:
+    docs/specs/rebuild-stats.md）と矛盾する。
+    本プロジェクトでは以下を優先して慣習より契約の一貫性を取る:
+
+    - `--output json`: `_output_error` 経由で stdout に `type:"error"` JSON 行を
+      出力してから `sys.exit(1)`（MCP 応答経路が構造化エラーを受け取れる）
+    - 上記以外（text モード）: argparse 標準のメッセージを stderr に書いてから
+      `sys.exit(1)`（exit code のみ統一、メッセージ形式は argparse 既定）
+    """
+
+    def error(self, message: str) -> None:  # type: ignore[override]
+        if self._output_json_requested():
+            _output_error(f"{self.prog}: {message}")
+        # text モード: argparse 標準の usage + エラーメッセージを stderr に出す
+        self.print_usage(sys.stderr)
+        self.exit(1, f"{self.prog}: error: {message}\n")
+
+    @staticmethod
+    def _output_json_requested() -> bool:
+        argv = sys.argv[1:]
+        if "--output=json" in argv:
+            return True
+        for i, arg in enumerate(argv):
+            if arg == "--output" and i + 1 < len(argv) and argv[i + 1] == "json":
+                return True
+        return False
+
+
 def _error_detail_message(detail: dict[str, object]) -> str:
     """error_details の dict から表示用メッセージを抽出する."""
     message = detail.get("message")
@@ -269,8 +301,12 @@ def _validate_bm25_b(value: str) -> float:
 
 def main() -> None:
     """CLIエントリポイント."""
-    parser = argparse.ArgumentParser(description="RAG Knowledge CLI")
-    subparsers = parser.add_subparsers(dest="command", required=True)
+    parser = _JsonAwareArgumentParser(description="RAG Knowledge CLI")
+    # サブパーサーにも _JsonAwareArgumentParser を使わせる。
+    # argparse のデフォルトは ArgumentParser 固定で、親クラスを継承しない。
+    subparsers = parser.add_subparsers(
+        dest="command", required=True, parser_class=_JsonAwareArgumentParser,
+    )
 
     # evaluate サブコマンド
     eval_parser = subparsers.add_parser("evaluate", help="RAG検索精度を評価")

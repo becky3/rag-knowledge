@@ -7,6 +7,7 @@ rag_rebuild MCP ツール・CLI、rag_stats 拡張の振る舞いを検証する
 
 from __future__ import annotations
 
+import json
 from importlib import import_module
 from unittest.mock import AsyncMock, patch
 
@@ -251,6 +252,60 @@ class TestRagRebuild:
         assert "zenn/user/articles/broken.json" in result
         assert "15 bytes" in result
         assert "JSON parse error" in result
+
+    @pytest.mark.asyncio
+    async def test_structured_errors_with_nonzero_exit_reach_mcp_response(self) -> None:
+        """非ゼロ exit_code でも result 行があれば構造化サマリが MCP に届くこと.
+
+        本テストは #605 の核となる契約を subprocess レベルでカバーする:
+        workload の errors>0 により CLI が将来的に非ゼロで終了しても、
+        stdout に result 行がある限り MCP クライアントはサマリを受け取る。
+        仕様: docs/specs/rebuild-stats.md「MCP 応答契約」。
+        """
+        from rag.server import rag_rebuild
+
+        result_payload = json.dumps({
+            "type": "result",
+            "mode": "incremental",
+            "total_files": 2,
+            "processed": 1,
+            "errors": [
+                {
+                    "path": "zenn/user/articles/broken.json",
+                    "size_bytes": 15,
+                    "message": "JSON parse error",
+                    "phase": "convert_and_index",
+                },
+            ],
+            "warnings": [],
+            "elapsed": 0.4,
+        })
+
+        mock_process = AsyncMock()
+        # 将来 CLI が errors>0 で非ゼロ exit を返したとしても result 行が優先される
+        mock_process.returncode = 2
+        mock_process.wait = AsyncMock(return_value=2)
+
+        lines_iter = iter([result_payload.encode("utf-8") + b"\n", b""])
+        stdout = AsyncMock()
+
+        async def _readline() -> bytes:
+            return next(lines_iter, b"")
+
+        stdout.readline = _readline
+        mock_process.stdout = stdout
+
+        stderr_mock = AsyncMock()
+        stderr_mock.read = AsyncMock(return_value=b"")
+        mock_process.stderr = stderr_mock
+
+        with patch("asyncio.create_subprocess_exec", return_value=mock_process):
+            response = await rag_rebuild(mode="incremental")
+
+        # exit_code=2 にもかかわらず構造化サマリが MCP レスポンスに含まれる
+        assert "zenn/user/articles/broken.json" in response
+        assert "15 bytes" in response
+        assert "JSON parse error" in response
 
     @pytest.mark.asyncio
     async def test_lock_conflict_returns_error(self) -> None:
