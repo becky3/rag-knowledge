@@ -29,6 +29,7 @@ QA 検証グループ:
   F) Upload   — HTTP Upload API（HTTP モード固定）
   G) Eval     — init-test-db, evaluate（フィクスチャ必要）
   H) Core     — stats, list-recent, search, get-document, delete, rebuild
+  I) Obs      — 観測性（構造化エラー情報・exit code 体系の検証）
 
 どのグループを検証しますか？（例: A B D, all）
 ```
@@ -372,6 +373,26 @@ A〜G の取り込みデータを使ってパイプライン基盤を検証す�
 MCP 対応: `rag_stats` / `rag_list_recent` (+ filters) / `rag_search` / `rag_get_document` / `rag_delete` / `rag_rebuild`
 
 > MCP `rag_list_recent` の filters 確認: `rag_list_recent(source_type="journal", filters="repository=rag-knowledge")` で journal がリポジトリ名で絞り込まれること。
+
+### I) Obs（観測性）
+
+PR #596 の観測性機能（構造化エラー情報）が production 出力経路（CLI JSON / MCP レスポンス）に届いていることを検証する。
+仕様: [docs/specs/pipeline-controller.md](../../../docs/specs/pipeline-controller.md) の `PipelineSummary.errors`。
+
+> **TODO:#605** exit code 体系（`echo $?` での判定）および MCP 応答経路との整合は #605 で設計確定後に追加する。
+
+#### グループ準備
+
+1. 事前に何らかのインジェストを実行し、source_store を非空にしておく（グループ A や C の実行後を想定）
+2. 壊れた JSON を投入するための `source_store/zenn` ディレクトリが存在することを確認する
+
+| # | コマンド（CLI） | 期待結果 | 検証種別 |
+|---|----------------|---------|---------|
+| 1 | 壊れた JSON を `<SOURCE_STORE_DIR>/zenn/obs_test/articles/broken.json` に配置（`echo '<!DOCTYPE html>' > …`）し、source_store で `git add -A && git commit` | 壊れた JSON の配置・コミットが成功 | `none` |
+| 2 | `rebuild --mode incremental --output json` を実行し、最終 JSON 行を `tail -1 \| jq '.errors'` で確認 | JSON 出力の `errors` が構造化 dict のリストで、`path` / `size_bytes` / `message` / `phase` を含む | `none` |
+| 3 | 壊れた JSON を削除し source_store で `git add -A && git commit` | 片付け成功 | `none` |
+
+MCP 対応: ステップ 2 は `rag_rebuild(mode="incremental")` のレスポンステキストに `path`・`size_bytes`・`message`・`phase` が含まれることで確認する（CLI JSON → MCP テキスト変換経路の動作確認）。
 
 ### 7. クリーンアップ
 

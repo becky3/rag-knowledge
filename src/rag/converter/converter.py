@@ -450,16 +450,14 @@ class Converter:
         try:
             raw = source_path.read_text(encoding="utf-8")
         except (OSError, UnicodeDecodeError) as exc:
-            raise ConversionFailedError(
-                f"JSON read error: {file_path}",
-            ) from exc
+            # path は PipelineErrorEntry.path で提供されるためメッセージには含めない
+            raise ConversionFailedError("JSON read error") from exc
 
         try:
             parsed = json.loads(raw)
         except json.JSONDecodeError as exc:
-            raise ConversionFailedError(
-                f"JSON parse error: {file_path}",
-            ) from exc
+            # path は PipelineErrorEntry.path で提供されるためメッセージには含めない
+            raise ConversionFailedError("JSON parse error") from exc
 
         if not isinstance(parsed, dict):
             logger.warning(

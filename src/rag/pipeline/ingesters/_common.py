@@ -49,6 +49,8 @@ class IngestResult:
     def summary(self, *, context: str = "") -> str:
         """結果サマリーテキストを生成する."""
         parts = [f"完了: {self.placed}件配置"]
+        if self.overwritten > 0:
+            parts.append(f"上書き: {self.overwritten}件")
         if self.skipped > 0:
             parts.append(f"スキップ: {self.skipped}件")
         if self.errors > 0:
