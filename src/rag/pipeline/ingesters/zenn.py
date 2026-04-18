@@ -116,12 +116,12 @@ class ZennIngester:
         effective_cb = _offset_progress if progress_callback is not None else None
 
         if content_type in ("articles", "all"):
-            items_before = result.placed + result.skipped + result.errors
+            items_before = result.placed + result.overwritten + result.skipped + result.errors
             await self._crawl_articles(
                 username, effective_max, client, result, force=force,
                 progress_callback=effective_cb,
             )
-            progress_offset[0] = (result.placed + result.skipped + result.errors) - items_before
+            progress_offset[0] = (result.placed + result.overwritten + result.skipped + result.errors) - items_before
 
         if content_type in ("scraps", "all"):
             await self._crawl_scraps(
@@ -154,12 +154,11 @@ class ZennIngester:
         for i, slug in enumerate(slugs):
             rel_path = f"zenn/{username}/articles/{slug}.json"
             dest = self._store.root_dir / rel_path
-            is_overwrite = dest.exists()
 
             # 取得フェーズ（category="metadata_fetch"）
             try:
                 # スキップ判定: 既存ファイルがあり force でなければスキップ
-                if is_overwrite and not force:
+                if dest.exists() and not force:
                     logger.debug("既存ファイルのためスキップ: %s", rel_path)
                     result.skipped += 1
                     if progress_callback is not None:
@@ -221,6 +220,7 @@ class ZennIngester:
 
             # 配置フェーズ（category="placement"）
             try:
+                is_overwrite = dest.exists()
                 self._store.place_file(
                     source_type="zenn",
                     data=json_bytes,
@@ -262,12 +262,11 @@ class ZennIngester:
         for i, slug in enumerate(slugs):
             rel_path = f"zenn/{username}/scraps/{slug}.json"
             dest = self._store.root_dir / rel_path
-            is_overwrite = dest.exists()
 
             # 取得フェーズ（category="metadata_fetch"）
             try:
                 # スキップ判定: 既存ファイルがあり force でなければスキップ
-                if is_overwrite and not force:
+                if dest.exists() and not force:
                     logger.debug("既存ファイルのためスキップ: %s", rel_path)
                     result.skipped += 1
                     if progress_callback is not None:
@@ -320,6 +319,7 @@ class ZennIngester:
 
             # 配置フェーズ（category="placement"）
             try:
+                is_overwrite = dest.exists()
                 self._store.place_file(
                     source_type="zenn",
                     data=json_bytes,

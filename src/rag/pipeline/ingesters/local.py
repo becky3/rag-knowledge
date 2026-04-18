@@ -66,7 +66,7 @@ class LocalIngester:
                 result.errors = 1
                 result.error_details.append({
                     "category": "placement",
-                    "target": filename,
+                    "target": rel_path,
                     "message": msg,
                 })
                 raise FileExistsError(msg)
