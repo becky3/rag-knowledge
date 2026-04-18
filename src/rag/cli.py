@@ -159,9 +159,8 @@ class _JsonAwareArgumentParser(argparse.ArgumentParser):
     docs/specs/rebuild-stats.md）と矛盾する。
     本プロジェクトでは以下を優先して慣習より契約の一貫性を取る:
 
-    - `--output json` / `-o json`: `_output_error` 経由で stdout に
-      `type:"error"` JSON 行を出力してから `sys.exit(1)`（MCP 応答経路が
-      構造化エラーを受け取れる）
+    - `--output json`: `_output_error` 経由で stdout に `type:"error"` JSON 行を
+      出力してから `sys.exit(1)`（MCP 応答経路が構造化エラーを受け取れる）
     - 上記以外（text モード）: argparse 標準のメッセージを stderr に書いてから
       `sys.exit(1)`（exit code のみ統一、メッセージ形式は argparse 既定）
     """
@@ -176,10 +175,10 @@ class _JsonAwareArgumentParser(argparse.ArgumentParser):
     @staticmethod
     def _output_json_requested() -> bool:
         argv = sys.argv[1:]
-        if "--output=json" in argv or "-o=json" in argv:
+        if "--output=json" in argv:
             return True
         for i, arg in enumerate(argv):
-            if arg in ("--output", "-o") and i + 1 < len(argv) and argv[i + 1] == "json":
+            if arg == "--output" and i + 1 < len(argv) and argv[i + 1] == "json":
                 return True
         return False
 

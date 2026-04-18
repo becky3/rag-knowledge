@@ -122,6 +122,9 @@ class TestJsonAwareArgumentParser:
         with pytest.raises(SystemExit) as exc_info:
             parser.parse_args(["--mode", "invalid", "--output=json"])
         assert exc_info.value.code == 1
+        captured = capsys.readouterr()
+        parsed = json.loads(captured.out.strip())
+        assert parsed["type"] == "error"
 
     def test_text_mode_exits_with_1_and_stderr_message(
         self,
