@@ -128,7 +128,10 @@ flowchart TD
     CRASH --> ERROR_CRASH["エラー返却（サーバー生存）"]
 ```
 
-MCP 経由の場合、パイプライン処理（再構築・取り込み後のインデックス構築・削除）は CLI を別プロセスとして実行する（MCP 薄層アダプターパターン、詳細は [rag-knowledge.md](rag-knowledge.md) を参照）。C 拡張の SEGFAULT が発生してもサーバープロセスは生存し、exit code からエラーメッセージを返却する。CLI 直接実行は独立プロセスのためサブプロセス化は不要。
+MCP 経由の場合、パイプライン処理（再構築・取り込み後のインデックス構築・削除）は CLI を別プロセスとして実行する
+（MCP 薄層アダプターパターン、詳細は [rag-knowledge.md](rag-knowledge.md) を参照）。
+C 拡張の SEGFAULT が発生してもサーバープロセスは生存し、SEGFAULT 検出時は専用のエラーメッセージを返却する
+（判定ロジックは後述「MCP 応答契約」参照）。CLI 直接実行は独立プロセスのためサブプロセス化は不要。
 
 ### CLI サブプロセス進捗通知
 
@@ -157,10 +160,38 @@ CLI は `--output json` 指定時に JSON Lines 形式で stdout に出力する
 
 MCP サーバー（server.py）は stdout を行単位で読み取り、`progress` 行を MCP 通知に変換し、`result` / `error` 行で処理結果を確定する。
 
-> **TODO:#605** CLI の exit code 体系（ingest/rebuild での errors/aborted の反映）
-> および MCP 応答経路との整合は本仕様書では未定義。#605 で設計確定後に追記する。
-> 現時点では「正常完走 → exit 0 / バリデーション失敗・例外 → exit 1」の 2 値のみ
-> （`errors > 0` や `aborted` は JSON 出力の構造化フィールドでのみ表現される）。
+#### CLI exit code 体系（2 値）
+
+CLI の exit code は「CLI プロセスが最終 JSON 行（`type: "result"` または `type: "error"`）を出力して正常終了したか」を示す 2 値であり、workload の結果（`errors` / `aborted`）は JSON 出力の構造化フィールドで表現する。
+
+| exit code | 意味 | 発生条件 |
+|-----------|------|---------|
+| `0` | CLI プロセスが最終 JSON 行を出力して正常終了した | workload の errors 有無は問わない（`errors>0` でも `0`、`aborted=true` でも `0`） |
+| `1` | CLI プロセスが致命的に失敗した | パラメータ・設定不備による進行不能、プログラミングエラー、未捕捉例外。`type: "error"` JSON 行を出力するか、または出力前にクラッシュする |
+
+**設計意図 (Why)**: MCP 経路は CLI の stdout を構造化 JSON として解釈する。workload の errors を exit code に反映すると「非ゼロ exit → 例外化」のガード経路と衝突し、構造化サマリが MCP クライアントに届かなくなる。CLI 側は「完走したか」のみを exit code で表現し、workload の結果は JSON 経路に単一責任を持たせる。
+
+**argparse バリデーション失敗の扱い**:
+Python 標準の argparse はバリデーション失敗時に exit code 2 を返す（POSIX usage-error 慣習）。
+本プロジェクトでは 2 値契約との一貫性を優先し、`_JsonAwareArgumentParser`（`src/rag/cli.py`）で exit code を 1 に統一する。
+`--output json` 指定時は `_output_error` 経由で構造化エラー行を出力する。
+
+**SEGFAULT の扱い**: C 拡張のクラッシュにより `_SEGFAULT_EXIT_CODES`（`src/rag/server.py` で定義）に含まれる exit code が返る場合、2 値契約の範囲外として MCP 応答契約で個別検出する（後述の優先度 1 参照）。
+
+**スケジューラ運用**: 致命的失敗の検知は exit code（`cmd && ...`）、workload の errors/aborted の判定は JSON parse（`jq '.errors | length > 0'` / `jq '.aborted'`）で行う。
+
+#### MCP 応答契約（stdout 判定ロジック）
+
+`src/rag/server.py::_run_cli_subprocess` は CLI の stdout を以下の優先順位で判定する。SEGFAULT 検出を除き、exit code は判定に使わず debug ログ出力および「出力なし」エラーメッセージでの参照のみに用いる。
+
+| 優先 | 検出対象 | 動作 |
+|------|----------|------|
+| 1 | `exit_code in _SEGFAULT_EXIT_CODES` | `CLISubprocessError("SEGFAULT, exit_code={code}")` を raise |
+| 2 | stdout に `type: "error"` 行 | `message` を取り出して `CLISubprocessError(message)` を raise（ロック競合判定は `_is_lock_conflict_error` が message 内のキーワード有無で実施。詳細は `src/rag/server.py`） |
+| 3 | stdout に `type: "result"` 行 | JSON をパースして dict を返す（`errors>0` でも `aborted=true` でも返却） |
+| 4 | 出力なし | `CLISubprocessError("出力が空 (exit_code={code})")` を raise（stderr tail を付加） |
+
+**設計意図 (Why)**: `errors>0` を含む result 行は MCP クライアントが期待する構造化サマリであり、exit code の値で破棄してはならない。error 行が明示的に出ている場合のみ失敗として扱う。
 
 #### サーバー側の処理
 
@@ -170,9 +201,10 @@ MCP サーバー（server.py）は stdout を行単位で読み取り、`progres
 2. stdout を行単位で非同期に読み取る（`readline()` ループ）
 3. 各行を JSON パースし:
    - `type: "progress"` → `ctx.report_progress(processed, total, message=current)` で進捗通知
-   - `type: "result"` → 結果として返却
-   - `type: "error"` → エラーとして処理
-4. stderr はプロセス終了後に読み取る
+   - `type: "result"` → 最終結果候補として保持
+   - `type: "error"` → エラー候補として保持
+4. stderr はプロセス終了後に読み取る（ログ転送のみ）
+5. 上記「MCP 応答契約」の優先順位に従って判定する
 
 #### PipelineController の変更
 

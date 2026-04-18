@@ -152,11 +152,20 @@ ConstrainedClient はサーキットブレーカーの責務（HTTP レスポン
 
 ##### JSON シリアライズ
 
-CLI `--output json` および MCP レスポンスでは、`IngestResult` の観測性フィールドを欠落なく JSON に含めなければならない。
-スケジューラや再取り込みツールが親失敗・部分失敗・中断を独立して判定できるよう、
-`placed` / `skipped` / `overwritten` / `errors` / `error_details` /
-`partial_failures` / `partial_failure_details` / `aborted` / `abort_reason`
-の全項目をゼロ値・空リスト・`None` も省略せず常に出力する。
+CLI `--output json` 出力は MCP 応答経路および外部スケジューラが解釈する workload 結果の SSoT である。
+`IngestResult` の観測性フィールド
+（`placed` / `skipped` / `overwritten` / `errors` / `error_details` /
+`partial_failures` / `partial_failure_details` / `aborted` / `abort_reason`）
+を欠落なく含め、スケジューラや再取り込みツールが親失敗・部分失敗・中断を独立して判定できるようにする。
+
+**CLI exit code との関係**: `errors > 0` や `aborted = true` は CLI の exit code に反映されない（CLI exit code 体系の SSoT: [rebuild-stats.md](../rebuild-stats.md) の「CLI exit code 体系」）。
+
+**出力経路の区別**:
+
+| 出力経路 | 内容 | 欠落可否 |
+|---|------|---------|
+| CLI `--output json`（SSoT） | `IngestResult` の全観測性フィールドを構造化 JSON で出力 | 欠落禁止。ゼロ値・空リスト・`None` も省略しない |
+| MCP テキスト応答（表示層） | 構造化 JSON を表示用テキストへ変換（`src/rag/server.py` の表示変換関数が担当） | 表示層の省略は許容（ゼロ件の内訳行を非表示にする等）。ただし表示対象から除外した情報も元 JSON には含まれる |
 
 #### 中断系エラーの扱い
 

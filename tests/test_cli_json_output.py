@@ -16,6 +16,7 @@ from rag.cli import (
     _add_output_option,
     _ingest_result_to_dict,
     _is_json_output,
+    _JsonAwareArgumentParser,
     _output_error,
     _output_json,
     _output_progress,
@@ -81,6 +82,67 @@ class TestIsJsonOutput:
     def test_returns_false_when_attr_missing(self) -> None:
         args = argparse.Namespace()
         assert _is_json_output(args) is False
+
+
+class TestJsonAwareArgumentParser:
+    """_JsonAwareArgumentParser のバリデーションエラー挙動."""
+
+    @pytest.fixture
+    def parser(self) -> _JsonAwareArgumentParser:
+        parser = _JsonAwareArgumentParser(prog="testcli")
+        parser.add_argument("--mode", choices=["a", "b"], required=True)
+        parser.add_argument("--output", choices=["text", "json"], default="text")
+        return parser
+
+    def test_json_mode_exits_with_1_and_json_error(
+        self,
+        parser: _JsonAwareArgumentParser,
+        capsys: pytest.CaptureFixture[str],
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """--output json 指定時はバリデーション失敗で exit 1 + JSON error を出す."""
+        monkeypatch.setattr("sys.argv", ["testcli", "--mode", "invalid", "--output", "json"])
+        with pytest.raises(SystemExit) as exc_info:
+            parser.parse_args(["--mode", "invalid", "--output", "json"])
+        assert exc_info.value.code == 1
+        captured = capsys.readouterr()
+        parsed = json.loads(captured.out.strip())
+        assert parsed["type"] == "error"
+        assert parsed["error"] is True
+        assert "invalid choice" in parsed["message"]
+
+    def test_json_equals_form_exits_with_1(
+        self,
+        parser: _JsonAwareArgumentParser,
+        capsys: pytest.CaptureFixture[str],
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """--output=json 形式も検出される."""
+        monkeypatch.setattr("sys.argv", ["testcli", "--mode", "invalid", "--output=json"])
+        with pytest.raises(SystemExit) as exc_info:
+            parser.parse_args(["--mode", "invalid", "--output=json"])
+        assert exc_info.value.code == 1
+
+    def test_text_mode_exits_with_1_and_stderr_message(
+        self,
+        parser: _JsonAwareArgumentParser,
+        capsys: pytest.CaptureFixture[str],
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """text モードでも exit 1 に統一し、メッセージは stderr に出す（2 値契約）.
+
+        argparse 標準の exit 2 は CLI 2 値契約（0/1）と矛盾するため、
+        本プロジェクトでは text モードでも exit 1 に統一する。
+        POSIX の usage-error 慣習より契約の一貫性を優先する。
+        """
+        monkeypatch.setattr("sys.argv", ["testcli", "--mode", "invalid"])
+        with pytest.raises(SystemExit) as exc_info:
+            parser.parse_args(["--mode", "invalid"])
+        assert exc_info.value.code == 1
+        captured = capsys.readouterr()
+        # text モードでは stderr にエラー、stdout は空
+        assert captured.out == ""
+        assert "invalid choice" in captured.err
 
 
 class TestAddOutputOption:
