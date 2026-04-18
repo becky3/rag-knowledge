@@ -315,11 +315,11 @@ class TestRagRebuild:
         with patch(
             "rag.server._run_cli_subprocess",
             new_callable=AsyncMock,
-            side_effect=CLISubprocessError("ロック競合", lock_conflict=True),
+            side_effect=CLISubprocessError("ロック競合", code="LOCK_CONFLICT"),
         ):
             result = await rag_rebuild(mode="full")
 
-        assert "別の再構築が実行中" in result
+        assert "ロックを保持しています" in result
 
     @pytest.mark.asyncio
     async def test_cli_error_returns_error(self) -> None:
