@@ -70,6 +70,7 @@ class JournalIngester:
                 "repository": repository,
             }
 
+            is_overwrite = (self._store.root_dir / rel_path).exists()
             data = body.encode("utf-8")
             self._store.place_file(
                 source_type="journal",
@@ -77,7 +78,10 @@ class JournalIngester:
                 rel_path=rel_path,
                 metadata=metadata,
             )
-            result.placed = 1
+            if is_overwrite:
+                result.overwritten = 1
+            else:
+                result.placed = 1
             self.last_entry_id = entry_id
         except ValueError as e:
             result.errors = 1
@@ -177,13 +181,17 @@ class JournalIngester:
                     "repository": repository,
                 }
 
+                is_overwrite = (self._store.root_dir / rel_path).exists()
                 self._store.place_file(
                     source_type="journal",
                     data=data,
                     rel_path=rel_path,
                     metadata=metadata,
                 )
-                result.placed += 1
+                if is_overwrite:
+                    result.overwritten += 1
+                else:
+                    result.placed += 1
             except OSError as exc:
                 logger.exception("Failed to import journal file: %s", fp)
                 result.errors += 1
@@ -194,8 +202,8 @@ class JournalIngester:
                 })
 
         logger.info(
-            "Journal import completed: placed=%d, skipped=%d, errors=%d",
-            result.placed, result.skipped, result.errors,
+            "Journal import completed: placed=%d, overwritten=%d, skipped=%d, errors=%d",
+            result.placed, result.overwritten, result.skipped, result.errors,
         )
         return result
 

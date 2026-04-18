@@ -59,14 +59,23 @@ class LocalIngester:
                 raise ValueError(f"ファイルが空です (0 バイト): {filename}")
 
             rel_path = self._upload_rel_path(filename)
+            exists = self._file_exists(rel_path)
 
-            if upload_mode == "fail" and self._file_exists(rel_path):
-                raise FileExistsError(
-                    f"同名ファイルが既に存在します: {rel_path}"
-                )
+            if upload_mode == "fail" and exists:
+                msg = f"同名ファイルが既に存在します: {rel_path}"
+                result.errors = 1
+                result.error_details.append({
+                    "category": "placement",
+                    "target": rel_path,
+                    "message": msg,
+                })
+                raise FileExistsError(msg)
 
             self._store.place_file(source_type="local", data=data, rel_path=rel_path)
-            result.placed = 1
+            if exists:
+                result.overwritten = 1
+            else:
+                result.placed = 1
         except FileExistsError:
             raise
         except ValueError as e:
@@ -135,7 +144,8 @@ class LocalIngester:
                     f"/{dir_basename}/{relative.as_posix()}"
                 )
 
-                if upload_mode == "fail" and self._file_exists(rel_path):
+                exists = self._file_exists(rel_path)
+                if upload_mode == "fail" and exists:
                     logger.warning(
                         "File already exists, skipping: %s", rel_path,
                     )
@@ -144,7 +154,10 @@ class LocalIngester:
 
                 data = fp.read_bytes()
                 self._store.place_file(source_type="local", data=data, rel_path=rel_path)
-                result.placed += 1
+                if exists:
+                    result.overwritten += 1
+                else:
+                    result.placed += 1
             except OSError as exc:
                 logger.exception("Failed to copy file: %s", fp)
                 result.errors += 1
@@ -157,8 +170,8 @@ class LocalIngester:
             if progress_callback is not None:
                 progress_callback(file_idx + 1, len(files), str(fp))
         logger.info(
-            "Document crawl completed: placed=%d, skipped=%d, errors=%d",
-            result.placed, result.skipped, result.errors,
+            "Document crawl completed: placed=%d, overwritten=%d, skipped=%d, errors=%d",
+            result.placed, result.overwritten, result.skipped, result.errors,
         )
         return result
 

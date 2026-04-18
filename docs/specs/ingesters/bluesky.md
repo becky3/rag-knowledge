@@ -445,7 +445,7 @@ embed の `$type` が `app.bsky.embed.recordWithMedia` の場合、メディア�
 
 `force` パラメータが `true` の場合、以下の全てを再取得する:
 
-1. **投稿 JSON**: 既存ファイルを上書きする（通常モードではスキップ）
+1. **投稿 JSON**: 既存ファイルを上書きする（通常モードではスキップ）。上書き時は `overwritten` に計上する（`placed` には計上しない。[common.md](common.md) の「`placed` と `overwritten` の排他関係」参照）
 2. **メディアファイル**: 画像・動画を再 DL する
 3. **投稿内 Web URL**: site_ingest で再取得する
 4. **投稿内 YouTube URL**: 投稿が新規（初回取り込み）の場合は常に取り込む。投稿が上書き（既存ファイルの再取得）の場合は `rag_bluesky_force_youtube_reingest` が `true` の場合のみ再取得する。デフォルトは再取得しない（YouTube の再取り込みは字幕取得・音声 DL 等のコストが高いため）

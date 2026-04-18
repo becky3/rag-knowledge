@@ -115,16 +115,20 @@ class TestAddEntry:
     def test_overwrite_existing_entry(
         self, ingester: JournalIngester, source_store: SourceStore,
     ) -> None:
-        """同一 entry_id で再登録すると上書きされること."""
-        ingester.add_entry(
+        """同一 entry_id で再登録すると上書きされ overwritten に計上されること（排他計上）."""
+        first = ingester.add_entry(
             title="V1", body="Version 1", repository="repo",
             entry_id="entry-001",
         )
+        assert first.placed == 1
+        assert first.overwritten == 0
+
         result = ingester.add_entry(
             title="V2", body="Version 2", repository="repo",
             entry_id="entry-001",
         )
-        assert result.placed == 1
+        assert result.placed == 0
+        assert result.overwritten == 1
         placed = source_store.root_dir / "journal" / "repo" / "entry-001.md"
         assert placed.read_text(encoding="utf-8") == "Version 2"
 
@@ -312,6 +316,22 @@ class TestImportDirectory:
         data_file = source_store.root_dir / "journal" / "repo" / "custom-name.md"
         meta = read_meta(data_file)
         assert meta["title"] == "custom-name"
+
+    def test_import_directory_overwrites_existing(
+        self, ingester: JournalIngester, journal_dir: Path,
+    ) -> None:
+        """同一ディレクトリを 2 回 import すると overwritten に計上されること（排他計上）.
+
+        仕様: docs/specs/ingesters/common.md「placed と overwritten の排他関係」
+        """
+        result1 = ingester.import_directory(str(journal_dir), "repo")
+        assert result1.placed == 3
+        assert result1.overwritten == 0
+
+        result2 = ingester.import_directory(str(journal_dir), "repo")
+        assert result2.placed == 0
+        assert result2.overwritten == 3
+        assert result2.skipped == 0
 
     def test_import_empty_directory(
         self, ingester: JournalIngester, tmp_path: Path,

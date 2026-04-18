@@ -470,7 +470,10 @@ class BlueskyIngester:
                         rel_path=rel_path,
                         metadata=metadata,
                     )
-                    result.placed += 1
+                    if is_overwrite:
+                        result.overwritten += 1
+                    else:
+                        result.placed += 1
                     placed_items.append(
                         {**item, "_is_overwrite": is_overwrite},
                     )
@@ -514,8 +517,8 @@ class BlueskyIngester:
                 break
 
         logger.info(
-            "BlueSky crawl completed: placed=%d, skipped=%d, errors=%d",
-            result.placed, result.skipped, result.errors,
+            "BlueSky crawl completed: placed=%d, overwritten=%d, skipped=%d, errors=%d",
+            result.placed, result.overwritten, result.skipped, result.errors,
         )
         return result, placed_items
 

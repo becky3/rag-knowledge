@@ -469,7 +469,7 @@ class TestSkipMode:
         assert client.get.call_count == 1
 
     async def test_force_overwrites_existing(self, source_store: SourceStore) -> None:
-        """force=True で既存ファイルが上書きされること."""
+        """force=True で既存ファイルが上書きされ overwritten に計上されること（排他計上）."""
         rel_path = source_store.root_dir / "zenn" / "testuser" / "articles" / "existing.json"
         rel_path.parent.mkdir(parents=True, exist_ok=True)
         rel_path.write_text('{"slug": "old"}', encoding="utf-8")
@@ -487,7 +487,8 @@ class TestSkipMode:
             client=client,
         )
 
-        assert result.placed == 1
+        assert result.placed == 0
+        assert result.overwritten == 1
         assert result.skipped == 0
         # 上書きされた内容を確認
         data = json.loads(rel_path.read_text(encoding="utf-8"))
@@ -495,7 +496,7 @@ class TestSkipMode:
         assert "body_html" in data
 
     async def test_force_overwrites_existing_scrap(self, source_store: SourceStore) -> None:
-        """force=True で既存スクラップが上書きされること."""
+        """force=True で既存スクラップが上書きされ overwritten に計上されること（排他計上）."""
         rel_path = source_store.root_dir / "zenn" / "testuser" / "scraps" / "existing.json"
         rel_path.parent.mkdir(parents=True, exist_ok=True)
         rel_path.write_text('{"slug": "old"}', encoding="utf-8")
@@ -513,7 +514,8 @@ class TestSkipMode:
             client=client,
         )
 
-        assert result.placed == 1
+        assert result.placed == 0
+        assert result.overwritten == 1
         assert result.skipped == 0
         data = json.loads(rel_path.read_text(encoding="utf-8"))
         assert data["comments_count"] == 2

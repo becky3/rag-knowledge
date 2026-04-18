@@ -83,11 +83,21 @@ class TestAddDocument:
         placed = source_store.root_dir / "local" / _UPLOAD_DIR / _today_prefix() / "doc.pdf"
         assert placed.read_bytes() == data
 
-    def test_add_replace_mode(self, ingester: LocalIngester, source_store: SourceStore) -> None:
-        """replace モード: 同名ファイルを上書きできること."""
-        ingester.add_document(b"v1", "overwrite.md", upload_mode="replace")
-        result = ingester.add_document(b"v2", "overwrite.md", upload_mode="replace")
+    def test_add_replace_mode_new_file(self, ingester: LocalIngester) -> None:
+        """replace モード: 新規配置時は placed に計上される."""
+        result = ingester.add_document(b"v1", "new.md", upload_mode="replace")
         assert result.placed == 1
+        assert result.overwritten == 0
+
+    def test_add_replace_mode_overwrites(self, ingester: LocalIngester, source_store: SourceStore) -> None:
+        """replace モード: 既存ファイル上書き時は overwritten に計上される（placed は 0）."""
+        first = ingester.add_document(b"v1", "overwrite.md", upload_mode="replace")
+        assert first.placed == 1
+        assert first.overwritten == 0
+
+        result = ingester.add_document(b"v2", "overwrite.md", upload_mode="replace")
+        assert result.placed == 0
+        assert result.overwritten == 1
         placed = source_store.root_dir / "local" / _UPLOAD_DIR / _today_prefix() / "overwrite.md"
         assert placed.read_bytes() == b"v2"
 
@@ -171,12 +181,14 @@ class TestCrawlDocuments:
         assert result2.skipped == 3
 
     def test_crawl_replace_mode(self, ingester: LocalIngester, sample_dir: Path) -> None:
-        """replace モード: 重複ファイルが上書きされること."""
+        """replace モード: 重複ファイルが上書きされ overwritten に計上される（placed は 0）."""
         result1 = ingester.crawl_documents(str(sample_dir), upload_mode="replace")
         assert result1.placed == 3
+        assert result1.overwritten == 0
 
         result2 = ingester.crawl_documents(str(sample_dir), upload_mode="replace")
-        assert result2.placed == 3
+        assert result2.placed == 0
+        assert result2.overwritten == 3
         assert result2.skipped == 0
 
 
