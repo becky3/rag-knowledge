@@ -314,7 +314,7 @@ uv run mypy src
 
 ## CI/CD
 
-PR 作成時に GitHub Actions で品質チェックが自動実行される。全チェックの通過が develop / main へのマージ条件。
+PR 作成・更新時に GitHub Actions で品質チェックが自動実行される。全チェックの通過が develop / main へのマージ条件。
 
 | ワークフロー | トリガー | 概要 |
 |-------------|---------|------|
@@ -322,7 +322,7 @@ PR 作成時に GitHub Actions で品質チェックが自動実行される。�
 | Validate Enums | PR・push (develop, main) | enum スキーマの整合性検証 |
 | Raw HTTP Check | PR・push (develop, main) | Python ソース内の raw HTTP 使用検出 |
 | Copilot Auto Fix | PR | Copilot レビューコメントの自動修正 |
-| Claude Code | Issue comment・PR comment | メンション応答・自動実装 |
+| Claude Code | Issue 作成・ラベル付け・Issue comment・PR comment・PR review | メンション応答・自動実装 |
 | Late Review Scanner | スケジュール（毎時） | 24 時間以上レビュー待ちの PR を検出 |
 | Post Merge | PR close | マージ後の review-batch Issue 更新 |
 

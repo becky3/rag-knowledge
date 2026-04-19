@@ -1,6 +1,6 @@
 # Quality Check — Caller
 #
-# PR マージ時の品質チェック（テスト・lint・型チェック・markdownlint）。
+# PR 作成・更新時の品質チェック（テスト・lint・型チェック・markdownlint）。
 # Reusable Workflow (shared-workflows) を呼び出す。
 # 設計書: shared-workflows/docs/specs/quality-check.md
 
