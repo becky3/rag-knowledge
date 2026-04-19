@@ -1,0 +1,25 @@
+# Quality Check — Caller
+#
+# PR 作成・更新時の品質チェック（テスト・lint・型チェック・markdownlint）。
+# Reusable Workflow (shared-workflows) を呼び出す。
+# 設計書: shared-workflows/docs/specs/quality-check.md
+
+name: Quality Check
+
+permissions:
+  contents: read
+
+on:
+  pull_request:
+    branches: [develop, main]
+
+jobs:
+  quality:
+    uses: becky3/shared-workflows/.github/workflows/quality-check.yml@main
+    with:
+      python_version: "3.11"
+      install_command: "uv sync --no-group with-mineru"
+      test_command: "uv run pytest"
+      lint_command: "uv run ruff check src/ tests/"
+      typecheck_command: "uv run mypy src/"
+      markdownlint: true

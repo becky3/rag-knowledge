@@ -212,6 +212,7 @@ class TestConfigureAndRun:
 
         with (
             patch.object(mod, "get_settings", return_value=mock_settings),
+            patch.object(mod, "_check_api_key_registered", return_value=None),
             patch.object(mod.mcp, "run") as mock_run,
         ):
             _configure_and_run()
@@ -232,6 +233,7 @@ class TestConfigureAndRun:
 
         with (
             patch.object(mod, "get_settings", return_value=mock_settings),
+            patch.object(mod, "_check_api_key_registered", return_value=None),
             patch.object(
                 mod.mcp, "run", side_effect=KeyboardInterrupt
             ),
