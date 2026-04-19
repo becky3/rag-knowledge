@@ -384,10 +384,12 @@ class RAGKnowledgeService:
         # 注: BM25は補助的機能のため、失敗してもVectorStoreの結果は維持する
         if self._bm25_index is not None:
             bm25_docs = []
+            bm25_metadata_list = []
             for chunk in document_chunks:
                 bm25_docs.append((chunk.id, chunk.text, normalized_url, "web"))
+                bm25_metadata_list.append(chunk.metadata)
             try:
-                self._bm25_index.add_documents(bm25_docs)
+                self._bm25_index.add_documents(bm25_docs, metadata_list=bm25_metadata_list)
                 logger.debug("Added %d documents to BM25 index", len(bm25_docs))
             except Exception:
                 logger.warning(

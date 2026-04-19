@@ -842,7 +842,7 @@ def _build_bm25_index_from_fixture(
         chunks = smart_chunk(content, chunk_size, chunk_overlap)
         normalized_url, _ = urldefrag(source_url)
         url_hash = hashlib.sha256(normalized_url.encode()).hexdigest()[:16]
-        for i, (chunk_text, section_path) in enumerate(chunks):
+        for i, (chunk_text, _section_path) in enumerate(chunks):
             documents.append((f"{url_hash}_{i}", chunk_text, normalized_url, "web"))
 
     added = bm25_index.add_documents(documents)

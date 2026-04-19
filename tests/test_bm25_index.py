@@ -193,6 +193,35 @@ class TestBM25Index:
         assert index._k1 == 2.0
         assert index._b == 0.5
 
+    def test_get_metadata_returns_stored_metadata(self) -> None:
+        """metadata_list 付きで追加したメタデータを get_metadata で取得できる."""
+        index = make_bm25_index()
+        docs = [("doc1", "sample text", "source1", "web")]
+        meta = [{"source_id": "source1", "chunk_index": 0, "title": "Test Title"}]
+        index.add_documents(docs, metadata_list=meta)
+
+        result = index.get_metadata("doc1")
+        assert result["source_id"] == "source1"
+        assert result["chunk_index"] == 0
+        assert result["title"] == "Test Title"
+
+    def test_get_metadata_returns_empty_for_unknown_doc(self) -> None:
+        """存在しない doc_id に対して空辞書を返す."""
+        index = make_bm25_index()
+        assert index.get_metadata("nonexistent") == {}
+
+    def test_get_metadata_returns_defensive_copy(self) -> None:
+        """get_metadata は防御コピーを返し、内部状態を変更しない."""
+        index = make_bm25_index()
+        docs = [("doc1", "sample text", "source1", "web")]
+        meta = [{"source_id": "source1", "title": "Original"}]
+        index.add_documents(docs, metadata_list=meta)
+
+        result = index.get_metadata("doc1")
+        result["title"] = "Modified"
+
+        assert index.get_metadata("doc1")["title"] == "Original"
+
 
 class TestBM25IndexPersistence:
     """BM25Index永続化のテスト.
@@ -237,6 +266,22 @@ class TestBM25IndexPersistence:
         # ソースURLも復元
         assert index2.get_source_url("doc1") == "source1"
         assert index2.get_source_url("doc4") == "source4"
+
+    def test_metadata_survives_save_and_load(self, persist_dir: str) -> None:
+        """metadata_list 付きで追加したメタデータが永続化後も復元される."""
+        index = make_bm25_index(persist_dir=persist_dir)
+        meta = [
+            {"source_id": "source1", "chunk_index": 0, "title": "Doc 1"},
+            {"source_id": "source2", "chunk_index": 0, "title": "Doc 2"},
+            {"source_id": "source3", "chunk_index": 0, "title": "Doc 3"},
+            {"source_id": "source4", "chunk_index": 0, "title": "Doc 4"},
+        ]
+        index.add_documents(self._sample_docs(), metadata_list=meta)
+
+        index2 = make_bm25_index(persist_dir=persist_dir)
+        result = index2.get_metadata("doc1")
+        assert result["title"] == "Doc 1"
+        assert result["chunk_index"] == 0
 
     def test_none_dir_means_in_memory(self) -> None:
         """AC80: persist_dir=Noneで従来のインメモリ動作."""
