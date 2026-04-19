@@ -337,6 +337,17 @@ class BM25Index:
         """
         return self._doc_source_type_map.get(doc_id)
 
+    def get_metadata(self, doc_id: str) -> dict[str, str | int | float | bool]:
+        """ドキュメントIDからチャンクメタデータを取得する.
+
+        Args:
+            doc_id: ドキュメントID
+
+        Returns:
+            メタデータ辞書。見つからない場合は空辞書
+        """
+        return dict(self._doc_metadata_map.get(doc_id, {}))
+
     def delete_stale_docs(self, source_id: str, valid_ids: set[str]) -> int:
         """ソースのドキュメントのうち、valid_ids に含まれないものを削除する.
 

@@ -843,11 +843,7 @@ def _build_bm25_index_from_fixture(
         normalized_url, _ = urldefrag(source_url)
         url_hash = hashlib.sha256(normalized_url.encode()).hexdigest()[:16]
         for i, (chunk_text, section_path) in enumerate(chunks):
-            # BM25 には section_path + 本文を結合したテキストを登録
-            bm25_text = (
-                f"{section_path}\n{chunk_text}" if section_path else chunk_text
-            )
-            documents.append((f"{url_hash}_{i}", bm25_text, normalized_url, "web"))
+            documents.append((f"{url_hash}_{i}", chunk_text, normalized_url, "web"))
 
     added = bm25_index.add_documents(documents)
     logger.info("BM25 index built with %d chunks from fixture", added)

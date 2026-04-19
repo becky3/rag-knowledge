@@ -5,25 +5,17 @@
 
 from __future__ import annotations
 
-import hashlib
 import logging
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
+
+from .indexer.chunk_id import generate_chunk_id
 
 if TYPE_CHECKING:
     from .bm25_index import BM25Index, BM25Result
     from .vector_store import RetrievalResult, VectorStore
 
 logger = logging.getLogger(__name__)
-
-
-def _generate_doc_id(source_url: str, chunk_index: int) -> str:
-    """ドキュメントIDを生成する.
-
-    VectorStoreと同じ形式（url_hash + "_" + chunk_index）で生成する。
-    """
-    url_hash = hashlib.sha256(source_url.encode()).hexdigest()[:16]
-    return f"{url_hash}_{chunk_index}"
 
 
 def min_max_normalize(scores: list[float]) -> list[float]:
@@ -200,9 +192,9 @@ class HybridSearchEngine:
         vector_doc_data: dict[str, tuple[float, str, dict[str, str | int | float | bool], float]] = {}
 
         for i, vr in enumerate(vector_results):
-            source_url = str(vr.metadata.get("source_id", ""))
+            source_id = str(vr.metadata.get("source_id", ""))
             chunk_index = int(vr.metadata.get("chunk_index", i))
-            doc_id = _generate_doc_id(source_url, chunk_index)
+            doc_id = generate_chunk_id(source_id, chunk_index)
 
             similarity = 1.0 - vr.distance
 
@@ -230,10 +222,11 @@ class HybridSearchEngine:
         bm25_doc_data: dict[str, tuple[float, str, dict[str, str | int | float | bool]]] = {}
 
         for br in bm25_results:
-            bm25_source_url = self._bm25_index.get_source_url(br.doc_id)
-            bm25_metadata: dict[str, str | int | float | bool] = {}
-            if bm25_source_url:
-                bm25_metadata["source_id"] = bm25_source_url
+            bm25_metadata = dict(self._bm25_index.get_metadata(br.doc_id))
+            if not bm25_metadata:
+                bm25_source_url = self._bm25_index.get_source_url(br.doc_id)
+                if bm25_source_url:
+                    bm25_metadata["source_id"] = bm25_source_url
             bm25_doc_data[br.doc_id] = (br.score, br.text, bm25_metadata)
 
         # BM25 スコアの min-max 正規化

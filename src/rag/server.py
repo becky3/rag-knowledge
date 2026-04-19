@@ -1241,8 +1241,9 @@ def _format_cli_search_result(result: dict[str, Any]) -> str:
             collected_at = item.get("collected_at", "")
             if collected_at:
                 parts.append(f"Collected: {collected_at}")
-            parts.append("")
+            parts.append("<<content>>")
             parts.append(item.get("text", ""))
+            parts.append("<</content>>")
             parts.append("")
 
     return "\n".join(parts).rstrip()
