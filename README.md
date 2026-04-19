@@ -312,6 +312,22 @@ uv run ruff check .
 uv run mypy src
 ```
 
+## CI/CD
+
+PR 作成時に GitHub Actions で品質チェックが自動実行される。全チェックの通過が develop / main へのマージ条件。
+
+| ワークフロー | トリガー | 概要 |
+|-------------|---------|------|
+| Quality Check | PR (develop, main) | テスト・lint・型チェック・markdownlint |
+| Validate Enums | PR・push (develop, main) | enum スキーマの整合性検証 |
+| Raw HTTP Check | PR・push (develop, main) | Python ソース内の raw HTTP 使用検出 |
+| Copilot Auto Fix | PR | Copilot レビューコメントの自動修正 |
+| Claude Code | Issue comment・PR comment | メンション応答・自動実装 |
+| Late Review Scanner | スケジュール（毎時） | 24 時間以上レビュー待ちの PR を検出 |
+| Post Merge | PR close | マージ後の review-batch Issue 更新 |
+
+品質チェック（Quality Check）は [shared-workflows](https://github.com/becky3/shared-workflows) の reusable workflow を使用。
+
 ## プロジェクト構成
 
 プロジェクトのディレクトリ構成・モジュール責務・仕様書との対応は [ARCHITECTURE.md](ARCHITECTURE.md) を参照。
