@@ -511,7 +511,7 @@ BlueSky 投稿内に含まれる URL を抽出し、URL の種別に応じて si
 1. 全投稿の source_store への配置が完了した後、配置した投稿の JSON から URL を一括抽出する
 2. 抽出した URL を重複排除する（同一 URL が複数投稿に出現する場合）
 3. URL 種別を判定し、Web / YouTube / スキップに分類する
-4. Web URL を全てバッチ収集し、CLI の `site-ingest` コマンド（複数 URL モード）で 1 回の Scrapy subprocess として取り込む。`--download-only` を指定し、パイプライン処理は BlueSky 側で一括実行する
+4. Web URL を全てバッチ収集し、CLI の `site-ingest` コマンド（複数 URL モード）で 1 回の Scrapy subprocess として取り込む。`--download-only` と `--output json` を指定し、パイプライン処理は BlueSky 側で一括実行する。subprocess の JSON 出力から配置数を取得する
 5. YouTube インジェスターで動画を取り込む（個別処理、URL 間に `rag_youtube_request_interval` に基づくスリープを挿入）
 6. 全 URL の処理が完了した後、パイプライン制御に取り込み完了を通知する
 

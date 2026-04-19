@@ -1970,3 +1970,63 @@ class TestPartialFailureObservability:
         assert result.errors == 1
         assert result.error_details[0]["category"] == "placement"
         assert result.error_details[0]["message"] == "disk full"
+
+
+@pytest.mark.asyncio()
+class TestRunSiteIngestBatch:
+    """_run_site_ingest_batch の JSON パーステスト."""
+
+    async def test_parses_json_result(self, source_store: SourceStore) -> None:
+        """JSON Lines の result 行から placed を正しく抽出すること."""
+        ingester = make_bluesky_ingester(source_store)
+        json_output = (
+            '{"type": "progress", "processed": 1, "total": 1, "current": "https://example.com"}\n'
+            '{"type": "result", "placed": 3, "overwritten": 0, "skipped": 1, "errors": 0, "elapsed": 1.5}\n'
+        )
+        mock_proc = AsyncMock()
+        mock_proc.communicate.return_value = (json_output.encode("utf-8"), b"")
+        mock_proc.returncode = 0
+
+        with patch("asyncio.create_subprocess_exec", return_value=mock_proc):
+            result = await ingester._run_site_ingest_batch(["https://example.com"])
+
+        assert result == 3
+
+    async def test_returns_zero_when_no_result_line(self, source_store: SourceStore) -> None:
+        """result 行がない場合 0 を返すこと."""
+        ingester = make_bluesky_ingester(source_store)
+        json_output = '{"type": "progress", "processed": 1, "total": 1, "current": "x"}\n'
+        mock_proc = AsyncMock()
+        mock_proc.communicate.return_value = (json_output.encode("utf-8"), b"")
+        mock_proc.returncode = 0
+
+        with patch("asyncio.create_subprocess_exec", return_value=mock_proc):
+            result = await ingester._run_site_ingest_batch(["https://example.com"])
+
+        assert result == 0
+
+    async def test_raises_on_nonzero_exit(self, source_store: SourceStore) -> None:
+        """subprocess の exit code != 0 で RuntimeError を送出すること."""
+        ingester = make_bluesky_ingester(source_store)
+        mock_proc = AsyncMock()
+        mock_proc.communicate.return_value = (b"", b"some error")
+        mock_proc.returncode = 1
+
+        with patch("asyncio.create_subprocess_exec", return_value=mock_proc):
+            with pytest.raises(RuntimeError, match="site-ingest failed"):
+                await ingester._run_site_ingest_batch(["https://example.com"])
+
+    async def test_passes_output_json_flag(self, source_store: SourceStore) -> None:
+        """CLI コマンドに --output json フラグが含まれること."""
+        ingester = make_bluesky_ingester(source_store)
+        json_output = '{"type": "result", "placed": 0}\n'
+        mock_proc = AsyncMock()
+        mock_proc.communicate.return_value = (json_output.encode("utf-8"), b"")
+        mock_proc.returncode = 0
+
+        with patch("asyncio.create_subprocess_exec", return_value=mock_proc) as mock_exec:
+            await ingester._run_site_ingest_batch(["https://example.com"])
+
+        cmd_args = mock_exec.call_args[0]
+        assert "--output" in cmd_args
+        assert "json" in cmd_args
