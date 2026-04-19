@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import logging
 from unittest.mock import MagicMock
 
 import pytest
@@ -21,6 +22,7 @@ from rag.cli import (
     _output_json,
     _output_progress,
     _output_result,
+    _output_result_logged,
 )
 from rag.errors import CliErrorCode
 
@@ -88,6 +90,27 @@ class TestJsonHelpers:
         captured = capsys.readouterr()
         parsed = json.loads(captured.out.strip())
         assert parsed == {"type": "result", "placed": 1, "skipped": 0}
+
+
+class TestOutputResultLogged:
+    """_output_result_logged のテスト."""
+
+    def test_stdout_contains_result_json_only(
+        self, capsys: pytest.CaptureFixture[str], caplog: pytest.LogCaptureFixture
+    ) -> None:
+        with caplog.at_level(logging.INFO):
+            _output_result_logged({"count": 5}, "test-cmd: count=%d", 5)
+        captured = capsys.readouterr()
+        parsed = json.loads(captured.out.strip())
+        assert parsed == {"type": "result", "count": 5}
+        assert captured.err == ""
+
+    def test_log_message_recorded(
+        self, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        with caplog.at_level(logging.INFO):
+            _output_result_logged({"ok": True}, "stats: chunks=%s", "100")
+        assert any("stats: chunks=100" in r.message for r in caplog.records)
 
 
 class TestIsJsonOutput:
@@ -245,9 +268,11 @@ class TestIngestResultToDict:
         result = _ingest_result_to_dict(ingest_result, pipeline_summary)
         assert result["placed"] == 1
         assert "pipeline" in result
-        assert result["pipeline"]["mode"] == "incremental"
-        assert result["pipeline"]["processed"] == 3
-        assert "skipped" not in result["pipeline"]
+        pipeline = result["pipeline"]
+        assert isinstance(pipeline, dict)
+        assert pipeline["mode"] == "incremental"
+        assert pipeline["processed"] == 3
+        assert "skipped" not in pipeline
 
     def test_includes_observability_fields_with_values(self) -> None:
         """partial_failures / aborted 等がゼロ値でない場合も正しくシリアライズされる.
@@ -255,7 +280,7 @@ class TestIngestResultToDict:
         失敗の観測性（仕様: docs/specs/ingesters/common.md）を production 出力に
         届けるため、IngestResult の全観測性フィールドを JSON に含めなければならない。
         """
-        partial_details = [{"target": "a.png", "category": "media_download"}]
+        partial_details: list[dict[str, object]] = [{"target": "a.png", "category": "media_download"}]
         ingest_result = self._make_ingest_result(
             placed=10,
             partial_failures=2,
