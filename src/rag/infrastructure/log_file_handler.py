@@ -57,6 +57,9 @@ class SessionRotatingFileHandler(logging.FileHandler):
             raise FileExistsError(msg)
 
     def emit(self, record: logging.LogRecord) -> None:
+        if self.stream is None:
+            self.mode = "a"
+            self.stream = self._open()
         try:
             if self._should_rollover():
                 self._do_rollover()

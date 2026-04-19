@@ -1036,6 +1036,20 @@ def list_recent_sources(
     finally:
         db.close()
 
+    logger.info(
+        "list-recent: source_type=%s, total=%d, returned=%d",
+        source_type,
+        total,
+        len(sources),
+    )
+    for i, src in enumerate(sources, 1):
+        logger.info(
+            "list-recent result %d: source_id=%s, title=%r",
+            i,
+            src.source_id,
+            src.title,
+        )
+
     if not sources:
         return f"source_type: {source_type}（0件 / 全0件）"
 

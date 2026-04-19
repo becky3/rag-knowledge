@@ -57,6 +57,7 @@ MCP ツール・CLI コマンド・HTTP API の機能を実際に実行し、正
 | F | Upload | POST /upload/document, POST /upload/journal | 不要 | HTTP 固定 |
 | G | Eval | init-test-db, evaluate | 不要 | CLI 固定 |
 | H | Core | stats, list-recent, search, get-document, delete, rebuild | 不要（Embedding のみ） | CLI / MCP |
+| J | Log | MCP サーバーのログファイル出力検証 | 不要 | MCP 固定 |
 
 ### インターフェース選択
 
@@ -66,7 +67,7 @@ MCP ツール・CLI コマンド・HTTP API の機能を実際に実行し、正
 | MCP | MCP ツールのみで検証 |
 | both | CLI と MCP の両方で検証 |
 
-Upload（F）は HTTP 固定、Eval（G）は CLI 固定のため、インターフェース選択に関わらず固定方式で実行する。
+Upload（F）は HTTP 固定、Eval（G）は CLI 固定、Log（J）は MCP 固定のため、インターフェース選択に関わらず固定方式で実行する。
 
 ## 処理フロー
 
@@ -87,6 +88,7 @@ QA 検証グループ:
   F) Upload   — HTTP Upload API（HTTP モード固定）
   G) Eval     — init-test-db, evaluate（フィクスチャ必要）
   H) Core     — stats, list-recent, search, get-document, delete, rebuild
+  J) Log      — ログファイル出力の検証（MCP フェーズのみ）
 
 どのグループを検証しますか？（例: A B D, all）
 ```
@@ -133,7 +135,7 @@ QA 検証グループ:
 
 ### ステップ 5: 選択グループの順次実行
 
-選択されたグループを ID 順（A→H）に実行する。各グループの詳細手順はグループ別検証手順に定義する。
+選択されたグループを ID 順（A→J）に実行する。各グループの詳細手順はグループ別検証手順に定義する。
 
 #### ステップ実行ループ
 
@@ -395,9 +397,40 @@ cat /tmp/upload_bg.txt
 | 5b | `get-document <source_id> --format original` | A) の README.md の全文がオリジナル形式で取得できる | `none` |
 | 6 | `delete <source_id>`（`source_id` は positional 引数） | A) の README.md が削除される | `delete` |
 | 7 | `rebuild --mode incremental` | 差分再構築が成功する | `none` |
+| 7a | `rebuild --mode convert` | コンバートのみ再実行が成功する | `none` |
+| 7b | `rebuild --mode index` | インデックスのみ再構築が成功する | `none` |
+| 7c | `rebuild --mode full` | 全再構築が成功する | `none` |
 | 8 | `stats` | 再構築後の統計が更新されている | `none` |
 
 CLI / MCP 対応: `rag_stats` / `rag_list_recent` / `rag_search` / `rag_get_document` / `rag_delete` / `rag_rebuild`
+
+`rag_rebuild` の mode 指定: `rag_rebuild(mode="incremental")` / `rag_rebuild(mode="convert")` / `rag_rebuild(mode="index")` / `rag_rebuild(mode="full")`
+
+### J) Log（ログファイル出力、MCP 固定）
+
+目的: MCP サーバーのログファイル出力（`SessionRotatingFileHandler`）が想定どおり動作していることの検証。サーバー起動ログ・MCP ツール呼び出しログ・CLI 転送ログの 3 経路が同一ファイルに記録されることを確認する。
+
+対象実装: `src/rag/infrastructure/log_file_handler.py`、`src/rag/server.py` の `_write_cli_lines_to_handlers` およびサーバーフォーマッタ。
+
+前提:
+
+- MCP サーバーが HTTP モードで起動中であること（worktree セットアップで起動済み）
+- `.env` の `RAG_LOG_DIR` が worktree 内の絶対パスを指していること（未設定の場合はデフォルトパスを使用）
+
+CLI フェーズではサーバー側のログファイルは生成されない（CLI 直接実行経路はファイルハンドラを経由しない）ため、本グループは MCP フェーズでのみ実行する。CLI フェーズが選択されている場合は全ステップをスキップする。
+
+| # | コマンド | 期待結果 | 検証種別 |
+|---|---------|---------|---------|
+| 1 | ログディレクトリ内のセッションログファイル一覧を表示する | サーバー起動後に `rag-server-YYYYMMDD-HHMMSS-00001.log` が存在する | `none` |
+| 2 | セッションログファイル内で `[MCP]` プレフィックス付きの `Starting MCP server` 行を確認する | 起動ログが記録されている | `none` |
+| 3 | MCP ツール `rag_stats` を呼び出した後、ログファイルに `[MCP]` と `[CLI]` の両方のプレフィックス行が記録されていることを確認する | サーバーログと CLI サブプロセス stderr 由来のログが同一ファイルに混在して記録される | `none` |
+| 4 | サーバーログの各行が `[MCP] YYYY-MM-DD HH:MM:SS,mmm - logger.name - LEVEL - message` 形式であることを確認する | サーバー側フォーマッタが正しく適用されている | `none` |
+| 5 | CLI 転送ログの各行が `[CLI] YYYY-MM-DD HH:MM:SS,mmm - logger.name - LEVEL - message` 形式であることを確認する（CLI 側のタイムスタンプをそのままパススルーしており、二重のタイムスタンプにならない） | CLI 転送経路のフォーマッタ差し替え（`_write_cli_lines_to_handlers`）が正しく動作している | `none` |
+
+補足:
+
+- ステップ 3 の検証ツールに `rag_stats` を用いるのは、サーバー側の副作用を発生させずに CLI サブプロセス経路（`_run_cli_subprocess` → `_write_cli_lines_to_handlers`）を通すため。取り込み系ツールは副作用が残るため非推奨
+- 対象ログファイルは「セッション最新」の `rag-server-*-00001.log`（ロールオーバー発生時は最大連番のファイル）を使用する
 
 ### ステップ 7: クリーンアップ
 
@@ -412,7 +445,7 @@ QA 完了後、worktree 環境を片付ける。ChromaDB・HTTP サーバー等�
 
 ### 入力
 
-- ユーザーによるグループ選択（A〜H、all）
+- ユーザーによるグループ選択（A〜J、all）
 - ユーザーによるインターフェース選択（CLI / MCP / both）
 - YouTube 実行時のユーザー確認（y/n）
 
