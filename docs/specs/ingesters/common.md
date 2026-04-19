@@ -187,7 +187,9 @@ CLI `--output json` 出力は MCP 応答経路および外部スケジューラ�
 
 **CLI exit code との関係**: `errors > 0` や `aborted = true` は CLI の exit code に反映されない（CLI exit code 体系の SSoT: [rebuild-stats.md](../rebuild-stats.md) の「CLI exit code 体系」）。
 
-**error 行のエラーコード**: `type: "error"` 行には `code` フィールド（[`_schema/enums.yml`](../../../_schema/enums.yml) の `cli_error_code` 参照）を含め、消費側が message 文字列のキーワードマッチに依存せずにエラー種別を判定できるようにする。詳細は [rebuild-stats.md](../rebuild-stats.md) の「CLI JSON 出力体系」を参照。
+**error 行のエラーコード**: `type: "error"` 行には `code` フィールド（[`_schema/enums.yml`](../../../_schema/enums.yml) の `cli_error_code` 参照）を含める。
+消費側が message 文字列のキーワードマッチに依存せずにエラー種別を判定できるようにする。
+詳細は [rebuild-stats.md](../rebuild-stats.md) の「CLI JSON 出力体系」を参照。
 
 **出力経路の区別**:
 
