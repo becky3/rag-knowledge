@@ -339,12 +339,9 @@ class Indexer:
                 metadata=meta,
             ))
 
-            # BM25: section_path + 本文を結合（見出しキーワードでもヒットさせる）
-            bm25_text = (
-                f"{section_path}\n{content}" if section_path else content
-            )
+            # BM25: 本文のみ（section_path はメタデータで保持）
             bm25_docs.append((
-                chunk_id, bm25_text, source_id, metadata.source_type,
+                chunk_id, content, source_id, metadata.source_type,
             ))
             bm25_metadata_list.append(meta)
 

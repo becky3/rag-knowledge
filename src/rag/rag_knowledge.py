@@ -241,8 +241,9 @@ def format_raw_search_results(raw: RawSearchResults) -> str:
                 parts.append(f"Section: {item.section_path}")
             if item.collected_at:
                 parts.append(f"Collected: {item.collected_at}")
-            parts.append("")
+            parts.append("<<content>>")
             parts.append(item.text)
+            parts.append("<</content>>")
             parts.append("")
 
     return "\n".join(parts).rstrip()
@@ -383,12 +384,12 @@ class RAGKnowledgeService:
         # 注: BM25は補助的機能のため、失敗してもVectorStoreの結果は維持する
         if self._bm25_index is not None:
             bm25_docs = []
+            bm25_metadata_list = []
             for chunk in document_chunks:
-                sp = str(chunk.metadata.get("section_path", ""))
-                bm25_text = f"{sp}\n{chunk.text}" if sp else chunk.text
-                bm25_docs.append((chunk.id, bm25_text, normalized_url, "web"))
+                bm25_docs.append((chunk.id, chunk.text, normalized_url, "web"))
+                bm25_metadata_list.append(chunk.metadata)
             try:
-                self._bm25_index.add_documents(bm25_docs)
+                self._bm25_index.add_documents(bm25_docs, metadata_list=bm25_metadata_list)
                 logger.debug("Added %d documents to BM25 index", len(bm25_docs))
             except Exception:
                 logger.warning(

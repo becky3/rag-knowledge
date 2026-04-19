@@ -245,19 +245,23 @@ class TestAdd:
             assert "[" not in doc  # 旧形式の breadcrumb
             assert "# " not in doc  # 旧形式の見出しプレフィックス
 
-    async def test_bm25_receives_section_path_plus_content(
+    async def test_bm25_receives_content_without_section_path(
         self, indexer: Indexer, bm25_index: BM25Index, tmp_path: Path,
     ) -> None:
-        """BM25 には section_path + 本文が渡されること."""
-        text = "# MyHeading\n\nBody text for BM25."
+        """BM25 には本文のみが渡され section_path は含まれないこと."""
+        text = "# UniqueHeading\n\nBody text for BM25 verification."
         path = _write_text_file(tmp_path, "heading.txt", text)
         meta = _make_metadata(source_id="src-bm25-sp")
 
         await indexer.add("src-bm25-sp", path, meta)
 
-        # BM25 で見出しキーワードで検索できる
-        results = bm25_index.search("MyHeading", n_results=5)
+        # BM25 で本文キーワードで検索できる
+        results = bm25_index.search("verification", n_results=5)
         assert len(results) > 0
+
+        # BM25 テキストに section_path が混入していないこと
+        for r in results:
+            assert not r.text.startswith("UniqueHeading")
 
     async def test_table_text_uses_table_chunker(
         self, indexer: Indexer, vector_store: VectorStore, tmp_path: Path,

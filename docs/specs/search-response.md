@@ -101,7 +101,7 @@ MCP クライアントからの rag_search ツール呼び出し。
 | Section | 見出し階層（`section_path`） | 値がある場合のみ | `Section: 第1章 > 1.1 前処理` |
 | Collected | 取り込み日時 | 値がある場合のみ | `Collected: 2025-01-15T10:30:00Z` |
 
-メタデータの後に空行を挟み、チャンクテキストを出力する。
+メタデータの後に `<<content>>` / `<</content>>` タグでチャンクテキストを囲む。タグによりメタデータと本文の境界を明確にし、本文中に Markdown 見出し（`###` 等）が含まれる場合でも Result ヘッダーとの混同を防ぐ。
 
 レスポンスの Source 値は、[source-store.md](source-store.md) で定義された `source_id`（= source_store 内の相対パス）を使用する。この値をそのまま rag_get_document の `source_id` パラメータとして使用できる。元 URL がある場合は URL 行に表示される。
 
@@ -118,8 +118,9 @@ Chunk: 3/15
 Type: web
 Section: 第1章 導入 > 1.1 セットアップ
 Collected: 2025-01-15T10:30:00Z
-
+<<content>>
 チャンクテキストがここに入る...
+<</content>>
 
 ### Result 2 [distance=0.456]
 Source: bluesky/did：plc：abc123/2026/01/xyz789.json
@@ -128,8 +129,9 @@ Title: Sample post
 Chunk: 1/1
 Type: bluesky
 Collected: 2025-01-20T14:00:00Z
-
+<<content>>
 チャンクテキストがここに入る...
+<</content>>
 
 ## BM25 検索結果 (キーワード一致)
 
@@ -140,8 +142,9 @@ Title: サンプル記事
 Chunk: 5/20
 Type: zenn
 Collected: 2025-01-18T08:00:00Z
-
+<<content>>
 チャンクテキストがここに入る...
+<</content>>
 ```
 
 **チャンク位置情報の取得:**
