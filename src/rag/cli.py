@@ -213,6 +213,14 @@ def _output_result(data: dict[str, object]) -> None:
     _output_json(payload)
 
 
+def _output_result_logged(
+    data: dict[str, object], log_msg: str, *log_args: object
+) -> None:
+    """結果 JSON を出力し、stderr にもログを記録する."""
+    _output_result(data)
+    logger.info(log_msg, *log_args)
+
+
 def _is_json_output(args: argparse.Namespace) -> bool:
     """--output json が指定されているかを判定する."""
     return getattr(args, "output_format", "text") == "json"
@@ -1264,16 +1272,22 @@ def run_get_document(args: argparse.Namespace) -> None:
             sys.exit(1)
 
     if json_out:
-        _output_result({
-            "source_id": result.source_id,
-            "title": result.title,
-            "source_type": result.source_type,
-            "format": result.format,
-            "content": result.content,
-            "is_binary": result.is_binary,
-            "collected_at": result.collected_at,
-            "extra": result.extra,
-        })
+        _output_result_logged(
+            {
+                "source_id": result.source_id,
+                "title": result.title,
+                "source_type": result.source_type,
+                "format": result.format,
+                "content": result.content,
+                "is_binary": result.is_binary,
+                "collected_at": result.collected_at,
+                "extra": result.extra,
+            },
+            "get-document: source_id=%s, format=%s, size=%d",
+            result.source_id,
+            result.format,
+            len(result.content) if result.content else 0,
+        )
         return
 
     response = format_document_response(result)
@@ -1691,7 +1705,12 @@ def run_stats(args: argparse.Namespace) -> None:
 
     # --- 出力 ---
     if json_out:
-        _output_result(stats_data)
+        _output_result_logged(
+            stats_data,
+            "stats: chunks=%s, sources=%s",
+            index_data.get("total_chunks", "N/A"),
+            index_data.get("source_count", "N/A"),
+        )
         return
 
     # text 出力
@@ -1812,12 +1831,6 @@ def run_list_recent(args: argparse.Namespace) -> None:
                 return
         finally:
             db.close()
-        logger.info(
-            "list-recent: source_type=%s, total=%d, returned=%d",
-            args.source_type,
-            total,
-            len(sources),
-        )
         for i, s in enumerate(sources, 1):
             logger.info(
                 "list-recent result %d: source_id=%s, title=%r",
@@ -1825,21 +1838,27 @@ def run_list_recent(args: argparse.Namespace) -> None:
                 s.source_id,
                 s.title,
             )
-        _output_result({
-            "source_type": args.source_type,
-            "sources": [
-                {
-                    "source_id": s.source_id,
-                    "title": s.title,
-                    "published_at": s.published_at,
-                    "file_size": s.file_size,
-                }
-                for s in sources
-            ],
-            "count": len(sources),
-            "total": total,
-            "order": args.order,
-        })
+        _output_result_logged(
+            {
+                "source_type": args.source_type,
+                "sources": [
+                    {
+                        "source_id": s.source_id,
+                        "title": s.title,
+                        "published_at": s.published_at,
+                        "file_size": s.file_size,
+                    }
+                    for s in sources
+                ],
+                "count": len(sources),
+                "total": total,
+                "order": args.order,
+            },
+            "list-recent: source_type=%s, total=%d, returned=%d",
+            args.source_type,
+            total,
+            len(sources),
+        )
     else:
         from .rag_knowledge import list_recent_sources
         print(list_recent_sources(
@@ -1950,7 +1969,11 @@ async def run_delete(args: argparse.Namespace) -> None:
         controller.source_store.remove_file(source_id)
     except KeyError:
         if json_out:
-            _output_result({"deleted": False, "not_found": True})
+            _output_result_logged(
+                {"deleted": False, "not_found": True},
+                "delete: source_id=%s, not_found=True",
+                source_id,
+            )
             return
         print(f"該当するソースが見つかりませんでした: {source_id}", file=sys.stderr)
         sys.exit(1)
@@ -1971,10 +1994,14 @@ async def run_delete(args: argparse.Namespace) -> None:
         sys.exit(1)
 
     if json_out:
-        _output_result({
-            "deleted": True,
-            "pipeline": _summary_to_dict(summary),
-        })
+        _output_result_logged(
+            {
+                "deleted": True,
+                "pipeline": _summary_to_dict(summary),
+            },
+            "delete: source_id=%s, deleted=True",
+            source_id,
+        )
         return
 
     if summary.warnings:
@@ -2962,19 +2989,25 @@ def run_search_aozora(args: argparse.Namespace) -> None:
         sys.exit(1)
 
     if json_out:
-        _output_result({
-            "results": [
-                {
-                    "book_id": r["book_id"],
-                    "title": r["title"],
-                    "person_id": r["person_id"],
-                    "author": r["author"],
-                    "copyright": r["copyright"],
-                }
-                for r in results
-            ],
-            "count": len(results),
-        })
+        _output_result_logged(
+            {
+                "results": [
+                    {
+                        "book_id": r["book_id"],
+                        "title": r["title"],
+                        "person_id": r["person_id"],
+                        "author": r["author"],
+                        "copyright": r["copyright"],
+                    }
+                    for r in results
+                ],
+                "count": len(results),
+            },
+            "search-aozora: author=%s, title=%s, count=%d",
+            args.author,
+            args.title,
+            len(results),
+        )
         return
 
     if not results:
