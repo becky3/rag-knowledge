@@ -6,6 +6,7 @@
 from __future__ import annotations
 
 import base64
+import sys
 
 import pytest
 
@@ -101,7 +102,8 @@ class TestSanitizeFilename:
         with pytest.raises(ValueError, match="filename"):
             sanitize_filename("/")
 
+    @pytest.mark.skipif(sys.platform != "win32", reason="Windows path semantics")
     def test_windows_drive_root_raises_value_error(self) -> None:
-        # "C:\" → Path("C:\\").name == "" → 拒否
+        # "C:\" → Path("C:\\").name == "" → 拒否 (Windows only)
         with pytest.raises(ValueError, match="filename"):
             sanitize_filename("C:\\")

@@ -114,7 +114,7 @@ class FileLock:
 
         assert self._fd is not None
         try:
-            msvcrt.locking(self._fd, msvcrt.LK_NBLCK, 1)
+            msvcrt.locking(self._fd, msvcrt.LK_NBLCK, 1)  # type: ignore[attr-defined]
         except OSError as e:
             if e.errno in (errno.EACCES, errno.EDEADLOCK):
                 raise LockAcquisitionError(
@@ -129,7 +129,7 @@ class FileLock:
         assert self._fd is not None
         # ファイルポインタを先頭に戻してから解放
         os.lseek(self._fd, 0, os.SEEK_SET)
-        msvcrt.locking(self._fd, msvcrt.LK_UNLCK, 1)
+        msvcrt.locking(self._fd, msvcrt.LK_UNLCK, 1)  # type: ignore[attr-defined]
 
     def __enter__(self) -> FileLock:
         self.acquire()
