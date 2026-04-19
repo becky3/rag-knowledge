@@ -1043,7 +1043,7 @@ def list_recent_sources(
     )
     for i, src in enumerate(sources, 1):
         logger.info(
-            "list-recent result %d: source_id=%s, title=%s",
+            "list-recent result %d: source_id=%s, title=%r",
             i,
             src.source_id,
             src.title,

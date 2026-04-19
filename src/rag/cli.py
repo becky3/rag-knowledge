@@ -1824,7 +1824,7 @@ def run_list_recent(args: argparse.Namespace) -> None:
         )
         for i, s in enumerate(sources, 1):
             logger.info(
-                "list-recent result %d: source_id=%s, title=%s",
+                "list-recent result %d: source_id=%s, title=%r",
                 i,
                 s.source_id,
                 s.title,
