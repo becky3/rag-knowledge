@@ -2028,5 +2028,5 @@ class TestRunSiteIngestBatch:
             await ingester._run_site_ingest_batch(["https://example.com"])
 
         cmd_args = mock_exec.call_args[0]
-        assert "--output" in cmd_args
-        assert "json" in cmd_args
+        output_index = cmd_args.index("--output")
+        assert cmd_args[output_index + 1] == "json"
