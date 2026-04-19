@@ -30,6 +30,7 @@ QA 検証グループ:
   G) Eval     — init-test-db, evaluate（フィクスチャ必要）
   H) Core     — stats, list-recent, search, get-document, delete, rebuild
   I) Obs      — 観測性（構造化エラー情報・exit code 体系の検証）
+  J) Log      — ログファイル出力の検証（MCP フェーズのみ）
 
 どのグループを検証しますか？（例: A B D, all）
 ```
@@ -77,7 +78,7 @@ QA 検証グループ:
 
 ### 5. グループ実行
 
-選択されたグループを ID 順（A→H）に実行する。
+選択されたグループを ID 順（A→J）に実行する。
 
 **ステップ実行ループ:**
 
@@ -206,6 +207,8 @@ NG を検出した場合、Issue 起票を提案する。
 | G) Eval | evaluate パラメータ | 上記 + `--vector-weight 0.6` |
 | H) Core | search クエリ | 直前に取り込んだ内容に関連するワード（固定値なし） |
 | H) Core | get-document / delete 対象 | A) で取り込んだ README.md の source_id |
+| J) Log | 検証対象 MCP ツール | `rag_stats`（副作用なしで CLI サブプロセス経路を通すため） |
+| J) Log | 対象ログディレクトリ | `.env` の `RAG_LOG_DIR` 配下（`rag-server-*.log`） |
 
 ## グループ別の検証内容
 
@@ -368,9 +371,14 @@ A〜G の取り込みデータを使ってパイプライン基盤を検証す�
 | 5b | `get-document <source_id> --format original` | A) の README.md の全文がオリジナル形式で取得できる | `none` |
 | 6 | `delete <source_id>`（`source_id` は positional 引数） | A) の README.md が削除される | `delete` |
 | 7 | `rebuild --mode incremental` | 差分再構築が成功する | `none` |
+| 7a | `rebuild --mode convert` | コンバートのみ再実行が成功する | `none` |
+| 7b | `rebuild --mode index` | インデックスのみ再構築が成功する | `none` |
+| 7c | `rebuild --mode full` | 全再構築が成功する | `none` |
 | 8 | `stats` | 再構築後の統計が更新されている | `none` |
 
 MCP 対応: `rag_stats` / `rag_list_recent` (+ filters) / `rag_search` / `rag_get_document` / `rag_delete` / `rag_rebuild`
+
+`rag_rebuild` の mode 指定: `rag_rebuild(mode="incremental")` / `rag_rebuild(mode="convert")` / `rag_rebuild(mode="index")` / `rag_rebuild(mode="full")`
 
 > MCP `rag_list_recent` の filters 確認: `rag_list_recent(source_type="journal", filters="repository=rag-knowledge")` で journal がリポジトリ名で絞り込まれること。
 
@@ -404,6 +412,34 @@ MCP 経路では `echo $?` を直接検証できないため、代替として�
 - ステップ 2: `rag_rebuild(mode="incremental")` のレスポンステキストに `path`・`size_bytes`・`message`・`phase` が含まれることで確認する（CLI JSON → MCP テキスト変換経路の動作確認）
 - ステップ 3 の代替: MCP 経路では `_run_cli_subprocess` が result 行を優先してパースするため、workload の `errors > 0` でも MCP クライアントは構造化サマリを受け取る（例外として失敗しない）。ステップ 2 でサマリが正しく返れば exit code 契約の動作も保証される
 - ステップ 5 の代替: `rag_rebuild(mode="incremental", source_type="web")` が `CLISubprocessError` として伝播し、エラーメッセージが MCP レスポンスに含まれる
+
+### J) Log（ログファイル出力、MCP フェーズのみ）
+
+MCP サーバーのログファイル出力（`SessionRotatingFileHandler`）が想定どおり動作していることを検証する。サーバー起動ログ・MCP ツール呼び出しログ・CLI 転送ログの 3 経路が同一ファイルに記録されることを確認する。
+
+仕様:
+
+- [docs/specs/rag-knowledge.md](../../../docs/specs/rag-knowledge.md) の「MCP サーバーのロガー設定 / ログファイル出力」
+- 実装: `src/rag/infrastructure/log_file_handler.py` / `src/rag/server.py` の `_write_cli_lines_to_handlers`
+
+#### グループ準備
+
+1. `.env` の `RAG_LOG_DIR` を確認し、worktree 内の絶対パスを指していることを確認する（未設定の場合はデフォルトパスを使用）
+2. MCP サーバーが HTTP モードで起動中であること（worktree セットアップで起動済み）
+
+| # | コマンド | 期待結果 | 検証種別 |
+|---|---------|---------|---------|
+| 1 | `ls -1 <RAG_LOG_DIR>/rag-server-*.log \| tail -1` | サーバー起動後にログファイル（`rag-server-YYYYMMDD-HHMMSS-00001.log`）が存在する | `none` |
+| 2 | 直前のログファイルに対し `grep -E "^\[MCP\].*Starting MCP server" <logfile>` | `[MCP]` プレフィックス付きで `Starting MCP server: transport=http` の行がマッチする | `none` |
+| 3 | MCP ツール `rag_stats` を呼び出し、その後ログファイルを再確認（`cat <logfile>`） | `[MCP]` プレフィックスのサーバーログと、CLI サブプロセス stderr 由来の `[CLI]` プレフィックス行の両方がファイルに記録されている | `none` |
+| 4 | `grep -E "^\[MCP\] [0-9]{4}-[0-9]{2}-[0-9]{2} [0-9]{2}:[0-9]{2}:[0-9]{2},[0-9]{3} - [^ ]+ - (INFO\|DEBUG\|WARNING\|ERROR) - " <logfile>` | サーバーログが `[MCP] YYYY-MM-DD HH:MM:SS,mmm - logger.name - LEVEL - message` 形式で記録されている | `none` |
+| 5 | `grep -E "^\[CLI\] [0-9]{4}-[0-9]{2}-[0-9]{2} [0-9]{2}:[0-9]{2}:[0-9]{2},[0-9]{3} - [^ ]+ - (INFO\|DEBUG\|WARNING\|ERROR) - " <logfile>` | CLI 転送ログが `[CLI] YYYY-MM-DD HH:MM:SS,mmm - logger.name - LEVEL - message` 形式で記録されている（CLI 側の stderr 行をそのままパススルーしており、二重のタイムスタンプにならない） | `none` |
+
+**注意:**
+
+- CLI フェーズではサーバー側でログファイルを生成しない（CLI 直接実行経路はファイルハンドラを経由しない）ため、本グループは MCP フェーズでのみ実行する。CLI フェーズが選択されている場合は全ステップをスキップする
+- ステップ 3 で `rag_stats` を選ぶのはサーバー副作用を発生させずに CLI サブプロセス経路（`_run_cli_subprocess` → `_write_cli_lines_to_handlers`）を通すため。他のツールでも代替可能だが、取り込み系は副作用が残るため非推奨
+- 対象ログファイルは「セッション最新」の `rag-server-*-00001.log`（ロールオーバーが発生していれば最大連番のファイル）を使用する
 
 ### 7. クリーンアップ
 

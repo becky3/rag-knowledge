@@ -161,6 +161,7 @@ def _output_error(
     if details is not None:
         payload["details"] = details
     _output_json(payload)
+    logger.error("CLI error: %s (code=%s)", message, code.value)
     sys.exit(1)
 
 
@@ -1815,6 +1816,19 @@ def run_list_recent(args: argparse.Namespace) -> None:
                 return
         finally:
             db.close()
+        logger.info(
+            "list-recent: source_type=%s, total=%d, returned=%d",
+            args.source_type,
+            total,
+            len(sources),
+        )
+        for i, s in enumerate(sources, 1):
+            logger.info(
+                "list-recent result %d: source_id=%s, title=%s",
+                i,
+                s.source_id,
+                s.title,
+            )
         _output_result({
             "source_type": args.source_type,
             "sources": [

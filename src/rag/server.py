@@ -74,7 +74,7 @@ MCPContext = Context[Any, Any, Any]
 # stdout は MCP stdio プロトコルが使うため変更しない
 ensure_utf8_streams()
 
-logger = logging.getLogger(__name__)
+logger = logging.getLogger("rag.server")
 
 mcp = FastMCP("rag")
 
@@ -985,6 +985,37 @@ def _sanitize_log_value(value: str, *, max_length: int = 200) -> str:
     return sanitized
 
 
+_CLI_PASSTHROUGH_FORMATTER = logging.Formatter("%(message)s")
+
+
+def _write_cli_lines_to_handlers(lines: list[str]) -> None:
+    """CLI stderr 行を [CLI] プレフィックス付きでハンドラに emit する.
+
+    logger.debug() を経由するとサーバー側フォーマッタ（[MCP] プレフィックス）が
+    適用されてタイムスタンプが二重になるため、フォーマッタを一時的に差し替えて
+    handler.emit() を呼ぶ。emit 経由にすることで SessionRotatingFileHandler の
+    ロールオーバーや stream 再オープンの恩恵を受ける。
+    """
+    rag_logger = logging.getLogger("rag")
+    for handler in rag_logger.handlers:
+        original_formatter = handler.formatter
+        handler.formatter = _CLI_PASSTHROUGH_FORMATTER
+        try:
+            for line in lines:
+                record = logging.LogRecord(
+                    name="rag.cli",
+                    level=logging.DEBUG,
+                    pathname="",
+                    lineno=0,
+                    msg=f"[CLI] {line}",
+                    args=None,
+                    exc_info=None,
+                )
+                handler.emit(record)
+        finally:
+            handler.formatter = original_formatter
+
+
 async def _run_cli_subprocess(
     command: str,
     args: list[str] | None = None,
@@ -1105,15 +1136,18 @@ async def _run_cli_subprocess(
     stderr_lines = stderr_text.rstrip().splitlines()
     stderr_tail = "\n".join(stderr_lines[-10:])
 
-    if stderr_text:
-        for line in stderr_lines:
-            logger.debug("[CLI] %s", line)
+    if stderr_lines:
+        _write_cli_lines_to_handlers(stderr_lines)
     logger.debug("CLI subprocess %s exit_code=%d", command, exit_code)
 
     # 判定は優先順位「SEGFAULT > error line > result line > 出力なし」。
     # exit_code は判定に使わない（CLI の 2 値契約: 0=完走 / 1=致命、
     # workload の errors/aborted は result JSON で表現する）。
     if exit_code in _SEGFAULT_EXIT_CODES:
+        logger.error(
+            "CLI subprocess %s crashed: SEGFAULT exit_code=%d",
+            command, exit_code,
+        )
         raise CLISubprocessError(
             f"CLI サブプロセスがクラッシュしました (SEGFAULT, exit_code={exit_code})"
         )
@@ -1122,17 +1156,29 @@ async def _run_cli_subprocess(
         try:
             error_data = json.loads(error_line)
         except json.JSONDecodeError as exc:
+            logger.error(
+                "CLI subprocess %s failed: error line parse failed: %s",
+                command, error_line,
+            )
             raise CLISubprocessError(
                 f"CLI サブプロセスのエラー行パースに失敗: {error_line}"
             ) from exc
         error_msg = error_data.get("message", "不明なエラー")
         error_code = error_data.get("code")
+        logger.warning(
+            "CLI subprocess %s failed: %s (code=%s)",
+            command, error_msg, error_code,
+        )
         raise CLISubprocessError(
             error_msg,
             code=error_code,
         )
 
     if not result_line:
+        logger.error(
+            "CLI subprocess %s failed: empty output (exit_code=%d)",
+            command, exit_code,
+        )
         raise CLISubprocessError(
             f"CLI サブプロセスの出力が空です (exit_code={exit_code})\n{stderr_tail}"
         )
@@ -1140,6 +1186,10 @@ async def _run_cli_subprocess(
     try:
         result: dict[str, Any] = json.loads(result_line)
     except json.JSONDecodeError as exc:
+        logger.error(
+            "CLI subprocess %s failed: result parse failed: %s",
+            command, result_line,
+        )
         raise CLISubprocessError(
             f"CLI サブプロセスの結果パースに失敗: {result_line}"
         ) from exc
@@ -1885,7 +1935,7 @@ def _configure_and_run() -> None:
     # rag 名前空間ロガーの設定（uvicorn/FastMCP のルートロガーを上書きしない）
     rag_logger = logging.getLogger("rag")
     log_formatter = logging.Formatter(
-        "%(asctime)s %(name)s %(levelname)s %(message)s",
+        "[MCP] %(asctime)s - %(name)s - %(levelname)s - %(message)s",
     )
     if not rag_logger.handlers:
         handler = logging.StreamHandler(sys.__stderr__)
