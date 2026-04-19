@@ -268,9 +268,11 @@ class TestIngestResultToDict:
         result = _ingest_result_to_dict(ingest_result, pipeline_summary)
         assert result["placed"] == 1
         assert "pipeline" in result
-        assert result["pipeline"]["mode"] == "incremental"
-        assert result["pipeline"]["processed"] == 3
-        assert "skipped" not in result["pipeline"]
+        pipeline = result["pipeline"]
+        assert isinstance(pipeline, dict)
+        assert pipeline["mode"] == "incremental"
+        assert pipeline["processed"] == 3
+        assert "skipped" not in pipeline
 
     def test_includes_observability_fields_with_values(self) -> None:
         """partial_failures / aborted 等がゼロ値でない場合も正しくシリアライズされる.
@@ -278,7 +280,7 @@ class TestIngestResultToDict:
         失敗の観測性（仕様: docs/specs/ingesters/common.md）を production 出力に
         届けるため、IngestResult の全観測性フィールドを JSON に含めなければならない。
         """
-        partial_details = [{"target": "a.png", "category": "media_download"}]
+        partial_details: list[dict[str, object]] = [{"target": "a.png", "category": "media_download"}]
         ingest_result = self._make_ingest_result(
             placed=10,
             partial_failures=2,
