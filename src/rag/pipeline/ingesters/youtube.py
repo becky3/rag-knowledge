@@ -11,6 +11,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import random
 import re
 import shutil
 import tempfile
@@ -30,6 +31,7 @@ logger = logging.getLogger(__name__)
 MAX_VIDEOS_HARD_LIMIT = 500
 MIN_REQUEST_INTERVAL = 0.1
 MAX_AUDIO_FILE_SIZE_MB = 500
+JITTER_MIN_RATIO = 0.3
 CIRCUIT_BREAKER_THRESHOLD = 5
 
 # video_id の正規表現
@@ -408,9 +410,13 @@ class YoutubeIngester:
             if progress_callback is not None:
                 progress_callback(i + 1, len(entries_to_process), video_url)
 
-            # リクエスト間隔待機（次の動画がある場合のみ）
+            # リクエスト間隔待機（次の動画がある場合のみ、ジッター付き）
             if i < len(entries_to_process) - 1:
-                await asyncio.sleep(self._request_interval)
+                jitter = random.uniform(
+                    self._request_interval * JITTER_MIN_RATIO,
+                    self._request_interval,
+                )
+                await asyncio.sleep(jitter)
 
         logger.info(
             "Playlist crawl completed: placed=%d, skipped=%d, errors=%d",

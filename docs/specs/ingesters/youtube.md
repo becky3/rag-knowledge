@@ -55,7 +55,7 @@ YouTube インジェスターは以下の 3 つのライブラリを使用して
 
 youtube-transcript-api と yt-dlp はそれぞれ独自の HTTP クライアントを内包しており、ConstrainedClient をトランスポート層として注入できない。そのため、以下の方式で安全制約を担保する:
 
-- **リクエスト間隔**: インジェスター側で各動画の処理間に `asyncio.sleep(request_interval)` を挟む
+- **リクエスト間隔**: インジェスター側で各動画の処理間にランダムジッター付きの待機を挟む。待機時間は `request_interval` を上限としてランダムに決定する（固定間隔によるボット検知を回避するため）
 - **操作数上限**: プレイリストの動画数を `max_videos`（ハードリミット 500）で制限する
 - **タイムアウト**: yt-dlp の `socket_timeout` オプションで制御する
 - **サーキットブレーカー**: インジェスター側で連続失敗をカウントし、5 回連続失敗で操作を中断する
@@ -67,7 +67,7 @@ youtube-transcript-api は非公式 API を使用しており、短時間に多�
 - IP ブロックは youtube-transcript-api のみに影響し、yt-dlp（メタデータ取得・音声ダウンロード）は継続動作する
 - ブロックは一時的で、通常は数十分〜数時間で解除される
 - プレイリスト一括取り込み時は `--max-videos` で段階的に取り込む（1 回あたり 10〜20 動画推奨）
-- `rag_youtube_request_interval`（デフォルト: 5.0 秒）を短くしすぎない
+- `rag_youtube_request_interval` を短くしすぎない
 - IP ブロックが発生した場合は時間を置いて再実行する
 
 ### 外部ツール依存
@@ -141,7 +141,7 @@ youtube-transcript-api は非公式 API を使用しており、短時間に多�
 | 設定項目 | 層 | 設計意図 |
 |---------|-----|---------|
 | `rag_youtube_max_videos` | 共通設定値 | プレイリスト取得時の最大動画数。API 負荷を抑制 |
-| `rag_youtube_request_interval` | 共通設定値 | リクエスト間の最低間隔。IP ブロック回避 |
+| `rag_youtube_request_interval` | 共通設定値 | リクエスト間の最大待機時間（ランダムジッター付き）。固定間隔によるボット検知・IP ブロック回避 |
 | `rag_youtube_request_timeout` | 共通設定値 | リクエストタイムアウト |
 | `rag_youtube_whisper_model` | 環境依存値 | faster-whisper のモデル名。GPU メモリに応じて選択 |
 | `rag_youtube_whisper_device` | 環境依存値 | faster-whisper のデバイス。GPU 有無で切替 |
@@ -328,7 +328,7 @@ flowchart TD
     VALIDATE["入力バリデーション + クランプ"]
     EXPAND["プレイリスト展開（yt-dlp extract_flat）"]
     EACH{"未処理動画がある?"}
-    WAIT["リクエスト間隔待機"]
+    WAIT["リクエスト間隔待機（ランダムジッター）"]
     INGEST["単一動画取り込み"]
     CB_CHECK{"連続失敗 5 回?"}
     NOTIFY["パイプライン制御に完了通知（一括）"]

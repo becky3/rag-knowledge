@@ -61,7 +61,7 @@ TEST_SETTINGS_DEFAULTS: dict[str, object] = {
     "rag_youtube_whisper_model": "base",
     "rag_youtube_whisper_device": "cpu",
     "rag_youtube_max_videos": 100,
-    "rag_youtube_request_interval": 5.0,
+    "rag_youtube_request_interval": 30.0,
     "rag_youtube_request_timeout": 30,
     "rag_youtube_transcript_languages": ["ja", "en"],
     "rag_youtube_merge_gap_sec": 2.0,

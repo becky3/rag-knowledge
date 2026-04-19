@@ -411,6 +411,51 @@ class TestCrawlPlaylist:
         assert result.errors == 0
 
     @pytest.mark.asyncio()
+    async def test_sleep_uses_jitter(self, source_store: Any) -> None:
+        """リクエスト間隔待機がランダムジッター（30%〜100%）で行われることを検証する."""
+        from rag.pipeline.ingesters.youtube import JITTER_MIN_RATIO
+
+        interval = 10.0
+        ingester = make_youtube_ingester(
+            source_store, max_videos=3, request_interval=interval
+        )
+
+        entries = [
+            {"id": "video_id_0001", "url": "video_id_0001"},
+            {"id": "video_id_0002", "url": "video_id_0002"},
+            {"id": "video_id_0003", "url": "video_id_0003"},
+        ]
+        single_result = IngestResult(placed=1)
+
+        sleep_values: list[float] = []
+
+        async def capture_sleep(seconds: float) -> None:
+            sleep_values.append(seconds)
+
+        with (
+            patch.object(
+                ingester,
+                "_expand_playlist",
+                new_callable=AsyncMock,
+                return_value=entries,
+            ),
+            patch.object(
+                ingester,
+                "ingest_video",
+                new_callable=AsyncMock,
+                return_value=single_result,
+            ),
+            patch("rag.pipeline.ingesters.youtube.asyncio.sleep", side_effect=capture_sleep),
+        ):
+            await ingester.crawl_playlist(
+                "https://www.youtube.com/playlist?list=PLtest123"
+            )
+
+        assert len(sleep_values) == 2
+        for val in sleep_values:
+            assert interval * JITTER_MIN_RATIO <= val <= interval
+
+    @pytest.mark.asyncio()
     async def test_circuit_breaker_on_consecutive_errors(self, source_store: Any) -> None:
         """5 回連続失敗でサーキットブレーカーが発動することを検証する."""
         ingester = make_youtube_ingester(source_store, max_videos=10, request_interval=0.1)
