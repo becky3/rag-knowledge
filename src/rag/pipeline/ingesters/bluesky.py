@@ -1038,7 +1038,7 @@ class BlueskyIngester:
         """site-ingest CLI subprocess を 1 バッチ分実行する."""
         cmd = [
             sys.executable, "-m", "rag.cli",
-            "site-ingest", *urls, "--download-only",
+            "site-ingest", *urls, "--download-only", "--output", "json",
         ]
 
         process = await asyncio.create_subprocess_exec(
@@ -1056,14 +1056,17 @@ class BlueskyIngester:
             )
             raise RuntimeError(f"site-ingest failed with exit_code={process.returncode}")
 
-        # stdout から配置数を抽出（"N件新規配置" パターン）
         stdout_text = stdout.decode("utf-8", errors="replace")
-        match = re.search(r"(\d+)件新規配置", stdout_text)
-        if match:
-            return int(match.group(1))
+        for line in reversed(stdout_text.strip().splitlines()):
+            try:
+                data = json.loads(line)
+                if isinstance(data, dict) and data.get("type") == "result":
+                    return int(data.get("placed", 0))
+            except (json.JSONDecodeError, ValueError, TypeError):
+                continue
 
         logger.warning(
-            "site-ingest の出力から配置数を取得できませんでした: %s",
+            "site-ingest の JSON 出力から result を取得できませんでした: %s",
             stdout_text[:200],
         )
         return 0

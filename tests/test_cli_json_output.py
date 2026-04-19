@@ -313,7 +313,7 @@ class TestIngestResultToDict:
 
 
 class TestCommandsHaveOutputOption:
-    """12 対象コマンドに --output オプションが追加されていることを確認する.
+    """13 対象コマンドに --output オプションが追加されていることを確認する.
 
     cli.py のソースコードを解析して、対象コマンドの直後に
     _add_output_option() 呼び出しがあることを検証する。
@@ -332,19 +332,20 @@ class TestCommandsHaveOutputOption:
         "update-aozora-catalog",
         "delete",
         "rebuild",
+        "site-ingest",
     ]
 
-    def test_all_12_commands_have_output_option(self) -> None:
-        """cli.py のソースに 12 コマンド分の _add_output_option 呼び出しがある."""
+    def test_all_13_commands_have_output_option(self) -> None:
+        """cli.py のソースに 13 コマンド分の _add_output_option 呼び出しがある."""
         import inspect
         import rag.cli as cli_module
 
         source = inspect.getsource(cli_module)
         count = source.count("_add_output_option(")
         # ヘルパー関数の定義 (def _add_output_option) は除外して呼び出しだけ数える
-        # 定義は 1 つ、呼び出しが 12 個で合計 13 回出現
-        assert count >= 12 + 1, (
-            f"_add_output_option の出現回数が {count} 回（期待: 定義1 + 呼び出し12 = 13）"
+        # 定義は 1 つ、呼び出しが 13 個で合計 14 回出現
+        assert count >= 13 + 1, (
+            f"_add_output_option の出現回数が {count} 回（期待: 定義1 + 呼び出し13 = 14）"
         )
 
     @pytest.mark.parametrize("command", TARGET_COMMANDS)
@@ -367,6 +368,7 @@ class TestCommandsHaveOutputOption:
             "update-aozora-catalog": "run_update_aozora_catalog",
             "delete": "run_delete",
             "rebuild": "run_rebuild",
+            "site-ingest": "run_site_ingest",
         }
 
         func_name = func_names[command]
