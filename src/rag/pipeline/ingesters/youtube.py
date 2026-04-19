@@ -412,9 +412,12 @@ class YoutubeIngester:
 
             # リクエスト間隔待機（次の動画がある場合のみ、ジッター付き）
             if i < len(entries_to_process) - 1:
-                jitter = random.uniform(
-                    self._request_interval * JITTER_MIN_RATIO,
-                    self._request_interval,
+                jitter = max(
+                    random.uniform(
+                        self._request_interval * JITTER_MIN_RATIO,
+                        self._request_interval,
+                    ),
+                    MIN_REQUEST_INTERVAL,
                 )
                 await asyncio.sleep(jitter)
 
