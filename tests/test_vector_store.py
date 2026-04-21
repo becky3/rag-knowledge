@@ -834,3 +834,112 @@ class TestCreateHttp:
                     host="localhost",
                     port=8000,
                 )
+
+
+class TestBatchProcessing:
+    """バッチ分割処理のテスト (#644 Phase 1)."""
+
+    @pytest.mark.asyncio
+    async def test_get_metadata_by_ids_batches(
+        self, ephemeral_store: VectorStore, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """_BATCH_SIZE を超える ID リストでもメタデータを取得できること."""
+        monkeypatch.setattr(VectorStore, "_BATCH_SIZE", 2)
+
+        chunks = [
+            DocumentChunk(
+                id=f"batch_{i}",
+                text=f"Text {i}",
+                metadata={"source_id": "src", "chunk_index": i},
+            )
+            for i in range(5)
+        ]
+        await ephemeral_store.add_documents(chunks)
+
+        ids = [f"batch_{i}" for i in range(5)]
+        result = await ephemeral_store.get_metadata_by_ids(ids)
+
+        assert len(result) == 5
+        for i in range(5):
+            assert f"batch_{i}" in result
+            assert result[f"batch_{i}"]["source_id"] == "src"
+
+    @pytest.mark.asyncio
+    async def test_get_metadata_by_ids_empty(
+        self, ephemeral_store: VectorStore
+    ) -> None:
+        """空の ID リストで空辞書を返すこと."""
+        result = await ephemeral_store.get_metadata_by_ids([])
+        assert result == {}
+
+    @pytest.mark.asyncio
+    async def test_update_metadata_batches(
+        self, ephemeral_store: VectorStore, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """_BATCH_SIZE を超えるメタデータ更新が成功すること."""
+        monkeypatch.setattr(VectorStore, "_BATCH_SIZE", 2)
+
+        chunks = [
+            DocumentChunk(
+                id=f"upd_{i}",
+                text=f"Text {i}",
+                metadata={"source_id": "src", "chunk_index": i, "title": "old"},
+            )
+            for i in range(5)
+        ]
+        await ephemeral_store.add_documents(chunks)
+
+        ids = [f"upd_{i}" for i in range(5)]
+        new_meta = [
+            {"source_id": "src", "chunk_index": i, "title": "new"}
+            for i in range(5)
+        ]
+        await ephemeral_store.update_metadata(ids, new_meta)
+
+        result = await ephemeral_store.get_metadata_by_ids(ids)
+        for i in range(5):
+            assert result[f"upd_{i}"]["title"] == "new"
+
+    @pytest.mark.asyncio
+    async def test_delete_stale_chunks_without_metadatas(
+        self, ephemeral_store: VectorStore
+    ) -> None:
+        """delete_stale_chunks が include=[] で正しく動作すること."""
+        chunks = [
+            DocumentChunk(
+                id=f"stale_{i}",
+                text=f"Text {i}",
+                metadata={"source_id": "src_a", "chunk_index": i},
+            )
+            for i in range(3)
+        ]
+        await ephemeral_store.add_documents(chunks)
+
+        deleted = await ephemeral_store.delete_stale_chunks(
+            "src_a", {"stale_0", "stale_2"}
+        )
+        assert deleted == 1
+
+        stats = ephemeral_store.get_stats()
+        assert stats["total_chunks"] == 2
+
+    @pytest.mark.asyncio
+    async def test_delete_by_source_without_metadatas(
+        self, ephemeral_store: VectorStore
+    ) -> None:
+        """delete_by_source が include=[] で正しく動作すること."""
+        chunks = [
+            DocumentChunk(
+                id=f"del_{i}",
+                text=f"Text {i}",
+                metadata={"source_id": "src_del", "chunk_index": i},
+            )
+            for i in range(3)
+        ]
+        await ephemeral_store.add_documents(chunks)
+
+        deleted = await ephemeral_store.delete_by_source("src_del")
+        assert deleted == 3
+
+        stats = ephemeral_store.get_stats()
+        assert stats["total_chunks"] == 0

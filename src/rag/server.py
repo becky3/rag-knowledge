@@ -1270,6 +1270,7 @@ def _format_chunk_position(chunk_index: int, total_chunks: int) -> str:
 
 def _format_cli_search_result(result: dict[str, Any]) -> str:
     """CLI search の JSON 結果を MCP レスポンス文字列に変換する."""
+    warnings = result.get("warnings", [])
     vector_results = result.get("vector_results", [])
     bm25_results = result.get("bm25_results", [])
 
@@ -1283,6 +1284,8 @@ def _format_cli_search_result(result: dict[str, Any]) -> str:
         sections.append(("## BM25 検索結果 (キーワード一致)\n", bm25_results, "score"))
 
     parts: list[str] = []
+    for w in warnings:
+        parts.append(f"⚠️ {w}\n")
     for header, items, score_key in sections:
         parts.append(header)
         for i, item in enumerate(items, start=1):

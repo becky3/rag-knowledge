@@ -52,7 +52,7 @@ MCP クライアントからの rag_search ツール呼び出し。
 | パラメータ | 型 | 必須 | 内容 |
 |-----------|-----|------|------|
 | `query` | str | Yes | 検索キーワード |
-| `n_results` | int | No | エンジンあたりの結果件数（未指定時は `rag_retrieval_count` 設定値を使用、1 以上） |
+| `n_results` | int | No | エンジンあたりの結果件数（未指定時は `rag_retrieval_count` 設定値を使用、1 以上）。`rag_retrieval_count` の Field 上限を超えた場合は警告付きで動作する |
 | `source_type` | str | No | ソース種別フィルタ（値は [`_schema/enums.yml`](../../_schema/enums.yml) の `source_type` を参照） |
 | `filters` | str | No | カスタムメタデータフィルタ（`key=value` 形式、複数指定時はカンマ区切り）。`.meta` の extra フィールドで検索結果を絞り込む。完全一致。例: `repository=rag-knowledge` / `repository=rag-knowledge,tag=dev` |
 
