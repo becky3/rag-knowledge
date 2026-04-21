@@ -1653,7 +1653,7 @@ def run_stats(args: argparse.Namespace) -> None:
     stats_data["converted_store"] = converted_store_data
 
     # インデックス
-    index_data: dict[str, object] = {}
+    index_data: dict[str, object] = {"source_count": 0}
     try:
         embedding_provider = get_embedding_provider(settings, settings.embedding_provider)
         with contextlib.redirect_stdout(io.StringIO()):
