@@ -1668,7 +1668,6 @@ def run_stats(args: argparse.Namespace) -> None:
             )
         raw_stats = vector_store.get_stats()
         index_data["total_chunks"] = int(str(raw_stats.get("total_chunks", 0)))
-        index_data["source_count"] = int(str(raw_stats.get("source_count", 0)))
     except Exception:
         logger.exception("インデックス統計の取得に失敗")
         index_data["error"] = "統計の取得に失敗しました"
@@ -1690,6 +1689,8 @@ def run_stats(args: argparse.Namespace) -> None:
                 history = db.get_pipeline_history()
                 last_commit_id = db.get_last_commit_id()
                 deleted_count = db.source_count(status="deleted")
+                active_count = db.source_count(status="active")
+                index_data["source_count"] = active_count
                 pipeline_data["last_processed_at"] = (
                     history[-1].processed_at if history else None
                 )

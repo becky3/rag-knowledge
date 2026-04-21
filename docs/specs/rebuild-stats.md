@@ -261,15 +261,14 @@ CLI は `--output json` 指定時にこの callback 内で進捗 JSON を stdout
 | 総ファイル数 | converted_store 内のファイル数 |
 | 総サイズ | 全ファイルの合計サイズ |
 
-#### インデックス統計（既存データ項目を維持）
+#### インデックス統計
 
 | 項目 | 内容 |
 |------|------|
-| 総チャンク数 | ChromaDB コレクション内のチャンク数 |
-| ソース数 | ユニークなソース数（source_id の種類数） |
-| ドメイン別ソース一覧 | ドメインごとのページ数・チャンク数（表示上限: `rag_stats_max_sources` 設定値） |
+| 総チャンク数 | ChromaDB コレクション内のチャンク数（`collection.count()`） |
+| ソース数 | metadata.db のアクティブソース数（`source_count(status="active")`） |
 
-既存の `rag_stats` が提供するデータ項目を維持する。出力テキストの形式は新セクション（source_store / converted_store / metadata.db）の追加に伴い統合フォーマットに変更する。
+総チャンク数は ChromaDB の軽量 API で取得する。ソース数は metadata.db が SSoT であり、ChromaDB のメタデータ走査は行わない。metadata.db が未設定・未初期化の場合、ソース数は 0 と表示する。
 
 #### metadata.db 統計
 
@@ -304,10 +303,6 @@ CLI は `--output json` 指定時にこの callback 内で進捗 JSON を stdout
 ■ インデックス
   総チャンク数: 1,234
   ソース数: 120
-  ドメイン別:
-    example.com: 5 pages (150 chunks)
-    ...
-  (以下省略、50件まで表示)
 
 ■ パイプライン
   最終処理: 2026-03-19T10:30:00+09:00

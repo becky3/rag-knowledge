@@ -273,14 +273,14 @@ class TestDeleteBySourceType:
 
 
 class TestAC11GetStats:
-    """AC11: VectorStore.get_stats() でナレッジベースの統計情報を取得できること."""
+    """AC11: VectorStore.get_stats() で総チャンク数を取得できること."""
 
     def test_get_stats_empty_store(self, ephemeral_store: VectorStore) -> None:
         """空のストアの統計."""
         stats = ephemeral_store.get_stats()
         assert stats["total_chunks"] == 0
-        assert stats["source_count"] == 0
-        assert stats["sources"] == []
+        assert "source_count" not in stats
+        assert "sources" not in stats
 
     @pytest.mark.asyncio
     async def test_get_stats_with_documents(self, ephemeral_store: VectorStore) -> None:
@@ -318,71 +318,6 @@ class TestAC11GetStats:
 
         stats = ephemeral_store.get_stats()
         assert stats["total_chunks"] == 3
-        assert stats["source_count"] == 2
-
-    @pytest.mark.asyncio
-    async def test_get_stats_returns_sources_with_domain_grouping(
-        self,
-        ephemeral_store: VectorStore,
-    ) -> None:
-        """ソース一覧がドメイン別にグルーピングされて返ること."""
-        chunks = [
-            DocumentChunk(
-                id="a_0",
-                text="テキスト1",
-                metadata={
-                    "source_id": "https://example.com/page1",
-                    "title": "ページA",
-                    "chunk_index": 0,
-                },
-            ),
-            DocumentChunk(
-                id="a_1",
-                text="テキスト2",
-                metadata={
-                    "source_id": "https://example.com/page1",
-                    "title": "ページA",
-                    "chunk_index": 1,
-                },
-            ),
-            DocumentChunk(
-                id="b_0",
-                text="テキスト3",
-                metadata={
-                    "source_id": "https://other.com/doc",
-                    "title": "ドキュメントB",
-                    "chunk_index": 0,
-                },
-            ),
-        ]
-        await ephemeral_store.add_documents(chunks)
-
-        stats = ephemeral_store.get_stats()
-        sources = stats["sources"]
-        assert isinstance(sources, list)
-        assert len(sources) == 2
-
-        # ドメイン名でソートされている
-        domains = [g["domain"] for g in sources]
-        assert domains == ["example.com", "other.com"]
-
-        # example.com のページ情報
-        example_group = sources[0]
-        assert example_group["domain"] == "example.com"
-        pages = example_group["pages"]
-        assert len(pages) == 1  # 1つのユニークURL
-        assert pages[0]["url"] == "https://example.com/page1"
-        assert pages[0]["title"] == "ページA"
-        assert pages[0]["chunks"] == 2
-
-        # other.com のページ情報
-        other_group = sources[1]
-        assert other_group["domain"] == "other.com"
-        pages = other_group["pages"]
-        assert len(pages) == 1
-        assert pages[0]["url"] == "https://other.com/doc"
-        assert pages[0]["title"] == "ドキュメントB"
-        assert pages[0]["chunks"] == 1
 
 
 class TestVectorStoreDataClasses:

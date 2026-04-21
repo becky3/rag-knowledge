@@ -776,12 +776,11 @@ class RAGKnowledgeService:
         return total_deleted
 
     async def get_stats(self) -> dict[str, object]:
-        """ナレッジベース統計とソース一覧.
+        """ナレッジベース統計（総チャンク数）.
 
         Returns:
-            統計情報の辞書（total_chunks, source_count, sources）
+            統計情報の辞書（total_chunks）
         """
-        # VectorStore.get_stats()は同期APIを呼ぶため、to_threadでラップ
         return await asyncio.to_thread(self._vector_store.get_stats)
 
 

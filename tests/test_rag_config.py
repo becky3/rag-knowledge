@@ -206,7 +206,6 @@ chromadb_collection_name = "knowledge"
 rag_url_safety_check = false
 rag_url_safety_cache_ttl = 300
 rag_url_safety_timeout = 5.0
-rag_stats_max_sources = 100
 rag_list_recent_limit = 20
 rag_log_file_max_bytes = 10485760
 rag_zenn_max_articles = 50

@@ -39,10 +39,6 @@ rag_url_safety_check = true
 rag_url_safety_cache_ttl = 300
 rag_url_safety_timeout = 5.0
 
-# レスポンス制御
-# rag_max_response_chars = (未設定時は None)
-rag_stats_max_sources = 100
-
 # rag_list_recent / list-recent のデフォルト取得件数
 rag_list_recent_limit = 20
 

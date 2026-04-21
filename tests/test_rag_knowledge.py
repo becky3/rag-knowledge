@@ -46,8 +46,6 @@ def mock_vector_store(mock_embedding_provider: MagicMock) -> MagicMock:
     mock.get_metadata_by_ids = AsyncMock(return_value={})
     mock.get_stats = MagicMock(return_value={
         "total_chunks": 10,
-        "source_count": 2,
-        "sources": [],
     })
     return mock
 
@@ -152,15 +150,6 @@ class TestGetStats:
         # Arrange
         mock_vector_store.get_stats.return_value = {
             "total_chunks": 100,
-            "source_count": 10,
-            "sources": [
-                {
-                    "domain": "example.com",
-                    "pages": [
-                        {"url": "https://example.com/p1", "title": "Page 1", "chunks": 5},
-                    ],
-                },
-            ],
         }
 
         # Act
@@ -168,9 +157,8 @@ class TestGetStats:
 
         # Assert
         assert result["total_chunks"] == 100
-        assert result["source_count"] == 10
-        assert isinstance(result["sources"], list)
-        assert len(result["sources"]) == 1
+        assert "source_count" not in result
+        assert "sources" not in result
 
 
 class TestConfiguration:
