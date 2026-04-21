@@ -1923,11 +1923,14 @@ def run_search(args: argparse.Namespace) -> None:
 
     # n_results 推奨範囲チェック（pydantic Field le= と同期）
     n_results_max = next(
-        m.le for m in RAGSettings.model_fields["rag_retrieval_count"].metadata
-        if hasattr(m, "le")
+        (
+            m.le for m in RAGSettings.model_fields["rag_retrieval_count"].metadata
+            if hasattr(m, "le")
+        ),
+        None,
     )
     warnings: list[str] = []
-    if n_results > n_results_max:
+    if n_results_max is not None and n_results > n_results_max:
         msg = f"n_results={n_results} は設定上限（{n_results_max}）を超えています。パフォーマンスに影響する可能性があります。"
         warnings.append(msg)
         logger.warning(msg)
