@@ -290,7 +290,7 @@ class TestAttachLogFileHandler:
         return logging.getLogger(f"rag_test_{uuid.uuid4().hex}")
 
     def test_handler_not_attached_when_rag_log_dir_is_none(self) -> None:
-        from rag.infrastructure.log_file_handler import SessionRotatingFileHandler
+        from py_common_lib.logging import SessionRotatingFileHandler
         from rag.server import _attach_log_file_handler
 
         rag_logger = self._build_rag_logger()
@@ -308,7 +308,7 @@ class TestAttachLogFileHandler:
     def test_handler_attached_when_rag_log_dir_set(
         self, tmp_path: Path
     ) -> None:
-        from rag.infrastructure.log_file_handler import SessionRotatingFileHandler
+        from py_common_lib.logging import SessionRotatingFileHandler
         from rag.server import _attach_log_file_handler
 
         rag_logger = self._build_rag_logger()

@@ -424,7 +424,7 @@ MCP サーバーのログファイル出力（`SessionRotatingFileHandler`）が
 仕様:
 
 - [docs/specs/rag-knowledge.md](../../../docs/specs/rag-knowledge.md) の「MCP サーバーのロガー設定 / ログファイル出力」
-- 実装: `src/rag/infrastructure/log_file_handler.py` / `src/rag/server.py` の `_write_cli_lines_to_handlers`
+- 実装: `py_common_lib.logging.SessionRotatingFileHandler`（py-common-lib 提供）/ `src/rag/server.py` の `_write_cli_lines_to_handlers`
 
 #### グループ準備
 
@@ -438,6 +438,21 @@ MCP サーバーのログファイル出力（`SessionRotatingFileHandler`）が
 | 3 | MCP ツール `rag_stats` を呼び出し、その後ログファイルを再確認（`cat <logfile>`） | `[MCP]` プレフィックスのサーバーログと、CLI サブプロセス stderr 由来の `[CLI]` プレフィックス行の両方がファイルに記録されている | `none` |
 | 4 | `grep -E "^\[MCP\] [0-9]{4}-[0-9]{2}-[0-9]{2} [0-9]{2}:[0-9]{2}:[0-9]{2},[0-9]{3} - [^ ]+ - (INFO\|DEBUG\|WARNING\|ERROR) - " <logfile>` | サーバーログが `[MCP] YYYY-MM-DD HH:MM:SS,mmm - logger.name - LEVEL - message` 形式で記録されている | `none` |
 | 5 | `grep -E "^\[CLI\] [0-9]{4}-[0-9]{2}-[0-9]{2} [0-9]{2}:[0-9]{2}:[0-9]{2},[0-9]{3} - [^ ]+ - (INFO\|DEBUG\|WARNING\|ERROR) - " <logfile>` | CLI 転送ログが `[CLI] YYYY-MM-DD HH:MM:SS,mmm - logger.name - LEVEL - message` 形式で記録されている（CLI 側の stderr 行をそのままパススルーしており、二重のタイムスタンプにならない） | `none` |
+| 6 | ローリング検証（下記手順を参照） | 00001.log が `rag_log_file_max_bytes` を超えた時点で 00002.log にローリングが発生し、旧ファイルが保持される | `none` |
+
+**ステップ 6 ローリング検証手順:**
+
+1. MCP サーバーを停止する
+2. `config.toml` の `rag_log_file_max_bytes` の元の値を記録し、`5000` に一時変更する
+3. ログディレクトリ内の `rag-server-*.log` を削除する
+4. MCP サーバーを再起動する（ユーザーに `/mcp` reconnect を依頼）
+5. `rag_stats` を 4〜5 回呼び出し、ログデータを蓄積する
+6. ログディレクトリを確認する:
+   - `rag-server-*-00002.log` が作成されていること（ローリング発生）
+   - `rag-server-*-00001.log` が削除されず保持されていること
+   - 両ファイルに `[MCP]` / `[CLI]` プレフィックスのログが記録されていること
+7. `config.toml` の `rag_log_file_max_bytes` を手順 2 で記録した元の値に復元する
+8. MCP サーバーを停止→再起動する（復元した設定で稼働させるため。ユーザーに `/mcp` reconnect を依頼）
 
 **注意:**
 

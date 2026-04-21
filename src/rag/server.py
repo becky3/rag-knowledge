@@ -44,7 +44,7 @@ os.environ.setdefault("ANONYMIZED_TELEMETRY", "False")
 # bm25s が "resource module not available on Windows" を stdout に print する
 # 問題への対策として、import 時に stdout を抑制する。
 from .config import RAGSettings, ensure_utf8_streams
-from .infrastructure.log_file_handler import SessionRotatingFileHandler
+from py_common_lib.logging import SessionRotatingFileHandler
 from .rag_knowledge import format_file_size
 
 with contextlib.redirect_stdout(io.StringIO()):
@@ -69,6 +69,8 @@ from starlette.responses import JSONResponse, Response
 
 # MCP Context の具象型パラメータ（ツール関数では型パラメータ不要のため Any で統一）
 MCPContext = Context[Any, Any, Any]
+
+LOG_FILE_PREFIX = "rag-server-"
 
 # Windows 環境で stderr が cp932 等の場合に UTF-8 へ再構成する
 # stdout は MCP stdio プロトコルが使うため変更しない
@@ -1927,6 +1929,7 @@ def _attach_log_file_handler(
         log_dir.mkdir(parents=True, exist_ok=True)
         file_handler = SessionRotatingFileHandler(
             log_dir=log_dir,
+            prefix=LOG_FILE_PREFIX,
             started_at=datetime.now(),
             max_bytes=settings.rag_log_file_max_bytes,
         )

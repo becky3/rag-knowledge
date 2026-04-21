@@ -12,11 +12,11 @@ from pathlib import Path
 
 import pytest
 
-from rag.infrastructure.log_file_handler import (
+from py_common_lib.logging import (
     SessionRotatingFileHandler,
     build_session_filename,
 )
-from rag.server import _write_cli_lines_to_handlers
+from rag.server import LOG_FILE_PREFIX, _write_cli_lines_to_handlers
 
 
 def _make_record(message: str) -> logging.LogRecord:
@@ -35,14 +35,14 @@ class TestBuildSessionFilename:
     def test_format_uses_session_timestamp_and_zero_padded_sequence(self) -> None:
         started_at = datetime(2026, 4, 17, 8, 30, 0)
         assert (
-            build_session_filename(started_at, 1)
+            build_session_filename(LOG_FILE_PREFIX, started_at, 1)
             == "rag-server-20260417-083000-00001.log"
         )
 
     def test_sequence_increments_preserve_five_digit_padding(self) -> None:
         started_at = datetime(2026, 4, 17, 8, 30, 0)
         assert (
-            build_session_filename(started_at, 42)
+            build_session_filename(LOG_FILE_PREFIX, started_at, 42)
             == "rag-server-20260417-083000-00042.log"
         )
 
@@ -53,7 +53,7 @@ class TestSessionRotatingFileHandler:
     ) -> None:
         started_at = datetime(2026, 4, 17, 8, 30, 0)
         handler = SessionRotatingFileHandler(
-            log_dir=tmp_path, started_at=started_at, max_bytes=1_000_000
+            log_dir=tmp_path, prefix=LOG_FILE_PREFIX, started_at=started_at, max_bytes=1_000_000
         )
         try:
             handler.emit(_make_record("hello"))
@@ -69,7 +69,7 @@ class TestSessionRotatingFileHandler:
     ) -> None:
         started_at = datetime(2026, 4, 17, 8, 30, 0)
         handler = SessionRotatingFileHandler(
-            log_dir=tmp_path, started_at=started_at, max_bytes=50
+            log_dir=tmp_path, prefix=LOG_FILE_PREFIX, started_at=started_at, max_bytes=50
         )
         try:
             handler.emit(_make_record("seed-line" + "x" * 40))
@@ -96,6 +96,7 @@ class TestSessionRotatingFileHandler:
         with pytest.raises(FileExistsError):
             SessionRotatingFileHandler(
                 log_dir=tmp_path,
+                prefix=LOG_FILE_PREFIX,
                 started_at=started_at,
                 max_bytes=1_000_000,
             )
@@ -109,7 +110,7 @@ class TestSessionRotatingFileHandler:
         conflicting = tmp_path / "rag-server-20260417-083000-00002.log"
         conflicting.write_text("preexisting", encoding="utf-8")
         handler = SessionRotatingFileHandler(
-            log_dir=tmp_path, started_at=started_at, max_bytes=50
+            log_dir=tmp_path, prefix=LOG_FILE_PREFIX, started_at=started_at, max_bytes=50
         )
         errors: list[BaseException] = []
         handler.handleError = (  # type: ignore[method-assign]
@@ -134,7 +135,7 @@ class TestSessionRotatingFileHandler:
         """
         started_at = datetime(2026, 4, 17, 8, 30, 0)
         handler = SessionRotatingFileHandler(
-            log_dir=tmp_path, started_at=started_at, max_bytes=1_000_000
+            log_dir=tmp_path, prefix=LOG_FILE_PREFIX, started_at=started_at, max_bytes=1_000_000
         )
         handler.emit(_make_record("first"))
         handler.flush()

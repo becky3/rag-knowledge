@@ -3185,7 +3185,7 @@ wheels = [
 [[package]]
 name = "py-common-lib"
 version = "0.1.0"
-source = { git = "https://github.com/becky3/py-common-lib#65ce072c1c052269ace49495c6b4bec58efc9a10" }
+source = { git = "https://github.com/becky3/py-common-lib#513d3688c69a5007efca82bd264eb2ae983f9c0c" }
 dependencies = [
     { name = "httpx" },
     { name = "keyring" },
