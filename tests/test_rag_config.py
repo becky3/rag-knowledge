@@ -320,3 +320,30 @@ rag_embedding_retry_base_delay = 1.0
             assert settings.rag_chunk_size == 300
             assert settings.rag_transport == "http"
         get_settings.cache_clear()
+
+
+# --- 検索: rag_retrieval_count (#644) ---
+
+
+class TestRetrievalCountValidation:
+    """rag_retrieval_count の上限制約テスト (#644)."""
+
+    def test_retrieval_count_valid(self) -> None:
+        """許容範囲内の値で設定が作成できること."""
+        settings = _make_settings(rag_retrieval_count=100)
+        assert settings.rag_retrieval_count == 100
+
+    def test_retrieval_count_min(self) -> None:
+        """下限値 1 が受理されること."""
+        settings = _make_settings(rag_retrieval_count=1)
+        assert settings.rag_retrieval_count == 1
+
+    def test_retrieval_count_zero_rejected(self) -> None:
+        """0 が拒否されること."""
+        with pytest.raises(ValidationError):
+            _make_settings(rag_retrieval_count=0)
+
+    def test_retrieval_count_exceeds_upper_limit(self) -> None:
+        """上限超過が拒否されること."""
+        with pytest.raises(ValidationError):
+            _make_settings(rag_retrieval_count=101)

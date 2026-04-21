@@ -152,7 +152,8 @@ class RAGSettings(BaseModel):
     rag_worst_token_char_ratio: float = Field(default=0.7, gt=0.0, le=1.0)
 
     # 検索
-    rag_retrieval_count: int = Field(ge=1)
+    # fetch_count = n * 3 のメモリ影響を抑制
+    rag_retrieval_count: int = Field(ge=1, le=100)
     # None = 閾値フィルタ無効（全結果を返す）
     rag_similarity_threshold: float | None = Field(
         default=None, ge=0.0, le=2.0

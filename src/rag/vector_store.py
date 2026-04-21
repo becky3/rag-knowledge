@@ -8,7 +8,7 @@ from __future__ import annotations
 import asyncio
 import logging
 from dataclasses import dataclass
-from typing import cast
+from typing import ClassVar, cast
 import chromadb
 from chromadb.api.shared_system_client import SharedSystemClient
 from chromadb.api.types import Embeddings, Metadatas
@@ -231,13 +231,15 @@ class VectorStore:
         ids = [chunk.id for chunk in chunks]
         metadatas = [chunk.metadata for chunk in chunks]
 
-        await asyncio.to_thread(
-            self._collection.upsert,
-            ids=ids,
-            embeddings=embeddings,
-            documents=texts,
-            metadatas=metadatas,  # type: ignore[arg-type]
-        )
+        for offset in range(0, len(ids), self._BATCH_SIZE):
+            end = offset + self._BATCH_SIZE
+            await asyncio.to_thread(
+                self._collection.upsert,
+                ids=ids[offset:end],
+                embeddings=embeddings[offset:end],
+                documents=texts[offset:end],
+                metadatas=metadatas[offset:end],  # type: ignore[arg-type]
+            )
 
         logger.info("Upserted %d documents to vector store", len(chunks))
         return len(chunks)
@@ -363,11 +365,16 @@ class VectorStore:
         chunks.sort(key=lambda c: int(c.metadata.get("chunk_index", 0)))
         return chunks
 
+    # SQLite IN 句パラメータ上限 (32,766) を安全に下回るバッチサイズ
+    _BATCH_SIZE: ClassVar[int] = 30_000
+
     async def get_metadata_by_ids(
         self,
         ids: list[str],
     ) -> dict[str, dict[str, str | int | float | bool]]:
         """チャンクIDのリストからメタデータを一括取得する.
+
+        SQLite IN 句パラメータ上限を回避するため、内部でバッチ分割して取得する。
 
         Args:
             ids: チャンクIDのリスト
@@ -378,16 +385,19 @@ class VectorStore:
         if not ids:
             return {}
 
-        results = await asyncio.to_thread(
-            self._collection.get,
-            ids=ids,
-            include=["metadatas"],
-        )
-
         meta_map: dict[str, dict[str, str | int | float | bool]] = {}
-        metadatas = results["metadatas"] or []
-        for chunk_id, meta in zip(results["ids"], metadatas):
-            meta_map[chunk_id] = meta or {}  # type: ignore[assignment]
+
+        for offset in range(0, len(ids), self._BATCH_SIZE):
+            batch = ids[offset : offset + self._BATCH_SIZE]
+            results = await asyncio.to_thread(
+                self._collection.get,
+                ids=batch,
+                include=["metadatas"],
+            )
+
+            metadatas = results["metadatas"] or []
+            for chunk_id, meta in zip(results["ids"], metadatas):
+                meta_map[chunk_id] = meta or {}  # type: ignore[assignment]
 
         return meta_map
 
@@ -418,11 +428,10 @@ class VectorStore:
         Returns:
             削除件数
         """
-        # まず該当するドキュメントを検索
         results = await asyncio.to_thread(
             self._collection.get,
             where={"source_id": source_id},
-            include=["metadatas"],
+            include=[],
         )
 
         if not results["ids"]:
@@ -431,11 +440,12 @@ class VectorStore:
         ids_to_delete = results["ids"]
         count = len(ids_to_delete)
 
-        # 削除実行
-        await asyncio.to_thread(
-            self._collection.delete,
-            ids=ids_to_delete,
-        )
+        for offset in range(0, count, self._BATCH_SIZE):
+            batch = ids_to_delete[offset : offset + self._BATCH_SIZE]
+            await asyncio.to_thread(
+                self._collection.delete,
+                ids=batch,
+            )
 
         logger.info("Deleted %d documents from vector store (source: %s)", count, source_id)
         return count
@@ -473,11 +483,10 @@ class VectorStore:
         Returns:
             削除件数
         """
-        # ソースの全チャンクを取得
         results = await asyncio.to_thread(
             self._collection.get,
             where={"source_id": source_id},
-            include=["metadatas"],
+            include=[],
         )
 
         if not results["ids"]:
@@ -489,11 +498,12 @@ class VectorStore:
         if not stale_ids:
             return 0
 
-        # 削除実行
-        await asyncio.to_thread(
-            self._collection.delete,
-            ids=stale_ids,
-        )
+        for offset in range(0, len(stale_ids), self._BATCH_SIZE):
+            batch = stale_ids[offset : offset + self._BATCH_SIZE]
+            await asyncio.to_thread(
+                self._collection.delete,
+                ids=batch,
+            )
 
         logger.info(
             "Deleted %d stale chunks from vector store (source: %s)", len(stale_ids), source_id
@@ -588,11 +598,14 @@ class VectorStore:
         if not chunk_ids:
             return
 
-        await asyncio.to_thread(
-            self._collection.update,
-            ids=chunk_ids,
-            metadatas=cast(Metadatas, metadatas),
-        )
+        for offset in range(0, len(chunk_ids), self._BATCH_SIZE):
+            batch_ids = chunk_ids[offset : offset + self._BATCH_SIZE]
+            batch_meta = metadatas[offset : offset + self._BATCH_SIZE]
+            await asyncio.to_thread(
+                self._collection.update,
+                ids=batch_ids,
+                metadatas=cast(Metadatas, batch_meta),
+            )
 
     async def clear(self) -> None:
         """コレクションを削除して再作成する（全データクリア）."""

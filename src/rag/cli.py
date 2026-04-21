@@ -1881,7 +1881,7 @@ def run_search(args: argparse.Namespace) -> None:
     import io
 
     from .bm25_index import BM25Index
-    from .config import get_settings
+    from .config import RAGSettings, get_settings
     from .embedding.factory import get_embedding_provider
     from .rag_knowledge import RAGKnowledgeService
     from .vector_store import VectorStore
@@ -1921,6 +1921,20 @@ def run_search(args: argparse.Namespace) -> None:
     n_results = args.n_results if args.n_results is not None else settings.rag_retrieval_count
     source_type: str | None = args.source_type
 
+    # n_results 推奨範囲チェック（pydantic Field le= と同期）
+    n_results_max = next(
+        (
+            m.le for m in RAGSettings.model_fields["rag_retrieval_count"].metadata
+            if hasattr(m, "le")
+        ),
+        None,
+    )
+    warnings: list[str] = []
+    if n_results_max is not None and n_results > n_results_max:
+        msg = f"n_results={n_results} は設定上限（{n_results_max}）を超えています。パフォーマンスに影響する可能性があります。"
+        warnings.append(msg)
+        logger.warning(msg)
+
     # filters パラメータのパース
     parsed_filters: dict[str, str] | None = None
     if args.filters is not None:
@@ -1941,11 +1955,14 @@ def run_search(args: argparse.Namespace) -> None:
     )
 
     if json_out:
-        _output_result({
+        result_data: dict[str, object] = {
             "query": args.query,
             "vector_results": [r.to_dict() for r in raw.vector_results],
             "bm25_results": [r.to_dict() for r in raw.bm25_results],
-        })
+        }
+        if warnings:
+            result_data["warnings"] = warnings
+        _output_result(result_data)
     else:
         from .rag_knowledge import format_raw_search_results
         print(format_raw_search_results(raw))

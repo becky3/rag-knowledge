@@ -360,7 +360,7 @@ class BM25Index:
         """
         stale_ids = [
             doc_id
-            for doc_id, src in list(self._doc_source_map.items())
+            for doc_id, src in self._doc_source_map.items()
             if src == source_id and doc_id not in valid_ids
         ]
         for doc_id in stale_ids:
