@@ -426,7 +426,7 @@ CLI フェーズではサーバー側のログファイルは生成されない�
 | 3 | MCP ツール `rag_stats` を呼び出した後、ログファイルに `[MCP]` と `[CLI]` の両方のプレフィックス行が記録されていることを確認する | サーバーログと CLI サブプロセス stderr 由来のログが同一ファイルに混在して記録される | `none` |
 | 4 | サーバーログの各行が `[MCP] YYYY-MM-DD HH:MM:SS,mmm - logger.name - LEVEL - message` 形式であることを確認する | サーバー側フォーマッタが正しく適用されている | `none` |
 | 5 | CLI 転送ログの各行が `[CLI] YYYY-MM-DD HH:MM:SS,mmm - logger.name - LEVEL - message` 形式であることを確認する（CLI 側のタイムスタンプをそのままパススルーしており、二重のタイムスタンプにならない） | CLI 転送経路のフォーマッタ差し替え（`_write_cli_lines_to_handlers`）が正しく動作している | `none` |
-| 6 | ローリング検証: `config.toml` の `rag_log_file_max_bytes` を `5000` に一時変更し、MCP サーバーを再起動してログをクリア。`rag_stats` を 4〜5 回呼び出し、ログディレクトリに `00002.log` が作成され `00001.log` が保持されていることを確認する。検証後 `config.toml` を元の値に復元し、MCP サーバーを再起動する | `SessionRotatingFileHandler` のサイズ超過時ファイルローリングが正しく動作している | `none` |
+| 6 | ローリング検証: MCP サーバーを停止し、`config.toml` の `rag_log_file_max_bytes` を `5000` に一時変更する。ログディレクトリ内の既存 `rag-server-*.log` を削除したうえで MCP サーバーを再起動する（`/mcp` reconnect が必要）。`rag_stats` を 4〜5 回呼び出し、ログディレクトリに `00002.log` が作成され `00001.log` が保持されていることを確認する。検証後 `config.toml` を元の値に復元し、MCP サーバーを再起動する | `SessionRotatingFileHandler` のサイズ超過時ファイルローリングが正しく動作している | `none` |
 
 補足:
 
