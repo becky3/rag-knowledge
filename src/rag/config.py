@@ -184,7 +184,6 @@ class RAGSettings(BaseModel):
     rag_max_response_chars: int | None = Field(default=None, ge=1)
 
     # MCP レスポンスの情報量を制御
-    rag_stats_max_sources: int = Field(ge=1)
     rag_list_recent_limit: int = Field(ge=1, le=100)
 
     # 単一ログファイルの肥大化を防ぎ、ツール側での読み込みコストを抑える

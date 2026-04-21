@@ -58,7 +58,7 @@ MCP サーバーとして独立動作し、18 個のツールを提供する。
 | ハイブリッド検索 | `rag_hybrid_search_enabled`, `rag_vector_weight`, `rag_bm25_k1`, `rag_bm25_b`, `rag_min_combined_score` |
 | ChromaDB | `chromadb_collection_name` |
 | URL 安全性 | `rag_url_safety_check`, `rag_url_safety_cache_ttl`, `rag_url_safety_timeout` |
-| レスポンス制御 | `rag_max_response_chars`（rag_get_document のトランケーション）, `rag_stats_max_sources`, `rag_list_recent_limit` |
+| レスポンス制御 | `rag_max_response_chars`（rag_get_document のトランケーション）, `rag_list_recent_limit` |
 | ログファイル出力 | `rag_log_file_max_bytes` |
 | Zenn インジェスター | `rag_zenn_max_articles`, `rag_zenn_request_timeout`, `rag_zenn_request_interval` |
 | BlueSky インジェスター | `rag_bluesky_appview_url`, `rag_bluesky_max_posts`, `rag_bluesky_request_timeout`, `rag_bluesky_request_interval`, `rag_bluesky_include_reposts` |
@@ -322,7 +322,7 @@ Scrapy subprocess で対象サイトをクロールし、source_store に配置�
 
 #### rag_stats
 
-統計情報（総チャンク数、ソース URL 数）と蓄積データ概要（ドメイン別ソース URL 一覧・タイトル）を返す。表示件数上限は `rag_stats_max_sources` で制御する。引数なし。
+統計情報（総チャンク数、ソース数）を返す。詳細は [rebuild-stats.md](rebuild-stats.md) を参照。引数なし。
 
 ### 取り込みツールの出力形式
 

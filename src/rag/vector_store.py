@@ -9,8 +9,6 @@ import asyncio
 import logging
 from dataclasses import dataclass
 from typing import cast
-from urllib.parse import urlparse
-
 import chromadb
 from chromadb.api.shared_system_client import SharedSystemClient
 from chromadb.api.types import Embeddings, Metadatas
@@ -503,62 +501,14 @@ class VectorStore:
         return len(stale_ids)
 
     def get_stats(self) -> dict[str, object]:
-        """ナレッジベース統計（総チャンク数等）とソース一覧を返す.
-
-        Note:
-            この関数は全チャンクのメタデータを走査するため O(N) のコストがかかる。
-            チャンク数が多い場合は頻繁な呼び出しを避けること。
+        """ナレッジベース統計（総チャンク数）を返す.
 
         Returns:
             統計情報の辞書。キー:
             - total_chunks: 総チャンク数
-            - source_count: ユニークソースURL数
-            - sources: ドメイン別ソース一覧
         """
-        count = self._collection.count()
-
-        # ユニークなソースURL数とソース詳細を取得
-        all_docs = self._collection.get(include=["metadatas"])
-        source_urls: set[str] = set()
-        # url -> {"title": str, "chunks": int}
-        source_details: dict[str, dict[str, str | int]] = {}
-        if all_docs["metadatas"]:
-            for meta in all_docs["metadatas"]:
-                if meta and "source_id" in meta:
-                    url = str(meta["source_id"])
-                    source_urls.add(url)
-                    if url not in source_details:
-                        source_details[url] = {
-                            "title": str(meta.get("title", "")),
-                            "chunks": 0,
-                        }
-                    source_details[url]["chunks"] = int(source_details[url]["chunks"]) + 1
-
-        # ドメイン別にグルーピング
-        domain_groups: dict[str, list[dict[str, str | int]]] = {}
-        for url, detail in source_details.items():
-            domain = urlparse(url).netloc or "unknown"
-            if domain not in domain_groups:
-                domain_groups[domain] = []
-            domain_groups[domain].append({
-                "url": url,
-                "title": detail["title"],
-                "chunks": detail["chunks"],
-            })
-
-        # ドメイン名でソート、各ドメイン内はタイトルでソート
-        sources: list[dict[str, object]] = []
-        for domain in sorted(domain_groups.keys()):
-            pages = sorted(domain_groups[domain], key=lambda p: str(p.get("title", "")))
-            sources.append({
-                "domain": domain,
-                "pages": pages,
-            })
-
         return {
-            "total_chunks": count,
-            "source_count": len(source_urls),
-            "sources": sources,
+            "total_chunks": self._collection.count(),
         }
 
     def close(self) -> None:
