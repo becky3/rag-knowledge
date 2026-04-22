@@ -13,6 +13,7 @@ Zenn（zenn.dev）の記事およびスクラップを API 経由で取得し、
 - .meta サイドカーファイルの生成
 - MCP ツールとしての取り込みインターフェースの提供
 - パイプライン制御への取り込み完了通知
+- URL 指定によるコンテンツの取得（記事詳細 API / スクラップ詳細 API 経由）
 
 スコープ外:
 
@@ -79,6 +80,7 @@ site_ingest（URL ベースの Web クロール）とは独立したツールと
 | ツール | 入力 | 振る舞い |
 |--------|------|---------|
 | `rag_crawl_zenn` | username、max_articles（任意）、content_type（任意）、force（任意） | 指定ユーザーの Zenn コンテンツを API 経由で取得し、source_store にファイルを配置する。取り込み完了後、パイプライン制御に通知する |
+| `rag_add_zenn` | urls | 指定 URL の Zenn 記事またはスクラップを API 経由で取得し、source_store に配置する。既存ファイルは上書きする。複数 URL を一括指定可能 |
 
 ツール入力パラメータ:
 
@@ -93,11 +95,24 @@ site_ingest（URL ベースの Web クロール）とは独立したツールと
 
 プレビュー機能は提供しない。Zenn のコンテンツ一覧は公開情報（`https://zenn.dev/{username}` で閲覧可能）であり、取り込み前の確認は Zenn サイト上で直接行える。
 
+#### rag_add_zenn 入力パラメータ
+
+| パラメータ | 型 | 必須 | 説明 |
+|-----------|-----|------|------|
+| `urls` | 文字列のリスト | はい | Zenn コンテンツの URL（1 件以上）。例: `https://zenn.dev/alice/articles/my-post`、`https://zenn.dev/alice/scraps/abc123` |
+
+各 URL から `username`、コンテンツ種別（`articles` or `scraps`）、`slug` をパースし、記事詳細 API またはスクラップ詳細 API で取得する。常に上書き動作（`force=True` 相当）で source_store のファイルを更新する。
+
+各 URL は独立して処理し、1 件の失敗が他の URL の処理を妨げない。
+
+ツール出力: 取り込み結果のサマリーテキスト（配置数、上書き数、エラー数。失敗がある場合は `target` と `category` の一覧を含む）
+
 ### CLI コマンド
 
 | コマンド | 引数 | 振る舞い |
 |---------|------|---------|
 | `crawl-zenn` | `username`、`--max-articles`（任意）、`--content-type`（任意）、`--force`（任意） | `rag_crawl_zenn` と同等の処理を CLI から実行する |
+| `ingest-zenn` | `url`（1 件以上） | `rag_add_zenn` と同等の処理を CLI から実行する |
 
 ### 設定項目
 
@@ -276,6 +291,16 @@ flowchart TD
 5. レスポンスの `scrap` オブジェクト（`comments` 配列を含む）をそのまま JSON として source_store に配置する（配置先: `zenn/{username}/scraps/{slug}.json`）
 6. .meta サイドカーファイルを同階層に生成する（配置先: `zenn/{username}/scraps/{slug}.json.meta`）
 
+### コンテンツ取得フロー（rag_add_zenn）
+
+1. 各 URL をパースし `username`、コンテンツ種別（`articles` or `scraps`）、`slug` を抽出する。URL 形式: `https://zenn.dev/{username}/articles/{slug}` または `https://zenn.dev/{username}/scraps/{slug}`。パース失敗は `errors` に計上しスキップする
+2. コンテンツ種別に応じて記事詳細 API（`/api/articles/{slug}`）またはスクラップ詳細 API（`/api/scraps/{slug}`）にリクエストを送信する
+3. レスポンスの `article` または `scrap` オブジェクトをそのまま JSON として source_store に上書き配置する
+4. .meta サイドカーファイルを同階層に生成する（既存の .meta を上書き）
+5. 全 URL の処理が完了したらパイプライン制御に取り込み完了を通知する
+
+各 URL は独立して処理し、1 件の失敗が他の URL の処理を妨げない。一覧走査をスキップし、直接詳細 API で取得するため、URL あたりの API リクエストは 1 回のみ。
+
 ### パイプライン制御との連携
 
 全コンテンツ（記事 + スクラップ）のファイル配置が完了した後、パイプライン制御に取り込み完了を通知する。パイプライン制御は通知を受けて以下を実行する:
@@ -419,6 +444,11 @@ Zenn は公式の API ドキュメントを公開していない。以下は観�
 | 同一スクラップの再取り込み（`force` 指定時） | source_id（ファイルパス）に対応する既存ファイルを上書きする。`overwritten` に計上する（`placed` には計上しない。[common.md](common.md) の「`placed` と `overwritten` の排他関係」参照） |
 | Zenn API のレート制限（429） | ConstrainedClient のサーキットブレーカーで検出される。連続失敗として計上し、閾値超過で操作を中断する |
 | .meta ファイルの書き込みに失敗した場合 | ファイル物理削除禁止制約により、配置済みデータファイルのロールバックは行わない。エラーログを出力して処理を続行する |
+| `rag_add_zenn` に Zenn 以外の URL が指定された | バリデーションエラーとして拒否する |
+| `rag_add_zenn` に指定された URL のコンテンツ種別が不明（`articles` でも `scraps` でもない） | バリデーションエラーとして拒否する |
+| `rag_add_zenn` に指定された記事が存在しない | API が 404 を返す。エラーメッセージとして「コンテンツが見つかりません」を返す |
+| `rag_add_zenn` に指定されたコンテンツが未取り込み | 新規配置として扱う（`placed` に計上） |
+| `rag_add_zenn` で API レスポンスの `article`/`scrap` オブジェクトが空 | エラーメッセージを返す（空の JSON は配置しない） |
 
 ## 関連ドキュメント
 

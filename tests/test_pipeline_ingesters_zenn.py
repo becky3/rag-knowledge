@@ -22,6 +22,7 @@ import pytest
 
 from rag.pipeline.ingesters.zenn import (
     MAX_ARTICLES_HARD_LIMIT,
+    parse_zenn_url,
 )
 from rag.store.source_store import SourceStore
 
@@ -650,3 +651,191 @@ class TestErrorDetailsStructured:
         assert detail["category"] == "placement"
         assert detail["target"] == "zenn/testuser/articles/good-slug.json"
         assert "disk full" in detail["message"]
+
+
+# ===========================================================================
+# parse_zenn_url
+# ===========================================================================
+
+
+class TestParseZennUrl:
+    """Zenn URL パーサーのテスト."""
+
+    def test_article_url(self) -> None:
+        result = parse_zenn_url("https://zenn.dev/alice/articles/my-post")
+        assert result == ("alice", "articles", "my-post")
+
+    def test_scrap_url(self) -> None:
+        result = parse_zenn_url("https://zenn.dev/alice/scraps/abc123")
+        assert result == ("alice", "scraps", "abc123")
+
+    def test_invalid_url_returns_none(self) -> None:
+        assert parse_zenn_url("https://example.com/not-zenn") is None
+
+    def test_missing_slug_returns_none(self) -> None:
+        assert parse_zenn_url("https://zenn.dev/alice/articles/") is None
+
+    def test_url_with_query_params(self) -> None:
+        result = parse_zenn_url("https://zenn.dev/alice/articles/my-post?ref=feed")
+        assert result == ("alice", "articles", "my-post")
+
+    def test_url_with_trailing_whitespace(self) -> None:
+        result = parse_zenn_url("  https://zenn.dev/alice/articles/my-post  ")
+        assert result == ("alice", "articles", "my-post")
+
+
+# ===========================================================================
+# ingest_contents
+# ===========================================================================
+
+
+def _make_ingest_article_response(slug: str = "test-slug", username: str = "testuser") -> dict:
+    """ingest テスト用の記事詳細 API モックレスポンス."""
+    return {
+        "article": {
+            "slug": slug,
+            "title": "Test Article",
+            "path": f"/{username}/articles/{slug}",
+            "article_type": "tech",
+            "published_at": "2026-01-10T12:00:00+09:00",
+            "liked_count": 5,
+            "topics": [{"name": "Python", "display_name": "Python"}],
+            "body_html": "<p>Test body</p>",
+        },
+    }
+
+
+def _make_ingest_scrap_response(slug: str = "test-scrap", username: str = "testuser") -> dict:
+    """ingest テスト用のスクラップ詳細 API モックレスポンス."""
+    return {
+        "scrap": {
+            "slug": slug,
+            "title": "Test Scrap",
+            "path": f"/{username}/scraps/{slug}",
+            "created_at": "2026-02-14T20:48:17+09:00",
+            "liked_count": 0,
+            "topics": [],
+            "comments_count": 2,
+            "closed": False,
+            "comments": [{"body_html": "<p>Comment 1</p>", "created_at": "2026-02-14T21:00:00+09:00"}],
+        },
+    }
+
+
+class TestIngestContents:
+    """ingest_contents のテスト."""
+
+    @pytest.mark.asyncio
+    async def test_ingest_article_places_file(self, source_store: SourceStore) -> None:
+        """記事 URL で新規配置されることを確認する."""
+        ingester = make_zenn_ingester(source_store)
+
+        resp = MagicMock()
+        resp.json.return_value = _make_ingest_article_response("my-post", "alice")
+        resp.is_success = True
+
+        client = AsyncMock()
+        client.get = AsyncMock(return_value=resp)
+
+        result = await ingester.ingest_contents(
+            ["https://zenn.dev/alice/articles/my-post"],
+            client=client,
+        )
+
+        assert result.placed == 1
+        assert result.errors == 0
+        assert (source_store.root_dir / "zenn/alice/articles/my-post.json").exists()
+
+    @pytest.mark.asyncio
+    async def test_ingest_scrap_places_file(self, source_store: SourceStore) -> None:
+        """スクラップ URL で新規配置されることを確認する."""
+        ingester = make_zenn_ingester(source_store)
+
+        resp = MagicMock()
+        resp.json.return_value = _make_ingest_scrap_response("abc123", "alice")
+        resp.is_success = True
+
+        client = AsyncMock()
+        client.get = AsyncMock(return_value=resp)
+
+        result = await ingester.ingest_contents(
+            ["https://zenn.dev/alice/scraps/abc123"],
+            client=client,
+        )
+
+        assert result.placed == 1
+        assert result.errors == 0
+        assert (source_store.root_dir / "zenn/alice/scraps/abc123.json").exists()
+
+    @pytest.mark.asyncio
+    async def test_ingest_overwrites_existing(self, source_store: SourceStore) -> None:
+        """既存ファイルが上書きされることを確認する."""
+        ingester = make_zenn_ingester(source_store)
+
+        rel_path = "zenn/alice/articles/my-post.json"
+        dest = source_store.root_dir / rel_path
+        dest.parent.mkdir(parents=True, exist_ok=True)
+        dest.write_text('{"old": "data"}')
+
+        resp = MagicMock()
+        resp.json.return_value = _make_ingest_article_response("my-post", "alice")
+        resp.is_success = True
+
+        client = AsyncMock()
+        client.get = AsyncMock(return_value=resp)
+
+        result = await ingester.ingest_contents(
+            ["https://zenn.dev/alice/articles/my-post"],
+            client=client,
+        )
+
+        assert result.overwritten == 1
+        assert result.placed == 0
+
+    @pytest.mark.asyncio
+    async def test_ingest_invalid_url_reports_error(self, source_store: SourceStore) -> None:
+        """無効な URL がエラーとして計上されることを確認する."""
+        ingester = make_zenn_ingester(source_store)
+        client = AsyncMock()
+
+        result = await ingester.ingest_contents(
+            ["https://example.com/not-zenn"],
+            client=client,
+        )
+
+        assert result.errors == 1
+        assert result.error_details[0]["category"] == "metadata_fetch"
+
+    @pytest.mark.asyncio
+    async def test_ingest_multiple_urls_independent(self, source_store: SourceStore) -> None:
+        """複数 URL を処理し、1 件の失敗が他に影響しないことを確認する."""
+        ingester = make_zenn_ingester(source_store)
+
+        ok_resp = MagicMock()
+        ok_resp.json.return_value = _make_ingest_article_response("ok-post", "alice")
+        ok_resp.is_success = True
+
+        client = AsyncMock()
+        client.get = AsyncMock(side_effect=[ok_resp, Exception("API error")])
+
+        result = await ingester.ingest_contents(
+            [
+                "https://zenn.dev/alice/articles/ok-post",
+                "https://zenn.dev/alice/articles/fail-post",
+            ],
+            client=client,
+        )
+
+        assert result.placed == 1
+        assert result.errors == 1
+
+    @pytest.mark.asyncio
+    async def test_ingest_empty_urls_returns_empty_result(self, source_store: SourceStore) -> None:
+        """空の URL リストで空の結果が返ることを確認する."""
+        ingester = make_zenn_ingester(source_store)
+        client = AsyncMock()
+
+        result = await ingester.ingest_contents([], client=client)
+
+        assert result.placed == 0
+        assert result.errors == 0

@@ -231,7 +231,9 @@ CLI `--output json` 出力は MCP 応答経路および外部スケジューラ�
 |------|------|-----------|------|
 | サイト一括取り込み | web | `rag_site_ingest` | Scrapy でサイトを一括取得して配置 |
 | BlueSky 投稿取り込み | bluesky | `rag_crawl_bluesky` | タイムラインから投稿を取得して配置 |
+| BlueSky 単一投稿再取得 | bluesky | `rag_add_bluesky` | URL 指定で単一投稿を再取得して上書き配置 |
 | Zenn コンテンツ取り込み | zenn | `rag_crawl_zenn` | Zenn API から記事・スクラップを取得して配置 |
+| Zenn 単一コンテンツ再取得 | zenn | `rag_add_zenn` | URL 指定で単一記事・スクラップを再取得して上書き配置 |
 | YouTube 単一動画取り込み | youtube | `rag_add_youtube` | 単一動画の字幕/文字起こしを取得して配置 |
 | YouTube プレイリスト一括取り込み | youtube | `rag_crawl_youtube` | プレイリスト内の動画を一括取得して配置 |
 | カタログ更新 | aozora | `rag_update_aozora_catalog` | 作品カタログ CSV をダウンロードして配置 |

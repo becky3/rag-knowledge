@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 from typing import TYPE_CHECKING, Any
 
 import httpx
@@ -35,6 +36,24 @@ MAX_ARTICLES_HARD_LIMIT = 100
 
 # Zenn API ベース URL
 ZENN_API_BASE = "https://zenn.dev/api"
+
+_ZENN_URL_RE = re.compile(
+    r"^https?://zenn\.dev/([^/]+)/(articles|scraps)/([^/?#]+)(?:[?#].*)?$",
+)
+
+
+def parse_zenn_url(url: str) -> tuple[str, str, str] | None:
+    """Zenn コンテンツ URL から (username, kind, slug) を抽出する.
+
+    kind は "articles" or "scraps"。
+
+    Returns:
+        (username, kind, slug) タプル、またはパース失敗時は None
+    """
+    m = _ZENN_URL_RE.match(url.strip())
+    if m is None:
+        return None
+    return m.group(1), m.group(2), m.group(3)
 
 
 class ZennIngester:
@@ -434,3 +453,153 @@ class ZennIngester:
             )
             return MAX_ARTICLES_HARD_LIMIT
         return max_articles
+
+    async def _fetch_and_place_single(
+        self,
+        username: str,
+        kind: str,
+        slug: str,
+        client: Any,
+        result: IngestResult,
+        *,
+        force: bool = True,
+    ) -> None:
+        """単一の記事またはスクラップを取得して配置する."""
+        rel_path = f"zenn/{username}/{kind}/{slug}.json"
+        dest = self._store.root_dir / rel_path
+
+        if dest.exists() and not force:
+            result.skipped += 1
+            return
+
+        try:
+            api_url = f"{ZENN_API_BASE}/{kind}/{slug}"
+            resp = await fetch_get(client, api_url)
+            data = resp.json()
+
+            if kind == "articles":
+                content_obj = data.get("article", data)
+            else:
+                content_obj = data.get("scrap", data)
+
+            if not content_obj:
+                logger.warning("コンテンツオブジェクトが空です: %s/%s", kind, slug)
+                result.errors += 1
+                result.error_details.append({
+                    "category": "metadata_fetch",
+                    "target": f"{kind}/{slug}",
+                    "message": "Empty content object",
+                })
+                return
+
+            json_data = json.dumps(content_obj, ensure_ascii=False, indent=2)
+            json_bytes = json_data.encode("utf-8")
+
+            topics = self._extract_topics(content_obj.get("topics", []))
+
+            if kind == "articles":
+                path = content_obj.get("path", f"/{username}/articles/{slug}")
+                metadata: dict[str, Any] = {
+                    "url": f"https://zenn.dev{path}",
+                    "source_type": "zenn",
+                    "title": content_obj.get("title", ""),
+                    "collected_at": now_iso(),
+                    "slug": slug,
+                    "content_type": "article",
+                    "article_type": content_obj.get("article_type", ""),
+                    "published_at": content_obj.get("published_at", ""),
+                    "liked_count": content_obj.get("liked_count", 0),
+                    "topics": topics,
+                    "comments_count": 0,
+                    "closed": False,
+                    "username": username,
+                }
+            else:
+                path = content_obj.get("path", f"/{username}/scraps/{slug}")
+                metadata = {
+                    "url": f"https://zenn.dev{path}",
+                    "source_type": "zenn",
+                    "title": content_obj.get("title", ""),
+                    "collected_at": now_iso(),
+                    "slug": slug,
+                    "content_type": "scrap",
+                    "article_type": "",
+                    "published_at": content_obj.get("created_at", ""),
+                    "liked_count": content_obj.get("liked_count", 0),
+                    "topics": topics,
+                    "comments_count": content_obj.get("comments_count", 0),
+                    "closed": content_obj.get("closed", False),
+                    "username": username,
+                }
+        except Exception as exc:
+            logger.exception("コンテンツの取得に失敗しました: %s/%s", kind, slug)
+            result.errors += 1
+            fetch_detail: dict[str, Any] = {
+                "category": "metadata_fetch",
+                "target": f"{kind}/{slug}",
+                "message": str(exc),
+            }
+            if isinstance(exc, httpx.HTTPStatusError):
+                fetch_detail["status"] = exc.response.status_code
+                fetch_detail["url"] = str(exc.request.url)
+            result.error_details.append(fetch_detail)
+            return
+
+        try:
+            is_overwrite = dest.exists()
+            self._store.place_file(
+                source_type="zenn",
+                data=json_bytes,
+                rel_path=rel_path,
+                metadata=metadata,
+            )
+            if is_overwrite:
+                result.overwritten += 1
+            else:
+                result.placed += 1
+        except Exception as exc:
+            logger.exception("コンテンツの配置に失敗しました: %s", rel_path)
+            result.errors += 1
+            result.error_details.append({
+                "category": "placement",
+                "target": rel_path,
+                "message": str(exc),
+            })
+
+    async def ingest_contents(
+        self,
+        urls: list[str],
+        *,
+        client: Any,
+    ) -> IngestResult:
+        """指定 URL の Zenn コンテンツを取得して source_store に配置する.
+
+        仕様: docs/specs/ingesters/zenn.md
+        """
+        result = IngestResult()
+
+        if not urls:
+            return result
+
+        for url in urls:
+            parsed = parse_zenn_url(url)
+            if parsed is None:
+                logger.warning("Zenn URL のパースに失敗しました: %s", url)
+                result.errors += 1
+                result.error_details.append({
+                    "category": "metadata_fetch",
+                    "target": url,
+                    "message": "Invalid Zenn URL format",
+                })
+                continue
+
+            username, kind, slug = parsed
+            await self._fetch_and_place_single(
+                username, kind, slug, client, result, force=True,
+            )
+
+        logger.info(
+            "Zenn ingest_contents completed: placed=%d, overwritten=%d, errors=%d",
+            result.placed, result.overwritten, result.errors,
+        )
+        return result

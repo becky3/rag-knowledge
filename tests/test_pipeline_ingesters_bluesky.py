@@ -32,6 +32,7 @@ from rag.pipeline.ingesters.bluesky import (
     _validate_max_posts,
     classify_url,
     extract_urls_from_item,
+    parse_bluesky_url,
 )
 from rag.store.source_store import SourceStore
 
@@ -2030,3 +2031,159 @@ class TestRunSiteIngestBatch:
         cmd_args = mock_exec.call_args[0]
         output_index = cmd_args.index("--output")
         assert cmd_args[output_index + 1] == "json"
+
+
+# ===========================================================================
+# parse_bluesky_url
+# ===========================================================================
+
+
+class TestParseBlueskyUrl:
+    """BlueSky URL パーサーのテスト."""
+
+    def test_valid_url_returns_handle_and_rkey(self) -> None:
+        result = parse_bluesky_url("https://bsky.app/profile/alice.bsky.social/post/abc123")
+        assert result == ("alice.bsky.social", "abc123")
+
+    def test_valid_url_with_custom_handle(self) -> None:
+        result = parse_bluesky_url("https://bsky.app/profile/custom.domain.example/post/xyz789")
+        assert result == ("custom.domain.example", "xyz789")
+
+    def test_invalid_url_returns_none(self) -> None:
+        assert parse_bluesky_url("https://example.com/not-bluesky") is None
+
+    def test_profile_only_url_returns_none(self) -> None:
+        assert parse_bluesky_url("https://bsky.app/profile/alice.bsky.social") is None
+
+    def test_url_with_trailing_whitespace(self) -> None:
+        result = parse_bluesky_url("  https://bsky.app/profile/alice.bsky.social/post/abc123  ")
+        assert result == ("alice.bsky.social", "abc123")
+
+
+# ===========================================================================
+# ingest_posts
+# ===========================================================================
+
+
+class TestIngestPosts:
+    """ingest_posts のテスト."""
+
+    @pytest.mark.asyncio
+    async def test_ingest_single_post_places_new(self, source_store: SourceStore) -> None:
+        """単一 URL で新規配置されることを確認する."""
+        ingester = make_bluesky_ingester(source_store)
+
+        # resolveHandle レスポンス
+        resolve_resp = MagicMock()
+        resolve_resp.json.return_value = {"did": "did:plc:abc123"}
+        resolve_resp.is_success = True
+
+        # getPosts レスポンス
+        posts_resp = MagicMock()
+        posts_resp.json.return_value = {
+            "posts": [{
+                "uri": "at://did:plc:abc123/app.bsky.feed.post/xyz789",
+                "cid": "test-cid",
+                "author": {"did": "did:plc:abc123", "handle": "alice.bsky.social", "displayName": "Alice"},
+                "record": {"text": "Updated post", "createdAt": "2026-01-15T09:00:00Z"},
+            }],
+        }
+        posts_resp.is_success = True
+
+        client = AsyncMock()
+        client.get = AsyncMock(side_effect=[resolve_resp, posts_resp])
+
+        result = await ingester.ingest_posts(
+            ["https://bsky.app/profile/alice.bsky.social/post/xyz789"],
+            client=client,
+        )
+
+        assert result.placed == 1
+        assert result.errors == 0
+
+    @pytest.mark.asyncio
+    async def test_ingest_invalid_url_reports_error(self, source_store: SourceStore) -> None:
+        """無効な URL がエラーとして計上されることを確認する."""
+        ingester = make_bluesky_ingester(source_store)
+        client = AsyncMock()
+
+        result = await ingester.ingest_posts(
+            ["https://example.com/not-bluesky"],
+            client=client,
+        )
+
+        assert result.errors == 1
+        assert result.error_details[0]["category"] == "metadata_fetch"
+
+    @pytest.mark.asyncio
+    async def test_ingest_deleted_post_reports_error(self, source_store: SourceStore) -> None:
+        """削除済み投稿で空の posts が返された場合のエラー."""
+        ingester = make_bluesky_ingester(source_store)
+
+        resolve_resp = MagicMock()
+        resolve_resp.json.return_value = {"did": "did:plc:abc123"}
+        resolve_resp.is_success = True
+
+        posts_resp = MagicMock()
+        posts_resp.json.return_value = {"posts": []}
+        posts_resp.is_success = True
+
+        client = AsyncMock()
+        client.get = AsyncMock(side_effect=[resolve_resp, posts_resp])
+
+        result = await ingester.ingest_posts(
+            ["https://bsky.app/profile/alice.bsky.social/post/deleted123"],
+            client=client,
+        )
+
+        assert result.errors == 1
+        assert "not found" in result.error_details[0]["message"].lower()
+
+    @pytest.mark.asyncio
+    async def test_ingest_multiple_urls(self, source_store: SourceStore) -> None:
+        """複数 URL を処理し、1 件の失敗が他に影響しないことを確認する."""
+        ingester = make_bluesky_ingester(source_store)
+
+        resolve_resp = MagicMock()
+        resolve_resp.json.return_value = {"did": "did:plc:abc123"}
+        resolve_resp.is_success = True
+
+        posts_resp_ok = MagicMock()
+        posts_resp_ok.json.return_value = {
+            "posts": [{
+                "uri": "at://did:plc:abc123/app.bsky.feed.post/ok1",
+                "cid": "cid-ok",
+                "author": {"did": "did:plc:abc123", "handle": "alice.bsky.social", "displayName": "Alice"},
+                "record": {"text": "OK post", "createdAt": "2026-01-15T09:00:00Z"},
+            }],
+        }
+        posts_resp_ok.is_success = True
+
+        posts_resp_empty = MagicMock()
+        posts_resp_empty.json.return_value = {"posts": []}
+        posts_resp_empty.is_success = True
+
+        client = AsyncMock()
+        client.get = AsyncMock(side_effect=[resolve_resp, posts_resp_ok, posts_resp_empty])
+
+        result = await ingester.ingest_posts(
+            [
+                "https://bsky.app/profile/alice.bsky.social/post/ok1",
+                "https://bsky.app/profile/alice.bsky.social/post/deleted1",
+            ],
+            client=client,
+        )
+
+        assert result.placed == 1
+        assert result.errors == 1
+
+    @pytest.mark.asyncio
+    async def test_ingest_empty_urls_returns_empty_result(self, source_store: SourceStore) -> None:
+        """空の URL リストで空の結果が返ることを確認する."""
+        ingester = make_bluesky_ingester(source_store)
+        client = AsyncMock()
+
+        result = await ingester.ingest_posts([], client=client)
+
+        assert result.placed == 0
+        assert result.errors == 0

@@ -229,7 +229,9 @@ HTTP モード（`/mcp` パスが必要）:
 | `search` | ナレッジベースを検索 |
 | `get-document` | ソースの全文を取得 |
 | `crawl-zenn` | Zenn コンテンツを一括取り込み |
+| `ingest-zenn` | Zenn コンテンツを URL 指定で取り込み |
 | `crawl-bluesky` | BlueSky 投稿を一括取り込み |
+| `ingest-bluesky` | BlueSky 投稿を URL 指定で取り込み |
 | `ingest-youtube` | YouTube 動画を取り込み |
 | `ingest-youtube-playlist` | YouTube プレイリストを一括取り込み |
 | `add-document` | ドキュメントファイルを取り込み |
