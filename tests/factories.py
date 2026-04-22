@@ -234,6 +234,10 @@ def make_converter_args(**overrides: Any) -> dict[str, Any]:
         "youtube_merge_gap_sec": 2.0,
         "youtube_merge_max_chars": 300,
         "media_analyzer": None,
+        "html_remove_class_tokens": [
+            "breadcrumb", "breadcrumbs", "topic-path", "nextprev", "pagination",
+            "toolbar", "footer-wrapper", "footer", "scrollToFeedback", "suggest",
+        ],
     }
     defaults.update(overrides)
     return defaults

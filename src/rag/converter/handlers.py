@@ -84,15 +84,6 @@ _CONTENT_CLASS_PATTERNS = (
 # タグ名ベースの除去
 _REMOVE_TAGS = ("script", "style", "noscript", "form")
 
-# class パターンベースの除去（部分一致）
-_REMOVE_CLASS_PATTERNS = (
-    "breadcrumb",
-    "topic-path",
-    "nextprev",
-    "pagination",
-    "toolbar",
-)
-
 # テキスト密度フォールバックで除外するタグ
 _TEXT_DENSITY_SKIP_TAGS = frozenset(
     ("script", "style", "nav", "noscript", "link"),
@@ -105,9 +96,22 @@ _COMPILED_ID_PATTERNS = tuple(
 _COMPILED_CLASS_PATTERNS = tuple(
     re.compile(re.escape(p), re.IGNORECASE) for p in _CONTENT_CLASS_PATTERNS
 )
-_COMPILED_REMOVE_CLASS_RE = re.compile(
-    "|".join(re.escape(p) for p in _REMOVE_CLASS_PATTERNS), re.IGNORECASE
-)
+
+
+def compile_remove_class_re(tokens: list[str]) -> re.Pattern[str]:
+    """class トークン除去用の正規表現をコンパイルする.
+
+    BS4 は各クラストークンに regex.search() するため ^...$ で完全一致にする。
+    空文字列トークンは除外される。
+    """
+    valid = [t for t in tokens if t.strip()]
+    if not valid:
+        msg = "rag_html_remove_class_tokens に有効なトークンがありません"
+        raise ValueError(msg)
+    return re.compile(
+        "^(?:" + "|".join(re.escape(t) for t in valid) + ")$",
+        re.IGNORECASE,
+    )
 
 
 def _create_md_converter() -> RagMarkdownConverter:
@@ -183,7 +187,10 @@ def _find_content_area(soup: BeautifulSoup) -> Tag | BeautifulSoup:
     return soup
 
 
-def _clean_content_area(content: Tag | BeautifulSoup) -> None:
+def _clean_content_area(
+    content: Tag | BeautifulSoup,
+    remove_class_re: re.Pattern[str],
+) -> None:
     """コンテンツ領域内の非コンテンツ要素を除去する.
 
     仕様: docs/specs/converter.md「コンテンツ領域内の非コンテンツ除去」
@@ -193,23 +200,22 @@ def _clean_content_area(content: Tag | BeautifulSoup) -> None:
         for tag in content.find_all(tag_name):
             tag.decompose()
 
-    # class パターンベースの除去（1つの結合済み正規表現で1パス走査）
-    for tag in content.find_all(class_=_COMPILED_REMOVE_CLASS_RE):
+    # class トークン完全一致の除去（1つの結合済み正規表現で1パス走査）
+    for tag in content.find_all(class_=remove_class_re):
         tag.decompose()
 
 
-def convert_html(source_path: Path) -> str | None:
+def convert_html(
+    source_path: Path,
+    remove_class_re: re.Pattern[str],
+) -> str | None:
     """HTML ファイルを Markdown に変換する.
 
     仕様: docs/specs/converter.md「HTML → Markdown 変換」
 
-    - コンテンツ領域の特定（article/main → role="main" → id/class パターン → テキスト密度 → body）
-    - コンテンツ領域内の非コンテンツ除去
-    - markdownify ベースの変換（ATX見出し、テーブル保持、リンクURL除去）
-    - 非 UTF-8 エンコーディング自動推定（charset_normalizer）
-
     Args:
         source_path: HTML ファイルの絶対パス
+        remove_class_re: 除去対象 class トークンのコンパイル済み正規表現
 
     Returns:
         Markdown テキスト、または変換失敗時は None
@@ -236,7 +242,7 @@ def convert_html(source_path: Path) -> str | None:
     content_area = _find_content_area(soup)
 
     # コンテンツ領域内の非コンテンツ除去
-    _clean_content_area(content_area)
+    _clean_content_area(content_area, remove_class_re)
 
     # HTML → Markdown 変換
     md_converter = _create_md_converter()

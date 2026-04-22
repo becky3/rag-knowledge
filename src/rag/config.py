@@ -23,7 +23,7 @@ import io
 import sys
 import tomllib
 from pathlib import Path
-from typing import Any, Literal
+from typing import Annotated, Any, Literal
 
 from pydantic import BaseModel, Field, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -194,6 +194,11 @@ class RAGSettings(BaseModel):
     rag_zenn_max_articles: int = Field(ge=1, le=100)
     rag_zenn_request_timeout: int = Field(ge=1, le=120)
     rag_zenn_request_interval: float = Field(ge=0.1, le=60.0)
+
+    # HTML → Markdown 変換時に除去する class トークン（完全一致）
+    rag_html_remove_class_tokens: list[Annotated[str, Field(min_length=1)]] = Field(
+        min_length=1,
+    )
 
     # ドキュメントインジェスター
     rag_document_supported_extensions: str

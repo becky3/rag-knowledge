@@ -488,11 +488,17 @@ class TestAC38SimilarityThreshold:
         ]
         await ephemeral_store.add_documents(chunks)
 
-        # Act
-        with caplog.at_level(logging.DEBUG, logger="rag.vector_store"):
-            await ephemeral_store.search(
-                "テキスト", n_results=5, similarity_threshold=0.0001
-            )
+        # Act — server.py が rag ロガーの propagate を False にするため明示的に復元
+        rag_logger = logging.getLogger("rag")
+        original_propagate = rag_logger.propagate
+        rag_logger.propagate = True
+        try:
+            with caplog.at_level(logging.DEBUG, logger="rag.vector_store"):
+                await ephemeral_store.search(
+                    "テキスト", n_results=5, similarity_threshold=0.0001
+                )
+        finally:
+            rag_logger.propagate = original_propagate
 
         # Assert: 厳しい閾値により除外が発生し、デバッグログが出力される
         threshold_logs = [

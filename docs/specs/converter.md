@@ -232,15 +232,9 @@ class パターン一覧（試行順）:
 | `<noscript>` | JavaScript 無効時の代替コンテンツ |
 | `<form>` | 検索フォーム等の入力要素 |
 
-class パターンベースの除去（部分一致、大文字小文字を区別しない）:
+class トークン完全一致の除去（大文字小文字を区別しない）:
 
-| パターン | 理由 |
-|---------|------|
-| `breadcrumb` | パンくずリスト |
-| `topic-path` | パンくずリスト（Nintendo 等の命名） |
-| `nextprev` | ページ送りナビゲーション |
-| `pagination` | ページネーション |
-| `toolbar` | ツールバー |
+除去対象の class トークンは `config.toml` の `rag_html_remove_class_tokens` で設定する。BS4 は各クラストークンに対して `regex.search()` を実行するため、`^(?:トークン1|トークン2|...)$` の正規表現で完全トークン一致を実現する。部分一致（`suggest` が `suggested-reading` にマッチする等）による誤除去を防ぐ。
 
 `<nav>`, `<header>`, `<footer>`, `<aside>` タグはコンテンツ領域の特定により自動的に除外されるケースが多いため、コンテンツ領域内では一律除去しない。これにより、コンテンツ領域内の `<header>` タグ（インタビュータイトル等）が誤って除去される問題を回避する。
 
@@ -481,6 +475,7 @@ source_type が `local` のメディアファイル（画像・動画）は、�
 | `rag_pdf_quality_sample_pages` | 共通設定値 | 品質サンプリングページ数。判定の精度とコストのバランス |
 | `rag_youtube_merge_gap_sec` | 共通設定値 | YouTube スニペット結合の間隔閾値。段落分割の粒度を制御する |
 | `rag_youtube_merge_max_chars` | 共通設定値 | YouTube スニペット結合の最大文字数。段落サイズの上限 |
+| `rag_html_remove_class_tokens` | 共通設定値 | HTML 変換時のボイラープレート除去。完全トークン一致でサイト UI 要素を除外する |
 
 `CONVERTED_STORE_DIR` は [pipeline-controller.md](pipeline-controller.md) の設定項目で定義済み。
 
