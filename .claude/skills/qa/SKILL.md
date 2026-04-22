@@ -54,9 +54,9 @@ QA 検証グループ:
 2. worktree を作成する: `git worktree add -b qa/qa-skill-<Issue番号> <worktree-path> develop`
    - 配置: リポジトリの親ディレクトリ、命名: `<リポジトリ名>-wt-<Issue番号>`
 3. メインリポジトリから `.env` をコピーする
-4. ストレージパスは相対パスのため書き換え不要（worktree 内の `.tmp/` が自動的に使用される）。以下を設定する:
-   - ポート競合時（前セッションの停止漏れ等）は `.env` で `CHROMADB_SERVER_PORT` を変更すること
+4. ストレージパスは相対パスのため worktree ディレクトリ基準で解決される（書き換え不要）。以下を確認・設定する:
    - `CHROMADB_AUTO_START=false`（worktree では手動起動するため。`true` のままだと MCP サーバー起動時に競合する可能性がある）
+   - ポート競合時（前セッションの停止漏れ等）は `CHROMADB_SERVER_PORT` を変更すること
 5. LM Studio の接続先を確認し、必要に応じて `localhost` に変更する
 6. `.tmp` ディレクトリを作成する
 7. メインリポジトリから `.qa/` ディレクトリをコピーする（`.qa/` は `.gitignore` 対象のため worktree に含まれない）
