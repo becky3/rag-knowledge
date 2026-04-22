@@ -104,7 +104,7 @@ def compile_remove_class_re(tokens: list[str]) -> re.Pattern[str]:
     BS4 は各クラストークンに regex.search() するため ^...$ で完全一致にする。
     空文字列トークンは除外される。
     """
-    valid = [t for t in tokens if t.strip()]
+    valid = [t.strip() for t in tokens if t.strip()]
     if not valid:
         msg = "rag_html_remove_class_tokens に有効なトークンがありません"
         raise ValueError(msg)
