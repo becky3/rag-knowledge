@@ -2244,93 +2244,16 @@ def _build_cli_pipeline_controller() -> tuple[
 ]:
     """CLI 用の PipelineController を構築する.
 
+    factory.build_pipeline_controller() に委譲し、settings も返す。
+
     Returns:
         (PipelineController, Settings) のタプル
     """
-    import contextlib
-    import io
-
-    from .bm25_index import BM25Index
     from .config import get_settings
-    from .converter import Converter
-    from .converter.pdf_extractor import PdfBackendConfig
-    from .embedding.factory import get_embedding_provider
-    from .indexer import Indexer
-    from .media.analyzer import MediaAnalyzer
-    from .pipeline.controller import PipelineController
-    from .store.source_store import SourceStore
-    from .vector_store import VectorStore
+    from .pipeline.factory import build_pipeline_controller
 
     settings = get_settings()
-
-    source_store_dir = Path(settings.source_store_dir)
-    converted_store_dir = Path(settings.converted_store_dir)
-    converted_store_dir.mkdir(parents=True, exist_ok=True)
-
-    source_store = SourceStore(source_store_dir)
-    source_store.initialize()
-
-    pdf_config = PdfBackendConfig(
-        backend=settings.rag_pdf_backend,
-        mineru_mfd_conf_thres=settings.rag_pdf_mineru_mfd_conf_thres,
-        quality_ufffd_threshold=settings.rag_pdf_quality_ufffd_threshold,
-        quality_greek_threshold=settings.rag_pdf_quality_greek_threshold,
-        quality_cjk_min_threshold=settings.rag_pdf_quality_cjk_min_threshold,
-        quality_min_chars_per_page=settings.rag_pdf_quality_min_chars_per_page,
-        quality_sample_pages=settings.rag_pdf_quality_sample_pages,
-    )
-    media_analyzer = MediaAnalyzer(
-        lmstudio_base_url=settings.lmstudio_base_url,
-        vision_model=settings.rag_vision_model,
-        reasoning_effort=settings.rag_vision_reasoning_effort,
-        frame_interval=settings.rag_vision_frame_interval,
-        max_tokens=settings.rag_vision_max_tokens,
-        api_timeout=settings.rag_vision_api_timeout,
-    )
-    converter = Converter(
-        regen_option="force",
-        pdf_config=pdf_config,
-        youtube_merge_gap_sec=settings.rag_youtube_merge_gap_sec,
-        youtube_merge_max_chars=settings.rag_youtube_merge_max_chars,
-        media_analyzer=media_analyzer,
-        html_remove_class_tokens=settings.rag_html_remove_class_tokens,
-    )
-
-    embedding_provider = get_embedding_provider(settings, settings.embedding_provider)
-
-    with contextlib.redirect_stdout(io.StringIO()):
-        vector_store = VectorStore.create_http(
-            embedding_provider=embedding_provider,
-            host=settings.chromadb_server_host,
-            port=settings.chromadb_server_port,
-            collection_name=settings.chromadb_collection_name,
-            hnsw_m=settings.hnsw_m,
-            hnsw_construction_ef=settings.hnsw_construction_ef,
-            hnsw_search_ef=settings.hnsw_search_ef,
-        )
-        bm25_index = BM25Index(
-            k1=settings.rag_bm25_k1,
-            b=settings.rag_bm25_b,
-            persist_dir=settings.bm25_persist_dir,
-        )
-
-    indexer = Indexer(
-        vector_store=vector_store,
-        bm25_index=bm25_index,
-        metadata_db=source_store.db,
-        chunk_size=settings.rag_chunk_size,
-        chunk_overlap=settings.rag_chunk_overlap,
-        embedding_prefix_enabled=settings.embedding_prefix_enabled,
-        embedding_context_length=settings.rag_embedding_context_length,
-        worst_token_char_ratio=settings.rag_worst_token_char_ratio,
-    )
-
-    controller = PipelineController(
-        source_store=source_store,
-        converted_store_dir=converted_store_dir,
-        converter=converter,
-        indexer=indexer,
-    )
+    controller = build_pipeline_controller(settings)
     return controller, settings
 
 
