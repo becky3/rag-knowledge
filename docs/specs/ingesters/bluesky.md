@@ -97,7 +97,10 @@ BlueSky 投稿は**複合ソース**として扱われる。投稿 JSON が親�
 |-----------|-----|------|------|
 | `urls` | 文字列のリスト | はい | BlueSky 投稿の URL（1 件以上）。例: `https://bsky.app/profile/user.bsky.social/post/abc123` |
 
-各 URL から `handle` と `rkey` をパースし、handle ごとに `resolveHandle` API で DID を解決した上で `getPosts` API で投稿データを取得する。同一 handle の投稿は DID 解決を 1 回にまとめる。常に上書き動作（`force=True` 相当）で source_store のファイルを更新する。メディア（画像・動画）も DL する。投稿内 URL の自動取り込みは実行しない（本ツールの目的は対象投稿自体の取得であり、URL 先の取り込みは `crawl_bluesky --force` の責務）。
+各 URL から `handle` と `rkey` をパースし、handle ごとに `resolveHandle` API で DID を解決した上で `getPosts` API で投稿データを取得する。
+同一 handle の投稿は DID 解決を 1 回にまとめる。
+常に上書き動作（`force=True` 相当）で source_store のファイルを更新する。メディア（画像・動画）も DL する。
+投稿内 URL の自動取り込みは実行しない（本ツールの目的は対象投稿自体の取得であり、URL 先の取り込みは `crawl_bluesky --force` の責務）。
 
 各 URL は独立して処理し、1 件の失敗が他の URL の処理を妨げない。
 
