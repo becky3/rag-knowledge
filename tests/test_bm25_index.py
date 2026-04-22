@@ -1,14 +1,13 @@
 """BM25インデックスのテスト
 
-仕様: docs/specs/rag-knowledge.md
+仕様: docs/specs/infrastructure/bm25-scalability.md
 """
 
-import json
 from pathlib import Path
 
 import pytest
 
-from rag.bm25_index import METADATA_FILENAME, tokenize_japanese
+from rag.bm25_index import STORE_DB_FILENAME, tokenize_japanese
 
 from factories import make_bm25_index
 
@@ -226,7 +225,7 @@ class TestBM25Index:
 class TestBM25IndexPersistence:
     """BM25Index永続化のテスト.
 
-    仕様: docs/specs/rag-knowledge.md
+    仕様: docs/specs/infrastructure/bm25-scalability.md
     """
 
     @pytest.fixture()
@@ -307,34 +306,12 @@ class TestBM25IndexPersistence:
         assert index2.get_document_count() == 3
         assert index2.get_source_url("doc1") is None
 
-    def test_corrupt_metadata_starts_empty(self, persist_dir: str) -> None:
-        """AC81: 壊れたJSONメタデータ → 空インデックスで起動."""
-        # 永続化ディレクトリを手動作成して壊れたメタデータを配置
+    def test_corrupt_db_starts_empty(self, persist_dir: str) -> None:
+        """AC81: 壊れた SQLite DB → 空インデックスで起動."""
         persist_path = Path(persist_dir)
         persist_path.mkdir(parents=True)
-        (persist_path / METADATA_FILENAME).write_text(
-            "{ invalid json !!!", encoding="utf-8"
-        )
+        (persist_path / STORE_DB_FILENAME).write_bytes(b"corrupted data!!!")
 
-        # エラーなく起動、空インデックス
-        index = make_bm25_index(persist_dir=persist_dir)
-        assert index.get_document_count() == 0
-
-    def test_version_mismatch_starts_empty(self, persist_dir: str) -> None:
-        """AC81: 不明バージョン → 空インデックスで起動."""
-        persist_path = Path(persist_dir)
-        persist_path.mkdir(parents=True)
-        metadata = {
-            "version": 9999,
-            "doc_ids": ["doc1"],
-            "documents": {"doc1": "text"},
-            "doc_source_map": {"doc1": "source"},
-        }
-        (persist_path / METADATA_FILENAME).write_text(
-            json.dumps(metadata), encoding="utf-8"
-        )
-
-        # バージョン不一致で空インデックス
         index = make_bm25_index(persist_dir=persist_dir)
         assert index.get_document_count() == 0
 
@@ -348,9 +325,8 @@ class TestBM25IndexPersistence:
         index2 = make_bm25_index(persist_dir=persist_dir)
         assert index2.get_document_count() == 0
 
-    def test_corrupt_bm25s_model_starts_empty(self, persist_dir: str) -> None:
-        """AC81: 正常なメタデータだがbm25sモデルが壊れている場合."""
-        # 一度正常に保存
+    def test_corrupt_bm25s_model_rebuilds_on_search(self, persist_dir: str) -> None:
+        """AC81: bm25sモデルが壊れていてもデータは保持され、検索時に rebuild される."""
         index = make_bm25_index(persist_dir=persist_dir)
         index.add_documents(self._sample_docs())
         assert index.get_document_count() == 4
@@ -360,21 +336,25 @@ class TestBM25IndexPersistence:
         for f in bm25s_dir.iterdir():
             f.write_text("corrupted", encoding="utf-8")
 
-        # 空インデックスで起動
+        # データは SQLite に残っているため document_count は維持される
         index2 = make_bm25_index(persist_dir=persist_dir)
-        assert index2.get_document_count() == 0
+        assert index2.get_document_count() == 4
 
-    def test_delete_all_removes_persist_dir(self, persist_dir: str) -> None:
-        """AC79: 全ドキュメント削除後に永続化ディレクトリが削除される."""
+        # 検索時に rebuild が走り、正常に結果が返る
+        results = index2.search("adventure quest", n_results=3)
+        assert len(results) > 0
+
+    def test_delete_all_keeps_persist_dir_with_empty_db(self, persist_dir: str) -> None:
+        """AC79: 全ドキュメント削除後も persist_dir は存在し、DB は空."""
         index = make_bm25_index(persist_dir=persist_dir)
         index.add_documents(self._sample_docs())
         assert Path(persist_dir).exists()
 
-        # 全ソースを削除
         for src in ["source1", "source2", "source3", "source4"]:
             index.delete_by_source(src)
 
-        assert not Path(persist_dir).exists()
+        assert Path(persist_dir).exists()
+        assert index.get_document_count() == 0
 
         # 空状態で再ロードしてもエラーなし
         index2 = make_bm25_index(persist_dir=persist_dir)
@@ -438,7 +418,7 @@ class TestBM25DeferredSave:
         assert index._needs_rebuild is False
 
     def test_deferred_save_with_persistence(self, tmp_path: Path) -> None:
-        """遅延モードで永続化が flush まで遅延される (#548)."""
+        """遅延モードで bm25s 永続化が flush まで遅延される (#548)."""
         persist_dir = str(tmp_path / "bm25_deferred")
 
         index = make_bm25_index(persist_dir=persist_dir)
@@ -446,22 +426,18 @@ class TestBM25DeferredSave:
 
         index.add_documents(self._sample_docs())
 
-        # 遅延中は永続化されていない（ディレクトリが存在しない、または古い状態）
-        # flush 前の状態を記録
-        persist_path = Path(persist_dir)
-        existed_before_flush = persist_path.exists()
+        # 遅延中は bm25s ディレクトリが存在しない
+        bm25s_dir = Path(persist_dir) / "bm25s"
+        assert not bm25s_dir.exists()
 
         index.flush()
 
-        # flush 後は永続化される
-        assert persist_path.exists()
+        # flush 後は bm25s ディレクトリが永続化される
+        assert bm25s_dir.exists()
 
         # 新しいインスタンスで復元できる
         index2 = make_bm25_index(persist_dir=persist_dir)
         assert index2.get_document_count() == 3
-
-        # 初期状態では永続化ディレクトリがなかったことを確認
-        assert not existed_before_flush
 
     def test_deferred_delete_and_flush(self) -> None:
         """遅延モード中の delete も flush まで save されない."""

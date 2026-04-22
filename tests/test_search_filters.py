@@ -80,8 +80,8 @@ class TestBM25MetadataMap:
         ]
         added = index.add_documents(docs, metadata_list=metadata_list)
         assert added == 2
-        assert index._doc_metadata_map["doc1"]["custom:repository"] == "repo-a"
-        assert index._doc_metadata_map["doc2"]["custom:repository"] == "repo-b"
+        assert index.get_metadata("doc1")["custom:repository"] == "repo-a"
+        assert index.get_metadata("doc2")["custom:repository"] == "repo-b"
 
     def test_add_documents_without_metadata(self) -> None:
         """metadata_list なしでも従来通り動作する."""
@@ -91,7 +91,7 @@ class TestBM25MetadataMap:
         ]
         added = index.add_documents(docs)
         assert added == 1
-        assert "doc1" not in index._doc_metadata_map
+        assert index.get_metadata("doc1") == {}
 
     def test_update_document_metadata(self) -> None:
         """既存ドキュメントを更新するとメタデータも更新される."""
@@ -100,12 +100,11 @@ class TestBM25MetadataMap:
         meta = [{"custom:repository": "repo-a"}]
         index.add_documents(docs, metadata_list=meta)
 
-        # 更新
         docs2 = [("doc1", "テスト文書1更新版", "source1", "journal")]
         meta2 = [{"custom:repository": "repo-b"}]
         index.add_documents(docs2, metadata_list=meta2)
 
-        assert index._doc_metadata_map["doc1"]["custom:repository"] == "repo-b"
+        assert index.get_metadata("doc1")["custom:repository"] == "repo-b"
 
     def test_delete_by_source_cleans_metadata(self) -> None:
         """delete_by_source でメタデータも削除される."""
@@ -121,8 +120,8 @@ class TestBM25MetadataMap:
         index.add_documents(docs, metadata_list=meta)
 
         index.delete_by_source("source1")
-        assert "doc1" not in index._doc_metadata_map
-        assert "doc2" in index._doc_metadata_map
+        assert index.get_metadata("doc1") == {}
+        assert index.get_metadata("doc2")["custom:repository"] == "repo-b"
 
     def test_delete_stale_docs_cleans_metadata(self) -> None:
         """delete_stale_docs でメタデータも削除される."""
@@ -139,8 +138,8 @@ class TestBM25MetadataMap:
 
         deleted = index.delete_stale_docs("source1", valid_ids={"doc1"})
         assert deleted == 1
-        assert "doc1" in index._doc_metadata_map
-        assert "doc2" not in index._doc_metadata_map
+        assert index.get_metadata("doc1")["custom:repository"] == "repo-a"
+        assert index.get_metadata("doc2") == {}
 
     def test_clear_cleans_metadata(self) -> None:
         """clear でメタデータも全削除される."""
@@ -150,7 +149,7 @@ class TestBM25MetadataMap:
         index.add_documents(docs, metadata_list=meta)
 
         index.clear()
-        assert len(index._doc_metadata_map) == 0
+        assert index.get_metadata("doc1") == {}
 
 
 class TestBM25SearchWithFilters:
@@ -312,7 +311,7 @@ class TestBM25MetadataPersistence:
 
         # 新インスタンスで復元
         index2 = make_bm25_index(persist_dir=persist_dir)
-        assert index2._doc_metadata_map["doc1"]["custom:repository"] == "rag-knowledge"
+        assert index2.get_metadata("doc1")["custom:repository"] == "rag-knowledge"
 
     def test_filter_works_after_persistence(self, persist_dir: str) -> None:
         """永続化→復元後もフィルタ検索が動作する."""
