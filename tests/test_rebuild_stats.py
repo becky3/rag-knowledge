@@ -8,7 +8,6 @@ rag_rebuild MCP ツール・CLI、rag_stats 拡張の振る舞いを検証する
 from __future__ import annotations
 
 import json
-from importlib import import_module
 from unittest.mock import AsyncMock, patch
 
 import pytest
@@ -497,33 +496,6 @@ class TestRagStats:
             result = await rag_stats()
 
         assert "エラー" in result
-
-
-# --- ツール数テスト ---
-
-
-@pytest.mark.asyncio
-async def test_rag_server_exposes_tools() -> None:
-    """RAG MCPサーバーが20個のツールを公開すること."""
-    mod = import_module("rag.server")
-    server = mod.mcp
-
-    tools = await server.list_tools()
-    tool_names = {t.name for t in tools}
-
-    expected = {
-        "rag_search", "rag_get_document",
-        "rag_crawl_zenn", "rag_add_zenn",
-        "rag_crawl_bluesky", "rag_add_bluesky",
-        "rag_add_youtube", "rag_crawl_youtube",
-        "rag_add_document", "rag_add_journal", "rag_crawl_documents",
-        "rag_site_ingest",
-        "rag_update_aozora_catalog", "rag_search_aozora",
-        "rag_add_aozora", "rag_crawl_aozora",
-        "rag_delete", "rag_rebuild", "rag_stats",
-        "rag_list_recent",
-    }
-    assert tool_names == expected, f"Expected {expected}, got {tool_names}"
 
 
 # --- _format_elapsed テスト ---

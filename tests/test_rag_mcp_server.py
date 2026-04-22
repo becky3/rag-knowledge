@@ -2,13 +2,8 @@
 
 仕様: docs/specs/rag-knowledge.md, docs/specs/search-response.md, docs/specs/rebuild-stats.md,
       docs/specs/site-ingest.md
-18個のRAGツール（rag_search, rag_get_document,
-rag_crawl_zenn, rag_crawl_bluesky, rag_add_youtube, rag_crawl_youtube,
-rag_add_document, rag_crawl_documents, rag_add_journal,
-rag_site_ingest, rag_delete, rag_rebuild, rag_stats,
-rag_update_aozora_catalog, rag_search_aozora, rag_add_aozora, rag_crawl_aozora,
-rag_list_recent）が
-MCPサーバーとして公開されていることを検証する。
+MCP サーバーが公開するツール一覧（expected_tools.py の EXPECTED_MCP_TOOL_NAMES が SSoT）と
+各ツールの振る舞いを検証する。
 """
 
 from __future__ import annotations
@@ -21,6 +16,7 @@ import logging
 
 import pytest
 
+from expected_tools import EXPECTED_MCP_TOOL_NAMES
 from rag.server import _configure_and_run, _reset_safe_browsing_client
 
 
@@ -32,36 +28,26 @@ def _reset_rag_global_state() -> None:
 
 @pytest.mark.asyncio
 async def test_rag_server_exposes_tools() -> None:
-    """RAG MCPサーバーが20個のツールを公開すること."""
+    """RAG MCPサーバーが期待するツールを公開すること."""
     mod = import_module("rag.server")
     server = mod.mcp
 
     tools = await server.list_tools()
     tool_names = {t.name for t in tools}
 
-    expected = {
-        "rag_search", "rag_get_document",
-        "rag_crawl_zenn", "rag_add_zenn",
-        "rag_crawl_bluesky", "rag_add_bluesky",
-        "rag_add_youtube", "rag_crawl_youtube",
-        "rag_add_document", "rag_add_journal", "rag_crawl_documents",
-        "rag_site_ingest",
-        "rag_update_aozora_catalog", "rag_search_aozora",
-        "rag_add_aozora", "rag_crawl_aozora",
-        "rag_delete", "rag_rebuild", "rag_stats",
-        "rag_list_recent",
-    }
-    assert tool_names == expected, f"Expected {expected}, got {tool_names}"
+    assert tool_names == EXPECTED_MCP_TOOL_NAMES, (
+        f"Expected {EXPECTED_MCP_TOOL_NAMES}, got {tool_names}"
+    )
 
 
 @pytest.mark.asyncio
 async def test_rag_server_tool_count() -> None:
-    """RAG MCPサーバーのツール数が exposes_tools の expected と一致すること."""
+    """RAG MCPサーバーのツール数が EXPECTED_MCP_TOOL_NAMES と一致すること."""
     mod = import_module("rag.server")
     server = mod.mcp
 
     tools = await server.list_tools()
-    expected_count = 20
+    expected_count = len(EXPECTED_MCP_TOOL_NAMES)
     assert len(tools) == expected_count, f"Expected {expected_count}, got {len(tools)}"
 
 
