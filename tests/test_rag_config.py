@@ -211,6 +211,7 @@ rag_log_file_max_bytes = 10485760
 rag_zenn_max_articles = 50
 rag_zenn_request_timeout = 30
 rag_zenn_request_interval = 1.0
+rag_html_remove_class_tokens = ["breadcrumb", "toolbar"]
 rag_document_supported_extensions = ".md,.txt,.pdf,.adoc,.jpg,.jpeg,.png,.webp,.mp4,.ts"
 rag_document_http_mode_enabled = false
 rag_document_allowed_dirs = ""

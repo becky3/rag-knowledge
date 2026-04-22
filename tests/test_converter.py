@@ -24,6 +24,7 @@ from rag.converter.converter import (
 )
 from rag.converter.handlers import (
     _fix_void_elements,
+    compile_remove_class_re,
     convert_html,
     convert_json_bluesky,
     convert_json_zenn_article,
@@ -31,6 +32,11 @@ from rag.converter.handlers import (
     passthrough_copy,
 )
 from rag.converter.normalize import normalize_text
+
+_TEST_REMOVE_CLASS_RE = compile_remove_class_re([
+    "breadcrumb", "breadcrumbs", "topic-path", "nextprev", "pagination",
+    "toolbar", "footer-wrapper", "footer", "scrollToFeedback", "suggest",
+])
 
 
 # ============================================================
@@ -81,7 +87,7 @@ class TestConvertHtml:
         html_file = tmp_path / "test.html"
         html_file.write_text(html, encoding="utf-8")
 
-        result = convert_html(html_file)
+        result = convert_html(html_file, _TEST_REMOVE_CLASS_RE)
         assert result is not None
         assert "Title" in result
         assert "Content here." in result
@@ -97,7 +103,7 @@ class TestConvertHtml:
         html_file = tmp_path / "test.html"
         html_file.write_text(html, encoding="utf-8")
 
-        result = convert_html(html_file)
+        result = convert_html(html_file, _TEST_REMOVE_CLASS_RE)
         assert result is not None
         assert "Article body." in result
         assert "Navigation" not in result
@@ -113,7 +119,7 @@ class TestConvertHtml:
         html_file = tmp_path / "test.html"
         html_file.write_text(html, encoding="utf-8")
 
-        result = convert_html(html_file)
+        result = convert_html(html_file, _TEST_REMOVE_CLASS_RE)
         assert result is not None
         assert "Main body." in result
         assert "Navigation" not in result
@@ -134,7 +140,7 @@ class TestConvertHtml:
         html_file = tmp_path / "test.html"
         html_file.write_text(html, encoding="utf-8")
 
-        result = convert_html(html_file)
+        result = convert_html(html_file, _TEST_REMOVE_CLASS_RE)
         assert result is not None
         assert "Content" in result
         assert "alert" not in result
@@ -155,7 +161,7 @@ class TestConvertHtml:
         html_file = tmp_path / "test.html"
         html_file.write_text(html, encoding="utf-8")
 
-        result = convert_html(html_file)
+        result = convert_html(html_file, _TEST_REMOVE_CLASS_RE)
         assert result is not None
         assert "Main body." in result
         assert "Header Noise" not in result
@@ -173,7 +179,7 @@ class TestConvertHtml:
         html_file = tmp_path / "test.html"
         html_file.write_text(html, encoding="utf-8")
 
-        result = convert_html(html_file)
+        result = convert_html(html_file, _TEST_REMOVE_CLASS_RE)
         assert result is not None
         assert "Content body." in result
         assert "Sidebar" not in result
@@ -190,7 +196,7 @@ class TestConvertHtml:
         html_file = tmp_path / "test.html"
         html_file.write_text(html, encoding="utf-8")
 
-        result = convert_html(html_file)
+        result = convert_html(html_file, _TEST_REMOVE_CLASS_RE)
         assert result is not None
         assert "Main body." in result
         assert "Sidebar Noise" not in result
@@ -210,7 +216,7 @@ class TestConvertHtml:
         html_file = tmp_path / "test.html"
         html_file.write_text(html, encoding="utf-8")
 
-        result = convert_html(html_file)
+        result = convert_html(html_file, _TEST_REMOVE_CLASS_RE)
         assert result is not None
         assert "Interview Title" in result
         assert "Interview body." in result
@@ -227,7 +233,7 @@ class TestConvertHtml:
         html_file = tmp_path / "test.html"
         html_file.write_text(html, encoding="utf-8")
 
-        result = convert_html(html_file)
+        result = convert_html(html_file, _TEST_REMOVE_CLASS_RE)
         assert result is not None
         assert "Main content." in result
         assert "Nav" not in result
@@ -245,7 +251,7 @@ class TestConvertHtml:
         html_file = tmp_path / "test.html"
         html_file.write_text(html, encoding="utf-8")
 
-        result = convert_html(html_file)
+        result = convert_html(html_file, _TEST_REMOVE_CLASS_RE)
         assert result is not None
         assert "Article Title" in result
         assert "Article body." in result
@@ -266,7 +272,7 @@ class TestConvertHtml:
         html_file = tmp_path / "test.html"
         html_file.write_text(html, encoding="utf-8")
 
-        result = convert_html(html_file)
+        result = convert_html(html_file, _TEST_REMOVE_CLASS_RE)
         assert result is not None
         assert "Long content paragraph" in result
         assert "Nav Link" not in result
@@ -285,10 +291,124 @@ class TestConvertHtml:
         html_file = tmp_path / "test.html"
         html_file.write_text(html, encoding="utf-8")
 
-        result = convert_html(html_file)
+        result = convert_html(html_file, _TEST_REMOVE_CLASS_RE)
         assert result is not None
         assert "Content here." in result
         assert "Home > Page" not in result
+
+    def test_footer_wrapper_class_removed(self, tmp_path: Path) -> None:
+        """コンテンツ領域内の footer-wrapper class が除去される."""
+        html = (
+            "<html><body>"
+            "<div id='content-wrap'>"
+            "<p>Main content.</p>"
+            "<div class='footer-wrapper'><div class='footer clear'>"
+            "<div class='copy'>Copyright 2026 Example.</div>"
+            "<div class='menu'><a>Terms</a><a>Privacy</a></div>"
+            "</div></div>"
+            "</div>"
+            "</body></html>"
+        )
+        html_file = tmp_path / "test.html"
+        html_file.write_text(html, encoding="utf-8")
+
+        result = convert_html(html_file, _TEST_REMOVE_CLASS_RE)
+        assert result is not None
+        assert "Main content." in result
+        assert "Copyright" not in result
+        assert "Terms" not in result
+
+    def test_scrolltofeedback_class_removed(self, tmp_path: Path) -> None:
+        """コンテンツ領域内の scrollToFeedback class が除去される."""
+        html = (
+            "<html><body>"
+            "<div id='main'>"
+            "<p>API description.</p>"
+            "<div class='scrollToFeedback'>"
+            "<a>Leave feedback</a>"
+            "</div>"
+            "</div>"
+            "</body></html>"
+        )
+        html_file = tmp_path / "test.html"
+        html_file.write_text(html, encoding="utf-8")
+
+        result = convert_html(html_file, _TEST_REMOVE_CLASS_RE)
+        assert result is not None
+        assert "API description." in result
+        assert "Leave feedback" not in result
+
+    def test_footer_class_removed(self, tmp_path: Path) -> None:
+        """コンテンツ領域内の footer class（完全トークン一致）が除去される."""
+        html = (
+            "<html><body>"
+            "<div id='main'>"
+            "<p>Main content.</p>"
+            "<div class='footer'>"
+            "<p>Copyright 2026.</p>"
+            "</div>"
+            "</div>"
+            "</body></html>"
+        )
+        html_file = tmp_path / "test.html"
+        html_file.write_text(html, encoding="utf-8")
+
+        result = convert_html(html_file, _TEST_REMOVE_CLASS_RE)
+        assert result is not None
+        assert "Main content." in result
+        assert "Copyright" not in result
+
+    def test_exact_match_does_not_remove_partial(self, tmp_path: Path) -> None:
+        """完全トークン一致のため、部分一致するクラスは除去されない."""
+        html = (
+            "<html><body>"
+            "<div id='main'>"
+            "<div class='suggested-reading'>"
+            "<p>Recommended articles.</p>"
+            "</div>"
+            "<div class='user-feedback-section'>"
+            "<p>User reviews here.</p>"
+            "</div>"
+            "</div>"
+            "</body></html>"
+        )
+        html_file = tmp_path / "test.html"
+        html_file.write_text(html, encoding="utf-8")
+
+        result = convert_html(html_file, _TEST_REMOVE_CLASS_RE)
+        assert result is not None
+        assert "Recommended articles." in result
+        assert "User reviews here." in result
+
+    def test_suggest_class_removed(self, tmp_path: Path) -> None:
+        """コンテンツ領域内の suggest class が除去される."""
+        html = (
+            "<html><body>"
+            "<div id='main'>"
+            "<h1>AnimationClip</h1>"
+            "<div class='suggest'>"
+            "<a>Suggest a change</a>"
+            "<div class='suggest-wrap'>"
+            "<div class='suggest-success'><h2>Success!</h2>"
+            "<p>Thank you for helping us improve.</p></div>"
+            "<div class='suggest-form'>"
+            "<label>Your name</label><input type='text'>"
+            "</div></div></div>"
+            "<h3>Description</h3>"
+            "<p>Provides an asset.</p>"
+            "</div>"
+            "</body></html>"
+        )
+        html_file = tmp_path / "test.html"
+        html_file.write_text(html, encoding="utf-8")
+
+        result = convert_html(html_file, _TEST_REMOVE_CLASS_RE)
+        assert result is not None
+        assert "AnimationClip" in result
+        assert "Provides an asset." in result
+        assert "Suggest a change" not in result
+        assert "Success!" not in result
+        assert "Your name" not in result
 
     def test_details_summary_preserved(self, tmp_path: Path) -> None:
         """<details>/<summary> タグ内のコンテンツが保持される."""
@@ -304,7 +424,7 @@ class TestConvertHtml:
         html_file = tmp_path / "test.html"
         html_file.write_text(html, encoding="utf-8")
 
-        result = convert_html(html_file)
+        result = convert_html(html_file, _TEST_REMOVE_CLASS_RE)
         assert result is not None
         assert "FAQ Question" in result
         assert "FAQ Answer" in result
@@ -320,7 +440,7 @@ class TestConvertHtml:
         html_file = tmp_path / "test.html"
         html_file.write_text(html, encoding="utf-8")
 
-        result = convert_html(html_file)
+        result = convert_html(html_file, _TEST_REMOVE_CLASS_RE)
         assert result is not None
         assert "Article content." in result
         assert "Main div content." not in result
@@ -330,7 +450,7 @@ class TestConvertHtml:
         html_file = tmp_path / "test.html"
         html_file.write_text(html, encoding="utf-8")
 
-        result = convert_html(html_file)
+        result = convert_html(html_file, _TEST_REMOVE_CLASS_RE)
         assert result is not None
         assert "# H1" in result
         assert "## H2" in result
@@ -341,7 +461,7 @@ class TestConvertHtml:
         html_file = tmp_path / "test.html"
         html_file.write_text(html, encoding="utf-8")
 
-        result = convert_html(html_file)
+        result = convert_html(html_file, _TEST_REMOVE_CLASS_RE)
         assert result is not None
         assert "Link Text" in result
         assert "https://example.com" not in result
@@ -351,7 +471,7 @@ class TestConvertHtml:
         html_file = tmp_path / "test.html"
         html_file.write_text(html, encoding="utf-8")
 
-        result = convert_html(html_file)
+        result = convert_html(html_file, _TEST_REMOVE_CLASS_RE)
         assert result is not None
         assert "Photo description" in result
         assert "img.png" not in result
@@ -361,7 +481,7 @@ class TestConvertHtml:
         html_file = tmp_path / "test.html"
         html_file.write_bytes(html.encode("shift_jis"))
 
-        result = convert_html(html_file)
+        result = convert_html(html_file, _TEST_REMOVE_CLASS_RE)
         assert result is not None
         assert "日本語テスト" in result
 
@@ -375,7 +495,7 @@ class TestConvertHtml:
         html_file = tmp_path / "test.html"
         html_file.write_text(html, encoding="utf-8")
 
-        result = convert_html(html_file)
+        result = convert_html(html_file, _TEST_REMOVE_CLASS_RE)
         assert result is not None
         assert "Name" in result
         assert "Value" in result
@@ -406,7 +526,7 @@ class TestConvertHtml:
         html_file = tmp_path / "test.html"
         html_file.write_text(html, encoding="utf-8")
 
-        result = convert_html(html_file)
+        result = convert_html(html_file, _TEST_REMOVE_CLASS_RE)
         assert result is not None
         assert "First paragraph" in result
         assert "Second paragraph" in result
@@ -423,7 +543,7 @@ class TestConvertHtml:
         html_file = tmp_path / "test.html"
         html_file.write_text(html, encoding="utf-8")
 
-        result = convert_html(html_file)
+        result = convert_html(html_file, _TEST_REMOVE_CLASS_RE)
         assert result is not None
         assert "Before break." in result
         assert "After break." in result
@@ -439,7 +559,7 @@ class TestConvertHtml:
         html_file = tmp_path / "test.html"
         html_file.write_text(html, encoding="utf-8")
 
-        result = convert_html(html_file)
+        result = convert_html(html_file, _TEST_REMOVE_CLASS_RE)
         assert result is not None
         assert "Content after self-closed img." in result
 
@@ -453,7 +573,7 @@ class TestConvertHtml:
         html_file = tmp_path / "test.html"
         html_file.write_text(html, encoding="utf-8")
 
-        result = convert_html(html_file)
+        result = convert_html(html_file, _TEST_REMOVE_CLASS_RE)
         assert result is not None
         assert "吾輩" in result
         assert "(わがはい)" in result
@@ -469,7 +589,7 @@ class TestConvertHtml:
         html_file = tmp_path / "test.html"
         html_file.write_text(html, encoding="utf-8")
 
-        result = convert_html(html_file)
+        result = convert_html(html_file, _TEST_REMOVE_CLASS_RE)
         assert result is not None
         assert "漢字" in result
         assert "(かんじ)" in result
@@ -487,7 +607,7 @@ class TestConvertHtml:
         html_file = tmp_path / "test.html"
         html_file.write_text(html, encoding="utf-8")
 
-        result = convert_html(html_file)
+        result = convert_html(html_file, _TEST_REMOVE_CLASS_RE)
         assert result is not None
         assert "青空" in result
         assert "文庫" in result
