@@ -2293,6 +2293,7 @@ def _build_cli_pipeline_controller() -> tuple[
         youtube_merge_gap_sec=settings.rag_youtube_merge_gap_sec,
         youtube_merge_max_chars=settings.rag_youtube_merge_max_chars,
         media_analyzer=media_analyzer,
+        html_remove_class_tokens=settings.rag_html_remove_class_tokens,
     )
 
     embedding_provider = get_embedding_provider(settings, settings.embedding_provider)
