@@ -40,38 +40,28 @@ MCP サーバープロセスを停止 → ChromaDB サーバーが起動して�
 
 worktree で CLI 操作・動作確認を行う場合、以下のセットアップを実施すること。
 
-1. メインリポジトリから `.env` をコピーする:
+1. メインリポジトリから `.env` をコピーする（ストレージパスは相対パスのため、worktree 内の `.tmp/` が自動的に使用される。書き換え不要）:
 
    ```bash
    cp .env <worktree-path>/.env
    ```
 
-2. worktree の `.env` でストレージパスを worktree 内の絶対パスに変更する（相対パスだとメインリポジトリのストレージを参照してしまう）:
-
-   ```
-   CHROMADB_PERSIST_DIR=D:/GitHub/becky3/rag-knowledge-wt-XXX/.tmp/test_chroma_db
-   BM25_PERSIST_DIR=D:/GitHub/becky3/rag-knowledge-wt-XXX/.tmp/test_bm25_index
-   SOURCE_STORE_DIR=D:/GitHub/becky3/rag-knowledge-wt-XXX/.tmp/test_source_store
-   CONVERTED_STORE_DIR=D:/GitHub/becky3/rag-knowledge-wt-XXX/.tmp/test_converted_store
-   CHROMADB_SERVER_PORT=8001
-   ```
-
-3. LM Studio の接続先を確認し、必要に応じて `localhost` に変更する:
+2. LM Studio の接続先を確認し、必要に応じて `localhost` に変更する:
 
    ```
    LMSTUDIO_BASE_URL=http://localhost:1234/v1
    ```
 
-4. `.tmp` ディレクトリを作成する:
+3. `.tmp` ディレクトリを作成する:
 
    ```bash
    mkdir -p <worktree-path>/.tmp
    ```
 
-5. ChromaDB サーバーを起動する（メインリポジトリの MCP サーバーが起動中の場合はポート 8000 が使用中のため、`.env` で `CHROMADB_SERVER_PORT` を変更すること）。初回は venv 構築のため起動に時間がかかる（目安: 10〜20 秒）。heartbeat 確認前に十分待機すること:
+4. ChromaDB サーバーを起動する。ポート競合時（前セッションの停止漏れ等）は `.env` で `CHROMADB_SERVER_PORT` を変更すること。初回は venv 構築のため起動に時間がかかる（目安: 10〜20 秒）。heartbeat 確認前に十分待機すること:
 
    ```bash
-   uv run chroma run --path <worktree-path>/.tmp/test_chroma_db --port <別ポート>
+   uv run chroma run --path <worktree-path>/.tmp/test_chroma_db
    ```
 
 ### CLI 動作確認の確認観点
@@ -100,23 +90,17 @@ uv run python -m rag.cli search --query "<クエリ>"
 
 worktree で開発中のコードを MCP サーバーとして動作確認する手順:
 
-1. worktree の `.env` でストレージパスを絶対パスに変更する（相対パスだとメインリポジトリのストレージを参照してしまう）:
-
-   ```
-   CHROMADB_PERSIST_DIR=D:/GitHub/becky3/rag-knowledge-wt-XXX/.tmp/test_chroma_db
-   ```
-
-2. worktree で MCP サーバーを HTTP モードで起動する:
+1. worktree で MCP サーバーを HTTP モードで起動する（ストレージパスは相対パスのため書き換え不要）:
 
    ```bash
    cd <worktree-path> && uv run python -m rag.server &
    ```
 
-3. `.mcp.json` の `url` は `http://localhost:<RAG_HTTP_PORT>/mcp` のまま変更不要（worktree のサーバーが同じポートで起動するため）。メインリポジトリの MCP サーバーが起動中の場合はポート競合するため、先に停止すること
+2. `.mcp.json` の `url` は `http://localhost:<RAG_HTTP_PORT>/mcp` のまま変更不要（worktree のサーバーが同じポートで起動するため）。ポート競合時（前セッションの停止漏れ等）は先に該当プロセスを停止すること
 
-4. `/mcp` で disabled の場合は enable、enabled の場合は reconnect（サーバー再接続）。`.mcp.json` を変更した場合はセッション再起動が必要
+3. `/mcp` で disabled の場合は enable、enabled の場合は reconnect（サーバー再接続）。`.mcp.json` を変更した場合はセッション再起動が必要
 
-5. 動作確認完了後、worktree のサーバープロセスを停止する
+4. 動作確認完了後、worktree のサーバープロセスを停止する
 
 ## Claude Code 拡張機能
 
