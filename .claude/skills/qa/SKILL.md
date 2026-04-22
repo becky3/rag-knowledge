@@ -54,9 +54,9 @@ QA 検証グループ:
 2. worktree を作成する: `git worktree add -b qa/qa-skill-<Issue番号> <worktree-path> develop`
    - 配置: リポジトリの親ディレクトリ、命名: `<リポジトリ名>-wt-<Issue番号>`
 3. メインリポジトリから `.env` をコピーする
-4. `.env` のストレージパスを worktree 内の**絶対パス**に変更する（相対パスだとメインリポジトリのストレージを参照してしまう）。以下も設定する:
-   - `CHROMADB_SERVER_PORT=8001`（メインリポジトリの MCP サーバーとのポート競合回避）
+4. ストレージパスは相対パスのため worktree ディレクトリ基準で解決される（書き換え不要）。以下を確認・設定する:
    - `CHROMADB_AUTO_START=false`（worktree では手動起動するため。`true` のままだと MCP サーバー起動時に競合する可能性がある）
+   - ポート競合時（前セッションの停止漏れ等）は `CHROMADB_SERVER_PORT` を変更すること
 5. LM Studio の接続先を確認し、必要に応じて `localhost` に変更する
 6. `.tmp` ディレクトリを作成する
 7. メインリポジトリから `.qa/` ディレクトリをコピーする（`.qa/` は `.gitignore` 対象のため worktree に含まれない）
@@ -73,7 +73,6 @@ QA 検証グループ:
 - LM Studio の接続確認（Embedding API が必要なグループの場合）
 - LM Studio Vision モデルの確認（グループ A でメディア解析ステップを実行する場合）: `curl http://localhost:1234/v1/models` で Vision 対応モデルがロードされているか確認する
 - ffmpeg の確認（メディア解析の動画処理を検証する場合）: `ffmpeg -version` で利用可能か確認する
-- `.env` のストレージパスが worktree 内の絶対パスを指していることを確認
 - 問題があればユーザーに報告し、解決してから続行
 
 ### 5. グループ実行
@@ -428,7 +427,7 @@ MCP サーバーのログファイル出力（`SessionRotatingFileHandler`）が
 
 #### グループ準備
 
-1. `.env` の `RAG_LOG_DIR` を確認し、worktree 内の絶対パスを指していることを確認する（未設定の場合はデフォルトパスを使用）
+1. `.env` の `RAG_LOG_DIR` を確認する（未設定の場合はデフォルトパスを使用）
 2. MCP サーバーが HTTP モードで起動中であること（worktree セットアップで起動済み）
 
 | # | コマンド | 期待結果 | 検証種別 |
