@@ -2069,8 +2069,8 @@ class TestIngestPosts:
     """ingest_posts のテスト."""
 
     @pytest.mark.asyncio
-    async def test_ingest_single_post_overwrites(self, source_store: SourceStore) -> None:
-        """既存ファイルが上書きされることを確認する."""
+    async def test_ingest_single_post_places_new(self, source_store: SourceStore) -> None:
+        """単一 URL で新規配置されるこ��を確認する."""
         ingester = make_bluesky_ingester(source_store)
 
         # resolveHandle レスポンス
