@@ -211,7 +211,8 @@ def _write_lock_or_exit(
             _output_error(
                 CliErrorCode.LOCK_CONFLICT, msg, lock_type=e.kind,
             )
-        print(f"エラー: {msg}", file=sys.stderr)
+        else:
+            print(f"エラー: {msg}", file=sys.stderr)
         raise SystemExit(1) from e
     try:
         yield
@@ -1495,9 +1496,10 @@ async def run_rebuild(args: argparse.Namespace) -> None:
             _output_error(
                 CliErrorCode.LOCK_CONFLICT, msg, lock_type=e.kind,
             )
-        print(f"エラー: {msg}", file=sys.stderr)
-        if if_needed:
-            _show_error_dialog(msg)
+        else:
+            print(f"エラー: {msg}", file=sys.stderr)
+            if if_needed:
+                _show_error_dialog(msg)
         raise SystemExit(1) from e
 
     has_error = False

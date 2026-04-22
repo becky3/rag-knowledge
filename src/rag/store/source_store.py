@@ -53,6 +53,7 @@ _EXCLUDE_PATTERNS: tuple[str, ...] = (
     "/.gitignore",
     f"/{WRITE_LOCK_FILENAME}",
     f"/{REBUILD_LOCK_FILENAME}",
+    "/.ingest.lock",
     ".git/",
     # 青空文庫カタログ（aozora インジェスターの内部参照ファイル、sidecar 扱い）
     "/aozora/catalog.csv",

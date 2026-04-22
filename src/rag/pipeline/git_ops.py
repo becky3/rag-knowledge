@@ -24,6 +24,7 @@ _GITIGNORE_ENTRIES: list[str] = [
     "metadata.db-shm",
     REBUILD_LOCK_FILENAME,
     WRITE_LOCK_FILENAME,
+    ".ingest.lock",
 ]
 _GITIGNORE_CONTENT = "\n".join(_GITIGNORE_ENTRIES) + "\n"
 

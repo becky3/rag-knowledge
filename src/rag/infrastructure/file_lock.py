@@ -294,8 +294,19 @@ class PipelineLock:
         try:
             self._primary.acquire()
         except LockAcquisitionError as e:
+            kind = self._primary_kind
+            # write_lock 取得失敗時: rebuild がプリチェック後に開始して
+            # write_lock を保持している可能性がある。rebuild_lock を追加
+            # チェックして、保持されていれば kind を "rebuild" に切り替える
+            if self._operation == "write":
+                try:
+                    probe = FileLock(self._rebuild_path)
+                    probe.acquire()
+                    probe.release()
+                except LockAcquisitionError:
+                    kind = "rebuild"
             raise LockAcquisitionError(
-                e.lock_path, kind=self._primary_kind,
+                e.lock_path, kind=kind,
             ) from e
 
         # secondary が無ければここで完了（write の場合）

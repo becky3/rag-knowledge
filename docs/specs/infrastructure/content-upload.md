@@ -320,7 +320,7 @@ MCP ツールはクライアントからコンテンツを文字列で受け取�
 | `src/rag/cli.py` | CLI コマンド。`--stdin` オプションによる stdin 入力、`--output json` による JSON Lines 出力をサポート |
 | `src/rag/pipeline/ingesters/local.py` | Local インジェスター（ドキュメント取り込み） |
 | `src/rag/pipeline/ingesters/journal.py` | Journal インジェスター（ジャーナル取り込み） |
-| `src/rag/infrastructure/file_lock.py` | OS ファイルロックの 2 層構造。低レベルの `FileLock`（単一ロックファイルへのノンブロッキング取得 primitive）と、その上で `write_lock` と `rebuild_lock` の非対称保持戦略を実装する `PipelineLock`（合成ロック、`ingest_lock` / `rebuild_lock` ファクトリ関数の戻り値）を提供する |
+| `src/rag/infrastructure/file_lock.py` | OS ファイルロックの 2 層構造。低レベルの `FileLock`（単一ロックファイルへのノンブロッキング取得 primitive）と、その上で `write_lock` と `rebuild_lock` の非対称保持戦略を実装する `PipelineLock`（合成ロック、`write_lock()` / `rebuild_lock()` ファクトリ関数の戻り値）を提供する |
 | `src/rag/config.py` | `rag_upload_max_file_size_mb` / `rag_upload_retry_after_write_sec` / `rag_upload_retry_after_rebuild_sec` 設定の定義 |
 | `config.toml` | 上記設定のデフォルト値 |
 
