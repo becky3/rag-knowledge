@@ -151,22 +151,46 @@ class _BM25Store:
 
         added = 0
         updated = 0
-        params = []
-        for i, (doc_id, text, source_id, source_type) in enumerate(documents):
-            meta_json = json.dumps(
-                metadata_list[i], ensure_ascii=False,
-            ) if metadata_list is not None else "{}"
-            params.append((doc_id, text, source_id, source_type, meta_json))
-            if doc_id in existing:
-                updated += 1
-            else:
-                added += 1
 
-        self._conn.executemany(
-            "INSERT OR REPLACE INTO chunks (doc_id, text, source_id, source_type, metadata) "
-            "VALUES (?, ?, ?, ?, ?)",
-            params,
-        )
+        if metadata_list is not None:
+            params = []
+            for i, (doc_id, text, source_id, source_type) in enumerate(documents):
+                meta_json = json.dumps(metadata_list[i], ensure_ascii=False)
+                params.append((doc_id, text, source_id, source_type, meta_json))
+                if doc_id in existing:
+                    updated += 1
+                else:
+                    added += 1
+            self._conn.executemany(
+                "INSERT OR REPLACE INTO chunks "
+                "(doc_id, text, source_id, source_type, metadata) "
+                "VALUES (?, ?, ?, ?, ?)",
+                params,
+            )
+        else:
+            params_no_meta = []
+            for doc_id, text, source_id, source_type in documents:
+                params_no_meta.append((text, source_id, source_type, doc_id))
+                if doc_id in existing:
+                    updated += 1
+                else:
+                    added += 1
+            # 新規は metadata='{}' で INSERT、既存は metadata を保持して UPDATE
+            for doc_id, text, source_id, source_type in documents:
+                if doc_id in existing:
+                    self._conn.execute(
+                        "UPDATE chunks SET text=?, source_id=?, source_type=? "
+                        "WHERE doc_id=?",
+                        (text, source_id, source_type, doc_id),
+                    )
+                else:
+                    self._conn.execute(
+                        "INSERT INTO chunks "
+                        "(doc_id, text, source_id, source_type, metadata) "
+                        "VALUES (?, ?, ?, ?, '{}')",
+                        (doc_id, text, source_id, source_type),
+                    )
+
         self._conn.commit()
         return added, updated
 
@@ -286,7 +310,7 @@ class _BM25Store:
     def estimate_text_memory_bytes(self) -> tuple[int, int]:
         """チャンク数とテキスト合計バイト数を返す（rebuild 前の見積もり用）."""
         row = self._conn.execute(
-            "SELECT COUNT(*), COALESCE(SUM(LENGTH(text)), 0) FROM chunks",
+            "SELECT COUNT(*), COALESCE(SUM(LENGTH(CAST(text AS BLOB))), 0) FROM chunks",
         ).fetchone()
         return (row[0], row[1]) if row else (0, 0)
 
@@ -640,23 +664,24 @@ class BM25Index:
             return
 
         self._doc_ids = [doc_id for doc_id, _ in all_docs]
-        doc_hashes = [(doc_id, _text_hash(text)) for doc_id, text in all_docs]
-        text_map = {doc_id: text for doc_id, text in all_docs}
+        doc_hashes = [_text_hash(text) for _, text in all_docs]
 
-        cached = self._store.get_cached_tokens(doc_hashes)
+        cached = self._store.get_cached_tokens(
+            list(zip(self._doc_ids, doc_hashes)),
+        )
 
         new_cache_entries: list[tuple[str, str, list[str]]] = []
         tokenized_corpus: list[list[str]] = []
         cache_hits = 0
 
-        for doc_id, text_h in doc_hashes:
+        for i, (doc_id, text) in enumerate(all_docs):
             if doc_id in cached:
                 tokenized_corpus.append(cached[doc_id])
                 cache_hits += 1
             else:
-                tokens = tokenize_japanese(text_map[doc_id])
+                tokens = tokenize_japanese(text)
                 tokenized_corpus.append(tokens)
-                new_cache_entries.append((doc_id, text_h, tokens))
+                new_cache_entries.append((doc_id, doc_hashes[i], tokens))
 
         if new_cache_entries:
             self._store.upsert_token_cache(new_cache_entries)

@@ -221,6 +221,19 @@ class TestBM25Index:
 
         assert index.get_metadata("doc1")["title"] == "Original"
 
+    def test_update_without_metadata_preserves_existing(self) -> None:
+        """metadata_list=None で更新しても既存メタデータが保持される."""
+        index = make_bm25_index()
+        docs = [("doc1", "sample text", "source1", "web")]
+        meta = [{"source_id": "source1", "title": "Original Title"}]
+        index.add_documents(docs, metadata_list=meta)
+
+        updated_docs = [("doc1", "updated text", "source1", "web")]
+        index.add_documents(updated_docs)
+
+        result = index.get_metadata("doc1")
+        assert result["title"] == "Original Title"
+
 
 class TestBM25IndexPersistence:
     """BM25Index永続化のテスト.
