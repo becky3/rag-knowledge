@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import contextlib
 import hashlib
 import io
 import json
@@ -14,6 +15,7 @@ import logging
 import math
 import os
 import sys
+from collections.abc import Iterator
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import TYPE_CHECKING, TypedDict
@@ -150,19 +152,72 @@ def _output_error(
     code: CliErrorCode,
     message: str,
     details: dict[str, object] | None = None,
+    *,
+    lock_type: str | None = None,
 ) -> None:
-    """エラー JSON を出力し、exit code 1 で終了する."""
+    """エラー JSON を出力し、exit code 1 で終了する.
+
+    lock_type が指定された場合は details["lock_type"] に追加する（details が
+    未指定なら自動生成）。サーバー側の Retry-After 分岐・メッセージ切替のため。
+    """
     payload: dict[str, object] = {
         "type": "error",
         "error": True,
         "code": code.value,
         "message": message,
     }
-    if details is not None:
-        payload["details"] = details
+    effective_details = dict(details) if details is not None else None
+    if lock_type is not None:
+        if effective_details is None:
+            effective_details = {}
+        effective_details["lock_type"] = lock_type
+    if effective_details is not None:
+        payload["details"] = effective_details
     _output_json(payload)
     logger.error("CLI error: %s (code=%s)", message, code.value)
     sys.exit(1)
+
+
+@contextlib.contextmanager
+def _write_lock_or_exit(
+    source_store_root: Path,
+    *,
+    json_out: bool,
+) -> Iterator[None]:
+    """書き込み系 CLI 用の write_lock を取得するコンテキストマネージャ.
+
+    ロック取得に失敗した場合はロック種別に応じたメッセージで _output_error 経由で
+    exit する。with 文を抜ける際にロックは自動解放される。
+
+    仕様: docs/specs/infrastructure/content-upload.md の「rebuild との相互排他」
+
+    使い方::
+
+        with _write_lock_or_exit(source_store_root, json_out=json_out):
+            # ロック保持下の処理
+            ...
+    """
+    from .infrastructure.file_lock import LockAcquisitionError, write_lock
+
+    lock = write_lock(source_store_root)
+    try:
+        lock.acquire()
+    except LockAcquisitionError as e:
+        if e.kind == "rebuild":
+            msg = "別の再構築が実行中です（ロック競合）"
+        else:
+            msg = "別の取り込みが実行中です（ロック競合）"
+        if json_out:
+            _output_error(
+                CliErrorCode.LOCK_CONFLICT, msg, lock_type=e.kind,
+            )
+        else:
+            print(f"エラー: {msg}", file=sys.stderr)
+        raise SystemExit(1) from e
+    try:
+        yield
+    finally:
+        lock.release()
 
 
 class _JsonAwareArgumentParser(argparse.ArgumentParser):
@@ -1432,14 +1487,20 @@ async def run_rebuild(args: argparse.Namespace) -> None:
     lock = rebuild_lock(Path(controller.source_store.root_dir))
     try:
         lock.acquire()
-    except LockAcquisitionError:
-        msg = "別の再構築が実行中です（ロック競合）"
+    except LockAcquisitionError as e:
+        if e.kind == "rebuild":
+            msg = "別の再構築が実行中です（ロック競合）"
+        else:
+            msg = "別の取り込みが実行中です（ロック競合）"
         if json_out:
-            _output_error(CliErrorCode.LOCK_CONFLICT, msg)
-        print(f"エラー: {msg}", file=sys.stderr)
-        if if_needed:
-            _show_error_dialog(msg)
-        raise SystemExit(1)
+            _output_error(
+                CliErrorCode.LOCK_CONFLICT, msg, lock_type=e.kind,
+            )
+        else:
+            print(f"エラー: {msg}", file=sys.stderr)
+            if if_needed:
+                _show_error_dialog(msg)
+        raise SystemExit(1) from e
 
     has_error = False
     try:
@@ -1995,54 +2056,57 @@ async def run_delete(args: argparse.Namespace) -> None:
     controller, _settings = _build_cli_pipeline_controller()
     source_id: str = args.source_id
 
-    try:
-        controller.source_store.remove_file(source_id)
-    except KeyError:
+    with _write_lock_or_exit(
+        Path(controller.source_store.root_dir), json_out=json_out,
+    ):
+        try:
+            controller.source_store.remove_file(source_id)
+        except KeyError:
+            if json_out:
+                _output_result_logged(
+                    {"deleted": False, "not_found": True},
+                    "delete: source_id=%s, not_found=True",
+                    source_id,
+                )
+                return
+            print(f"該当するソースが見つかりませんでした: {source_id}", file=sys.stderr)
+            sys.exit(1)
+
+        try:
+            summary = await controller.ingest_and_index(
+                f"delete: {source_id}",
+                progress_callback=progress_cb,
+            )
+        except Exception:
+            logger.exception("削除パイプライン実行に失敗: %s", source_id)
+            if json_out:
+                _output_error(CliErrorCode.INTERNAL_ERROR, f"削除に失敗しました: {source_id}")
+            print(
+                f"エラー: 削除に失敗しました: {source_id}",
+                file=sys.stderr,
+            )
+            sys.exit(1)
+
         if json_out:
             _output_result_logged(
-                {"deleted": False, "not_found": True},
-                "delete: source_id=%s, not_found=True",
+                {
+                    "deleted": True,
+                    "pipeline": _summary_to_dict(summary),
+                },
+                "delete: source_id=%s, deleted=True",
                 source_id,
             )
             return
-        print(f"該当するソースが見つかりませんでした: {source_id}", file=sys.stderr)
-        sys.exit(1)
 
-    try:
-        summary = await controller.ingest_and_index(
-            f"delete: {source_id}",
-            progress_callback=progress_cb,
-        )
-    except Exception:
-        logger.exception("削除パイプライン実行に失敗: %s", source_id)
-        if json_out:
-            _output_error(CliErrorCode.INTERNAL_ERROR, f"削除に失敗しました: {source_id}")
-        print(
-            f"エラー: 削除に失敗しました: {source_id}",
-            file=sys.stderr,
-        )
-        sys.exit(1)
-
-    if json_out:
-        _output_result_logged(
-            {
-                "deleted": True,
-                "pipeline": _summary_to_dict(summary),
-            },
-            "delete: source_id=%s, deleted=True",
-            source_id,
-        )
-        return
-
-    if summary.warnings:
-        print(f"パイプライン警告: {len(summary.warnings)}件")
-        for warn in summary.warnings:
-            print(f"  - {warn}")
-    if summary.errors:
-        print(f"パイプラインエラー: {len(summary.errors)}件")
-        for entry in summary.errors:
-            print(f"  - {_format_pipeline_error(entry)}")
-    print(f"削除しました: {source_id}")
+        if summary.warnings:
+            print(f"パイプライン警告: {len(summary.warnings)}件")
+            for warn in summary.warnings:
+                print(f"  - {warn}")
+        if summary.errors:
+            print(f"パイプラインエラー: {len(summary.errors)}件")
+            for entry in summary.errors:
+                print(f"  - {_format_pipeline_error(entry)}")
+        print(f"削除しました: {source_id}")
 
 
 async def run_add_journal(args: argparse.Namespace) -> None:
@@ -2051,7 +2115,6 @@ async def run_add_journal(args: argparse.Namespace) -> None:
     Args:
         args: コマンドライン引数（--title, --file/--stdin, --repository, --entry-id）
     """
-    from .infrastructure.file_lock import LockAcquisitionError, ingest_lock
     from .pipeline.ingesters.journal import JournalIngester
 
     json_out = _is_json_output(args)
@@ -2076,18 +2139,9 @@ async def run_add_journal(args: argparse.Namespace) -> None:
             raise SystemExit(1)
         body = file_path.read_text(encoding="utf-8")
 
-    # インジェストロックを取得
-    lock = ingest_lock(Path(controller.source_store.root_dir))
-    try:
-        lock.acquire()
-    except LockAcquisitionError:
-        msg = "別のインジェストが実行中です（ロック競合）"
-        if json_out:
-            _output_error(CliErrorCode.LOCK_CONFLICT, msg)
-        print(f"エラー: {msg}", file=sys.stderr)
-        raise SystemExit(1)
-
-    try:
+    with _write_lock_or_exit(
+        Path(controller.source_store.root_dir), json_out=json_out,
+    ):
         ingester = JournalIngester(controller.source_store)
 
         ingest_result = ingester.add_entry(
@@ -2112,8 +2166,6 @@ async def run_add_journal(args: argparse.Namespace) -> None:
             ingest_result, pipeline_summary, context=f"journal/{args.repository}",
             json_output=json_out,
         )
-    finally:
-        lock.release()
 
 
 def run_migrate_journal(args: argparse.Namespace) -> None:
@@ -2317,23 +2369,26 @@ async def run_ingest_youtube(args: argparse.Namespace) -> None:
         max_duration=settings.rag_youtube_max_duration,
     )
 
-    try:
-        ingest_result = await youtube_ingester.ingest_video(args.video_url)
-    except (ValueError, TypeError) as e:
-        if json_out:
-            _output_error(CliErrorCode.DEPENDENCY_UNAVAILABLE, str(e))
-        logger.error("エラー: %s", e)
-        sys.exit(1)
+    with _write_lock_or_exit(
+        Path(controller.source_store.root_dir), json_out=json_out,
+    ):
+        try:
+            ingest_result = await youtube_ingester.ingest_video(args.video_url)
+        except (ValueError, TypeError) as e:
+            if json_out:
+                _output_error(CliErrorCode.DEPENDENCY_UNAVAILABLE, str(e))
+            logger.error("エラー: %s", e)
+            sys.exit(1)
 
-    if ingest_result.placed == 0:
-        _print_ingest_result(ingest_result, None, context=f"動画: {args.video_url}", json_output=json_out)
-        return
+        if ingest_result.placed == 0:
+            _print_ingest_result(ingest_result, None, context=f"動画: {args.video_url}", json_output=json_out)
+            return
 
-    pipeline_summary = await controller.ingest_and_index(
-        f"ingest(youtube): {args.video_url}",
-        progress_callback=progress_cb,
-    )
-    _print_ingest_result(ingest_result, pipeline_summary, context=f"動画: {args.video_url}", json_output=json_out)
+        pipeline_summary = await controller.ingest_and_index(
+            f"ingest(youtube): {args.video_url}",
+            progress_callback=progress_cb,
+        )
+        _print_ingest_result(ingest_result, pipeline_summary, context=f"動画: {args.video_url}", json_output=json_out)
 
 
 async def run_ingest_youtube_playlist(args: argparse.Namespace) -> None:
@@ -2359,27 +2414,30 @@ async def run_ingest_youtube_playlist(args: argparse.Namespace) -> None:
 
     progress_cb = _output_progress if json_out else None
 
-    try:
-        ingest_result = await youtube_ingester.crawl_playlist(
-            args.playlist_url,
-            max_videos=max_videos,
-            progress_callback=_wrap_progress(progress_cb, PipelinePhase.FETCH.display),
+    with _write_lock_or_exit(
+        Path(controller.source_store.root_dir), json_out=json_out,
+    ):
+        try:
+            ingest_result = await youtube_ingester.crawl_playlist(
+                args.playlist_url,
+                max_videos=max_videos,
+                progress_callback=_wrap_progress(progress_cb, PipelinePhase.FETCH.display),
+            )
+        except (ValueError, TypeError) as e:
+            if json_out:
+                _output_error(CliErrorCode.DEPENDENCY_UNAVAILABLE, str(e))
+            logger.error("エラー: %s", e)
+            sys.exit(1)
+
+        if ingest_result.placed == 0:
+            _print_ingest_result(ingest_result, None, context=f"プレイリスト: {args.playlist_url}", json_output=json_out)
+            return
+
+        pipeline_summary = await controller.ingest_and_index(
+            f"ingest(youtube-playlist): {args.playlist_url}",
+            progress_callback=progress_cb,
         )
-    except (ValueError, TypeError) as e:
-        if json_out:
-            _output_error(CliErrorCode.DEPENDENCY_UNAVAILABLE, str(e))
-        logger.error("エラー: %s", e)
-        sys.exit(1)
-
-    if ingest_result.placed == 0:
-        _print_ingest_result(ingest_result, None, context=f"プレイリスト: {args.playlist_url}", json_output=json_out)
-        return
-
-    pipeline_summary = await controller.ingest_and_index(
-        f"ingest(youtube-playlist): {args.playlist_url}",
-        progress_callback=progress_cb,
-    )
-    _print_ingest_result(ingest_result, pipeline_summary, context=f"プレイリスト: {args.playlist_url}", json_output=json_out)
+        _print_ingest_result(ingest_result, pipeline_summary, context=f"プレイリスト: {args.playlist_url}", json_output=json_out)
 
 
 
@@ -2423,63 +2481,66 @@ async def run_crawl_bluesky(args: argparse.Namespace) -> None:
 
     progress_cb = _output_progress if json_out else None
 
-    try:
-        async with ConstrainedClient(
-            request_timeout=settings.rag_bluesky_request_timeout,
-            request_interval=settings.rag_bluesky_request_interval,
-        ) as client:
-            force = args.force
+    with _write_lock_or_exit(
+        Path(controller.source_store.root_dir), json_out=json_out,
+    ):
+        try:
+            async with ConstrainedClient(
+                request_timeout=settings.rag_bluesky_request_timeout,
+                request_interval=settings.rag_bluesky_request_interval,
+            ) as client:
+                force = args.force
 
-            ingest_result, placed_items = await bluesky_ingester.crawl_bluesky(
-                args.handle,
-                max_posts=max_posts,
-                include_reposts=include_reposts,
-                force=force,
-                client=client,
-                progress_callback=_wrap_progress(progress_cb, PipelinePhase.FETCH.display),
-            )
-
-            # 投稿内 URL の自動取り込み
-            url_stats: dict[str, int] = {}
-            if placed_items:
-                youtube_ingester = _create_youtube_ingester_cli(controller.source_store, settings)
-                url_stats = await bluesky_ingester.follow_urls(
-                    placed_items,
-                    youtube_ingester=youtube_ingester,
-                    force_youtube_reingest=settings.rag_bluesky_force_youtube_reingest,
-                    result=ingest_result,
+                ingest_result, placed_items = await bluesky_ingester.crawl_bluesky(
+                    args.handle,
+                    max_posts=max_posts,
+                    include_reposts=include_reposts,
+                    force=force,
+                    client=client,
+                    progress_callback=_wrap_progress(progress_cb, PipelinePhase.FETCH.display),
                 )
-    except (ValueError, TypeError) as e:
-        if json_out:
-            _output_error(CliErrorCode.DEPENDENCY_UNAVAILABLE, str(e))
-        logger.error("エラー: %s", e)
-        sys.exit(1)
 
-    pipeline_summary = await controller.ingest_and_index(
-        f"ingest(bluesky): {args.handle}",
-        progress_callback=progress_cb,
-    )
-    if json_out:
-        data = _ingest_result_to_dict(ingest_result, pipeline_summary)
-        if url_stats:
-            data["url_follow"] = {
-                "web_placed": url_stats.get("web_placed", 0),
-                "youtube_placed": url_stats.get("youtube_placed", 0),
-                "errors": url_stats.get("errors", 0),
-            }
-        _output_result(data)
-    else:
-        _print_ingest_result(ingest_result, pipeline_summary, context=f"ハンドル: {args.handle}")
-        if url_stats and any(url_stats.get(k, 0) > 0 for k in ("web_placed", "youtube_placed", "errors")):
-            parts = ["URL 自動取り込み:"]
-            web_n = url_stats.get("web_placed", 0)
-            yt_n = url_stats.get("youtube_placed", 0)
-            err_n = url_stats.get("errors", 0)
-            if web_n > 0 or yt_n > 0:
-                parts.append(f"Web {web_n}件, YouTube {yt_n}件")
-            if err_n > 0:
-                parts.append(f"エラー {err_n}件")
-            print(" ".join(parts))
+                # 投稿内 URL の自動取り込み
+                url_stats: dict[str, int] = {}
+                if placed_items:
+                    youtube_ingester = _create_youtube_ingester_cli(controller.source_store, settings)
+                    url_stats = await bluesky_ingester.follow_urls(
+                        placed_items,
+                        youtube_ingester=youtube_ingester,
+                        force_youtube_reingest=settings.rag_bluesky_force_youtube_reingest,
+                        result=ingest_result,
+                    )
+        except (ValueError, TypeError) as e:
+            if json_out:
+                _output_error(CliErrorCode.DEPENDENCY_UNAVAILABLE, str(e))
+            logger.error("エラー: %s", e)
+            sys.exit(1)
+
+        pipeline_summary = await controller.ingest_and_index(
+            f"ingest(bluesky): {args.handle}",
+            progress_callback=progress_cb,
+        )
+        if json_out:
+            data = _ingest_result_to_dict(ingest_result, pipeline_summary)
+            if url_stats:
+                data["url_follow"] = {
+                    "web_placed": url_stats.get("web_placed", 0),
+                    "youtube_placed": url_stats.get("youtube_placed", 0),
+                    "errors": url_stats.get("errors", 0),
+                }
+            _output_result(data)
+        else:
+            _print_ingest_result(ingest_result, pipeline_summary, context=f"ハンドル: {args.handle}")
+            if url_stats and any(url_stats.get(k, 0) > 0 for k in ("web_placed", "youtube_placed", "errors")):
+                parts = ["URL 自動取り込み:"]
+                web_n = url_stats.get("web_placed", 0)
+                yt_n = url_stats.get("youtube_placed", 0)
+                err_n = url_stats.get("errors", 0)
+                if web_n > 0 or yt_n > 0:
+                    parts.append(f"Web {web_n}件, YouTube {yt_n}件")
+                if err_n > 0:
+                    parts.append(f"エラー {err_n}件")
+                print(" ".join(parts))
 
 
 async def run_crawl_zenn(args: argparse.Namespace) -> None:
@@ -2501,38 +2562,41 @@ async def run_crawl_zenn(args: argparse.Namespace) -> None:
 
     progress_cb = _output_progress if json_out else None
 
-    try:
-        async with ConstrainedClient(
-            request_timeout=settings.rag_zenn_request_timeout,
-            request_interval=settings.rag_zenn_request_interval,
-        ) as client:
-            ingest_result = await zenn_ingester.crawl_zenn(
-                args.username,
-                max_articles=max_articles,
-                content_type=args.content_type,
-                force=args.force,
-                client=client,
-                progress_callback=_wrap_progress(progress_cb, PipelinePhase.FETCH.display),
+    with _write_lock_or_exit(
+        Path(controller.source_store.root_dir), json_out=json_out,
+    ):
+        try:
+            async with ConstrainedClient(
+                request_timeout=settings.rag_zenn_request_timeout,
+                request_interval=settings.rag_zenn_request_interval,
+            ) as client:
+                ingest_result = await zenn_ingester.crawl_zenn(
+                    args.username,
+                    max_articles=max_articles,
+                    content_type=args.content_type,
+                    force=args.force,
+                    client=client,
+                    progress_callback=_wrap_progress(progress_cb, PipelinePhase.FETCH.display),
+                )
+        except (ValueError, TypeError) as e:
+            if json_out:
+                _output_error(CliErrorCode.DEPENDENCY_UNAVAILABLE, str(e))
+            logger.error("エラー: %s", e)
+            sys.exit(1)
+
+        if ingest_result.placed == 0 and ingest_result.errors == 0:
+            _print_ingest_result(
+                ingest_result, None, context=f"ユーザー: {args.username}", json_output=json_out,
             )
-    except (ValueError, TypeError) as e:
-        if json_out:
-            _output_error(CliErrorCode.DEPENDENCY_UNAVAILABLE, str(e))
-        logger.error("エラー: %s", e)
-        sys.exit(1)
+            if not json_out and ingest_result.skipped > 0:
+                print("（上書きするには --force を指定してください）")
+            return
 
-    if ingest_result.placed == 0 and ingest_result.errors == 0:
-        _print_ingest_result(
-            ingest_result, None, context=f"ユーザー: {args.username}", json_output=json_out,
+        pipeline_summary = await controller.ingest_and_index(
+            f"ingest(zenn): {args.username}",
+            progress_callback=progress_cb,
         )
-        if not json_out and ingest_result.skipped > 0:
-            print("（上書きするには --force を指定してください）")
-        return
-
-    pipeline_summary = await controller.ingest_and_index(
-        f"ingest(zenn): {args.username}",
-        progress_callback=progress_cb,
-    )
-    _print_ingest_result(ingest_result, pipeline_summary, context=f"ユーザー: {args.username}", json_output=json_out)
+        _print_ingest_result(ingest_result, pipeline_summary, context=f"ユーザー: {args.username}", json_output=json_out)
 
 
 async def run_ingest_bluesky(args: argparse.Namespace) -> None:
@@ -2552,30 +2616,33 @@ async def run_ingest_bluesky(args: argparse.Namespace) -> None:
         include_reposts=settings.rag_bluesky_include_reposts,
     )
 
-    try:
-        async with ConstrainedClient(
-            request_timeout=settings.rag_bluesky_request_timeout,
-            request_interval=settings.rag_bluesky_request_interval,
-        ) as client:
-            ingest_result = await bluesky_ingester.ingest_posts(
-                args.url,
-                client=client,
-            )
-    except (ValueError, TypeError) as e:
-        if json_out:
-            _output_error(CliErrorCode.DEPENDENCY_UNAVAILABLE, str(e))
-        logger.error("エラー: %s", e)
-        sys.exit(1)
+    with _write_lock_or_exit(
+        Path(controller.source_store.root_dir), json_out=json_out,
+    ):
+        try:
+            async with ConstrainedClient(
+                request_timeout=settings.rag_bluesky_request_timeout,
+                request_interval=settings.rag_bluesky_request_interval,
+            ) as client:
+                ingest_result = await bluesky_ingester.ingest_posts(
+                    args.url,
+                    client=client,
+                )
+        except (ValueError, TypeError) as e:
+            if json_out:
+                _output_error(CliErrorCode.DEPENDENCY_UNAVAILABLE, str(e))
+            logger.error("エラー: %s", e)
+            sys.exit(1)
 
-    if ingest_result.placed == 0 and ingest_result.overwritten == 0 and ingest_result.errors == 0:
-        _print_ingest_result(ingest_result, None, context="BlueSky ingest", json_output=json_out)
-        return
+        if ingest_result.placed == 0 and ingest_result.overwritten == 0 and ingest_result.errors == 0:
+            _print_ingest_result(ingest_result, None, context="BlueSky ingest", json_output=json_out)
+            return
 
-    pipeline_summary = await controller.ingest_and_index(
-        "ingest(bluesky/url)",
-        progress_callback=_output_progress if json_out else None,
-    )
-    _print_ingest_result(ingest_result, pipeline_summary, context="BlueSky ingest", json_output=json_out)
+        pipeline_summary = await controller.ingest_and_index(
+            "ingest(bluesky/url)",
+            progress_callback=_output_progress if json_out else None,
+        )
+        _print_ingest_result(ingest_result, pipeline_summary, context="BlueSky ingest", json_output=json_out)
 
 
 async def run_ingest_zenn(args: argparse.Namespace) -> None:
@@ -2593,35 +2660,37 @@ async def run_ingest_zenn(args: argparse.Namespace) -> None:
         max_articles=settings.rag_zenn_max_articles,
     )
 
-    try:
-        async with ConstrainedClient(
-            request_timeout=settings.rag_zenn_request_timeout,
-            request_interval=settings.rag_zenn_request_interval,
-        ) as client:
-            ingest_result = await zenn_ingester.ingest_contents(
-                args.url,
-                client=client,
-            )
-    except (ValueError, TypeError) as e:
-        if json_out:
-            _output_error(CliErrorCode.DEPENDENCY_UNAVAILABLE, str(e))
-        logger.error("エラー: %s", e)
-        sys.exit(1)
+    with _write_lock_or_exit(
+        Path(controller.source_store.root_dir), json_out=json_out,
+    ):
+        try:
+            async with ConstrainedClient(
+                request_timeout=settings.rag_zenn_request_timeout,
+                request_interval=settings.rag_zenn_request_interval,
+            ) as client:
+                ingest_result = await zenn_ingester.ingest_contents(
+                    args.url,
+                    client=client,
+                )
+        except (ValueError, TypeError) as e:
+            if json_out:
+                _output_error(CliErrorCode.DEPENDENCY_UNAVAILABLE, str(e))
+            logger.error("エラー: %s", e)
+            sys.exit(1)
 
-    if ingest_result.placed == 0 and ingest_result.overwritten == 0 and ingest_result.errors == 0:
-        _print_ingest_result(ingest_result, None, context="Zenn ingest", json_output=json_out)
-        return
+        if ingest_result.placed == 0 and ingest_result.overwritten == 0 and ingest_result.errors == 0:
+            _print_ingest_result(ingest_result, None, context="Zenn ingest", json_output=json_out)
+            return
 
-    pipeline_summary = await controller.ingest_and_index(
-        "ingest(zenn/url)",
-        progress_callback=_output_progress if json_out else None,
-    )
-    _print_ingest_result(ingest_result, pipeline_summary, context="Zenn ingest", json_output=json_out)
+        pipeline_summary = await controller.ingest_and_index(
+            "ingest(zenn/url)",
+            progress_callback=_output_progress if json_out else None,
+        )
+        _print_ingest_result(ingest_result, pipeline_summary, context="Zenn ingest", json_output=json_out)
 
 
 async def run_add_document(args: argparse.Namespace) -> None:
     """単一ドキュメント取り込み."""
-    from .infrastructure.file_lock import LockAcquisitionError, ingest_lock
     from .pipeline.ingesters.local import LocalIngester
     from .upload import decode_upload_content
 
@@ -2705,18 +2774,9 @@ async def run_add_document(args: argparse.Namespace) -> None:
             raise SystemExit(1)
         display_name = file_path_str
 
-    # インジェストロックを取得
-    lock = ingest_lock(Path(controller.source_store.root_dir))
-    try:
-        lock.acquire()
-    except LockAcquisitionError:
-        msg = "別のインジェストが実行中です（ロック競合）"
-        if json_out:
-            _output_error(CliErrorCode.LOCK_CONFLICT, msg)
-        print(f"エラー: {msg}", file=sys.stderr)
-        raise SystemExit(1)
-
-    try:
+    with _write_lock_or_exit(
+        Path(controller.source_store.root_dir), json_out=json_out,
+    ):
         local_ingester = LocalIngester(
             controller.source_store,
             supported_extensions=supported_extensions,
@@ -2752,8 +2812,6 @@ async def run_add_document(args: argparse.Namespace) -> None:
             progress_callback=progress_cb,
         )
         _print_ingest_result(ingest_result, pipeline_summary, context=display_name, json_output=json_out)
-    finally:
-        lock.release()
 
 
 async def run_crawl_documents(args: argparse.Namespace) -> None:
@@ -2778,30 +2836,33 @@ async def run_crawl_documents(args: argparse.Namespace) -> None:
 
     progress_cb = _output_progress if json_out else None
 
-    ingest_result = local_ingester.crawl_documents(
-        args.dir_path, args.pattern, upload_mode=args.upload_mode,
-        progress_callback=_wrap_progress(progress_cb, PipelinePhase.FETCH.display),
-    )
-
-    if ingest_result.placed == 0 and ingest_result.errors == 0:
-        _print_ingest_result(
-            ingest_result, None, context=f"ディレクトリ: {args.dir_path}",
-            json_output=json_out,
+    with _write_lock_or_exit(
+        Path(controller.source_store.root_dir), json_out=json_out,
+    ):
+        ingest_result = local_ingester.crawl_documents(
+            args.dir_path, args.pattern, upload_mode=args.upload_mode,
+            progress_callback=_wrap_progress(progress_cb, PipelinePhase.FETCH.display),
         )
-        return
-    if ingest_result.errors > 0 and ingest_result.placed == 0:
-        # 早期終了: エラー詳細を先頭 1 件だけ表示してから exit
-        first_detail = _error_detail_message(ingest_result.error_details[0])
-        if json_out:
-            _output_error(CliErrorCode.INTERNAL_ERROR, first_detail)
-        print(f"エラー: {first_detail}", file=sys.stderr)
-        raise SystemExit(1)
 
-    pipeline_summary = await controller.ingest_and_index(
-        f"ingest(local): crawl {args.dir_path}",
-        progress_callback=progress_cb,
-    )
-    _print_ingest_result(ingest_result, pipeline_summary, context=f"ディレクトリ: {args.dir_path}", json_output=json_out)
+        if ingest_result.placed == 0 and ingest_result.errors == 0:
+            _print_ingest_result(
+                ingest_result, None, context=f"ディレクトリ: {args.dir_path}",
+                json_output=json_out,
+            )
+            return
+        if ingest_result.errors > 0 and ingest_result.placed == 0:
+            # 早期終了: エラー詳細を先頭 1 件だけ表示してから exit
+            first_detail = _error_detail_message(ingest_result.error_details[0])
+            if json_out:
+                _output_error(CliErrorCode.INTERNAL_ERROR, first_detail)
+            print(f"エラー: {first_detail}", file=sys.stderr)
+            raise SystemExit(1)
+
+        pipeline_summary = await controller.ingest_and_index(
+            f"ingest(local): crawl {args.dir_path}",
+            progress_callback=progress_cb,
+        )
+        _print_ingest_result(ingest_result, pipeline_summary, context=f"ディレクトリ: {args.dir_path}", json_output=json_out)
 
 
 async def run_site_ingest(args: argparse.Namespace) -> None:
@@ -2844,125 +2905,128 @@ async def run_site_ingest(args: argparse.Namespace) -> None:
 
     controller, settings = _build_cli_pipeline_controller()
 
-    # max_pages のクランプ（クロールモードのみ）
-    effective_max_pages: int | None = None
-    if not multi_url_mode:
-        effective_max_pages = (
-            args.max_pages if args.max_pages is not None
-            else settings.site_ingest_max_pages
-        )
-        if effective_max_pages < 1:
-            effective_max_pages = 1
-            logger.warning("max_pages を 1 にクランプしました")
-        elif effective_max_pages > 1000:
-            effective_max_pages = 1000
-            logger.warning("max_pages を 1000 にクランプしました")
-
-    # ドメイン導出
-    from urllib.parse import urlparse
-    if multi_url_mode:
-        # 複数 URL モード: 全ドメインの和集合
-        domains = []
-        for u in validated_urls:
-            hostname = urlparse(u).hostname
-            if hostname and hostname not in domains:
-                domains.append(hostname)
-        allowed_domains = ",".join(domains)
-    else:
-        parsed = urlparse(validated_urls[0])
-        allowed_domains = parsed.hostname or ""
-
-    start_time = time_mod.monotonic()
-
-    # Scrapy Runner でクロール / 複数 URL 取得
-    runner = ScrapyRunner(
-        temp_dir=settings.site_ingest_temp_dir,
-        delay_sec=settings.site_ingest_delay_sec,
-        max_pages=effective_max_pages or settings.site_ingest_max_pages,
-        download_timeout=settings.site_ingest_download_timeout,
-        timeout_sec=settings.site_ingest_timeout_sec,
-        error_count=settings.site_ingest_error_count,
-    )
-
-    if multi_url_mode:
-        crawl_result = await runner.run(
-            start_urls=validated_urls,
-            allowed_domains=allowed_domains,
-        )
-    else:
-        crawl_result = await runner.run(
-            start_url=validated_urls[0],
-            allowed_domains=allowed_domains,
-            url_pattern=args.url_pattern,
-            max_pages=effective_max_pages,
-            force=args.force,
-        )
-
-    display_url = validated_urls[0] if not multi_url_mode else f"{len(validated_urls)} URLs"
-
-    if not crawl_result.jsonl_path.exists():
-        elapsed = time_mod.monotonic() - start_time
-        if json_out:
-            _output_result({
-                "placed": 0,
-                "overwritten": 0,
-                "skipped": 0,
-                "errors": 0,
-                "elapsed": round(elapsed, 1),
-                "scrapy_exit_code": crawl_result.exit_code,
-                "no_output": True,
-            })
-        else:
-            print(
-                f"クロールが完了しましたが、メタデータが出力されませんでした。"
-                f" exit_code={crawl_result.exit_code}, 所要時間={elapsed:.1f}秒",
+    with _write_lock_or_exit(
+        Path(controller.source_store.root_dir), json_out=json_out,
+    ):
+        # max_pages のクランプ（クロールモードのみ）
+        effective_max_pages: int | None = None
+        if not multi_url_mode:
+            effective_max_pages = (
+                args.max_pages if args.max_pages is not None
+                else settings.site_ingest_max_pages
             )
-        return
+            if effective_max_pages < 1:
+                effective_max_pages = 1
+                logger.warning("max_pages を 1 にクランプしました")
+            elif effective_max_pages > 1000:
+                effective_max_pages = 1000
+                logger.warning("max_pages を 1000 にクランプしました")
 
-    # Bridge: JSONL + HTML → source_store
-    bridge_result = import_to_source_store(
-        jsonl_path=crawl_result.jsonl_path,
-        html_dir=crawl_result.output_dir,
-        source_store=controller.source_store,
-    )
+        # ドメイン導出
+        from urllib.parse import urlparse
+        if multi_url_mode:
+            # 複数 URL モード: 全ドメインの和集合
+            domains = []
+            for u in validated_urls:
+                hostname = urlparse(u).hostname
+                if hostname and hostname not in domains:
+                    domains.append(hostname)
+            allowed_domains = ",".join(domains)
+        else:
+            parsed = urlparse(validated_urls[0])
+            allowed_domains = parsed.hostname or ""
 
-    # パイプライン処理
-    pipeline_summary = None
-    has_changes = (bridge_result.ingest.placed + bridge_result.ingest.overwritten) > 0
-    if has_changes and not args.download_only:
-        pipeline_summary = await controller.ingest_and_index(
-            f"ingest(web): site-ingest {display_url}",
-            progress_callback=progress_cb,
+        start_time = time_mod.monotonic()
+
+        # Scrapy Runner でクロール / 複数 URL 取得
+        runner = ScrapyRunner(
+            temp_dir=settings.site_ingest_temp_dir,
+            delay_sec=settings.site_ingest_delay_sec,
+            max_pages=effective_max_pages or settings.site_ingest_max_pages,
+            download_timeout=settings.site_ingest_download_timeout,
+            timeout_sec=settings.site_ingest_timeout_sec,
+            error_count=settings.site_ingest_error_count,
         )
-    elif has_changes and args.download_only:
-        controller.commit(f"ingest(web): site-ingest {display_url} (download_only)")
 
-    # 正常完了後のクリーンアップ（仕様: docs/specs/site-ingest.md）
-    if crawl_result.success:
-        crawl_result.cleanup()
+        if multi_url_mode:
+            crawl_result = await runner.run(
+                start_urls=validated_urls,
+                allowed_domains=allowed_domains,
+            )
+        else:
+            crawl_result = await runner.run(
+                start_url=validated_urls[0],
+                allowed_domains=allowed_domains,
+                url_pattern=args.url_pattern,
+                max_pages=effective_max_pages,
+                force=args.force,
+            )
 
-    # 操作全体の所要時間（クロール + Bridge + パイプライン）
-    elapsed = time_mod.monotonic() - start_time
+        display_url = validated_urls[0] if not multi_url_mode else f"{len(validated_urls)} URLs"
 
-    if json_out:
-        data: dict[str, object] = _ingest_result_to_dict(bridge_result.ingest, pipeline_summary)
-        data["elapsed"] = round(elapsed, 1)
-        data["download_only"] = args.download_only
-        if not crawl_result.success:
-            data["scrapy_exit_code"] = crawl_result.exit_code
-        _output_result(data)
-    else:
-        _print_ingest_result(
-            bridge_result.ingest,
-            pipeline_summary,
-            context=f"サイト: {display_url}",
-            json_output=False,
+        if not crawl_result.jsonl_path.exists():
+            elapsed = time_mod.monotonic() - start_time
+            if json_out:
+                _output_result({
+                    "placed": 0,
+                    "overwritten": 0,
+                    "skipped": 0,
+                    "errors": 0,
+                    "elapsed": round(elapsed, 1),
+                    "scrapy_exit_code": crawl_result.exit_code,
+                    "no_output": True,
+                })
+            else:
+                print(
+                    f"クロールが完了しましたが、メタデータが出力されませんでした。"
+                    f" exit_code={crawl_result.exit_code}, 所要時間={elapsed:.1f}秒",
+                )
+            return
+
+        # Bridge: JSONL + HTML → source_store
+        bridge_result = import_to_source_store(
+            jsonl_path=crawl_result.jsonl_path,
+            html_dir=crawl_result.output_dir,
+            source_store=controller.source_store,
         )
-        print(f"所要時間: {elapsed:.1f}秒")
-        if args.download_only:
-            print("パイプライン処理: スキップ（download_only）")
-        if not crawl_result.success:
-            print(f"Scrapy exit_code={crawl_result.exit_code}（部分的な結果）")
+
+        # パイプライン処理
+        pipeline_summary = None
+        has_changes = (bridge_result.ingest.placed + bridge_result.ingest.overwritten) > 0
+        if has_changes and not args.download_only:
+            pipeline_summary = await controller.ingest_and_index(
+                f"ingest(web): site-ingest {display_url}",
+                progress_callback=progress_cb,
+            )
+        elif has_changes and args.download_only:
+            controller.commit(f"ingest(web): site-ingest {display_url} (download_only)")
+
+        # 正常完了後のクリーンアップ（仕様: docs/specs/site-ingest.md）
+        if crawl_result.success:
+            crawl_result.cleanup()
+
+        # 操作全体の所要時間（クロール + Bridge + パイプライン）
+        elapsed = time_mod.monotonic() - start_time
+
+        if json_out:
+            data: dict[str, object] = _ingest_result_to_dict(bridge_result.ingest, pipeline_summary)
+            data["elapsed"] = round(elapsed, 1)
+            data["download_only"] = args.download_only
+            if not crawl_result.success:
+                data["scrapy_exit_code"] = crawl_result.exit_code
+            _output_result(data)
+        else:
+            _print_ingest_result(
+                bridge_result.ingest,
+                pipeline_summary,
+                context=f"サイト: {display_url}",
+                json_output=False,
+            )
+            print(f"所要時間: {elapsed:.1f}秒")
+            if args.download_only:
+                print("パイプライン処理: スキップ（download_only）")
+            if not crawl_result.success:
+                print(f"Scrapy exit_code={crawl_result.exit_code}（部分的な結果）")
 
 
 async def run_update_aozora_catalog(args: argparse.Namespace) -> None:
@@ -3076,25 +3140,28 @@ async def run_ingest_aozora(args: argparse.Namespace) -> None:
         max_works=settings.rag_aozora_max_works,
     )
 
-    try:
-        async with ConstrainedClient(
-            request_timeout=settings.rag_aozora_request_timeout,
-            request_interval=settings.rag_aozora_request_interval,
-        ) as client:
-            ingest_result = await aozora_ingester.add_work(
-                args.book_id, client=client,
-            )
-    except (ValueError, TypeError) as e:
-        if json_out:
-            _output_error(CliErrorCode.DEPENDENCY_UNAVAILABLE, str(e))
-        logger.error("エラー: %s", e)
-        sys.exit(1)
+    with _write_lock_or_exit(
+        Path(controller.source_store.root_dir), json_out=json_out,
+    ):
+        try:
+            async with ConstrainedClient(
+                request_timeout=settings.rag_aozora_request_timeout,
+                request_interval=settings.rag_aozora_request_interval,
+            ) as client:
+                ingest_result = await aozora_ingester.add_work(
+                    args.book_id, client=client,
+                )
+        except (ValueError, TypeError) as e:
+            if json_out:
+                _output_error(CliErrorCode.DEPENDENCY_UNAVAILABLE, str(e))
+            logger.error("エラー: %s", e)
+            sys.exit(1)
 
-    pipeline_summary = await controller.ingest_and_index(
-        f"ingest(aozora): book_id={args.book_id}",
-        progress_callback=progress_cb,
-    )
-    _print_ingest_result(ingest_result, pipeline_summary, context=f"作品ID: {args.book_id}", json_output=json_out)
+        pipeline_summary = await controller.ingest_and_index(
+            f"ingest(aozora): book_id={args.book_id}",
+            progress_callback=progress_cb,
+        )
+        _print_ingest_result(ingest_result, pipeline_summary, context=f"作品ID: {args.book_id}", json_output=json_out)
 
 
 async def run_ingest_aozora_author(args: argparse.Namespace) -> None:
@@ -3116,28 +3183,31 @@ async def run_ingest_aozora_author(args: argparse.Namespace) -> None:
 
     progress_cb = _output_progress if json_out else None
 
-    try:
-        async with ConstrainedClient(
-            request_timeout=settings.rag_aozora_request_timeout,
-            request_interval=settings.rag_aozora_request_interval,
-        ) as client:
-            ingest_result = await aozora_ingester.crawl_author(
-                args.person_id,
-                max_works=max_works,
-                client=client,
-                progress_callback=_wrap_progress(progress_cb, PipelinePhase.FETCH.display),
-            )
-    except (ValueError, TypeError) as e:
-        if json_out:
-            _output_error(CliErrorCode.DEPENDENCY_UNAVAILABLE, str(e))
-        logger.error("エラー: %s", e)
-        sys.exit(1)
+    with _write_lock_or_exit(
+        Path(controller.source_store.root_dir), json_out=json_out,
+    ):
+        try:
+            async with ConstrainedClient(
+                request_timeout=settings.rag_aozora_request_timeout,
+                request_interval=settings.rag_aozora_request_interval,
+            ) as client:
+                ingest_result = await aozora_ingester.crawl_author(
+                    args.person_id,
+                    max_works=max_works,
+                    client=client,
+                    progress_callback=_wrap_progress(progress_cb, PipelinePhase.FETCH.display),
+                )
+        except (ValueError, TypeError) as e:
+            if json_out:
+                _output_error(CliErrorCode.DEPENDENCY_UNAVAILABLE, str(e))
+            logger.error("エラー: %s", e)
+            sys.exit(1)
 
-    pipeline_summary = await controller.ingest_and_index(
-        f"ingest(aozora): person_id={args.person_id}",
-        progress_callback=progress_cb,
-    )
-    _print_ingest_result(ingest_result, pipeline_summary, context=f"著者ID: {args.person_id}", json_output=json_out)
+        pipeline_summary = await controller.ingest_and_index(
+            f"ingest(aozora): person_id={args.person_id}",
+            progress_callback=progress_cb,
+        )
+        _print_ingest_result(ingest_result, pipeline_summary, context=f"著者ID: {args.person_id}", json_output=json_out)
 
 
 if __name__ == "__main__":

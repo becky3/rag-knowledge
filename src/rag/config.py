@@ -209,6 +209,10 @@ class RAGSettings(BaseModel):
 
     # Upload HTTP API
     rag_upload_max_file_size_mb: int = Field(ge=1, le=500)
+    # ロック競合時の Retry-After ヘッダ値（秒）。クライアントの即リトライを抑制するためのヒント
+    rag_upload_retry_after_write_sec: int = Field(ge=1, le=3600)
+    # 再構築は長時間動作するため、書き込み側より長い間隔を設定する
+    rag_upload_retry_after_rebuild_sec: int = Field(ge=1, le=86400)
 
     # PDF バックエンド
     # auto: MinerU 利用可能なら優先、未インストール時は pymupdf4llm にフォールバック

@@ -70,8 +70,11 @@ warn_unused_ignores = false
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
-addopts = "-n auto"
+addopts = "-n auto -m 'not slow'"
 required_plugins = ["pytest-xdist"]
+markers = [
+    "slow: E2E テストや長時間テスト。デフォルトの pytest 実行では skip され、明示的に -m slow で実行する",
+]
 
 [tool.uv]
 # uv sync で MinerU + PyTorch (CUDA 12.4) を自動インストール。

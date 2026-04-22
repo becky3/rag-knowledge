@@ -60,6 +60,9 @@ rag_document_allowed_dirs = ""
 # Upload HTTP API
 # Upload HTTP API の最大ファイルサイズ（MB）
 rag_upload_max_file_size_mb = 500
+# ロック競合時の Retry-After ヘッダ値（秒）
+rag_upload_retry_after_write_sec = 30
+rag_upload_retry_after_rebuild_sec = 300
 
 # HTML → Markdown 変換時に除去する class トークン（完全一致、大文字小文字無視）
 rag_html_remove_class_tokens = [

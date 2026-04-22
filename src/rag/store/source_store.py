@@ -20,7 +20,7 @@ from typing import Any
 
 import pathspec
 
-from rag.infrastructure.file_lock import INGEST_LOCK_FILENAME, REBUILD_LOCK_FILENAME
+from rag.infrastructure.file_lock import REBUILD_LOCK_FILENAME, WRITE_LOCK_FILENAME
 from rag.store.meta import meta_path_for, read_meta, write_meta
 from rag.store.metadata_db import MetadataDB
 from rag.store.models import (
@@ -51,8 +51,9 @@ _EXCLUDE_PATTERNS: tuple[str, ...] = (
     "/metadata.db*",
     # Git・ロックファイル（ルート直下のみ）
     "/.gitignore",
-    f"/{INGEST_LOCK_FILENAME}",
+    f"/{WRITE_LOCK_FILENAME}",
     f"/{REBUILD_LOCK_FILENAME}",
+    "/.ingest.lock",
     ".git/",
     # 青空文庫カタログ（aozora インジェスターの内部参照ファイル、sidecar 扱い）
     "/aozora/catalog.csv",

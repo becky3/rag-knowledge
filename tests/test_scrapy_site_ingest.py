@@ -17,6 +17,7 @@
 from __future__ import annotations
 
 import argparse
+import contextlib
 from importlib import import_module
 from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock, patch
@@ -30,6 +31,34 @@ from rag.server import _reset_safe_browsing_client
 def _reset_global_state() -> None:
     """各テスト前にグローバル状態をリセットする."""
     _reset_safe_browsing_client()
+
+
+@pytest.fixture(autouse=True)
+def _bypass_write_lock():
+    """CLI の write_lock 取得を no-op にする.
+
+    本ファイルの CLI 統合テストは `_build_cli_pipeline_controller` を
+    MagicMock で置き換える都合上、controller.source_store.root_dir が
+    MagicMock オブジェクトになる。そのまま `_write_lock_or_exit` を通すと
+    実際に `Path(MagicMock)` から `MagicMock/mock.source_store.root_dir/...`
+    ディレクトリが作成されてしまうため、ヘルパーを no-op に差し替える。
+
+    トレードオフ:
+    - メリット: 各テストで tmp_path fixture を引き回して
+      `mock_controller.source_store.root_dir = tmp_path` を設定する
+      ボイラープレートが不要になる（修正が 1 箇所で済む）
+    - デメリット: 本ファイルの CLI 統合テストでは write_lock の挙動
+      （競合時の exit、kind 伝搬）自体は検証されない。これらは
+      `tests/test_cli_lock_conflict.py`（ユニット）と
+      `tests/test_file_lock_subprocess.py`（実 subprocess での OS 自動解放）
+      で個別に担保している。本ファイルは site-ingest のフロー検証が主眼のため、
+      ロック挙動を bypass してもカバレッジに穴は空かない
+    """
+    with patch(
+        "rag.cli._write_lock_or_exit",
+        new=lambda *args, **kwargs: contextlib.nullcontext(),
+    ):
+        yield
 
 
 # --- MCP ツール rag_site_ingest テスト ---

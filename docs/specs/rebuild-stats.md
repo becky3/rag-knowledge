@@ -98,7 +98,9 @@ MCP ツール `rag_rebuild` と同じバリデーション・振る舞いを適�
 
 1. MCP ツール または CLI からパラメータを受け取る
 2. パラメータを検証する（不正な場合はエラー返却）
-3. 排他ロックを取得する（取得失敗時は「別の再構築が実行中」エラー）
+3. 排他ロックを取得する。取得失敗時は `LockAcquisitionError.kind` により 2 分岐する:
+   - `kind="rebuild"`: 別の rebuild が実行中 → 「別の再構築が実行中」エラー
+   - `kind="write"`: 別の書き込み（ingest / delete 等）が実行中 → 「別の取り込みが実行中」エラー
 4. MCP 経由の場合は CLI サブプロセスとして実行する。CLI 直接実行の場合はそのままパイプライン制御に委譲する
 5. 処理結果サマリを返却する（クラッシュ時はエラー返却、サーバーは生存）
 
@@ -108,7 +110,8 @@ flowchart TD
     ENTRY_CLI["CLI rebuild"]
     VALIDATE["パラメータ検証"]
     LOCK["排他ロック取得"]
-    LOCK_FAIL["エラー: 別の再構築が実行中"]
+    LOCK_FAIL_REBUILD["エラー: 別の再構築が実行中"]
+    LOCK_FAIL_WRITE["エラー: 別の取り込みが実行中"]
     CLI_SUB["CLI サブプロセス"]
     DELEGATE["パイプライン制御に委譲"]
     CRASH["クラッシュ検出（exit code）"]
@@ -118,7 +121,8 @@ flowchart TD
     ENTRY_CLI --> VALIDATE
     VALIDATE -->|不正| ERROR["エラー返却"]
     VALIDATE -->|正常| LOCK
-    LOCK -->|取得失敗| LOCK_FAIL
+    LOCK -->|kind=rebuild| LOCK_FAIL_REBUILD
+    LOCK -->|kind=write| LOCK_FAIL_WRITE
     LOCK -->|取得成功 MCP| CLI_SUB
     LOCK -->|取得成功 CLI| DELEGATE
     CLI_SUB --> DELEGATE
@@ -156,7 +160,7 @@ CLI は `--output json` 指定時に JSON Lines 形式で stdout に出力する
 |-----------|-------------|-----------|
 | `progress` | ファイル処理完了ごと | `processed`（int）、`total`（int）、`current`（str: 処理済みファイルパス） |
 | `result` | 処理完了時（最終行） | コマンド固有のフィールド（`mode`, `total_files`, `processed`, `errors`, `warnings`, `elapsed` 等。`full` モードは `convert` / `index` オブジェクトに分割）。`errors` は [pipeline-controller.md](pipeline-controller.md) の `PipelineSummary.errors` スキーマに従う構造化 dict のリスト（`{path, size_bytes, message, phase}`）を出力する。ingest 系コマンドでは `IngestResult` の全観測性フィールド（`partial_failures` / `aborted` 等）も併せて含める（[ingesters/common.md](ingesters/common.md) の「JSON シリアライズ」参照） |
-| `error` | エラー時（最終行） | `error`（bool, 常に `true`）、`code`（str: エラー種別コード、[`_schema/enums.yml`](../../_schema/enums.yml) の `cli_error_code` 参照）、`message`（str）、`details`（dict, 任意: 種別固有の付加情報） |
+| `error` | エラー時（最終行） | `error`（bool, 常に `true`）、`code`（str: エラー種別コード、[`_schema/enums.yml`](../../_schema/enums.yml) の `cli_error_code` 参照）、`message`（str）、`details`（dict, 任意: 種別固有の付加情報）。`code="LOCK_CONFLICT"` の場合、`details.lock_type` に `"write"` または `"rebuild"` のロック種別識別子を含める。サーバー側（`server.py`）はこの識別子を `CLISubprocessError.lock_type` として受け取り、Upload HTTP API の HTTP ステータス（429 / 503）・`Retry-After` 値の選択、および MCP ツールのエラーメッセージ切替に使用する。詳細は [`content-upload.md`](infrastructure/content-upload.md) の「書き込み排他制御の制約」を参照 |
 
 MCP サーバー（server.py）は stdout を行単位で読み取り、`progress` 行を MCP 通知に変換し、`result` / `error` 行で処理結果を確定する。
 
@@ -250,7 +254,7 @@ CLI は `--output json` 指定時にこの callback 内で進捗 JSON を stdout
 - フィルタなしの `rag_stats` と `rag_rebuild --mode full`（`source_type` 指定なし）が対象とする総ファイル数は一致する
 - `source_type={T}` を指定した `rag_stats` の媒体別件数と、`rag_rebuild --mode full --source-type {T}` が対象とするファイル数は一致する
 - `rag_stats` が表示する媒体別件数は各 `source_type` ディレクトリ配下の独立ソース数と一致する（attachment・sidecar は含まない）
-- ロックファイル（`.ingest.lock`・`.rebuild.lock`）・`aozora/catalog.csv`・複合ソースの attachment は `rag_stats` に現れない
+- ロックファイル（`.write.lock`・`.rebuild.lock`）・`aozora/catalog.csv`・複合ソースの attachment は `rag_stats` に現れない
 
 5 経路の詳細・除外判定の SSoT は [pipeline-controller.md](pipeline-controller.md) の「ソース列挙経路」および [source-store.md](source-store.md) の「ソース判定」を参照。
 

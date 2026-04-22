@@ -13,7 +13,7 @@ import os
 import subprocess
 from pathlib import Path
 
-from rag.infrastructure.file_lock import INGEST_LOCK_FILENAME, REBUILD_LOCK_FILENAME
+from rag.infrastructure.file_lock import REBUILD_LOCK_FILENAME, WRITE_LOCK_FILENAME
 
 logger = logging.getLogger(__name__)
 
@@ -23,7 +23,8 @@ _GITIGNORE_ENTRIES: list[str] = [
     "metadata.db-wal",
     "metadata.db-shm",
     REBUILD_LOCK_FILENAME,
-    INGEST_LOCK_FILENAME,
+    WRITE_LOCK_FILENAME,
+    ".ingest.lock",
 ]
 _GITIGNORE_CONTENT = "\n".join(_GITIGNORE_ENTRIES) + "\n"
 

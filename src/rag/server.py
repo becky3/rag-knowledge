@@ -1009,9 +1009,10 @@ async def rag_rebuild(
 class CLISubprocessError(Exception):
     """CLI サブプロセスの実行エラー."""
 
-    _LOCK_CONFLICT_MESSAGE = (
-        "エラー: 別のプロセスがロックを保持しています。"
-        "しばらく待ってから再試行してください"
+    _LOCK_CONFLICT_MESSAGE_WRITE = "エラー: 別の取り込みが実行中のため受け付けられません"
+    _LOCK_CONFLICT_MESSAGE_REBUILD = "エラー: 再構築処理中のため受け付けられません"
+    _LOCK_CONFLICT_MESSAGE_GENERIC = (
+        "エラー: 別のプロセスがロックを保持しています"
     )
 
     def __init__(
@@ -1019,9 +1020,11 @@ class CLISubprocessError(Exception):
         message: str,
         *,
         code: str | None = None,
+        lock_type: str | None = None,
     ) -> None:
         super().__init__(message)
         self.code = code
+        self.lock_type = lock_type
 
     @property
     def lock_conflict(self) -> bool:
@@ -1029,9 +1032,19 @@ class CLISubprocessError(Exception):
         return self.code == "LOCK_CONFLICT"
 
     def format_mcp_error(self, context: str = "") -> str:
-        """MCP ツール用のエラーメッセージを生成する."""
+        """MCP ツール用のエラーメッセージを生成する.
+
+        ロック競合の場合は lock_type に応じたメッセージを返す。
+        メッセージには再試行を促す文言を含めない（再試行タイミングは
+        HTTP API では Retry-After ヘッダで伝達し、MCP ツールでは
+        状態の事実のみを伝える）。
+        """
         if self.lock_conflict:
-            return self._LOCK_CONFLICT_MESSAGE
+            if self.lock_type == "rebuild":
+                return self._LOCK_CONFLICT_MESSAGE_REBUILD
+            if self.lock_type == "write":
+                return self._LOCK_CONFLICT_MESSAGE_WRITE
+            return self._LOCK_CONFLICT_MESSAGE_GENERIC
         if context:
             return f"エラー: {context} ({self})"
         return f"エラー: {self}"
@@ -1234,13 +1247,20 @@ async def _run_cli_subprocess(
             ) from exc
         error_msg = error_data.get("message", "不明なエラー")
         error_code = error_data.get("code")
+        error_details = error_data.get("details")
+        lock_type: str | None = None
+        if isinstance(error_details, dict):
+            candidate = error_details.get("lock_type")
+            if candidate in ("write", "rebuild"):
+                lock_type = candidate
         logger.warning(
-            "CLI subprocess %s failed: %s (code=%s)",
-            command, error_msg, error_code,
+            "CLI subprocess %s failed: %s (code=%s, lock_type=%s)",
+            command, error_msg, error_code, lock_type,
         )
         raise CLISubprocessError(
             error_msg,
             code=error_code,
+            lock_type=lock_type,
         )
 
     if not result_line:
@@ -1616,11 +1636,24 @@ async def _check_api_key(request: Request) -> Response | None:
     return None
 
 
-def _upload_error(status_code: int, message: str) -> JSONResponse:
-    """Upload API のエラーレスポンスを生成する."""
+def _upload_error(
+    status_code: int,
+    message: str,
+    *,
+    retry_after: int | None = None,
+) -> JSONResponse:
+    """Upload API のエラーレスポンスを生成する.
+
+    retry_after が指定された場合、`Retry-After` ヘッダを付与する。
+    クライアントへの再試行間隔のヒントとして使う（ロック競合時等）。
+    """
+    headers: dict[str, str] | None = None
+    if retry_after is not None:
+        headers = {"Retry-After": str(retry_after)}
     return JSONResponse(
         {"status": "error", "message": message},
         status_code=status_code,
+        headers=headers,
     )
 
 
@@ -1628,6 +1661,30 @@ def _upload_success(message: str, source_id: str) -> JSONResponse:
     """Upload API の成功レスポンスを生成する."""
     return JSONResponse(
         {"status": "ok", "message": message, "source_id": source_id},
+    )
+
+
+def _upload_lock_conflict_response(e: CLISubprocessError) -> JSONResponse:
+    """ロック競合時の Upload API 応答を生成する.
+
+    lock_type に応じて HTTP ステータスと Retry-After を切り替える:
+    - write 競合: HTTP 429 + `rag_upload_retry_after_write_sec`
+    - rebuild 競合: HTTP 503 + `rag_upload_retry_after_rebuild_sec`
+    - lock_type 不明（後方互換）: HTTP 429 + write 値（安全側の短めヒント）
+
+    仕様: docs/specs/infrastructure/content-upload.md の HTTP ステータスコード表
+    """
+    settings = get_settings()
+    if e.lock_type == "rebuild":
+        return _upload_error(
+            503,
+            "再構築処理中のため受け付けられません",
+            retry_after=settings.rag_upload_retry_after_rebuild_sec,
+        )
+    return _upload_error(
+        429,
+        "別の取り込みが実行中のため受け付けられません",
+        retry_after=settings.rag_upload_retry_after_write_sec,
     )
 
 
@@ -1792,7 +1849,7 @@ async def upload_document(request: Request) -> Response:
 
     except CLISubprocessError as e:
         if e.lock_conflict:
-            return _upload_error(409, "別のインジェストが実行中です")
+            return _upload_lock_conflict_response(e)
         message = str(e)
         if "同名" in message:
             return _upload_error(409, message)
@@ -1885,7 +1942,7 @@ async def upload_journal(request: Request) -> Response:
 
     except CLISubprocessError as e:
         if e.lock_conflict:
-            return _upload_error(409, "別のインジェストが実行中です")
+            return _upload_lock_conflict_response(e)
         message = str(e)
         if "同名" in message:
             return _upload_error(409, message)
