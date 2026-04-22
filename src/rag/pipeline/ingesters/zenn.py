@@ -38,7 +38,7 @@ MAX_ARTICLES_HARD_LIMIT = 100
 ZENN_API_BASE = "https://zenn.dev/api"
 
 _ZENN_URL_RE = re.compile(
-    r"^https?://zenn\.dev/([^/]+)/(articles|scraps)/([^/?#]+)",
+    r"^https?://zenn\.dev/([^/]+)/(articles|scraps)/([^/?#]+)(?:[?#].*)?$",
 )
 
 

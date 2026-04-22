@@ -261,7 +261,7 @@ def classify_url(url: str) -> Literal["youtube", "web", "skip"]:
 
 
 _BSKY_POST_URL_RE = re.compile(
-    r"^https?://bsky\.app/profile/([^/]+)/post/([a-zA-Z0-9]+)",
+    r"^https?://bsky\.app/profile/([^/]+)/post/([a-zA-Z0-9]+)(?:[?#].*)?$",
 )
 
 

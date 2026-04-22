@@ -56,12 +56,13 @@ async def test_rag_server_exposes_tools() -> None:
 
 @pytest.mark.asyncio
 async def test_rag_server_tool_count() -> None:
-    """RAG MCPサーバーのツール数が正確に20であること."""
+    """RAG MCPサーバーのツール数が exposes_tools の expected と一致すること."""
     mod = import_module("rag.server")
     server = mod.mcp
 
     tools = await server.list_tools()
-    assert len(tools) == 20
+    expected_count = 20
+    assert len(tools) == expected_count, f"Expected {expected_count}, got {len(tools)}"
 
 
 class TestRagSearchOutput:
