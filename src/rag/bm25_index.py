@@ -1,15 +1,17 @@
 """BM25キーワード検索インデックスモジュール
 
-仕様: docs/specs/rag-knowledge.md
+仕様: docs/specs/infrastructure/bm25-scalability.md
 """
 
 from __future__ import annotations
 
+import hashlib
 import io
 import json
 import logging
 import re
 import shutil
+import sqlite3
 import tempfile
 from contextlib import redirect_stdout
 from dataclasses import dataclass
@@ -23,10 +25,9 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
-# 永続化メタデータ
-METADATA_FILENAME = "metadata.json"
 BM25S_SUBDIR = "bm25s"
-METADATA_VERSION = 1
+STORE_DB_FILENAME = "bm25_store.db"
+_REBUILD_MEMORY_WARNING_BYTES = 256 * 1024 * 1024  # 256 MB
 
 # fugashiのインポートを遅延させる（オプショナル依存）
 _fugashi_available: bool | None = None
@@ -56,6 +57,31 @@ def _get_fugashi_tagger() -> "fugashi.Tagger | None":
         return None
 
 
+_STORE_SCHEMA_SQL = """\
+CREATE TABLE IF NOT EXISTS chunks (
+    doc_id      TEXT PRIMARY KEY,
+    text        TEXT NOT NULL,
+    source_id   TEXT NOT NULL,
+    source_type TEXT NOT NULL,
+    metadata    TEXT NOT NULL DEFAULT '{}'
+);
+
+CREATE INDEX IF NOT EXISTS idx_chunks_source_id ON chunks(source_id);
+CREATE INDEX IF NOT EXISTS idx_chunks_source_type ON chunks(source_type);
+
+CREATE TABLE IF NOT EXISTS token_cache (
+    doc_id    TEXT PRIMARY KEY,
+    text_hash TEXT NOT NULL,
+    tokens    TEXT NOT NULL
+);
+"""
+
+
+def _text_hash(text: str) -> str:
+    """テキストの SHA-256 ハッシュ先頭 16 文字を返す."""
+    return hashlib.sha256(text.encode("utf-8")).hexdigest()[:16]
+
+
 @dataclass
 class BM25Result:
     """BM25検索結果."""
@@ -65,10 +91,296 @@ class BM25Result:
     text: str
 
 
+class _BM25Store:
+    """BM25 チャンクデータの SQLite ストア.
+
+    persist_dir が None の場合は :memory: で動作する。
+    """
+
+    def __init__(self, persist_dir: Path | None) -> None:
+        self._persist_dir = persist_dir
+        if persist_dir is not None:
+            persist_dir.mkdir(parents=True, exist_ok=True)
+            db_path = str(persist_dir / STORE_DB_FILENAME)
+        else:
+            db_path = ":memory:"
+
+        conn: sqlite3.Connection | None = None
+        try:
+            conn = sqlite3.connect(db_path, check_same_thread=False)
+            conn.execute("PRAGMA journal_mode=WAL")
+            conn.executescript(_STORE_SCHEMA_SQL)
+        except sqlite3.DatabaseError:
+            if conn is not None:
+                conn.close()
+            if persist_dir is not None:
+                corrupt_path = persist_dir / STORE_DB_FILENAME
+                if corrupt_path.exists():
+                    corrupt_path.unlink()
+                    logger.warning(
+                        "Corrupt BM25 store DB removed: %s", corrupt_path,
+                    )
+            conn = sqlite3.connect(db_path, check_same_thread=False)
+            conn.execute("PRAGMA journal_mode=WAL")
+            conn.executescript(_STORE_SCHEMA_SQL)
+        self._conn = conn
+
+    def close(self) -> None:
+        self._conn.close()
+
+    def upsert_chunks(
+        self,
+        documents: list[tuple[str, str, str, str]],
+        metadata_list: list[dict[str, str | int | float | bool]] | None,
+    ) -> tuple[int, int]:
+        """チャンクを INSERT OR REPLACE する.
+
+        Returns:
+            (added, updated) のタプル
+        """
+        existing: set[str] = set()
+        doc_ids = [d[0] for d in documents]
+        for batch_start in range(0, len(doc_ids), 900):
+            batch = doc_ids[batch_start:batch_start + 900]
+            placeholders = ",".join("?" * len(batch))
+            rows = self._conn.execute(
+                f"SELECT doc_id FROM chunks WHERE doc_id IN ({placeholders})",
+                batch,
+            ).fetchall()
+            existing.update(r[0] for r in rows)
+
+        added = 0
+        updated = 0
+
+        if metadata_list is not None:
+            params = []
+            for i, (doc_id, text, source_id, source_type) in enumerate(documents):
+                meta_json = json.dumps(metadata_list[i], ensure_ascii=False)
+                params.append((doc_id, text, source_id, source_type, meta_json))
+                if doc_id in existing:
+                    updated += 1
+                else:
+                    added += 1
+            self._conn.executemany(
+                "INSERT OR REPLACE INTO chunks "
+                "(doc_id, text, source_id, source_type, metadata) "
+                "VALUES (?, ?, ?, ?, ?)",
+                params,
+            )
+        else:
+            params_no_meta = []
+            for doc_id, text, source_id, source_type in documents:
+                params_no_meta.append((text, source_id, source_type, doc_id))
+                if doc_id in existing:
+                    updated += 1
+                else:
+                    added += 1
+            # 新規は metadata='{}' で INSERT、既存は metadata を保持して UPDATE
+            for doc_id, text, source_id, source_type in documents:
+                if doc_id in existing:
+                    self._conn.execute(
+                        "UPDATE chunks SET text=?, source_id=?, source_type=? "
+                        "WHERE doc_id=?",
+                        (text, source_id, source_type, doc_id),
+                    )
+                else:
+                    self._conn.execute(
+                        "INSERT INTO chunks "
+                        "(doc_id, text, source_id, source_type, metadata) "
+                        "VALUES (?, ?, ?, ?, '{}')",
+                        (doc_id, text, source_id, source_type),
+                    )
+
+        self._conn.commit()
+        return added, updated
+
+    def delete_by_source(self, source_id: str) -> list[str]:
+        """source_id で削除し、削除された doc_id リストを返す."""
+        rows = self._conn.execute(
+            "SELECT doc_id FROM chunks WHERE source_id = ?", (source_id,),
+        ).fetchall()
+        deleted_ids = [r[0] for r in rows]
+        if deleted_ids:
+            self._conn.execute(
+                "DELETE FROM chunks WHERE source_id = ?", (source_id,),
+            )
+            self._delete_token_cache(deleted_ids)
+            self._conn.commit()
+        return deleted_ids
+
+    def delete_by_source_type(self, source_type: str) -> list[str]:
+        """source_type で削除し、削除された doc_id リストを返す."""
+        rows = self._conn.execute(
+            "SELECT doc_id FROM chunks WHERE source_type = ?", (source_type,),
+        ).fetchall()
+        deleted_ids = [r[0] for r in rows]
+        if deleted_ids:
+            self._conn.execute(
+                "DELETE FROM chunks WHERE source_type = ?", (source_type,),
+            )
+            self._delete_token_cache(deleted_ids)
+            self._conn.commit()
+        return deleted_ids
+
+    def delete_stale(self, source_id: str, valid_ids: set[str]) -> list[str]:
+        """source_id のチャンクのうち valid_ids に含まれないものを削除する."""
+        rows = self._conn.execute(
+            "SELECT doc_id FROM chunks WHERE source_id = ?", (source_id,),
+        ).fetchall()
+        stale_ids = [r[0] for r in rows if r[0] not in valid_ids]
+        if stale_ids:
+            for batch_start in range(0, len(stale_ids), 900):
+                batch = stale_ids[batch_start:batch_start + 900]
+                placeholders = ",".join("?" * len(batch))
+                self._conn.execute(
+                    f"DELETE FROM chunks WHERE doc_id IN ({placeholders})", batch,
+                )
+            self._delete_token_cache(stale_ids)
+            self._conn.commit()
+        return stale_ids
+
+    def get_document_count(self) -> int:
+        row = self._conn.execute("SELECT COUNT(*) FROM chunks").fetchone()
+        return row[0] if row else 0
+
+    def get_source_url(self, doc_id: str) -> str | None:
+        row = self._conn.execute(
+            "SELECT source_id FROM chunks WHERE doc_id = ?", (doc_id,),
+        ).fetchone()
+        return row[0] if row else None
+
+    def get_source_type(self, doc_id: str) -> str | None:
+        row = self._conn.execute(
+            "SELECT source_type FROM chunks WHERE doc_id = ?", (doc_id,),
+        ).fetchone()
+        return row[0] if row else None
+
+    def get_metadata(self, doc_id: str) -> dict[str, str | int | float | bool]:
+        row = self._conn.execute(
+            "SELECT metadata FROM chunks WHERE doc_id = ?", (doc_id,),
+        ).fetchone()
+        if row is None:
+            return {}
+        return json.loads(row[0])  # type: ignore[no-any-return]
+
+    def get_texts_by_ids(self, doc_ids: list[str]) -> dict[str, str]:
+        """doc_id リストに対応するテキストを取得する."""
+        result: dict[str, str] = {}
+        for batch_start in range(0, len(doc_ids), 900):
+            batch = doc_ids[batch_start:batch_start + 900]
+            placeholders = ",".join("?" * len(batch))
+            rows = self._conn.execute(
+                f"SELECT doc_id, text FROM chunks WHERE doc_id IN ({placeholders})",
+                batch,
+            ).fetchall()
+            for r in rows:
+                result[r[0]] = r[1]
+        return result
+
+    def get_source_types_by_ids(self, doc_ids: list[str]) -> dict[str, str]:
+        """doc_id リストに対応する source_type を取得する."""
+        result: dict[str, str] = {}
+        for batch_start in range(0, len(doc_ids), 900):
+            batch = doc_ids[batch_start:batch_start + 900]
+            placeholders = ",".join("?" * len(batch))
+            rows = self._conn.execute(
+                f"SELECT doc_id, source_type FROM chunks WHERE doc_id IN ({placeholders})",
+                batch,
+            ).fetchall()
+            for r in rows:
+                result[r[0]] = r[1]
+        return result
+
+    def get_metadatas_by_ids(
+        self, doc_ids: list[str],
+    ) -> dict[str, dict[str, str | int | float | bool]]:
+        """doc_id リストに対応するメタデータを取得する."""
+        result: dict[str, dict[str, str | int | float | bool]] = {}
+        for batch_start in range(0, len(doc_ids), 900):
+            batch = doc_ids[batch_start:batch_start + 900]
+            placeholders = ",".join("?" * len(batch))
+            rows = self._conn.execute(
+                f"SELECT doc_id, metadata FROM chunks WHERE doc_id IN ({placeholders})",
+                batch,
+            ).fetchall()
+            for r in rows:
+                result[r[0]] = json.loads(r[1])
+        return result
+
+    def estimate_text_memory_bytes(self) -> tuple[int, int]:
+        """チャンク数とテキスト合計バイト数を返す（rebuild 前の見積もり用）."""
+        row = self._conn.execute(
+            "SELECT COUNT(*), COALESCE(SUM(LENGTH(CAST(text AS BLOB))), 0) FROM chunks",
+        ).fetchone()
+        return (row[0], row[1]) if row else (0, 0)
+
+    def get_all_for_rebuild(self) -> list[tuple[str, str]]:
+        """rebuild 用に全 (doc_id, text) を doc_id 順で返す."""
+        return self._conn.execute(
+            "SELECT doc_id, text FROM chunks ORDER BY doc_id",
+        ).fetchall()
+
+    def has_documents(self) -> bool:
+        row = self._conn.execute("SELECT 1 FROM chunks LIMIT 1").fetchone()
+        return row is not None
+
+    def clear(self) -> None:
+        self._conn.execute("DELETE FROM chunks")
+        self._conn.execute("DELETE FROM token_cache")
+        self._conn.commit()
+
+    # --- token cache ---
+
+    def get_cached_tokens(
+        self, doc_ids_with_hashes: list[tuple[str, str]],
+    ) -> dict[str, list[str]]:
+        """キャッシュヒットしたトークンを返す."""
+        result: dict[str, list[str]] = {}
+        for batch_start in range(0, len(doc_ids_with_hashes), 900):
+            batch = doc_ids_with_hashes[batch_start:batch_start + 900]
+            ids = [b[0] for b in batch]
+            placeholders = ",".join("?" * len(ids))
+            rows = self._conn.execute(
+                f"SELECT doc_id, text_hash, tokens FROM token_cache "
+                f"WHERE doc_id IN ({placeholders})",
+                ids,
+            ).fetchall()
+            hash_map = {b[0]: b[1] for b in batch}
+            for doc_id, cached_hash, tokens_json in rows:
+                if cached_hash == hash_map.get(doc_id):
+                    result[doc_id] = json.loads(tokens_json)
+        return result
+
+    def upsert_token_cache(
+        self, entries: list[tuple[str, str, list[str]]],
+    ) -> None:
+        """トークンキャッシュを一括更新する."""
+        if not entries:
+            return
+        params = [
+            (doc_id, text_hash, json.dumps(tokens, ensure_ascii=False))
+            for doc_id, text_hash, tokens in entries
+        ]
+        self._conn.executemany(
+            "INSERT OR REPLACE INTO token_cache (doc_id, text_hash, tokens) "
+            "VALUES (?, ?, ?)",
+            params,
+        )
+        self._conn.commit()
+
+    def _delete_token_cache(self, doc_ids: list[str]) -> None:
+        for batch_start in range(0, len(doc_ids), 900):
+            batch = doc_ids[batch_start:batch_start + 900]
+            placeholders = ",".join("?" * len(batch))
+            self._conn.execute(
+                f"DELETE FROM token_cache WHERE doc_id IN ({placeholders})", batch,
+            )
+
+
 class BM25Index:
     """BM25ベースのキーワード検索インデックス.
 
-    仕様: docs/specs/rag-knowledge.md
+    仕様: docs/specs/infrastructure/bm25-scalability.md
     """
 
     def __init__(
@@ -88,25 +400,21 @@ class BM25Index:
         self._b = b
         self._persist_dir = Path(persist_dir) if persist_dir else None
 
-        # ドキュメントストレージ
-        self._documents: dict[str, str] = {}  # id -> text
-        self._doc_source_map: dict[str, str] = {}  # id -> source_url
-        self._doc_source_type_map: dict[str, str] = {}  # id -> source_type
-        self._doc_metadata_map: dict[str, dict[str, str | int | float | bool]] = {}  # id -> chunk metadata
+        self._store = _BM25Store(self._persist_dir)
 
         # BM25インデックス（遅延初期化）
         self._bm25: "bm25s.BM25 | None" = None
-        self._doc_ids: list[str] = []  # インデックス順序を保持
+        self._doc_ids: list[str] = []
 
         # 再構築フラグ
         self._needs_rebuild = True
 
-        # 遅延 save モード: バッチ処理中は save をスキップし flush() で一括実行
+        # 遅延 save モード
         self._deferred_save = False
 
-        # 永続化ディレクトリからロード
+        # 永続化ディレクトリからbm25sモデルをロード
         if self._persist_dir is not None:
-            self._load()
+            self._load_bm25s()
 
     def add_documents(
         self,
@@ -128,30 +436,15 @@ class BM25Index:
                 f"documents={len(documents)}, metadata_list={len(metadata_list)}"
             )
 
-        added = 0
-        updated = 0
-        for i, (doc_id, text, source_url, source_type) in enumerate(documents):
-            if doc_id in self._documents:
-                self._documents[doc_id] = text
-                self._doc_source_map[doc_id] = source_url
-                self._doc_source_type_map[doc_id] = source_type
-                updated += 1
-            else:
-                self._documents[doc_id] = text
-                self._doc_source_map[doc_id] = source_url
-                self._doc_source_type_map[doc_id] = source_type
-                added += 1
-            if metadata_list is not None:
-                self._doc_metadata_map[doc_id] = metadata_list[i]
+        added, updated = self._store.upsert_chunks(documents, metadata_list)
 
-        # 新規追加または更新があった場合はインデックス再構築が必要
         if added > 0 or updated > 0:
             self._needs_rebuild = True
             logger.debug(
-                "BM25 index: added %d, updated %d documents", added, updated
+                "BM25 index: added %d, updated %d documents", added, updated,
             )
             if not self._deferred_save:
-                self._save()
+                self._save_bm25s()
 
         return added
 
@@ -173,23 +466,19 @@ class BM25Index:
         Returns:
             BM25Resultのリスト（スコア降順）
         """
-        if not self._documents:
+        if not self._store.has_documents():
             return []
 
-        # 必要に応じてインデックスを再構築
         if self._needs_rebuild:
             self._rebuild_index()
 
         if self._bm25 is None:
             return []
 
-        # クエリをトークナイズ
         query_tokens = tokenize_japanese(query)
         if not query_tokens:
             return []
 
-        # BM25検索（k は corpus サイズ以下に制限）
-        # source_type / filters フィルタで除外される可能性を考慮し、3倍（最低20件）を取得
         fetch_count = n_results
         has_filter = source_type is not None or filters
         if has_filter:
@@ -199,29 +488,42 @@ class BM25Index:
             return []
 
         doc_indices, scores = self._bm25.retrieve(
-            [query_tokens], k=k, show_progress=False
+            [query_tokens], k=k, show_progress=False,
         )
 
-        # スコア > 0 の結果のみ抽出（source_type + filters フィルタ適用）
-        results: list[BM25Result] = []
+        hit_doc_ids: list[tuple[str, float]] = []
         for idx, score in zip(doc_indices[0], scores[0]):
             if score <= 0:
                 continue
-            doc_id = self._doc_ids[int(idx)]
+            hit_doc_ids.append((self._doc_ids[int(idx)], float(score)))
+
+        if not hit_doc_ids:
+            return []
+
+        all_hit_ids = [d[0] for d in hit_doc_ids]
+        texts = self._store.get_texts_by_ids(all_hit_ids)
+
+        if source_type is not None:
+            source_types = self._store.get_source_types_by_ids(all_hit_ids)
+        else:
+            source_types = {}
+
+        if filters:
+            metadatas = self._store.get_metadatas_by_ids(all_hit_ids)
+        else:
+            metadatas = {}
+
+        results: list[BM25Result] = []
+        for doc_id, score in hit_doc_ids:
             if source_type is not None:
-                if self._doc_source_type_map.get(doc_id) != source_type:
+                if source_types.get(doc_id) != source_type:
                     continue
             if filters:
-                doc_meta = self._doc_metadata_map.get(doc_id, {})
+                doc_meta = metadatas.get(doc_id, {})
                 if not self._matches_filters(doc_meta, filters):
                     continue
-            results.append(
-                BM25Result(
-                    doc_id=doc_id,
-                    score=float(score),
-                    text=self._documents[doc_id],
-                )
-            )
+            text = texts.get(doc_id, "")
+            results.append(BM25Result(doc_id=doc_id, score=score, text=text))
             if len(results) >= n_results:
                 break
 
@@ -232,11 +534,7 @@ class BM25Index:
         metadata: dict[str, str | int | float | bool],
         filters: dict[str, str],
     ) -> bool:
-        """メタデータがフィルタ条件に一致するか判定する.
-
-        フィルタ値（常に文字列）とメタデータ値を大文字変換して比較する。
-        これにより、メタデータの型（int/bool 等）や大文字小文字の違いを吸収する。
-        """
+        """メタデータがフィルタ条件に一致するか判定する."""
         for key, value in filters.items():
             meta_value = metadata.get(key)
             if meta_value is None:
@@ -254,29 +552,18 @@ class BM25Index:
         Returns:
             削除されたドキュメント数
         """
-        to_delete = [
-            doc_id
-            for doc_id, url in self._doc_source_map.items()
-            if url == source_url
-        ]
+        deleted_ids = self._store.delete_by_source(source_url)
 
-        for doc_id in to_delete:
-            del self._documents[doc_id]
-            del self._doc_source_map[doc_id]
-            self._doc_source_type_map.pop(doc_id, None)  # 旧データに source_type がない場合の互換性
-            self._doc_metadata_map.pop(doc_id, None)
-
-        if to_delete:
+        if deleted_ids:
             self._needs_rebuild = True
             logger.debug(
                 "Deleted %d documents from BM25 index (source: %s)",
-                len(to_delete),
-                source_url,
+                len(deleted_ids), source_url,
             )
             if not self._deferred_save:
-                self._save()
+                self._save_bm25s()
 
-        return len(to_delete)
+        return len(deleted_ids)
 
     def delete_by_source_type(self, source_type: str) -> int:
         """source_type 指定でドキュメントを一括削除する.
@@ -287,135 +574,71 @@ class BM25Index:
         Returns:
             削除されたドキュメント数
         """
-        to_delete = [
-            doc_id
-            for doc_id, st in self._doc_source_type_map.items()
-            if st == source_type
-        ]
+        deleted_ids = self._store.delete_by_source_type(source_type)
 
-        for doc_id in to_delete:
-            self._documents.pop(doc_id, None)
-            self._doc_source_map.pop(doc_id, None)
-            self._doc_source_type_map.pop(doc_id, None)
-            self._doc_metadata_map.pop(doc_id, None)
-
-        if to_delete:
+        if deleted_ids:
             self._needs_rebuild = True
             logger.debug(
                 "Deleted %d documents from BM25 index (source_type: %s)",
-                len(to_delete),
-                source_type,
+                len(deleted_ids), source_type,
             )
             if not self._deferred_save:
-                self._save()
+                self._save_bm25s()
 
-        return len(to_delete)
+        return len(deleted_ids)
+
+    def close(self) -> None:
+        """SQLite コネクションをクローズする."""
+        self._store.close()
 
     def get_document_count(self) -> int:
         """インデックス内のドキュメント数を返す."""
-        return len(self._documents)
+        return self._store.get_document_count()
 
     def get_source_url(self, doc_id: str) -> str | None:
-        """ドキュメントIDからソースURLを取得する.
-
-        Args:
-            doc_id: ドキュメントID
-
-        Returns:
-            ソースURL、見つからない場合はNone
-        """
-        return self._doc_source_map.get(doc_id)
+        """ドキュメントIDからソースURLを取得する."""
+        return self._store.get_source_url(doc_id)
 
     def get_source_type(self, doc_id: str) -> str | None:
-        """ドキュメントIDからソース種別を取得する.
-
-        Args:
-            doc_id: ドキュメントID
-
-        Returns:
-            ソース種別、見つからない場合はNone
-        """
-        return self._doc_source_type_map.get(doc_id)
+        """ドキュメントIDからソース種別を取得する."""
+        return self._store.get_source_type(doc_id)
 
     def get_metadata(self, doc_id: str) -> dict[str, str | int | float | bool]:
-        """ドキュメントIDからチャンクメタデータを取得する.
-
-        Args:
-            doc_id: ドキュメントID
-
-        Returns:
-            メタデータ辞書。見つからない場合は空辞書
-        """
-        return dict(self._doc_metadata_map.get(doc_id, {}))
+        """ドキュメントIDからチャンクメタデータを取得する."""
+        return self._store.get_metadata(doc_id)
 
     def delete_stale_docs(self, source_id: str, valid_ids: set[str]) -> int:
-        """ソースのドキュメントのうち、valid_ids に含まれないものを削除する.
-
-        Args:
-            source_id: ソース識別子
-            valid_ids: 保持する ID セット（これ以外を削除）
-
-        Returns:
-            削除件数
-        """
-        stale_ids = [
-            doc_id
-            for doc_id, src in self._doc_source_map.items()
-            if src == source_id and doc_id not in valid_ids
-        ]
-        for doc_id in stale_ids:
-            self._documents.pop(doc_id, None)
-            self._doc_source_map.pop(doc_id, None)
-            self._doc_source_type_map.pop(doc_id, None)
-            self._doc_metadata_map.pop(doc_id, None)
+        """ソースのドキュメントのうち、valid_ids に含まれないものを削除する."""
+        stale_ids = self._store.delete_stale(source_id, valid_ids)
 
         if stale_ids:
             self._needs_rebuild = True
             if not self._deferred_save:
-                self._save()
+                self._save_bm25s()
 
         return len(stale_ids)
 
     def clear(self) -> None:
         """全データをクリアして永続化する."""
-        self._documents.clear()
-        self._doc_source_map.clear()
-        self._doc_source_type_map.clear()
-        self._doc_metadata_map.clear()
+        self._store.clear()
         self._doc_ids.clear()
         self._bm25 = None
         self._needs_rebuild = True
-        self._save()
+        self._save_bm25s()
 
     def set_deferred_save(self, enabled: bool) -> None:
-        """遅延 save モードの有効/無効を切り替える.
-
-        有効にすると add/delete 操作で _save() を呼ばなくなる。
-        バッチ処理完了後に flush() で一括 rebuild + 永続化する。
-
-        Args:
-            enabled: True で遅延モード有効
-        """
+        """遅延 save モードの有効/無効を切り替える."""
         self._deferred_save = enabled
 
     def flush(self) -> None:
-        """未保存の変更を rebuild + 永続化する.
-
-        遅延 save モード中に蓄積された変更を一括で反映する。
-        _needs_rebuild が False（変更なし）の場合は何もしない。
-        """
+        """未保存の変更を rebuild + 永続化する."""
         if not self._needs_rebuild:
             return
-
-        if self._persist_dir is not None:
-            self._save()
-        else:
-            # インメモリモードでは _save() が早期リターンするため
-            # rebuild のみ実行して _needs_rebuild をリセットする
-            self._rebuild_index()
+        self._rebuild_index()
+        self._persist_bm25s()
 
     def _rebuild_index(self) -> None:
-        """BM25インデックスを再構築する."""
+        """BM25インデックスを再構築する（トークンキャッシュ使用）."""
         try:
             with redirect_stdout(io.StringIO()):
                 import bm25s
@@ -425,193 +648,150 @@ class BM25Index:
             self._needs_rebuild = False
             return
 
-        self._doc_ids = list(self._documents.keys())
-        tokenized_corpus = [
-            tokenize_japanese(self._documents[doc_id]) for doc_id in self._doc_ids
-        ]
+        chunk_count, text_bytes = self._store.estimate_text_memory_bytes()
+        if text_bytes > _REBUILD_MEMORY_WARNING_BYTES:
+            logger.warning(
+                "BM25 rebuild: text data is large (%d chunks, %d MB). "
+                "Peak memory usage will increase during rebuild.",
+                chunk_count, text_bytes // (1024 * 1024),
+            )
 
-        if tokenized_corpus:
-            self._bm25 = bm25s.BM25(k1=self._k1, b=self._b)
-            self._bm25.index(tokenized_corpus, show_progress=False)
-        else:
+        all_docs = self._store.get_all_for_rebuild()
+        if not all_docs:
             self._bm25 = None
-
-        self._needs_rebuild = False
-        logger.debug("Rebuilt BM25 index with %d documents", len(self._doc_ids))
-
-    def _save(self) -> None:
-        """インデックスをディスクに永続化する."""
-        if self._persist_dir is None:
-            return
-
-        if not self._documents:
-            # 空インデックスの場合、ディレクトリがあれば削除
-            if self._persist_dir.exists():
-                shutil.rmtree(self._persist_dir)
-                logger.debug("Removed empty BM25 persist dir: %s", self._persist_dir)
+            self._doc_ids = []
             self._needs_rebuild = False
             return
 
-        # インデックスが未構築なら構築
+        self._doc_ids = [doc_id for doc_id, _ in all_docs]
+        doc_hashes = [_text_hash(text) for _, text in all_docs]
+
+        cached = self._store.get_cached_tokens(
+            list(zip(self._doc_ids, doc_hashes)),
+        )
+
+        new_cache_entries: list[tuple[str, str, list[str]]] = []
+        tokenized_corpus: list[list[str]] = []
+        cache_hits = 0
+
+        for i, (doc_id, text) in enumerate(all_docs):
+            if doc_id in cached:
+                tokenized_corpus.append(cached[doc_id])
+                cache_hits += 1
+            else:
+                tokens = tokenize_japanese(text)
+                tokenized_corpus.append(tokens)
+                new_cache_entries.append((doc_id, doc_hashes[i], tokens))
+
+        if new_cache_entries:
+            self._store.upsert_token_cache(new_cache_entries)
+
+        self._bm25 = bm25s.BM25(k1=self._k1, b=self._b)
+        self._bm25.index(tokenized_corpus, show_progress=False)
+        self._needs_rebuild = False
+
+        logger.debug(
+            "Rebuilt BM25 index with %d documents (cache hits: %d, misses: %d)",
+            len(self._doc_ids), cache_hits, len(new_cache_entries),
+        )
+
+    def _save_bm25s(self) -> None:
+        """rebuild + bm25s 永続化を実行する."""
+        if not self._store.has_documents():
+            if self._persist_dir is not None and self._persist_dir.exists():
+                bm25s_dir = self._persist_dir / BM25S_SUBDIR
+                if bm25s_dir.exists():
+                    shutil.rmtree(bm25s_dir)
+                logger.debug("Removed BM25S subdir (empty index): %s", self._persist_dir)
+            self._bm25 = None
+            self._doc_ids = []
+            self._needs_rebuild = False
+            return
+
         if self._needs_rebuild:
             self._rebuild_index()
 
-        if self._bm25 is None:
+        self._persist_bm25s()
+
+    def _persist_bm25s(self) -> None:
+        """bm25s モデルをディスクに保存する（アトミックスワップ）."""
+        if self._persist_dir is None or self._bm25 is None:
             return
 
         try:
-            self._persist_dir.parent.mkdir(parents=True, exist_ok=True)
+            bm25s_dir = self._persist_dir / BM25S_SUBDIR
+            old_dir = self._persist_dir / (BM25S_SUBDIR + "_old")
 
-            # アトミックスワップ用のディレクトリ名を事前定義
-            old_dir = self._persist_dir.with_name(
-                self._persist_dir.name + "_old"
-            )
-
-            # 一時ディレクトリに書き出し（アトミック書き込み）
             tmp_dir = Path(
                 tempfile.mkdtemp(
-                    dir=self._persist_dir.parent,
-                    prefix=f"{self._persist_dir.name}_tmp_",
-                )
+                    dir=self._persist_dir,
+                    prefix=f"{BM25S_SUBDIR}_tmp_",
+                ),
             )
             try:
-                # metadata.json
-                metadata = {
-                    "version": METADATA_VERSION,
-                    "doc_ids": self._doc_ids,
-                    "documents": self._documents,
-                    "doc_source_map": self._doc_source_map,
-                    "doc_source_type_map": self._doc_source_type_map,
-                    "doc_metadata_map": self._doc_metadata_map,
-                }
-                metadata_path = tmp_dir / METADATA_FILENAME
-                metadata_path.write_text(
-                    json.dumps(metadata, ensure_ascii=False), encoding="utf-8"
-                )
+                self._bm25.save(str(tmp_dir))
 
-                # bm25s ネイティブファイル
-                bm25s_dir = tmp_dir / BM25S_SUBDIR
-                bm25s_dir.mkdir()
-                self._bm25.save(str(bm25s_dir))
-
-                # アトミックスワップ: old → .old, tmp → 本体, .old 削除
                 if old_dir.exists():
                     shutil.rmtree(old_dir)
-
-                if self._persist_dir.exists():
-                    self._persist_dir.rename(old_dir)
-
-                tmp_dir.rename(self._persist_dir)
-
+                if bm25s_dir.exists():
+                    bm25s_dir.rename(old_dir)
+                tmp_dir.rename(bm25s_dir)
                 if old_dir.exists():
                     shutil.rmtree(old_dir)
 
                 logger.debug(
-                    "BM25 index saved to %s (%d documents)",
-                    self._persist_dir,
-                    len(self._doc_ids),
+                    "BM25 model saved to %s (%d documents)",
+                    bm25s_dir, len(self._doc_ids),
                 )
             except Exception:
-                # リカバリ: .old があれば復元
-                if old_dir.exists() and not self._persist_dir.exists():
-                    old_dir.rename(self._persist_dir)
+                if old_dir.exists() and not bm25s_dir.exists():
+                    old_dir.rename(bm25s_dir)
                 if tmp_dir.exists():
                     shutil.rmtree(tmp_dir)
                 raise
         except Exception:
-            logger.warning("Failed to save BM25 index", exc_info=True)
+            logger.warning("Failed to save BM25 model", exc_info=True)
 
-    def _load(self) -> None:
-        """ディスクからインデックスをロードする."""
+    def _load_bm25s(self) -> None:
+        """bm25s モデルをディスクからロードする."""
         if self._persist_dir is None:
             return
 
-        # クラッシュリカバリ: _old が残っていて本体がなければ復元
-        old_dir = self._persist_dir.with_name(self._persist_dir.name + "_old")
-        if old_dir.exists() and not self._persist_dir.exists():
-            old_dir.rename(self._persist_dir)
-            logger.warning("Recovered BM25 index from _old directory")
+        bm25s_dir = self._persist_dir / BM25S_SUBDIR
 
-        if not self._persist_dir.exists():
+        # クラッシュリカバリ
+        old_dir = self._persist_dir / (BM25S_SUBDIR + "_old")
+        if old_dir.exists() and not bm25s_dir.exists():
+            old_dir.rename(bm25s_dir)
+            logger.warning("Recovered BM25 model from _old directory")
+
+        if not bm25s_dir.exists():
             return
 
-        metadata_path = self._persist_dir / METADATA_FILENAME
-        if not metadata_path.exists():
-            logger.warning(
-                "BM25 metadata not found at %s, starting with empty index",
-                metadata_path,
-            )
+        if not self._store.has_documents():
             return
 
         try:
-            raw = metadata_path.read_text(encoding="utf-8")
-            metadata = json.loads(raw)
-
-            # バージョンチェック
-            version = metadata.get("version")
-            if version != METADATA_VERSION:
-                logger.warning(
-                    "BM25 metadata version mismatch (expected %d, got %s), "
-                    "starting with empty index",
-                    METADATA_VERSION,
-                    version,
-                )
-                return
-
-            # 必須キー検証
-            required_keys = ("doc_ids", "documents", "doc_source_map")
-            if not all(k in metadata for k in required_keys):
-                logger.warning(
-                    "BM25 metadata missing required keys at %s, "
-                    "starting with empty index",
-                    metadata_path,
-                )
-                return
-
-            # ドキュメントデータ復元
-            self._doc_ids = metadata["doc_ids"]
-            self._documents = metadata["documents"]
-            self._doc_source_map = metadata["doc_source_map"]
-            self._doc_source_type_map = metadata.get("doc_source_type_map", {})
-            self._doc_metadata_map = metadata["doc_metadata_map"]
-
-            # bm25s モデル復元
-            bm25s_dir = self._persist_dir / BM25S_SUBDIR
-            if not bm25s_dir.exists():
-                logger.warning(
-                    "BM25 model directory not found at %s, starting with empty index",
-                    bm25s_dir,
-                )
-                self._doc_ids = []
-                self._documents = {}
-                self._doc_source_map = {}
-                self._doc_source_type_map = {}
-                self._doc_metadata_map = {}
-                return
-
             with redirect_stdout(io.StringIO()):
                 import bm25s as bm25s_lib
 
             self._bm25 = bm25s_lib.BM25.load(str(bm25s_dir))
+
+            all_docs = self._store.get_all_for_rebuild()
+            self._doc_ids = [doc_id for doc_id, _ in all_docs]
             self._needs_rebuild = False
 
             logger.info(
                 "BM25 index loaded from %s (%d documents)",
-                self._persist_dir,
-                len(self._doc_ids),
+                self._persist_dir, len(self._doc_ids),
             )
         except Exception:
             logger.warning(
-                "Failed to load BM25 index from %s, starting with empty index",
-                self._persist_dir,
-                exc_info=True,
+                "Failed to load BM25 model from %s, will rebuild on next search",
+                bm25s_dir, exc_info=True,
             )
-            self._documents = {}
-            self._doc_source_map = {}
-            self._doc_source_type_map = {}
-            self._doc_metadata_map = {}
-            self._doc_ids = []
             self._bm25 = None
+            self._doc_ids = []
             self._needs_rebuild = True
 
 
