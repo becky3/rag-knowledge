@@ -16,7 +16,7 @@ import sys
 import tempfile
 from datetime import datetime
 from pathlib import Path
-from urllib.parse import urljoin, urlparse
+from urllib.parse import urlencode, urljoin, urlparse
 
 import httpx
 
@@ -260,6 +260,23 @@ def classify_url(url: str) -> Literal["youtube", "web", "skip"]:
     return "web"
 
 
+_BSKY_POST_URL_RE = re.compile(
+    r"^https?://bsky\.app/profile/([^/]+)/post/([a-zA-Z0-9]+)",
+)
+
+
+def parse_bluesky_url(url: str) -> tuple[str, str] | None:
+    """BlueSky 投稿 URL から (handle, rkey) を抽出する.
+
+    Returns:
+        (handle, rkey) タプル、またはパース失敗時は None
+    """
+    m = _BSKY_POST_URL_RE.match(url.strip())
+    if m is None:
+        return None
+    return m.group(1), m.group(2)
+
+
 class BlueskyIngester:
     """BlueSky インジェスター.
 
@@ -347,7 +364,6 @@ class BlueskyIngester:
             if cursor:
                 params["cursor"] = cursor
 
-            from urllib.parse import urlencode
             url = f"{self._appview_url}/xrpc/app.bsky.feed.getAuthorFeed?{urlencode(params)}"
             resp = await fetch_get(client, url)
             data = resp.json()
@@ -372,143 +388,22 @@ class BlueskyIngester:
 
                 total_processed += 1
 
-                post = item.get("post", {})
-                post_uri = post.get("uri", "")
-                author = post.get("author", {})
-                record = post.get("record", {})
+                placed_ok = await self._place_single_post(
+                    item,
+                    is_repost=is_repost,
+                    force=force,
+                    client=client,
+                    result=result,
+                    seen_paths=seen_paths,
+                    placed_items=placed_items,
+                )
 
-                # DID と rkey を抽出
-                did = author.get("did", "")
-                handle_author = author.get("handle", "")
-                # AT URI: at://did:plc:xxx/app.bsky.feed.post/rkey
-                rkey = post_uri.rsplit("/", 1)[-1] if "/" in post_uri else ""
-
-                # 年月の導出
-                created_at_str = record.get("createdAt", "")
-                try:
-                    dt = datetime.fromisoformat(created_at_str.replace("Z", "+00:00"))
-                    year = str(dt.year)
-                    month = f"{dt.month:02d}"
-                except (ValueError, TypeError):
-                    year = "unknown"
-                    month = "00"
-
-                # ファイルパス
-                escaped_did = _escape_did(did)
-                rel_path = f"bluesky/{escaped_did}/{year}/{month}/{rkey}.json"
-
-                # 重複検出: seen_paths + ファイル存在チェック
-                if rel_path in seen_paths:
-                    result.skipped += 1
-                    continue
-                seen_paths.add(rel_path)
-
-                dest = self._store.root_dir / rel_path
-                is_overwrite = dest.exists()
-                if is_overwrite and not force:
-                    result.skipped += 1
-                    continue
-
-                # JSON データ保存
-                json_data = json.dumps(item, ensure_ascii=False, indent=2)
-                data_bytes = json_data.encode("utf-8")
-
-                # .meta 生成
-                text = record.get("text", "")
-                title = _make_title(text)
-
-                # embed 情報の判定
-                embed = record.get("embed") or {}
-                has_images = False
-                has_video = False
-                has_external_link = False
-
-                if isinstance(embed, dict):
-                    embed_type = embed.get("$type", "")
-                    if "image" in embed_type:
-                        has_images = True
-                    if "video" in embed_type:
-                        has_video = True
-                    if "external" in embed_type:
-                        has_external_link = True
-                    # recordWithMedia
-                    media = embed.get("media", {})
-                    if isinstance(media, dict):
-                        media_type = media.get("$type", "")
-                        if "image" in media_type:
-                            has_images = True
-                        if "video" in media_type:
-                            has_video = True
-                        if "external" in media_type:
-                            has_external_link = True
-
-                is_reply = "reply" in record if isinstance(record, dict) else False
-
-                bsky_url = f"https://bsky.app/profile/{handle_author}/post/{rkey}"
-
-                metadata = {
-                    "at_uri": post_uri,
-                    "source_type": "bluesky",
-                    "title": title,
-                    "collected_at": now_iso(),
-                    "handle": handle_author,
-                    "did": did,
-                    "rkey": rkey,
-                    "url": bsky_url,
-                    "created_at": created_at_str,
-                    "has_images": has_images,
-                    "has_video": has_video,
-                    "has_external_link": has_external_link,
-                    "is_reply": is_reply,
-                    "is_repost": is_repost,
-                }
-
-                try:
-                    self._store.place_file(
-                        source_type="bluesky",
-                        data=data_bytes,
-                        rel_path=rel_path,
-                        metadata=metadata,
-                    )
-                    if is_overwrite:
-                        result.overwritten += 1
-                    else:
-                        result.placed += 1
-                    placed_items.append(
-                        {**item, "_is_overwrite": is_overwrite},
-                    )
-                except Exception as exc:
-                    logger.exception("投稿の配置に失敗しました: %s", rel_path)
-                    result.errors += 1
-                    result.error_details.append(
-                        {
-                            "category": "placement",
-                            "target": rel_path,
-                            "message": str(exc),
-                        },
-                    )
-                    continue
-
-                # メディア DL（画像・動画）
-                if has_images or has_video:
-                    media_dir = (
-                        self._store.root_dir
-                        / "bluesky"
-                        / escaped_did
-                        / year
-                        / month
-                        / "media"
-                        / rkey
-                    )
-                    await self._download_media(
-                        item,
-                        media_dir=media_dir,
-                        client=client,
-                        result=result,
-                        rel_path=rel_path,
-                    )
-
-                if progress_callback is not None:
+                if progress_callback is not None and placed_ok is not None:
+                    post = item.get("post", {})
+                    author = post.get("author", {})
+                    post_uri = post.get("uri", "")
+                    rkey = post_uri.rsplit("/", 1)[-1] if "/" in post_uri else ""
+                    bsky_url = f"https://bsky.app/profile/{author.get('handle', '')}/post/{rkey}"
                     progress_callback(total_processed, effective_max, bsky_url)
 
             # 次ページの確認
@@ -521,6 +416,271 @@ class BlueskyIngester:
             result.placed, result.overwritten, result.skipped, result.errors,
         )
         return result, placed_items
+
+    async def _place_single_post(
+        self,
+        item: dict[str, Any],
+        *,
+        is_repost: bool,
+        force: bool,
+        client: ConstrainedClient,
+        result: IngestResult,
+        seen_paths: set[str] | None = None,
+        placed_items: list[dict[str, Any]] | None = None,
+    ) -> bool | None:
+        """単一投稿を source_store に配置する.
+
+        Returns:
+            True: 配置成功, False: 配置失敗, None: スキップ
+        """
+        post = item.get("post", {})
+        post_uri = post.get("uri", "")
+        author = post.get("author", {})
+        record = post.get("record", {})
+
+        did = author.get("did", "")
+        handle_author = author.get("handle", "")
+        rkey = post_uri.rsplit("/", 1)[-1] if "/" in post_uri else ""
+
+        created_at_str = record.get("createdAt", "")
+        try:
+            dt = datetime.fromisoformat(created_at_str.replace("Z", "+00:00"))
+            year = str(dt.year)
+            month = f"{dt.month:02d}"
+        except (ValueError, TypeError):
+            year = "unknown"
+            month = "00"
+
+        escaped_did = _escape_did(did)
+        rel_path = f"bluesky/{escaped_did}/{year}/{month}/{rkey}.json"
+
+        if seen_paths is not None:
+            if rel_path in seen_paths:
+                result.skipped += 1
+                return None
+            seen_paths.add(rel_path)
+
+        dest = self._store.root_dir / rel_path
+        is_overwrite = dest.exists()
+        if is_overwrite and not force:
+            result.skipped += 1
+            return None
+
+        json_data = json.dumps(item, ensure_ascii=False, indent=2)
+        data_bytes = json_data.encode("utf-8")
+
+        text = record.get("text", "")
+        title = _make_title(text)
+
+        embed = record.get("embed") or {}
+        has_images = False
+        has_video = False
+        has_external_link = False
+
+        if isinstance(embed, dict):
+            embed_type = embed.get("$type", "")
+            if "image" in embed_type:
+                has_images = True
+            if "video" in embed_type:
+                has_video = True
+            if "external" in embed_type:
+                has_external_link = True
+            media = embed.get("media", {})
+            if isinstance(media, dict):
+                media_type = media.get("$type", "")
+                if "image" in media_type:
+                    has_images = True
+                if "video" in media_type:
+                    has_video = True
+                if "external" in media_type:
+                    has_external_link = True
+
+        is_reply = "reply" in record if isinstance(record, dict) else False
+        bsky_url = f"https://bsky.app/profile/{handle_author}/post/{rkey}"
+
+        metadata = {
+            "at_uri": post_uri,
+            "source_type": "bluesky",
+            "title": title,
+            "collected_at": now_iso(),
+            "handle": handle_author,
+            "did": did,
+            "rkey": rkey,
+            "url": bsky_url,
+            "created_at": created_at_str,
+            "has_images": has_images,
+            "has_video": has_video,
+            "has_external_link": has_external_link,
+            "is_reply": is_reply,
+            "is_repost": is_repost,
+        }
+
+        try:
+            self._store.place_file(
+                source_type="bluesky",
+                data=data_bytes,
+                rel_path=rel_path,
+                metadata=metadata,
+            )
+            if is_overwrite:
+                result.overwritten += 1
+            else:
+                result.placed += 1
+            if placed_items is not None:
+                placed_items.append(
+                    {**item, "_is_overwrite": is_overwrite},
+                )
+        except Exception as exc:
+            logger.exception("投稿の配置に失敗しました: %s", rel_path)
+            result.errors += 1
+            result.error_details.append(
+                {
+                    "category": "placement",
+                    "target": rel_path,
+                    "message": str(exc),
+                },
+            )
+            return False
+
+        if has_images or has_video:
+            media_dir = (
+                self._store.root_dir
+                / "bluesky"
+                / escaped_did
+                / year
+                / month
+                / "media"
+                / rkey
+            )
+            await self._download_media(
+                item,
+                media_dir=media_dir,
+                client=client,
+                result=result,
+                rel_path=rel_path,
+            )
+
+        return True
+
+    async def ingest_posts(
+        self,
+        urls: list[str],
+        *,
+        client: ConstrainedClient,
+    ) -> IngestResult:
+        """指定 URL の BlueSky 投稿を取得して source_store に配置する.
+
+        仕様: docs/specs/ingesters/bluesky.md
+        """
+        result = IngestResult()
+
+        if not urls:
+            return result
+
+        parsed: list[tuple[str, str]] = []
+        for url in urls:
+            hr = parse_bluesky_url(url)
+            if hr is None:
+                logger.warning("BlueSky URL のパースに失敗しました: %s", url)
+                result.errors += 1
+                result.error_details.append(
+                    {
+                        "category": "metadata_fetch",
+                        "target": url,
+                        "message": "Invalid BlueSky URL format",
+                    },
+                )
+                continue
+            parsed.append(hr)
+
+        if not parsed:
+            return result
+
+        # handle → DID 解決（同一 handle はまとめる）
+        handle_to_did: dict[str, str] = {}
+        unique_handles = {h for h, _ in parsed}
+        for handle in unique_handles:
+            try:
+                params = urlencode({"handle": handle})
+                resolve_url = (
+                    f"{self._appview_url}/xrpc/"
+                    f"com.atproto.identity.resolveHandle?{params}"
+                )
+                resp = await fetch_get(client, resolve_url)
+                data = resp.json()
+                did = data.get("did", "")
+                if did:
+                    handle_to_did[handle] = did
+                else:
+                    logger.warning("DID の解決結果が空です: %s", handle)
+            except Exception as exc:
+                logger.warning("DID 解決に失敗しました: handle=%s, error=%s", handle, exc)
+
+        # 各投稿を取得・配置
+        for handle, rkey in parsed:
+            did = handle_to_did.get(handle)
+            if not did:
+                result.errors += 1
+                result.error_details.append(
+                    {
+                        "category": "metadata_fetch",
+                        "target": f"https://bsky.app/profile/{handle}/post/{rkey}",
+                        "message": f"Failed to resolve DID for handle: {handle}",
+                    },
+                )
+                continue
+
+            at_uri = f"at://{did}/app.bsky.feed.post/{rkey}"
+            try:
+                params = urlencode({"uris": at_uri})
+                posts_url = (
+                    f"{self._appview_url}/xrpc/"
+                    f"app.bsky.feed.getPosts?{params}"
+                )
+                resp = await fetch_get(client, posts_url)
+                data = resp.json()
+                posts = data.get("posts", [])
+            except Exception as exc:
+                logger.warning("投稿の取得に失敗しました: %s, error=%s", at_uri, exc)
+                result.errors += 1
+                result.error_details.append(
+                    {
+                        "category": "metadata_fetch",
+                        "target": f"https://bsky.app/profile/{handle}/post/{rkey}",
+                        "message": str(exc),
+                    },
+                )
+                continue
+
+            if not posts:
+                logger.warning("投稿が見つかりません: %s", at_uri)
+                result.errors += 1
+                result.error_details.append(
+                    {
+                        "category": "metadata_fetch",
+                        "target": f"https://bsky.app/profile/{handle}/post/{rkey}",
+                        "message": "Post not found (may be deleted)",
+                    },
+                )
+                continue
+
+            # getPosts はフィードアイテムではなく post オブジェクトを返すため変換
+            post_obj = posts[0]
+            item: dict[str, Any] = {"post": post_obj, "reason": None}
+
+            await self._place_single_post(
+                item,
+                is_repost=False,
+                force=True,
+                client=client,
+                result=result,
+            )
+
+        logger.info(
+            "BlueSky ingest_posts completed: placed=%d, overwritten=%d, errors=%d",
+            result.placed, result.overwritten, result.errors,
+        )
+        return result
 
     async def _download_media(
         self,

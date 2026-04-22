@@ -32,7 +32,7 @@ def _reset_rag_global_state() -> None:
 
 @pytest.mark.asyncio
 async def test_rag_server_exposes_tools() -> None:
-    """RAG MCPサーバーが18個のツールを公開すること."""
+    """RAG MCPサーバーが20個のツールを公開すること."""
     mod = import_module("rag.server")
     server = mod.mcp
 
@@ -41,7 +41,8 @@ async def test_rag_server_exposes_tools() -> None:
 
     expected = {
         "rag_search", "rag_get_document",
-        "rag_crawl_zenn", "rag_crawl_bluesky",
+        "rag_crawl_zenn", "rag_add_zenn",
+        "rag_crawl_bluesky", "rag_add_bluesky",
         "rag_add_youtube", "rag_crawl_youtube",
         "rag_add_document", "rag_add_journal", "rag_crawl_documents",
         "rag_site_ingest",
@@ -55,12 +56,12 @@ async def test_rag_server_exposes_tools() -> None:
 
 @pytest.mark.asyncio
 async def test_rag_server_tool_count() -> None:
-    """RAG MCPサーバーのツール数が正確に18であること."""
+    """RAG MCPサーバーのツール数が正確に20であること."""
     mod = import_module("rag.server")
     server = mod.mcp
 
     tools = await server.list_tools()
-    assert len(tools) == 18
+    assert len(tools) == 20
 
 
 class TestRagSearchOutput:

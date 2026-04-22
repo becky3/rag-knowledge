@@ -625,6 +625,11 @@ def main() -> None:
     bs_parser.add_argument("--force", action="store_true", default=False, help="上書き再取得モード（既存ファイルを上書き + メディア再DL）")
     _add_output_option(bs_parser)
 
+    # ingest-bluesky: BlueSky 単一投稿取り込み
+    rbs_parser = subparsers.add_parser("ingest-bluesky", help="BlueSky 投稿を URL 指定で取り込み")
+    rbs_parser.add_argument("url", nargs="+", help="BlueSky 投稿の URL（1 件以上）")
+    _add_output_option(rbs_parser)
+
     # crawl-zenn: Zenn 取り込み
     zenn_parser = subparsers.add_parser("crawl-zenn", help="Zenn コンテンツを一括取り込み")
     zenn_parser.add_argument("username", help="Zenn ユーザー名")
@@ -632,6 +637,11 @@ def main() -> None:
     zenn_parser.add_argument("--content-type", choices=["articles", "scraps", "all"], default="all", help="取得対象")
     zenn_parser.add_argument("--force", action="store_true", default=False, help="既存ファイルを上書きする（デフォルト: スキップ）")
     _add_output_option(zenn_parser)
+
+    # ingest-zenn: Zenn 単一コンテンツ取り込み
+    rzenn_parser = subparsers.add_parser("ingest-zenn", help="Zenn コンテンツを URL 指定で取り込み")
+    rzenn_parser.add_argument("url", nargs="+", help="Zenn コンテンツの URL（1 件以上）")
+    _add_output_option(rzenn_parser)
 
     # add-document: 単一ドキュメント取り込み
     adddoc_parser = subparsers.add_parser("add-document", help="ドキュメントファイルをナレッジベースに取り込む")
@@ -727,7 +737,9 @@ def main() -> None:
         "ingest-youtube": run_ingest_youtube,
         "ingest-youtube-playlist": run_ingest_youtube_playlist,
         "crawl-bluesky": run_crawl_bluesky,
+        "ingest-bluesky": run_ingest_bluesky,
         "crawl-zenn": run_crawl_zenn,
+        "ingest-zenn": run_ingest_zenn,
         "add-document": run_add_document,
         "crawl-documents": run_crawl_documents,
         "site-ingest": run_site_ingest,
@@ -2597,6 +2609,90 @@ async def run_crawl_zenn(args: argparse.Namespace) -> None:
         progress_callback=progress_cb,
     )
     _print_ingest_result(ingest_result, pipeline_summary, context=f"ユーザー: {args.username}", json_output=json_out)
+
+
+async def run_ingest_bluesky(args: argparse.Namespace) -> None:
+    """BlueSky 投稿取り込み（URL 指定）."""
+    from .pipeline.ingesters.bluesky import BlueskyIngester
+
+    from py_common_lib.httpx import ConstrainedClient  # safety:allowed
+
+    json_out = _is_json_output(args)
+
+    controller, settings = _build_cli_pipeline_controller()
+
+    bluesky_ingester = BlueskyIngester(
+        controller.source_store,
+        appview_url=settings.rag_bluesky_appview_url,
+        max_posts=settings.rag_bluesky_max_posts,
+        include_reposts=settings.rag_bluesky_include_reposts,
+    )
+
+    try:
+        async with ConstrainedClient(
+            request_timeout=settings.rag_bluesky_request_timeout,
+            request_interval=settings.rag_bluesky_request_interval,
+        ) as client:
+            ingest_result = await bluesky_ingester.ingest_posts(
+                args.url,
+                client=client,
+            )
+    except (ValueError, TypeError) as e:
+        if json_out:
+            _output_error(CliErrorCode.DEPENDENCY_UNAVAILABLE, str(e))
+        logger.error("エラー: %s", e)
+        sys.exit(1)
+
+    if ingest_result.placed == 0 and ingest_result.overwritten == 0 and ingest_result.errors == 0:
+        _print_ingest_result(ingest_result, None, context="BlueSky ingest", json_output=json_out)
+        return
+
+    pipeline_summary = await controller.ingest_and_index(
+        "ingest(bluesky/url)",
+        progress_callback=_output_progress if json_out else None,
+    )
+    _print_ingest_result(ingest_result, pipeline_summary, context="BlueSky ingest", json_output=json_out)
+
+
+async def run_ingest_zenn(args: argparse.Namespace) -> None:
+    """Zenn コンテンツ取り込み（URL 指定）."""
+    from .pipeline.ingesters.zenn import ZennIngester
+
+    from py_common_lib.httpx import ConstrainedClient  # safety:allowed
+
+    json_out = _is_json_output(args)
+
+    controller, settings = _build_cli_pipeline_controller()
+
+    zenn_ingester = ZennIngester(
+        controller.source_store,
+        max_articles=settings.rag_zenn_max_articles,
+    )
+
+    try:
+        async with ConstrainedClient(
+            request_timeout=settings.rag_zenn_request_timeout,
+            request_interval=settings.rag_zenn_request_interval,
+        ) as client:
+            ingest_result = await zenn_ingester.ingest_contents(
+                args.url,
+                client=client,
+            )
+    except (ValueError, TypeError) as e:
+        if json_out:
+            _output_error(CliErrorCode.DEPENDENCY_UNAVAILABLE, str(e))
+        logger.error("エラー: %s", e)
+        sys.exit(1)
+
+    if ingest_result.placed == 0 and ingest_result.overwritten == 0 and ingest_result.errors == 0:
+        _print_ingest_result(ingest_result, None, context="Zenn ingest", json_output=json_out)
+        return
+
+    pipeline_summary = await controller.ingest_and_index(
+        "ingest(zenn/url)",
+        progress_callback=_output_progress if json_out else None,
+    )
+    _print_ingest_result(ingest_result, pipeline_summary, context="Zenn ingest", json_output=json_out)
 
 
 async def run_add_document(args: argparse.Namespace) -> None:

@@ -17,10 +17,11 @@ BlueSky 投稿は**複合ソース**として扱われる。投稿 JSON が親�
 - 投稿内 URL の自動取り込み（site_ingest / YouTube インジェスターへの委譲）
 - 投稿に添付されたメディア（画像・動画）の DL と source_store 配置
 - MCP ツールとしての投稿取り込みインターフェースの提供
+- URL 指定による投稿の取得（`getPosts` API 経由）
 
 スコープ外:
 
-- 他ユーザーの投稿の個別取得（タイムラインに含まれるリポスト・引用を除く）
+- 他ユーザーのタイムライン走査（タイムラインに含まれるリポスト・引用は取得対象）
 - 投稿の作成・編集・削除（読み取り専用）
 - DM（ダイレクトメッセージ）の取得
 - フォロー・いいね等のソーシャルデータの取得
@@ -75,6 +76,7 @@ BlueSky 投稿は**複合ソース**として扱われる。投稿 JSON が親�
 | ツール | 入力 | 振る舞い |
 |--------|------|---------|
 | rag_crawl_bluesky | handle、max_posts（任意）、include_reposts（任意）、force（任意） | 指定ユーザーの BlueSky 投稿を AT Protocol API 経由で取得し、source_store に JSON ファイルとして配置する。通常は既存ファイルと一致する投稿をスキップする。`force` 指定時は全データを上書き再取得する |
+| rag_add_bluesky | urls | 指定 URL の BlueSky 投稿を `getPosts` API 経由で取得し、source_store に配置する。既存ファイルは上書きする。メディア（画像・動画）も DL する。複数 URL を一括指定可能 |
 
 ツール入力パラメータ:
 
@@ -89,11 +91,24 @@ BlueSky 投稿は**複合ソース**として扱われる。投稿 JSON が親�
 
 プレビュー機能は提供しない。BlueSky の投稿一覧は公開情報（`https://bsky.app/profile/{handle}` で閲覧可能）であり、取り込み前の確認は BlueSky 上で直接行える。
 
+#### rag_add_bluesky 入力パラメータ
+
+| パラメータ | 型 | 必須 | 説明 |
+|-----------|-----|------|------|
+| `urls` | 文字列のリスト | はい | BlueSky 投稿の URL（1 件以上）。例: `https://bsky.app/profile/user.bsky.social/post/abc123` |
+
+各 URL から `handle` と `rkey` をパースし、handle ごとに `resolveHandle` API で DID を解決した上で `getPosts` API で投稿データを取得する。同一 handle の投稿は DID 解決を 1 回にまとめる。常に上書き動作（`force=True` 相当）で source_store のファイルを更新する。メディア（画像・動画）も DL する。投稿内 URL の自動取り込みは実行しない（本ツールの目的は対象投稿自体の取得であり、URL 先の取り込みは `crawl_bluesky --force` の責務）。
+
+各 URL は独立して処理し、1 件の失敗が他の URL の処理を妨げない。
+
+ツール出力: 取り込み結果のサマリーテキスト（配置数、上書き数、エラー数。URL 単位の内訳を含む）
+
 ### CLI コマンド
 
 | コマンド | 引数 | 振る舞い |
 |---------|------|---------|
 | `crawl-bluesky` | `handle`、`--max-posts`（任意）、`--include-reposts`（任意）、`--force`（任意） | `rag_crawl_bluesky` と同等の処理を CLI から実行する |
+| `ingest-bluesky` | `url`（1 件以上） | `rag_add_bluesky` と同等の処理を CLI から実行する |
 
 ### 設定項目
 
@@ -441,6 +456,17 @@ embed の `$type` が `app.bsky.embed.recordWithMedia` の場合、メディア�
 | 画像 | `post.embed.images[].fullsize` | `post.embed.media.images[].fullsize` |
 | 動画 | `post.embed.playlist` | `post.embed.media.playlist` |
 
+### 投稿取得フロー（rag_add_bluesky）
+
+1. 各 URL をパースし `handle` と `rkey` を抽出する。URL 形式: `https://bsky.app/profile/{handle}/post/{rkey}`。パース失敗は `errors` に計上しスキップする
+2. handle ごとに `resolveHandle` API で DID を解決する（同一 handle は 1 回のみ）
+3. 各投稿の AT URI を構成する: `at://{did}/app.bsky.feed.post/{rkey}`
+4. `getPosts` API に AT URI を渡して投稿データ（view 形式）を取得する
+5. レスポンスの投稿オブジェクトをフィードアイテム形式（`{"post": ..., "reason": null}`）に変換する
+6. 既存の単一投稿保存ロジック（JSON 配置 + .meta 生成）で source_store に上書き配置する
+7. メディア（画像・動画）が添付されている場合、既存のメディア DL 処理で再 DL する
+8. 全 URL の処理が完了したらパイプライン制御に取り込み完了を通知する
+
 ### --force オプション（上書き再取得）
 
 `force` パラメータが `true` の場合、以下の全てを再取得する:
@@ -599,40 +625,71 @@ AppView のベース URL は設定可能とし、デフォルトは `https://pub
 | `by` | オブジェクト | リポストしたユーザーの情報（`did`、`handle` 等） |
 | `indexedAt` | 文字列 | リポスト日時（ISO 8601） |
 
-#### getRecord エンドポイント（個別レコード取得）
+#### getPosts エンドポイント（個別投稿取得）
 
-タイムライン一括取得（`rag_crawl_bluesky`）では使用しない。AT URI 指定による個別投稿取得が必要になった場合に利用可能なエンドポイントとして記載する。
+投稿の URL 指定取得（`rag_add_bluesky`）で使用する。AT URI 指定で投稿データを view 形式（`getAuthorFeed` と同等の構造）で取得できる。
 
 | 項目 | 内容 |
 |------|------|
-| URL | `{appview_url}/xrpc/com.atproto.repo.getRecord`（デフォルト: `https://public.api.bsky.app/xrpc/com.atproto.repo.getRecord`） |
+| URL | `{appview_url}/xrpc/app.bsky.feed.getPosts`（デフォルト: `https://public.api.bsky.app/xrpc/app.bsky.feed.getPosts`） |
 | メソッド | GET |
-| 認証 | 不要（AppView がプロキシ） |
+| 認証 | 不要（公開 API） |
 
 クエリパラメータ:
 
 | パラメータ | 型 | 必須 | 説明 |
 |-----------|-----|------|------|
-| `repo` | 文字列 | はい | DID またはハンドル（レコード所有者） |
-| `collection` | 文字列 | はい | レコードコレクション（例: `app.bsky.feed.post`） |
-| `rkey` | 文字列 | はい | レコードキー（AT URI の末尾パス） |
-| `cid` | 文字列 | いいえ | 特定バージョンの CID（省略時は最新） |
+| `uris` | 文字列（複数指定可） | はい | AT URI（例: `at://did:plc:xxx/app.bsky.feed.post/rkey`）。DID ベースの AT URI のみ受け付ける（handle ベースは空結果を返す） |
 
 レスポンス構造:
 
 | フィールド | 型 | 説明 |
 |-----------|-----|------|
-| `uri` | 文字列 | AT URI |
-| `cid` | 文字列 | コンテンツ ID |
-| `value` | オブジェクト | レコード本体（投稿レコードと同じ構造） |
+| `posts` | 配列 | 投稿オブジェクトの配列（`getAuthorFeed` の `post` オブジェクトと同等構造。view 版 `embed` を含む） |
+
+`getAuthorFeed` との差異:
+
+- レスポンスはフィードアイテム（`{post, reason}`）ではなく、投稿オブジェクト（`post`）の配列を直接返す
+- `reason` フィールドは含まれない（リポスト判定は不可）
+- URL 指定取得では、取得した投稿 JSON をフィードアイテム形式（`{post: ..., reason: null}`）に変換して保存する
 
 エラーレスポンス:
 
 | HTTP ステータス | 意味 | 対応 |
 |----------------|------|------|
-| 400 | パラメータ不正 | エラーログ出力 |
-| 404（`RecordNotFound`） | レコードが存在しない（削除済み等） | 警告ログ出力 |
+| 400 | パラメータ不正（AT URI 形式エラー等） | エラーログ出力 |
 | 502 / 503 / 504 | サーバーエラー | エラーログ出力、サーキットブレーカーに計上 |
+
+指定した AT URI に対応する投稿が存在しない場合（削除済み等）、`posts` 配列が空で返る（HTTP エラーにはならない）。
+
+#### resolveHandle エンドポイント（ハンドル→DID 解決）
+
+`rag_add_bluesky` で URL から DID を解決するために使用する。
+
+| 項目 | 内容 |
+|------|------|
+| URL | `{appview_url}/xrpc/com.atproto.identity.resolveHandle`（デフォルト: `https://public.api.bsky.app/xrpc/com.atproto.identity.resolveHandle`） |
+| メソッド | GET |
+| 認証 | 不要 |
+
+クエリパラメータ:
+
+| パラメータ | 型 | 必須 | 説明 |
+|-----------|-----|------|------|
+| `handle` | 文字列 | はい | BlueSky ハンドル（例: `user.bsky.social`） |
+
+レスポンス構造:
+
+| フィールド | 型 | 説明 |
+|-----------|-----|------|
+| `did` | 文字列 | 解決された DID（例: `did:plc:xxx`） |
+
+エラーレスポンス:
+
+| HTTP ステータス | 意味 | 対応 |
+|----------------|------|------|
+| 400 | ハンドル形式不正 | エラーログ出力 |
+| 404 | ハンドルが存在しない | エラーメッセージを返す |
 
 #### API 選定理由
 
@@ -680,6 +737,10 @@ AppView のベース URL は設定可能とし、デフォルトは `https://pub
 | site_ingest subprocess が失敗 | エラーをログに記録し、`errors` に `delegation` カテゴリで計上する。BlueSky 投稿の取り込みには影響しない |
 | `--force` 時に上書き投稿の YouTube 再取り込みが `rag_bluesky_force_youtube_reingest` で抑制されている | 上書き投稿の YouTube URL をスキップし、Web URL とメディアのみ再取得する。新規投稿の YouTube URL は常に取り込む |
 | メディアが添付されていない投稿 | メディア DL フェーズをスキップし、JSON のみ配置する（既存動作と同じ） |
+| `rag_add_bluesky` に BlueSky 以外の URL が指定された | バリデーションエラーとして拒否する |
+| `rag_add_bluesky` に指定された URL の投稿が削除済み | `getPosts` が空の `posts` 配列を返す。エラーメッセージとして「投稿が見つかりません」を返す |
+| `rag_add_bluesky` に指定された URL の投稿が未取り込み | 新規配置として扱う（`placed` に計上） |
+| `rag_add_bluesky` で `resolveHandle` が失敗 | エラーメッセージを返す（DID 解決なしには `getPosts` を呼べない） |
 
 以下の `media_download` 系失敗はすべて `partial_failures` に計上する。投稿 JSON 自体の取り込みには影響しない（親成功）:
 

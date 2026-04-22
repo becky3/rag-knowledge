@@ -286,6 +286,35 @@ async def rag_crawl_zenn(
 
 
 @mcp.tool()
+async def rag_add_zenn(
+    urls: list[str],
+    ctx: MCPContext | None = None,
+) -> str:
+    """[rag-knowledge] RAG add Zenn - Zenn コンテンツを URL 指定で取り込み.
+
+    knowledge base, Zenn, add, ingest, single article, single scrap.
+    指定 URL の Zenn 記事またはスクラップを取得し、ナレッジベースに取り込む。
+    既存コンテンツは上書きする。複数 URL を一括指定可能。
+
+    Args:
+        urls: Zenn コンテンツの URL リスト（例: ["https://zenn.dev/alice/articles/my-post"]）
+
+    Returns:
+        取り込み結果のサマリーテキスト
+    """
+    args: list[str] = list(urls)
+
+    try:
+        result = await _run_cli_subprocess("ingest-zenn", args, ctx=ctx)
+        return _format_cli_ingest_result(result, context="Zenn ingest")
+    except CLISubprocessError as e:
+        return e.format_mcp_error("Zenn コンテンツの取り込みに失敗しました")
+    except Exception:
+        logger.exception("Failed to ingest Zenn contents")
+        return "エラー: Zenn コンテンツの取り込みに失敗しました"
+
+
+@mcp.tool()
 async def rag_crawl_bluesky(
     handle: str,
     max_posts: int | None = None,
@@ -326,6 +355,35 @@ async def rag_crawl_bluesky(
             "Failed to crawl BlueSky posts for handle: %s", handle
         )
         return f"エラー: BlueSky 投稿の取り込みに失敗しました（ハンドル: {handle}）"
+
+
+@mcp.tool()
+async def rag_add_bluesky(
+    urls: list[str],
+    ctx: MCPContext | None = None,
+) -> str:
+    """[rag-knowledge] RAG add BlueSky - BlueSky 投稿を URL 指定で取り込み.
+
+    knowledge base, BlueSky, add, ingest, single post.
+    指定 URL の BlueSky 投稿を取得し、ナレッジベースに取り込む。
+    メディア（画像・動画）も DL する。既存投稿は上書きする。複数 URL を一括指定可能。
+
+    Args:
+        urls: BlueSky 投稿の URL リスト（例: ["https://bsky.app/profile/user.bsky.social/post/abc123"]）
+
+    Returns:
+        取り込み結果のサマリーテキスト
+    """
+    args: list[str] = list(urls)
+
+    try:
+        result = await _run_cli_subprocess("ingest-bluesky", args, ctx=ctx)
+        return _format_cli_ingest_result(result, context="BlueSky ingest")
+    except CLISubprocessError as e:
+        return e.format_mcp_error("BlueSky 投稿の取り込みに失敗しました")
+    except Exception:
+        logger.exception("Failed to ingest BlueSky posts")
+        return "エラー: BlueSky 投稿の取り込みに失敗しました"
 
 
 @mcp.tool()
