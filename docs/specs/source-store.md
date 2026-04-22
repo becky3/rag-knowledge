@@ -120,7 +120,7 @@ source_store 層は「このファイルは独立ソースか？」「どの sou
 
 # Git・ロックファイル
 /.gitignore
-/.ingest.lock
+/.write.lock
 /.rebuild.lock
 .git/
 
@@ -140,7 +140,7 @@ desktop.ini
 
 - 先頭 `/` でルート直下限定にアンカリングする。
   例: `/.gitignore` はルート直下の `.gitignore` のみを除外し、ユーザー文書内の同名ファイル（`local/myproject/.gitignore`）は独立ソースとして扱う。
-  上記パターンでは `/metadata.db*` / `/.gitignore` / `/.ingest.lock` / `/.rebuild.lock` / `/aozora/catalog.csv(.meta)` が該当
+  上記パターンでは `/metadata.db*` / `/.gitignore` / `/.write.lock` / `/.rebuild.lock` / `/aozora/catalog.csv(.meta)` が該当
 - 末尾 `/` でディレクトリ配下を表現する（例: `.git/` は任意階層の `.git` ディレクトリ配下を除外）
 - アンカーなしパターンは任意階層でファイル名マッチする。上記パターンでは `*.meta` / `.DS_Store` / `Thumbs.db` / `desktop.ini` が該当
 

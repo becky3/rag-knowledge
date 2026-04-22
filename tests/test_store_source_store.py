@@ -272,13 +272,13 @@ class TestListFiles:
 
     def test_excludes_lock_files(self, store: SourceStore) -> None:
         """ロックファイルはリストに含まれない."""
-        (store.root_dir / ".ingest.lock").write_bytes(b"")
+        (store.root_dir / ".write.lock").write_bytes(b"")
         (store.root_dir / ".rebuild.lock").write_bytes(b"")
         store.place_file(source_type="local", data=b"a", rel_path="local/a.md")
 
         files = store.list_files()
         paths = [f.as_posix() for f in files]
-        assert ".ingest.lock" not in paths
+        assert ".write.lock" not in paths
         assert ".rebuild.lock" not in paths
         assert "local/a.md" in paths
 
@@ -382,7 +382,7 @@ class TestListFiles:
             },
         )
         # 除外されるべきファイル群
-        (store.root_dir / ".ingest.lock").write_bytes(b"")
+        (store.root_dir / ".write.lock").write_bytes(b"")
         (store.root_dir / ".rebuild.lock").write_bytes(b"")
         catalog = store.root_dir / "aozora" / "catalog.csv"
         catalog.parent.mkdir(parents=True, exist_ok=True)
@@ -585,7 +585,7 @@ class TestIsSourceFile:
         assert is_source_file("metadata.db-wal") is False
         assert is_source_file("metadata.db-shm") is False
         assert is_source_file(".gitignore") is False
-        assert is_source_file(".ingest.lock") is False
+        assert is_source_file(".write.lock") is False
         assert is_source_file(".rebuild.lock") is False
 
     def test_user_files_with_same_name_not_excluded(self) -> None:
@@ -596,7 +596,7 @@ class TestIsSourceFile:
         from rag.store.source_store import is_source_file
 
         assert is_source_file("local/myproject/.gitignore") is True
-        assert is_source_file("local/foo/.ingest.lock") is True
+        assert is_source_file("local/foo/.write.lock") is True
         assert is_source_file("local/bar/metadata.db") is True
 
     def test_git_directory_excluded_any_depth(self) -> None:
@@ -749,7 +749,7 @@ class TestDetectSourceType:
         from rag.store.source_store import detect_source_type
 
         with pytest.raises(ValueError, match="未知の source_type"):
-            detect_source_type(".ingest.lock")
+            detect_source_type(".write.lock")
         with pytest.raises(ValueError, match="未知の source_type"):
             detect_source_type("unknown/foo.md")
         with pytest.raises(ValueError, match="未知の source_type"):

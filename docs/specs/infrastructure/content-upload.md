@@ -52,20 +52,36 @@ MCP は JSON ベースのテキストプロトコルであるため、ツール�
 - **エラーレスポンスの安全性**: エラーレスポンスにスタックトレース、内部ファイルパス、フレームワークバージョン等の内部情報を含めない
 - **依存追加**: `python-multipart` パッケージが必要（Starlette の `multipart/form-data` パースに使用）
 
-### インジェスト排他制御の制約
+### 書き込み排他制御の制約
 
-- **適用対象**: 全インジェスト操作に適用する。Upload HTTP API（`/upload/document`、`/upload/journal`）、MCP ツール（`rag_add_document`、`rag_add_journal`）、CLI 直接実行の全てが対象
+- **適用対象**: 全書き込み操作（ingest / delete 等）に適用する。Upload HTTP API（`/upload/document`、`/upload/journal`）、MCP ツール（`rag_add_document`、`rag_add_journal`）、CLI 直接実行の全てが対象
 - **ロック方式**: OS ファイルロックによるプロセス間排他制御。Unix では `fcntl.flock`、Windows では `msvcrt.locking` を使用する。
-  ロック取得処理の実施主体は CLI とし、MCP サーバー（`server.py`）からのインジェストも CLI サブプロセスを起動して同一のロック取得処理を利用する。
+  ロック取得処理の実施主体は CLI とし、MCP サーバー（`server.py`）からの書き込みも CLI サブプロセスを起動して同一のロック取得処理を利用する。
   `server.py` 自身はロックファイルを直接操作しない
-- **ロックファイル**: source_store ディレクトリ直下に配置する。インジェストロックと rebuild ロックでそれぞれ別のロックファイルを使用する
+- **ロックファイル**: source_store ディレクトリ直下に配置する。`write_lock`（書き込みロック、ファイル名 `.write.lock`）と `rebuild_lock`（再構築ロック、ファイル名 `.rebuild.lock`）でそれぞれ別のロックファイルを使用する
 - **ノンブロッキング**: CLI はロック取得を試み（`LOCK_NB` / `LK_NBLCK`）、取得できない場合は待機せず即座にエラーを返却する。
-  CLI はロック競合時に JSON Lines の error メッセージ（`type: "error"`）にロック競合である旨を含め、exit code 1 で終了する。
-  `server.py` は CLI サブプロセスの error メッセージからロック競合を判定し、Upload HTTP API では HTTP 409、MCP ツールではエラーメッセージとして返却する。
+  CLI はロック競合時に JSON Lines の error メッセージ（`type: "error"`）にロック競合コード（`LOCK_CONFLICT`）とロック種別（`write` / `rebuild`）を含め、exit code 1 で終了する。
+  `server.py` は CLI サブプロセスの error メッセージからロック競合を判定し、Upload HTTP API ではロック種別に応じた HTTP 応答（`write` 競合 = 429、`rebuild` 競合 = 503）+ `Retry-After` ヘッダ、MCP ツールではロック種別に応じたエラーメッセージとして返却する。
   CLI 直接実行では標準エラー出力 + exit code 1 を返す
+- **ロック種別の伝搬**: CLI のロック競合エラーには種別識別子（`write` または `rebuild`）を含める。この識別子は Upload HTTP API の HTTP ステータスコード・`Retry-After` 値の選択と、MCP ツールのエラーメッセージの切替に使用する。識別子の意味は「取得失敗したロック」であり、外部プロセスの保持状態を示す
+- **lock_type 不明時のフォールバック**: CLI エラー応答に `details.lock_type` が含まれない
+  （低レベル `FileLock` 直接利用で `kind=None` の場合、または旧バージョン CLI との後方互換）、
+  もしくは不正値（`write`/`rebuild` 以外）の場合、Upload HTTP API は `write` 相当として
+  HTTP 429 + `rag_upload_retry_after_write_sec` を返す。
+  短めの Retry-After を返すことで安全側に倒す（長時間待機を誤って強いるリスクを避ける）
 - **ステールロック対策**: OS ファイルロックはプロセス終了時（SEGFAULT 含む異常終了を含む）に OS が自動解放するため、明示的なステールロック対策は不要。OS クラッシュ・電源断の場合もロックはカーネルメモリ上のみに存在し、再起動後にクリーンな状態になる
 - **Advisory lock の制約**: OS ファイルロックは advisory lock（協調ロック）であり、ロック取得のコードを経由しないアクセスは防げない。本システムでは全書き込み操作が CLI 経由（MCP サブプロセス + CLI 直接実行）のため問題ない
-- **rebuild との独立性**: インジェストロックと rebuild ロックはそれぞれ別のロックファイルを使用し、独立して動作する。rebuild 実行中のインジェスト、およびインジェスト中の rebuild は、それぞれのロックで個別に制御される
+- **rebuild との相互排他（非対称設計 + プリチェック）**: 書き込み操作（ingest / delete 等）と
+  rebuild 操作は相互排他で動作する。ロック保持戦略は非対称で、書き込み系 CLI は `write_lock`
+  のみ保持（`rebuild_lock` はプリチェックで取得 → 即 release）、`rebuild` は `rebuild_lock` と
+  `write_lock` の両方を保持する。rebuild は自分のロック（`rebuild_lock`）を先に取得し、
+  その後 `write_lock` を取得する。この設計により、rebuild 実行中の書き込み、および
+  書き込み実行中の rebuild はそれぞれロック競合として即失敗し、かつ kind 判定は全パターンで
+  正確になる:
+  - rebuild 保持中 → 書き込みが来た場合: 書き込みのプリチェックで `rebuild_lock` 取得失敗 → `kind="rebuild"` ✓
+  - 書き込み保持中 → rebuild が来た場合: rebuild の `write_lock` 取得で失敗 → `kind="write"` ✓
+  - 書き込み同士の競合: 後発の `write_lock` 取得で失敗 → `kind="write"` ✓
+  - rebuild 同士の競合: 後発 rebuild の `rebuild_lock` 取得で失敗 → `kind="rebuild"` ✓
 
 ## インターフェース
 
@@ -177,20 +193,31 @@ MCP サーバー（HTTP モード）に `custom_route()` で併設する HTTP �
 
 #### HTTP ステータスコード
 
-| ステータス | 条件 |
-|-----------|------|
-| 200 | 成功（インジェスト完了） |
-| 400 | バリデーションエラー（不正なパラメータ、未対応拡張子、必須フィールド未指定等） |
-| 401 | 認証失敗（API キー不正・未指定） |
-| 409 | 競合（インジェストロック取得失敗、または `upload_mode=fail` で同名ファイル存在） |
-| 413 | ファイルサイズ上限超過 |
-| 500 | 内部エラー（インジェスト処理中の予期しないエラー） |
+| ステータス | 条件 | `Retry-After` |
+|-----------|------|---------------|
+| 200 | 成功（書き込み完了） | なし |
+| 400 | バリデーションエラー（不正なパラメータ、未対応拡張子、必須フィールド未指定等） | なし |
+| 401 | 認証失敗（API キー不正・未指定） | なし |
+| 409 | `upload_mode=fail` で同名ファイル存在 | なし |
+| 413 | ファイルサイズ上限超過 | なし |
+| 429 | `write_lock` 取得失敗（別の書き込みが実行中） | `rag_upload_retry_after_write_sec` |
+| 500 | 内部エラー（書き込み処理中の予期しないエラー） | なし |
+| 503 | `rebuild_lock` 取得失敗（再構築処理が実行中） | `rag_upload_retry_after_rebuild_sec` |
+
+エラー応答は `Retry-After` ヘッダを付与する場合でも、ボディには再試行を促す文言を含めない。再試行タイミングの案内は `Retry-After` ヘッダに一本化し、メッセージは状態の事実のみを伝える。
+
+| ロック種別 | 応答メッセージ |
+|-----------|--------------|
+| `write_lock`（書き込みロック） | `"別の取り込みが実行中のため受け付けられません"` |
+| `rebuild_lock`（再構築ロック） | `"再構築処理中のため受け付けられません"` |
 
 ### 設定項目
 
 | 設定項目 | 層 | 設計意図 |
 |---------|-----|---------|
 | `rag_upload_max_file_size_mb` | 共通設定値 | Upload API のファイルサイズ上限（MB）。運用環境のメモリ容量に応じて調整する |
+| `rag_upload_retry_after_write_sec` | 共通設定値 | `write_lock` 競合時の `Retry-After` ヘッダ値（秒）。クライアントの即リトライを抑制するためのヒント。書き込み処理は通常短時間で完了する前提で設定する |
+| `rag_upload_retry_after_rebuild_sec` | 共通設定値 | `rebuild_lock` 競合時の `Retry-After` ヘッダ値（秒）。再構築は長時間（数十分〜数時間）動作するため、書き込み側より長い間隔を設定する |
 
 ## コンポーネント構成
 
@@ -293,9 +320,9 @@ MCP ツールはクライアントからコンテンツを文字列で受け取�
 | `src/rag/cli.py` | CLI コマンド。`--stdin` オプションによる stdin 入力、`--output json` による JSON Lines 出力をサポート |
 | `src/rag/pipeline/ingesters/local.py` | Local インジェスター（ドキュメント取り込み） |
 | `src/rag/pipeline/ingesters/journal.py` | Journal インジェスター（ジャーナル取り込み） |
-| `src/rag/infrastructure/file_lock.py` | OS ファイルロックによるプロセス間排他制御（インジェストロック・rebuild ロック） |
-| `src/rag/config.py` | `rag_upload_max_file_size_mb` 設定の定義 |
-| `config.toml` | ファイルサイズ上限のデフォルト値 |
+| `src/rag/infrastructure/file_lock.py` | OS ファイルロックの 2 層構造。低レベルの `FileLock`（単一ロックファイルへのノンブロッキング取得 primitive）と、その上で `write_lock` と `rebuild_lock` の非対称保持戦略を実装する `PipelineLock`（合成ロック、`ingest_lock` / `rebuild_lock` ファクトリ関数の戻り値）を提供する |
+| `src/rag/config.py` | `rag_upload_max_file_size_mb` / `rag_upload_retry_after_write_sec` / `rag_upload_retry_after_rebuild_sec` 設定の定義 |
+| `config.toml` | 上記設定のデフォルト値 |
 
 ## エッジケース
 
@@ -315,29 +342,35 @@ MCP ツールはクライアントからコンテンツを文字列で受け取�
 
 ### Upload HTTP API
 
+HTTP ステータス昇順:
+
 | ケース | 振る舞い |
 |--------|---------|
-| `X-API-Key` ヘッダーが未指定 | HTTP 401 を返す |
-| `X-API-Key` の値が不正 | HTTP 401 を返す |
 | `file` フィールドが未指定 | HTTP 400 を返す |
-| アップロードファイルのサイズが上限超過 | HTTP 413 を返す |
 | アップロードファイルが 0 バイト | HTTP 400 を返す |
-| インジェストロック取得失敗（別のインジェスト実行中） | HTTP 409 を返す（エラーメッセージに「別のインジェストが実行中」である旨を含める） |
-| `upload_mode=fail` で同名ファイルが既に存在 | HTTP 409 を返す |
 | アップロードファイルの拡張子が未対応 | HTTP 400 を返す（対応拡張子の一覧をエラーメッセージに含める） |
 | `/upload/journal` で `title` または `repository` が未指定 | HTTP 400 を返す |
-| stdio モードで Upload API にアクセス | エンドポイント自体が存在しないため、接続不可 |
-| パイプライン実行中にエラーが発生 | HTTP 500 を返す。インジェストロックは確実に解放する |
+| `X-API-Key` ヘッダーが未指定 | HTTP 401 を返す |
+| `X-API-Key` の値が不正 | HTTP 401 を返す |
+| `upload_mode=fail` で同名ファイルが既に存在 | HTTP 409 を返す |
+| アップロードファイルのサイズが上限超過 | HTTP 413 を返す |
+| `write_lock` 取得失敗（別の書き込みが実行中） | HTTP 429 を返す。`Retry-After: <rag_upload_retry_after_write_sec>` を付与する。メッセージには取り込み処理中である事実のみを記述し、再試行を促す文言を含めない |
+| パイプライン実行中にエラーが発生 | HTTP 500 を返す。`write_lock` は確実に解放する |
+| `rebuild_lock` 取得失敗（再構築処理が実行中） | HTTP 503 を返す。`Retry-After: <rag_upload_retry_after_rebuild_sec>` を付与する。メッセージには再構築処理中である事実のみを記述し、再試行を促す文言を含めない |
+| stdio モードで Upload API にアクセス | エンドポイント自体が存在しないため、接続不可（HTTP 応答なし） |
 
-### インジェスト排他制御
+### 書き込み排他制御
 
 | ケース | 振る舞い |
 |--------|---------|
-| MCP サブプロセスと CLI 直接実行が同時にインジェストを試みる | 先にファイルロックを取得した方が実行され、後発はエラーを返す |
-| MCP ツールと Upload API が同時にインジェストを試みる | 先にファイルロックを取得した方が実行され、後発はエラーを返す |
-| インジェスト処理中にプロセスが異常終了（SEGFAULT 等） | OS がファイルロックを自動解放する。次の操作でロック取得が可能 |
-| インジェスト処理中に例外が発生 | ロックは確実に解放する（finally ブロック等） |
-| rebuild 中にインジェストを実行 | インジェストロックと rebuild ロックは別のロックファイルを使用し独立しているため、両方が同時に実行される可能性がある。パイプラインレベルでの整合性はパイプライン制御側の責務 |
+| MCP サブプロセスと CLI 直接実行が同時に書き込みを試みる | 先にファイルロックを取得した方が実行され、後発はエラーを返す |
+| MCP ツールと Upload API が同時に書き込みを試みる | 先にファイルロックを取得した方が実行され、後発はエラーを返す |
+| 書き込み処理中にプロセスが異常終了（SEGFAULT 等） | OS がファイルロックを自動解放する。次の操作でロック取得が可能 |
+| 書き込み処理中に例外が発生 | ロックは確実に解放する（finally ブロック等） |
+| rebuild 中に書き込みを実行 | 書き込み系 CLI は `rebuild_lock` をプリチェックで取得試行し、rebuild が保持中のため即失敗する。`LockAcquisitionError.kind="rebuild"` として返り、Upload API は HTTP 503 + `Retry-After: <rag_upload_retry_after_rebuild_sec>` を返す |
+| 書き込み中に rebuild を実行 | rebuild CLI は `rebuild_lock` → `write_lock` の順で両方取得するため、書き込み系 CLI が保持中の `write_lock` を取得できず即失敗する。`LockAcquisitionError.kind="write"` として返り、CLI は標準エラー出力 + exit code 1 を返す |
+| 書き込み同士が同時に実行される | 後発の書き込み系 CLI は `rebuild_lock` プリチェック成功後に `write_lock` 取得で失敗する。`LockAcquisitionError.kind="write"` で失敗し、Upload API は HTTP 429 + `Retry-After: <rag_upload_retry_after_write_sec>` を返す（非対称設計 + プリチェックにより書き込み同士は正しく判定される） |
+| rebuild 同士が同時に実行される | 後発の rebuild はステップ①で `rebuild_lock` を取得できず即失敗する（rebuild の取得順序: `rebuild_lock` → `write_lock`）。`LockAcquisitionError.kind="rebuild"` が返り、CLI 直接実行では標準エラー出力 + exit code 1。Upload API 経由では発生しない（Upload API は書き込み系のみ起動）。運用上 rebuild は人間が明示起動するため稀 |
 
 ## 関連ドキュメント
 

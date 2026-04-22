@@ -27,6 +27,8 @@ def _default_mock_settings(**overrides: object) -> MagicMock:
     """テスト用のデフォルト設定モックを生成する."""
     defaults: dict[str, object] = {
         "rag_upload_max_file_size_mb": 50,
+        "rag_upload_retry_after_write_sec": 30,
+        "rag_upload_retry_after_rebuild_sec": 300,
         "rag_document_supported_extensions": ".md,.txt,.pdf,.adoc",
     }
     defaults.update(overrides)
@@ -326,11 +328,59 @@ class TestUploadJournalIntegration:
 
 
 class TestIngestLockConflict:
-    """CLI ファイルロック競合時の 409 レスポンステスト."""
+    """CLI ファイルロック競合時の HTTP 応答テスト（修正版案I: 429 / 503）."""
 
     @pytest.mark.asyncio
-    async def test_document_lock_conflict_returns_409(self, client: httpx.AsyncClient) -> None:
-        """ドキュメントアップロード時にロック競合で 409 を返す."""
+    async def test_document_ingest_lock_returns_429_with_retry_after(
+        self, client: httpx.AsyncClient,
+    ) -> None:
+        """ingest ロック競合時に 429 + Retry-After=30 + 取り込み中メッセージ."""
+        with patch(
+            "rag.server._run_cli_subprocess",
+            new_callable=AsyncMock,
+            side_effect=CLISubprocessError(
+                "ロック競合", code="LOCK_CONFLICT", lock_type="write",
+            ),
+        ):
+            resp = await client.post(
+                "/upload/document",
+                files={"file": ("test.md", b"content", "text/plain")},
+            )
+
+        assert resp.status_code == 429
+        assert resp.headers["Retry-After"] == "30"
+        message = resp.json()["message"]
+        assert "別の取り込みが実行中" in message
+        assert "再試行" not in message
+
+    @pytest.mark.asyncio
+    async def test_document_rebuild_lock_returns_503_with_retry_after(
+        self, client: httpx.AsyncClient,
+    ) -> None:
+        """rebuild ロック競合時に 503 + Retry-After=300 + 再構築中メッセージ."""
+        with patch(
+            "rag.server._run_cli_subprocess",
+            new_callable=AsyncMock,
+            side_effect=CLISubprocessError(
+                "ロック競合", code="LOCK_CONFLICT", lock_type="rebuild",
+            ),
+        ):
+            resp = await client.post(
+                "/upload/document",
+                files={"file": ("test.md", b"content", "text/plain")},
+            )
+
+        assert resp.status_code == 503
+        assert resp.headers["Retry-After"] == "300"
+        message = resp.json()["message"]
+        assert "再構築処理中" in message
+        assert "再試行" not in message
+
+    @pytest.mark.asyncio
+    async def test_document_lock_conflict_without_lock_type_defaults_to_ingest(
+        self, client: httpx.AsyncClient,
+    ) -> None:
+        """lock_type 欠落時は安全側（ingest 相当の 429 + 短め Retry-After）."""
         with patch(
             "rag.server._run_cli_subprocess",
             new_callable=AsyncMock,
@@ -341,16 +391,20 @@ class TestIngestLockConflict:
                 files={"file": ("test.md", b"content", "text/plain")},
             )
 
-        assert resp.status_code == 409
-        assert "インジェスト" in resp.json()["message"]
+        assert resp.status_code == 429
+        assert resp.headers["Retry-After"] == "30"
 
     @pytest.mark.asyncio
-    async def test_journal_lock_conflict_returns_409(self, client: httpx.AsyncClient) -> None:
-        """ジャーナルアップロード時にロック競合で 409 を返す."""
+    async def test_journal_ingest_lock_returns_429_with_retry_after(
+        self, client: httpx.AsyncClient,
+    ) -> None:
+        """ジャーナル: ingest ロック競合時に 429 + Retry-After=30."""
         with patch(
             "rag.server._run_cli_subprocess",
             new_callable=AsyncMock,
-            side_effect=CLISubprocessError("ロック競合", code="LOCK_CONFLICT"),
+            side_effect=CLISubprocessError(
+                "ロック競合", code="LOCK_CONFLICT", lock_type="write",
+            ),
         ):
             resp = await client.post(
                 "/upload/journal",
@@ -358,12 +412,73 @@ class TestIngestLockConflict:
                 data={"title": "Test", "repository": "test-repo"},
             )
 
-        assert resp.status_code == 409
-        assert "インジェスト" in resp.json()["message"]
+        assert resp.status_code == 429
+        assert resp.headers["Retry-After"] == "30"
+        assert "別の取り込みが実行中" in resp.json()["message"]
+
+    @pytest.mark.asyncio
+    async def test_journal_rebuild_lock_returns_503_with_retry_after(
+        self, client: httpx.AsyncClient,
+    ) -> None:
+        """ジャーナル: rebuild ロック競合時に 503 + Retry-After=300."""
+        with patch(
+            "rag.server._run_cli_subprocess",
+            new_callable=AsyncMock,
+            side_effect=CLISubprocessError(
+                "ロック競合", code="LOCK_CONFLICT", lock_type="rebuild",
+            ),
+        ):
+            resp = await client.post(
+                "/upload/journal",
+                files={"file": ("test.md", b"content", "text/plain")},
+                data={"title": "Test", "repository": "test-repo"},
+            )
+
+        assert resp.status_code == 503
+        assert resp.headers["Retry-After"] == "300"
+        assert "再構築処理中" in resp.json()["message"]
+
+    @pytest.mark.asyncio
+    async def test_retry_after_reflects_settings(
+        self, client: httpx.AsyncClient,
+    ) -> None:
+        """Retry-After 値は設定（rag_upload_retry_after_*）を反映する."""
+        custom_settings = _default_mock_settings(
+            rag_upload_retry_after_write_sec=45,
+            rag_upload_retry_after_rebuild_sec=600,
+        )
+        with patch("rag.server.get_settings", return_value=custom_settings):
+            with patch(
+                "rag.server._run_cli_subprocess",
+                new_callable=AsyncMock,
+                side_effect=CLISubprocessError(
+                    "ロック競合", code="LOCK_CONFLICT", lock_type="write",
+                ),
+            ):
+                resp = await client.post(
+                    "/upload/document",
+                    files={"file": ("test.md", b"c", "text/plain")},
+                )
+            assert resp.status_code == 429
+            assert resp.headers["Retry-After"] == "45"
+
+            with patch(
+                "rag.server._run_cli_subprocess",
+                new_callable=AsyncMock,
+                side_effect=CLISubprocessError(
+                    "ロック競合", code="LOCK_CONFLICT", lock_type="rebuild",
+                ),
+            ):
+                resp = await client.post(
+                    "/upload/document",
+                    files={"file": ("test.md", b"c", "text/plain")},
+                )
+            assert resp.status_code == 503
+            assert resp.headers["Retry-After"] == "600"
 
     @pytest.mark.asyncio
     async def test_document_cli_error_returns_500(self, client: httpx.AsyncClient) -> None:
-        """ドキュメントアップロード時に CLI エラーで 500 を返す."""
+        """ドキュメントアップロード時に CLI エラー（非ロック）で 500 を返す."""
         with patch(
             "rag.server._run_cli_subprocess",
             new_callable=AsyncMock,
@@ -378,7 +493,7 @@ class TestIngestLockConflict:
 
     @pytest.mark.asyncio
     async def test_journal_cli_error_returns_500(self, client: httpx.AsyncClient) -> None:
-        """ジャーナルアップロード時に CLI エラーで 500 を返す."""
+        """ジャーナルアップロード時に CLI エラー（非ロック）で 500 を返す."""
         with patch(
             "rag.server._run_cli_subprocess",
             new_callable=AsyncMock,
@@ -400,14 +515,16 @@ class TestMCPToolIngestLock:
     """既存 MCP ツール（rag_add_document / rag_add_journal）のロック競合テスト."""
 
     @pytest.mark.asyncio
-    async def test_rag_add_document_lock_conflict(self) -> None:
-        """rag_add_document がロック競合時にエラーメッセージを返す."""
+    async def test_rag_add_document_ingest_lock_returns_ingest_message(self) -> None:
+        """rag_add_document: ingest ロック競合時に取り込み中メッセージ."""
         from rag.server import rag_add_document
 
         with patch(
             "rag.server._run_cli_subprocess",
             new_callable=AsyncMock,
-            side_effect=CLISubprocessError("ロック競合", code="LOCK_CONFLICT"),
+            side_effect=CLISubprocessError(
+                "ロック競合", code="LOCK_CONFLICT", lock_type="write",
+            ),
         ):
             result = await rag_add_document(
                 content="test",
@@ -416,17 +533,42 @@ class TestMCPToolIngestLock:
                 upload_mode="fail",
             )
 
-        assert "ロックを保持しています" in result
+        assert "別の取り込みが実行中" in result
+        assert "再試行" not in result
 
     @pytest.mark.asyncio
-    async def test_rag_add_journal_lock_conflict(self) -> None:
-        """rag_add_journal がロック競合時にエラーメッセージを返す."""
+    async def test_rag_add_document_rebuild_lock_returns_rebuild_message(self) -> None:
+        """rag_add_document: rebuild ロック競合時に再構築中メッセージ."""
+        from rag.server import rag_add_document
+
+        with patch(
+            "rag.server._run_cli_subprocess",
+            new_callable=AsyncMock,
+            side_effect=CLISubprocessError(
+                "ロック競合", code="LOCK_CONFLICT", lock_type="rebuild",
+            ),
+        ):
+            result = await rag_add_document(
+                content="test",
+                filename="test.md",
+                encoding="text",
+                upload_mode="fail",
+            )
+
+        assert "再構築処理中" in result
+        assert "再試行" not in result
+
+    @pytest.mark.asyncio
+    async def test_rag_add_journal_ingest_lock_returns_ingest_message(self) -> None:
+        """rag_add_journal: ingest ロック競合時に取り込み中メッセージ."""
         from rag.server import rag_add_journal
 
         with patch(
             "rag.server._run_cli_subprocess",
             new_callable=AsyncMock,
-            side_effect=CLISubprocessError("ロック競合", code="LOCK_CONFLICT"),
+            side_effect=CLISubprocessError(
+                "ロック競合", code="LOCK_CONFLICT", lock_type="write",
+            ),
         ):
             result = await rag_add_journal(
                 title="Test",
@@ -435,7 +577,30 @@ class TestMCPToolIngestLock:
                 repository="test-repo",
             )
 
-        assert "ロックを保持しています" in result
+        assert "別の取り込みが実行中" in result
+        assert "再試行" not in result
+
+    @pytest.mark.asyncio
+    async def test_rag_add_journal_rebuild_lock_returns_rebuild_message(self) -> None:
+        """rag_add_journal: rebuild ロック競合時に再構築中メッセージ."""
+        from rag.server import rag_add_journal
+
+        with patch(
+            "rag.server._run_cli_subprocess",
+            new_callable=AsyncMock,
+            side_effect=CLISubprocessError(
+                "ロック競合", code="LOCK_CONFLICT", lock_type="rebuild",
+            ),
+        ):
+            result = await rag_add_journal(
+                title="Test",
+                content="body",
+                filename="test.md",
+                repository="test-repo",
+            )
+
+        assert "再構築処理中" in result
+        assert "再試行" not in result
 
 
 # --- レスポンス形式テスト ---

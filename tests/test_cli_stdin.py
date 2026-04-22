@@ -145,12 +145,14 @@ class TestAddJournalStdinExecution:
         )
 
         mock_lock = MagicMock()
-        mock_lock.acquire.side_effect = LockAcquisitionError("locked")
+        mock_lock.acquire.side_effect = LockAcquisitionError(
+            Path("/tmp/test_store/.write.lock"), kind="write",
+        )
 
         with (
             patch("sys.stdin", io.StringIO("some content")),
             patch("rag.cli._build_cli_pipeline_controller") as mock_ctrl,
-            patch("rag.infrastructure.file_lock.ingest_lock", return_value=mock_lock),
+            patch("rag.infrastructure.file_lock.write_lock", return_value=mock_lock),
         ):
             mock_controller = MagicMock()
             mock_controller.source_store.root_dir = Path("/tmp/test_store")
@@ -287,12 +289,14 @@ class TestAddDocumentStdinExecution:
         )
 
         mock_lock = MagicMock()
-        mock_lock.acquire.side_effect = LockAcquisitionError("locked")
+        mock_lock.acquire.side_effect = LockAcquisitionError(
+            Path("/tmp/test_store/.write.lock"), kind="write",
+        )
 
         with (
             patch("sys.stdin", io.StringIO("some content")),
             patch("rag.cli._build_cli_pipeline_controller") as mock_ctrl,
-            patch("rag.infrastructure.file_lock.ingest_lock", return_value=mock_lock),
+            patch("rag.infrastructure.file_lock.write_lock", return_value=mock_lock),
         ):
             mock_controller = MagicMock()
             mock_controller.source_store.root_dir = Path("/tmp/test_store")
@@ -332,7 +336,7 @@ class TestAddDocumentStdinExecution:
         with (
             patch("sys.stdin", io.StringIO("some content")),
             patch("rag.cli._build_cli_pipeline_controller") as mock_ctrl,
-            patch("rag.infrastructure.file_lock.ingest_lock", return_value=mock_lock),
+            patch("rag.infrastructure.file_lock.write_lock", return_value=mock_lock),
             patch("rag.pipeline.ingesters.local.LocalIngester", mock_ingester),
         ):
             mock_controller = MagicMock()
@@ -405,7 +409,7 @@ class TestAddDocumentFilenamePriority:
 
         with (
             patch("rag.cli._build_cli_pipeline_controller") as mock_ctrl,
-            patch("rag.infrastructure.file_lock.ingest_lock", return_value=mock_lock),
+            patch("rag.infrastructure.file_lock.write_lock", return_value=mock_lock),
             patch("rag.pipeline.ingesters.local.LocalIngester", mock_ingester),
         ):
             mock_controller = MagicMock()
@@ -446,7 +450,7 @@ class TestAddDocumentFilenamePriority:
 
         with (
             patch("rag.cli._build_cli_pipeline_controller") as mock_ctrl,
-            patch("rag.infrastructure.file_lock.ingest_lock", return_value=mock_lock),
+            patch("rag.infrastructure.file_lock.write_lock", return_value=mock_lock),
             patch("rag.pipeline.ingesters.local.LocalIngester", mock_ingester),
         ):
             mock_controller = MagicMock()
