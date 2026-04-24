@@ -13,6 +13,7 @@ import logging
 import shutil
 import subprocess
 import tempfile
+import threading
 from io import BytesIO
 from pathlib import Path
 
@@ -35,6 +36,8 @@ class MediaAnalyzer:
     """
 
     _HEALTHCHECK_TIMEOUT = 5.0
+    _ffmpeg_available: bool | None = None
+    _ffmpeg_lock = threading.Lock()
 
     def __init__(
         self,
@@ -56,23 +59,27 @@ class MediaAnalyzer:
         self._max_tokens = max_tokens
         self._api_timeout = api_timeout
         self._available_cache: bool | None = None
+        self._cache_lock = threading.Lock()
 
     def is_available(self) -> bool:
         """LM Studio の Vision モデルが利用可能かを返す.
 
-        キャッシュが設定されている場合はキャッシュを返す。
-        バッチ処理の開始時に check_and_cache_availability() で
-        キャッシュを設定し、繰り返しの HTTP 呼び出しを避ける。
+        初回呼び出し時に HTTP チェックを行い結果をキャッシュする。
+        threading.Lock でスレッドセーフに動作する（asyncio.to_thread 対応）。
         """
         if self._available_cache is not None:
             return self._available_cache
-        try:
-            with httpx.Client(timeout=self._HEALTHCHECK_TIMEOUT) as client:  # safety:allowed
-                resp = client.get(f"{self._base_url}/models")
-                resp.raise_for_status()
-            return True
-        except (httpx.HTTPError, httpx.ConnectError, OSError):
-            return False
+        with self._cache_lock:
+            if self._available_cache is not None:
+                return self._available_cache
+            try:
+                with httpx.Client(timeout=self._HEALTHCHECK_TIMEOUT) as client:  # safety:allowed
+                    resp = client.get(f"{self._base_url}/models")
+                    resp.raise_for_status()
+                self._available_cache = True
+            except (httpx.HTTPError, httpx.ConnectError, OSError):
+                self._available_cache = False
+            return self._available_cache
 
     def check_and_cache_availability(self) -> bool:
         """利用可否を確認しキャッシュに保存する.
@@ -80,12 +87,12 @@ class MediaAnalyzer:
         バッチ処理の開始時に呼び出し、以降の is_available() 呼び出しで
         繰り返しの HTTP リクエストを発行しないようにする。
         """
-        self._available_cache = self.is_available()
-        return self._available_cache
+        return self.is_available()
 
     def clear_availability_cache(self) -> None:
         """利用可否キャッシュをクリアする."""
-        self._available_cache = None
+        with self._cache_lock:
+            self._available_cache = None
 
     def analyze_image(self, image_path: Path) -> str:
         """画像を Vision モデルで解析し、テキストを返す.
@@ -264,10 +271,16 @@ class MediaAnalyzer:
 
         return tmp_dir, frames
 
-    @staticmethod
-    def _is_ffmpeg_available() -> bool:
+    @classmethod
+    def _is_ffmpeg_available(cls) -> bool:
         """ffmpeg がインストールされているかチェックする."""
-        return shutil.which("ffmpeg") is not None
+        if cls._ffmpeg_available is not None:
+            return cls._ffmpeg_available
+        with cls._ffmpeg_lock:
+            if cls._ffmpeg_available is not None:
+                return cls._ffmpeg_available
+            cls._ffmpeg_available = shutil.which("ffmpeg") is not None
+            return cls._ffmpeg_available
 
     @staticmethod
     def _format_timestamp(seconds: float) -> str:

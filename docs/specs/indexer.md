@@ -31,6 +31,11 @@
 
 ## 制約
 
+### 並行処理
+
+- ファイル読み込みとチャンキング（sync CPU 処理）は `asyncio.to_thread` でスレッドプールへオフロードし、イベントループをブロックしない。これにより Embedding API 呼び出し等の async 処理と並列実行される
+- Embedding プロバイダーの疎通チェックは `asyncio.Lock` で保護し、並列呼び出し時のレースコンディションを防止する
+
 ### 入力制約
 
 - 入力は常に converted_store のファイルのみ。source_store を直接参照しない
@@ -132,11 +137,10 @@ Embedding に渡る最終テキストは「Embedding プレフィックス + チ
 
 ### ソース並列処理
 
-インデックス再構築（`run_index_only` / `run_full_rebuild` のインデクサーフェーズ）では、複数ソースの Embedding を並列で実行できる。`asyncio.Semaphore` で同時実行数を制限し、`asyncio.gather` で並列処理する。
+全パイプラインモード（差分更新・全再構築・コンバートのみ・インデックスのみ）で複数ソースを並列処理できる。`asyncio.Semaphore` で同時実行数を制限し、`asyncio.gather` で並列処理する。
 
 - 並列処理の対象は Embedding API リクエスト。ChromaDB upsert・BM25 のインメモリデータ構造への追加は各ソースの Embedding 完了後に実行される。BM25 の rebuild + 永続化はバッチ完了後に一括実行される（遅延 save モード）
 - 並列数は `.env` の `RAG_EMBEDDING_CONCURRENCY` で設定する。LM Studio のリクエストキュー飽和を考慮し、環境に応じて調整する
-- 差分更新（`_process_changes`）やコンバートのみ再実行（`run_convert_only`）は直列のまま（並列化の効果が小さいため）
 
 > **TODO:#242** オンライン Embedding 使用時の操作全体タイムアウトおよびファイル数上限について、パイプライン全体の安全性設計として別 Issue で検討する
 

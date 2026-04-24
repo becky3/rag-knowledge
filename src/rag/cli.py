@@ -1543,6 +1543,7 @@ async def run_rebuild(args: argparse.Namespace) -> None:
             summary = await controller.run_convert_only(
                 source_type=source_type,
                 progress_callback=progress_cb,
+                concurrency=concurrency,
             )
         elif mode == "index":
             summary = await controller.run_index_only(
@@ -1553,6 +1554,7 @@ async def run_rebuild(args: argparse.Namespace) -> None:
         else:
             summary = await controller.run_incremental(
                 progress_callback=progress_cb,
+                concurrency=concurrency,
             )
 
         elapsed = time.monotonic() - start
