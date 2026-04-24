@@ -8,6 +8,7 @@ PDF ファイルからテキスト（Markdown 形式）を抽出する。
 
 from __future__ import annotations
 
+import functools
 import logging
 import os
 import tempfile
@@ -258,6 +259,7 @@ def _run_assessment(doc: Any, config: PdfBackendConfig) -> _PdfAssessment:
     return _PdfAssessment(backend="pymupdf4llm", reason="normal PDF")
 
 
+@functools.lru_cache(maxsize=1)
 def _is_mineru_available() -> bool:
     """MinerU pipeline がインストールされているか確認する."""
     try:

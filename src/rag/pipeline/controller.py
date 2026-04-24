@@ -112,6 +112,7 @@ class PipelineController:
         self,
         message: str,
         progress_callback: ProgressCallback | None = None,
+        concurrency: int = 1,
     ) -> PipelineSummary:
         """インジェスター実行後の後処理を一括実行する.
 
@@ -120,17 +121,25 @@ class PipelineController:
         Args:
             message: コミットメッセージ
             progress_callback: 進捗コールバック
+            concurrency: 同時実行数
 
         Returns:
             パイプライン処理結果サマリ
         """
         logger.info("Ingest post-processing started: %s", message)
         self.commit(message)
-        return await self.run_incremental(progress_callback=progress_callback)
+        return await self.run_incremental(
+            progress_callback=progress_callback,
+            concurrency=concurrency,
+        )
 
     # --- パイプライン実行 ---
 
-    async def run_incremental(self, progress_callback: ProgressCallback | None = None) -> PipelineSummary:
+    async def run_incremental(
+        self,
+        progress_callback: ProgressCallback | None = None,
+        concurrency: int = 1,
+    ) -> PipelineSummary:
         """差分更新を実行する.
 
         source_store に未コミットの変更がある場合は自動コミットし、
@@ -204,6 +213,7 @@ class PipelineController:
         summary = await self._process_changes(
             changes, PipelineMode.INCREMENTAL, last_commit_id, head_commit,
             progress_callback=progress_callback,
+            concurrency=concurrency,
         )
         logger.info(
             "Incremental pipeline completed: total=%d, processed=%d, errors=%d, warnings=%d",
@@ -239,7 +249,7 @@ class PipelineController:
         Args:
             source_type: 対象媒体フィルタ（None で全媒体）
             progress_callback: 進捗コールバック
-            concurrency: index フェーズの同時実行数
+            concurrency: convert / index フェーズの同時実行数
 
         Raises:
             RuntimeError: source_store に未コミットの変更がある場合
@@ -299,6 +309,7 @@ class PipelineController:
             mode=PipelineMode.CONVERT_ONLY,
             log_prefix="全再構築(Convert)中に",
             progress_callback=progress_callback,
+            concurrency=concurrency,
         )
         logger.info(
             "Phase 1: Convert completed: processed=%d, errors=%d, warnings=%d",
@@ -419,6 +430,7 @@ class PipelineController:
         source_type: SourceType | None = None,
         *,
         progress_callback: ProgressCallback | None = None,
+        concurrency: int = 1,
     ) -> PipelineSummary:
         """コンバートのみ再実行する.
 
@@ -427,6 +439,8 @@ class PipelineController:
 
         Args:
             source_type: 対象媒体フィルタ（None で全媒体）
+            progress_callback: 進捗コールバック
+            concurrency: 同時実行数
 
         Raises:
             RuntimeError: source_store に未コミットの変更がある場合
@@ -473,6 +487,7 @@ class PipelineController:
             mode=PipelineMode.CONVERT_ONLY,
             log_prefix="コンバート再実行中に",
             progress_callback=progress_callback,
+            concurrency=concurrency,
         )
         logger.info(
             "Convert-only rebuild completed: processed=%d, errors=%d, warnings=%d",
@@ -736,11 +751,11 @@ class PipelineController:
         各パイプラインモードで共通する
         ループ + try/except + progress + PipelineSummary 組み立てを一元化する。
         process_fn は sync / async どちらも受け付ける。
+        sync の場合は asyncio.to_thread でスレッドプールへオフロードし、
+        イベントループをブロックしない。
 
         asyncio.Semaphore で同時実行数を制限し、asyncio.gather で並列処理する。
         concurrency=1 の場合は実質直列動作となる。
-        process_fn 内の sync 部分はイベントループをブロックする。
-        並列化の効果は process_fn 内の await ポイント（Embedding API 等）に依存する。
         """
         if concurrency < 1:
             msg = f"concurrency must be >= 1, got {concurrency}"
@@ -751,15 +766,17 @@ class PipelineController:
         errors: list[PipelineErrorEntry] = []
         warnings: list[str] = []
         lock = asyncio.Lock()
+        is_async = inspect.iscoroutinefunction(process_fn)
 
         async def _process_one(item: _T) -> None:
             nonlocal processed
             file_path = get_file_path(item)
             async with sem:
                 try:
-                    result = process_fn(item)
-                    if inspect.isawaitable(result):
-                        await result
+                    if is_async:
+                        await process_fn(item)  # type: ignore[misc]
+                    else:
+                        await asyncio.to_thread(process_fn, item)
                     async with lock:
                         processed += 1
                 except asyncio.CancelledError:
@@ -858,6 +875,7 @@ class PipelineController:
         from_commit_id: str,
         to_commit_id: str,
         progress_callback: ProgressCallback | None = None,
+        concurrency: int = 1,
     ) -> PipelineSummary:
         """変更エントリを処理する."""
         with self._indexer.bm25_deferred():
@@ -871,6 +889,7 @@ class PipelineController:
                 progress_callback=progress_callback,
                 from_commit_id=from_commit_id,
                 to_commit_id=to_commit_id,
+                concurrency=concurrency,
             )
         return summary
 
@@ -895,7 +914,8 @@ class PipelineController:
             return
 
         self._register_in_db(entry.file_path)
-        converted_path = self._converter.convert(
+        converted_path = await asyncio.to_thread(
+            self._converter.convert,
             entry.file_path,
             self._source_store.root_dir,
             self._converted_store_dir,
@@ -906,7 +926,8 @@ class PipelineController:
     async def _handle_modified(self, entry: ChangeEntry) -> None:
         """変更ファイルを処理する."""
         self._update_in_db(entry.file_path)
-        converted_path = self._converter.convert(
+        converted_path = await asyncio.to_thread(
+            self._converter.convert,
             entry.file_path,
             self._source_store.root_dir,
             self._converted_store_dir,
@@ -932,7 +953,8 @@ class PipelineController:
         old_source_id = self._resolve_source_id(entry.old_path)
 
         # コンバーター: 新パスで変換
-        converted_path = self._converter.convert(
+        converted_path = await asyncio.to_thread(
+            self._converter.convert,
             entry.file_path,
             self._source_store.root_dir,
             self._converted_store_dir,

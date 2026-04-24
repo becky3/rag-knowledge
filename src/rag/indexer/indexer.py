@@ -8,6 +8,7 @@ converted_store のテキストファイルからチャンキング・Embedding�
 
 from __future__ import annotations
 
+import asyncio
 import contextlib
 import logging
 from collections.abc import Iterator
@@ -65,6 +66,7 @@ class Indexer:
         self._chunk_size = chunk_size
         self._chunk_overlap = chunk_overlap
         self._embedding_checked = False
+        self._embedding_lock = asyncio.Lock()
 
         # 実効サイズの算出: min(chunk_size, 安全上限 - overhead)
         # 仕様: docs/specs/indexer.md「オーバーヘッドと実効サイズ」
@@ -96,12 +98,13 @@ class Indexer:
         """
         _validate_source_id(source_id, metadata)
         await self._check_embedding_available()
-        text = self._read_file(converted_path)
+        text, chunk_texts = await asyncio.to_thread(
+            self._read_and_chunk, converted_path,
+        )
         if not text.strip():
             logger.info("空ファイルのためスキップ: %s", converted_path)
             return
 
-        chunk_texts = self._chunk_text(text)
         if not chunk_texts:
             return
 
@@ -132,13 +135,14 @@ class Indexer:
         """
         _validate_source_id(source_id, metadata)
         await self._check_embedding_available()
-        text = self._read_file(converted_path)
+        text, chunk_texts = await asyncio.to_thread(
+            self._read_and_chunk, converted_path,
+        )
 
         if not text.strip():
             await self.delete(source_id)
             return
 
-        chunk_texts = self._chunk_text(text)
         if not chunk_texts:
             await self.delete(source_id)
             return
@@ -256,21 +260,34 @@ class Indexer:
 
         初回呼び出し時のみ実際にチェックし、結果をキャッシュする。
         バッチ処理（run_index_only 等）での重複チェックを回避する。
+        asyncio.Lock で並列呼び出し時のレースコンディションを防止する。
 
         Raises:
             ConnectionError: プロバイダーに接続できない場合
         """
         if self._embedding_checked:
             return
-        available = await self._vector_store.is_embedding_available()
-        if not available:
-            msg = "Embedding プロバイダーに接続できません"
-            raise ConnectionError(msg)
-        self._embedding_checked = True
+        async with self._embedding_lock:
+            if self._embedding_checked:
+                return
+            available = await self._vector_store.is_embedding_available()
+            if not available:
+                msg = "Embedding プロバイダーに接続できません"
+                raise ConnectionError(msg)
+            self._embedding_checked = True
 
     def _read_file(self, path: Path) -> str:
         """ファイルの内容を読み取る."""
         return path.read_text(encoding="utf-8")
+
+    def _read_and_chunk(
+        self, converted_path: Path,
+    ) -> tuple[str, list[tuple[str, str]]]:
+        """ファイル読み込みとチャンキングを同期実行する (to_thread 用)."""
+        text = self._read_file(converted_path)
+        if not text.strip():
+            return text, []
+        return text, self._chunk_text(text)
 
     def _chunk_text(self, text: str) -> list[tuple[str, str]]:
         """コンテンツタイプに応じたチャンキング戦略でテキストを分割する.
