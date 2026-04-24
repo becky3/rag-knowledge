@@ -719,7 +719,8 @@ class TestConvertJsonBluesky:
         assert result is not None
         assert "[Video ALT] Video description" in result
 
-    def test_link_card(self) -> None:
+    def test_link_card_excluded_from_body(self) -> None:
+        """リンクカード情報は本文に含まれない（.meta で管理）."""
         data = {
             "post": {
                 "record": {
@@ -737,10 +738,11 @@ class TestConvertJsonBluesky:
         }
         result = convert_json_bluesky(data)
         assert result is not None
-        assert "[Link Card]" in result
-        assert "Title: Sample Article" in result
-        assert "URL: https://example.com/article" in result
-        assert "Description: An article about something" in result
+        assert "Check this out" in result
+        assert "[Link Card]" not in result
+        assert "Title: Sample Article" not in result
+        assert "URL: https://example.com/article" not in result
+        assert "Description: An article about something" not in result
 
     def test_record_with_media(self) -> None:
         data = {

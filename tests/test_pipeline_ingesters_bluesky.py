@@ -27,6 +27,7 @@ from rag.pipeline.ingesters.bluesky import (
     BlueskyIngester,
     _escape_did,
     _ext_from_content_type,
+    _extract_link_card,
     _extract_media_urls,
     _make_title,
     _validate_max_posts,
@@ -313,6 +314,8 @@ class TestCrawlBluesky:
         assert meta["did"] == "did:plc:abc123"
         assert meta["rkey"] == "xyz789"
         assert meta["has_images"] is True
+        assert meta["has_external_link"] is False
+        assert meta["link_card"] is None
         assert meta["is_reply"] is True
         assert meta["is_repost"] is False
 
@@ -684,6 +687,37 @@ class TestExtFromContentType:
     def test_unknown_defaults_to_webp(self) -> None:
         """不明な Content-Type はデフォルト .webp."""
         assert _ext_from_content_type("application/octet-stream") == ".webp"
+
+
+class TestExtractLinkCard:
+    """_extract_link_card のテスト."""
+
+    def test_full_card(self) -> None:
+        """uri, title, description が全て含まれるリンクカード."""
+        result = _extract_link_card({
+            "uri": "https://example.com/article",
+            "title": "Sample Article",
+            "description": "An article about something",
+        })
+        assert result == {
+            "uri": "https://example.com/article",
+            "title": "Sample Article",
+            "description": "An article about something",
+        }
+
+    def test_uri_only(self) -> None:
+        """uri のみのリンクカード."""
+        result = _extract_link_card({"uri": "https://example.com"})
+        assert result == {"uri": "https://example.com"}
+
+    def test_empty_external(self) -> None:
+        """空の external オブジェクトは None を返す."""
+        assert _extract_link_card({}) is None
+
+    def test_non_dict(self) -> None:
+        """dict でない値は None を返す."""
+        assert _extract_link_card(None) is None
+        assert _extract_link_card("string") is None
 
 
 class TestExtractMediaUrls:
