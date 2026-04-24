@@ -122,6 +122,7 @@ source_store 層は「このファイルは独立ソースか？」「どの sou
 /.gitignore
 /.write.lock
 /.rebuild.lock
+/.ingest.lock
 .git/
 
 # 青空文庫カタログ（aozora インジェスターの内部参照ファイル。sidecar 扱い）
@@ -132,6 +133,10 @@ source_store 層は「このファイルは独立ソースか？」「どの sou
 .DS_Store
 Thumbs.db
 desktop.ini
+
+# ドキュメント生成ツールのインフラファイル（検索索引・TOC・xref 等）
+docdata/
+xrefmap.yml
 ```
 
 加えて、`resolve_attachment_parent(rel_path) is not None` のとき（すなわち attachment と判定される場合）も除外する。
@@ -140,9 +145,9 @@ desktop.ini
 
 - 先頭 `/` でルート直下限定にアンカリングする。
   例: `/.gitignore` はルート直下の `.gitignore` のみを除外し、ユーザー文書内の同名ファイル（`local/myproject/.gitignore`）は独立ソースとして扱う。
-  上記パターンでは `/metadata.db*` / `/.gitignore` / `/.write.lock` / `/.rebuild.lock` / `/aozora/catalog.csv(.meta)` が該当
-- 末尾 `/` でディレクトリ配下を表現する（例: `.git/` は任意階層の `.git` ディレクトリ配下を除外）
-- アンカーなしパターンは任意階層でファイル名マッチする。上記パターンでは `*.meta` / `.DS_Store` / `Thumbs.db` / `desktop.ini` が該当
+  上記パターンでは `/metadata.db*` / `/.gitignore` / `/.write.lock` / `/.rebuild.lock` / `/.ingest.lock` / `/aozora/catalog.csv(.meta)` が該当
+- 末尾 `/` でディレクトリ配下を表現する（例: `.git/` は任意階層の `.git` ディレクトリ配下を除外、`docdata/` は任意階層の `docdata` ディレクトリ配下を除外）
+- アンカーなしパターンは任意階層でファイル名マッチする。上記パターンでは `*.meta` / `.DS_Store` / `Thumbs.db` / `desktop.ini` / `xrefmap.yml` が該当
 
 **設計判断（採用しないアプローチ）**:
 
