@@ -52,6 +52,18 @@ def _escape_did(did: str) -> str:
     return did.replace(":", _COLON_FULLWIDTH)
 
 
+def _extract_link_card(external: object) -> dict[str, str] | None:
+    """embed.external オブジェクトからリンクカード情報を抽出する."""
+    if not isinstance(external, dict):
+        return None
+    card: dict[str, str] = {}
+    for key in ("uri", "title", "description"):
+        val = external.get(key, "")
+        if isinstance(val, str) and val.strip():
+            card[key] = val.strip()
+    return card if card else None
+
+
 def _make_title(text: str) -> str:
     """投稿テキストからタイトルを生成する.
 
@@ -476,6 +488,7 @@ class BlueskyIngester:
         has_images = False
         has_video = False
         has_external_link = False
+        link_card: dict[str, str] | None = None
 
         if isinstance(embed, dict):
             embed_type = embed.get("$type", "")
@@ -485,6 +498,7 @@ class BlueskyIngester:
                 has_video = True
             if "external" in embed_type:
                 has_external_link = True
+                link_card = _extract_link_card(embed.get("external"))
             media = embed.get("media", {})
             if isinstance(media, dict):
                 media_type = media.get("$type", "")
@@ -494,6 +508,8 @@ class BlueskyIngester:
                     has_video = True
                 if "external" in media_type:
                     has_external_link = True
+                    if link_card is None:
+                        link_card = _extract_link_card(media.get("external"))
 
         is_reply = "reply" in record if isinstance(record, dict) else False
         bsky_url = f"https://bsky.app/profile/{handle_author}/post/{rkey}"
@@ -511,6 +527,7 @@ class BlueskyIngester:
             "has_images": has_images,
             "has_video": has_video,
             "has_external_link": has_external_link,
+            "link_card": link_card,
             "is_reply": is_reply,
             "is_repost": is_repost,
         }

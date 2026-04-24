@@ -265,7 +265,6 @@ def _extract_text_from_post(value: dict[str, Any]) -> str:
     構造:
     1. 投稿テキスト（先頭）
     2. 画像/動画 ALT テキスト（[Image ALT] / [Video ALT] プレフィックス）
-    3. リンクカード（[Link Card] セクション）
 
     引用元テキストは呼び出し元で [Quote] セクションとして追加する。
 
@@ -282,7 +281,7 @@ def _extract_text_from_post(value: dict[str, Any]) -> str:
     if text:
         sections.append(text)
 
-    # 2-3. embed からメディア情報を抽出
+    # 2. embed からメディア情報を抽出
     embed = value.get("embed")
     if isinstance(embed, dict):
         media_sections = _extract_embed_sections(embed)
@@ -338,21 +337,12 @@ def _extract_media_sections(media: dict[str, Any]) -> list[str]:
     if video_alt:
         sections.append(f"[Video ALT] {video_alt}")
 
-    # リンクカード
+    # リンクカード URI（本文が空でも変換結果が欠落しないよう最低限の情報を残す）
     external = media.get("external")
     if isinstance(external, dict):
-        card_parts: list[str] = ["[Link Card]"]
-        ext_title = external.get("title", "")
-        if ext_title:
-            card_parts.append(f"Title: {ext_title}")
         ext_uri = external.get("uri", "")
         if ext_uri:
-            card_parts.append(f"URL: {ext_uri}")
-        ext_desc = external.get("description", "")
-        if ext_desc:
-            card_parts.append(f"Description: {ext_desc}")
-        if len(card_parts) > 1:
-            sections.append("\n".join(card_parts))
+            sections.append(ext_uri)
 
     return sections
 

@@ -309,6 +309,7 @@ source_store/
 | `has_images` | bool | 画像添付の有無 | `post.record.embed` に画像データが含まれるか |
 | `has_video` | bool | 動画添付の有無 | `post.record.embed` に動画データが含まれるか |
 | `has_external_link` | bool | 外部リンクの有無 | `post.record.embed` に外部リンクが含まれるか |
+| `link_card` | dict or null | リンクカード情報 | `post.record.embed.external`（recordWithMedia 時は `embed.media.external`）から `uri`, `title`, `description` を抽出。リンクカードがない場合は `null` |
 | `is_reply` | bool | リプライかどうか | `post.record.reply` が存在するか |
 | `is_repost` | bool | リポストかどうか | フィードアイテムの `reason.$type` が `app.bsky.feed.defs#reasonRepost` か |
 
@@ -327,6 +328,10 @@ created_at: "2026-01-15T09:00:00Z"
 has_images: false
 has_video: false
 has_external_link: true
+link_card:
+  uri: "https://example.com/article"
+  title: "Sample Article"
+  description: "An article about something"
 is_reply: false
 is_repost: false
 ```
@@ -498,7 +503,7 @@ BlueSky 上で削除された投稿は source_store に残り続ける。削除�
 
 BlueSky 投稿の JSON からのテキスト抽出仕様（フィールドパス、recordWithMedia 対応、引用元テキスト、テキスト構造）は [converter.md](../converter.md) の「JSON → テキスト抽出 > BlueSky 投稿」セクションで定義されている。converter.md が正本であり、本セクションでは概要のみ記載する。
 
-- 投稿テキスト、画像/動画 ALT、リンクカード、引用元テキストを構造化プレーンテキストとして抽出する
+- 投稿テキスト、画像/動画 ALT、引用元テキストを構造化プレーンテキストとして抽出する（リンクカード情報は `.meta` の `link_card` フィールドで管理）
 - Markdown 変換は不要（投稿は最大 300 文字の短文）
 - リポスト時は `[Repost: @handle]` ヘッダーを付与する
 

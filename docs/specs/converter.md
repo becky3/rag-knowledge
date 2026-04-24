@@ -299,6 +299,7 @@ JSON パース自体に失敗した場合（構文エラー等、ファイル破
 AT Protocol の投稿 JSON（`getAuthorFeed` レスポンスのフィードアイテム）からテキストを抽出する。投稿は最大 300 文字の短文であり、Markdown 変換は不要。プレーンテキストとして抽出する。
 
 テキスト抽出は `post.record`（raw record）から行う。`post.record` の embed の `$type` に `#view` サフィックスは付かない。
+リンクカード情報（`embed.external` の `uri` / `title` / `description`）の詳細は変換テキストに含めず、`.meta` の `link_card` フィールドで管理する（[bluesky.md](ingesters/bluesky.md) 参照）。ただし、投稿テキストが空でリンクカードのみの場合に変換結果が欠落しないよう、リンクカードの URI のみを変換テキストに残す。
 
 **基本フィールド:**
 
@@ -307,9 +308,6 @@ AT Protocol の投稿 JSON（`getAuthorFeed` レスポンスのフィードア�
 | 投稿テキスト | `post.record.text` | 投稿本文 |
 | 画像 ALT テキスト | `post.record.embed.images[].alt` | 画像の代替テキスト |
 | 動画 ALT テキスト | `post.record.embed.alt` | 動画の代替テキスト |
-| リンクカードタイトル | `post.record.embed.external.title` | 外部リンクのタイトル |
-| リンクカード URL | `post.record.embed.external.uri` | 外部リンクの URL |
-| リンクカード説明 | `post.record.embed.external.description` | 外部リンクの説明文 |
 
 **recordWithMedia 時のフィールド:**
 
@@ -319,9 +317,6 @@ embed の `$type` が `app.bsky.embed.recordWithMedia`（メディア + 引用�
 |-----------|--------------------------|------|
 | 画像 ALT テキスト | `post.record.embed.media.images[].alt` | recordWithMedia 時の画像 ALT |
 | 動画 ALT テキスト | `post.record.embed.media.alt` | recordWithMedia 時の動画 ALT |
-| リンクカードタイトル | `post.record.embed.media.external.title` | recordWithMedia 時のリンクタイトル |
-| リンクカード URL | `post.record.embed.media.external.uri` | recordWithMedia 時のリンク URL |
-| リンクカード説明 | `post.record.embed.media.external.description` | recordWithMedia 時のリンク説明 |
 
 **引用元投稿テキスト:**
 
@@ -358,11 +353,6 @@ embed の `$type` が `app.bsky.embed.recordWithMedia`（メディア + 引用�
 <video:1>
 メディア解析モジュールによる動画解析テキスト
 </video:1>
-
-[Link Card]
-Title: 外部リンクのタイトル
-URL: 外部リンクの URL
-Description: 外部リンクの説明文
 
 [Quote]
 引用元の投稿テキスト
