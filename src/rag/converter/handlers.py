@@ -337,6 +337,13 @@ def _extract_media_sections(media: dict[str, Any]) -> list[str]:
     if video_alt:
         sections.append(f"[Video ALT] {video_alt}")
 
+    # リンクカード URI（本文が空でも変換結果が欠落しないよう最低限の情報を残す）
+    external = media.get("external")
+    if isinstance(external, dict):
+        ext_uri = external.get("uri", "")
+        if ext_uri:
+            sections.append(ext_uri)
+
     return sections
 
 

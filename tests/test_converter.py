@@ -744,6 +744,28 @@ class TestConvertJsonBluesky:
         assert "URL: https://example.com/article" not in result
         assert "Description: An article about something" not in result
 
+    def test_empty_text_with_link_card_returns_uri(self) -> None:
+        """本文が空でリンクカードのみの場合、URI が変換結果に残る."""
+        data = {
+            "post": {
+                "record": {
+                    "text": "",
+                    "embed": {
+                        "$type": "app.bsky.embed.external",
+                        "external": {
+                            "title": "Sample Article",
+                            "uri": "https://example.com/article",
+                            "description": "An article about something",
+                        },
+                    },
+                },
+            },
+        }
+        result = convert_json_bluesky(data)
+        assert result is not None
+        assert "https://example.com/article" in result
+        assert "[Link Card]" not in result
+
     def test_record_with_media(self) -> None:
         data = {
             "post": {

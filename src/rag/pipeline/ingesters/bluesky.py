@@ -59,8 +59,8 @@ def _extract_link_card(external: object) -> dict[str, str] | None:
     card: dict[str, str] = {}
     for key in ("uri", "title", "description"):
         val = external.get(key, "")
-        if val:
-            card[key] = val
+        if isinstance(val, str) and val.strip():
+            card[key] = val.strip()
     return card if card else None
 
 
