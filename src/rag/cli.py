@@ -2055,7 +2055,7 @@ async def run_delete(args: argparse.Namespace) -> None:
     json_out = _is_json_output(args)
     progress_cb = _output_progress if json_out else None
 
-    controller, _settings = _build_cli_pipeline_controller()
+    controller, settings = _build_cli_pipeline_controller()
     source_id: str = args.source_id
 
     with _write_lock_or_exit(
@@ -2078,6 +2078,7 @@ async def run_delete(args: argparse.Namespace) -> None:
             summary = await controller.ingest_and_index(
                 f"delete: {source_id}",
                 progress_callback=progress_cb,
+                concurrency=settings.rag_embedding_concurrency,
             )
         except Exception:
             logger.exception("削除パイプライン実行に失敗: %s", source_id)
@@ -2122,7 +2123,7 @@ async def run_add_journal(args: argparse.Namespace) -> None:
     json_out = _is_json_output(args)
     progress_cb = _output_progress if json_out else None
 
-    controller, _settings = _build_cli_pipeline_controller()
+    controller, settings = _build_cli_pipeline_controller()
 
     # コンテンツの取得: --stdin または --file
     if getattr(args, "stdin", False):
@@ -2163,6 +2164,7 @@ async def run_add_journal(args: argparse.Namespace) -> None:
         pipeline_summary = await controller.ingest_and_index(
             f"ingest(journal): add {args.title}",
             progress_callback=progress_cb,
+        concurrency=settings.rag_embedding_concurrency,
         )
         _print_ingest_result(
             ingest_result, pipeline_summary, context=f"journal/{args.repository}",
@@ -2389,6 +2391,7 @@ async def run_ingest_youtube(args: argparse.Namespace) -> None:
         pipeline_summary = await controller.ingest_and_index(
             f"ingest(youtube): {args.video_url}",
             progress_callback=progress_cb,
+        concurrency=settings.rag_embedding_concurrency,
         )
         _print_ingest_result(ingest_result, pipeline_summary, context=f"動画: {args.video_url}", json_output=json_out)
 
@@ -2438,6 +2441,7 @@ async def run_ingest_youtube_playlist(args: argparse.Namespace) -> None:
         pipeline_summary = await controller.ingest_and_index(
             f"ingest(youtube-playlist): {args.playlist_url}",
             progress_callback=progress_cb,
+        concurrency=settings.rag_embedding_concurrency,
         )
         _print_ingest_result(ingest_result, pipeline_summary, context=f"プレイリスト: {args.playlist_url}", json_output=json_out)
 
@@ -2521,6 +2525,7 @@ async def run_crawl_bluesky(args: argparse.Namespace) -> None:
         pipeline_summary = await controller.ingest_and_index(
             f"ingest(bluesky): {args.handle}",
             progress_callback=progress_cb,
+        concurrency=settings.rag_embedding_concurrency,
         )
         if json_out:
             data = _ingest_result_to_dict(ingest_result, pipeline_summary)
@@ -2597,6 +2602,7 @@ async def run_crawl_zenn(args: argparse.Namespace) -> None:
         pipeline_summary = await controller.ingest_and_index(
             f"ingest(zenn): {args.username}",
             progress_callback=progress_cb,
+        concurrency=settings.rag_embedding_concurrency,
         )
         _print_ingest_result(ingest_result, pipeline_summary, context=f"ユーザー: {args.username}", json_output=json_out)
 
@@ -2643,6 +2649,7 @@ async def run_ingest_bluesky(args: argparse.Namespace) -> None:
         pipeline_summary = await controller.ingest_and_index(
             "ingest(bluesky/url)",
             progress_callback=_output_progress if json_out else None,
+            concurrency=settings.rag_embedding_concurrency,
         )
         _print_ingest_result(ingest_result, pipeline_summary, context="BlueSky ingest", json_output=json_out)
 
@@ -2687,6 +2694,7 @@ async def run_ingest_zenn(args: argparse.Namespace) -> None:
         pipeline_summary = await controller.ingest_and_index(
             "ingest(zenn/url)",
             progress_callback=_output_progress if json_out else None,
+            concurrency=settings.rag_embedding_concurrency,
         )
         _print_ingest_result(ingest_result, pipeline_summary, context="Zenn ingest", json_output=json_out)
 
@@ -2812,6 +2820,7 @@ async def run_add_document(args: argparse.Namespace) -> None:
         pipeline_summary = await controller.ingest_and_index(
             f"ingest(local): add {filename}",
             progress_callback=progress_cb,
+        concurrency=settings.rag_embedding_concurrency,
         )
         _print_ingest_result(ingest_result, pipeline_summary, context=display_name, json_output=json_out)
 
@@ -2863,6 +2872,7 @@ async def run_crawl_documents(args: argparse.Namespace) -> None:
         pipeline_summary = await controller.ingest_and_index(
             f"ingest(local): crawl {args.dir_path}",
             progress_callback=progress_cb,
+        concurrency=settings.rag_embedding_concurrency,
         )
         _print_ingest_result(ingest_result, pipeline_summary, context=f"ディレクトリ: {args.dir_path}", json_output=json_out)
 
@@ -2999,6 +3009,7 @@ async def run_site_ingest(args: argparse.Namespace) -> None:
             pipeline_summary = await controller.ingest_and_index(
                 f"ingest(web): site-ingest {display_url}",
                 progress_callback=progress_cb,
+            concurrency=settings.rag_embedding_concurrency,
             )
         elif has_changes and args.download_only:
             controller.commit(f"ingest(web): site-ingest {display_url} (download_only)")
@@ -3162,6 +3173,7 @@ async def run_ingest_aozora(args: argparse.Namespace) -> None:
         pipeline_summary = await controller.ingest_and_index(
             f"ingest(aozora): book_id={args.book_id}",
             progress_callback=progress_cb,
+        concurrency=settings.rag_embedding_concurrency,
         )
         _print_ingest_result(ingest_result, pipeline_summary, context=f"作品ID: {args.book_id}", json_output=json_out)
 
@@ -3208,6 +3220,7 @@ async def run_ingest_aozora_author(args: argparse.Namespace) -> None:
         pipeline_summary = await controller.ingest_and_index(
             f"ingest(aozora): person_id={args.person_id}",
             progress_callback=progress_cb,
+        concurrency=settings.rag_embedding_concurrency,
         )
         _print_ingest_result(ingest_result, pipeline_summary, context=f"著者ID: {args.person_id}", json_output=json_out)
 

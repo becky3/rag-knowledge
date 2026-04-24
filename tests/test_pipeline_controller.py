@@ -381,6 +381,30 @@ class TestRunIncremental:
         assert "local/old.txt" in indexer.deleted_ids
         assert "local/new.txt" in indexer.added
 
+    async def test_incremental_concurrency_processes_all(
+        self,
+        controller: tuple[PipelineController, StubConverter, StubIndexer],
+        workspace: dict[str, Path],
+    ) -> None:
+        """concurrency > 1 で全ファイルが正しく処理される."""
+        ctrl, converter, indexer = controller
+        _place_local_file(workspace["source"], "local/a.txt")
+        ctrl.commit("first")
+        await ctrl.run_incremental()
+
+        converter.converted.clear()
+        indexer.added.clear()
+
+        for i in range(5):
+            _place_local_file(workspace["source"], f"local/file{i}.txt", f"content{i}")
+        ctrl.commit("add 5 files")
+
+        summary = await ctrl.run_incremental(concurrency=4)
+        assert summary.processed == 5
+        assert len(summary.errors) == 0
+        assert len(summary.warnings) == 0
+        assert len(converter.converted) == 5
+
     async def test_no_changes_returns_empty(
         self,
         controller: tuple[PipelineController, StubConverter, StubIndexer],
