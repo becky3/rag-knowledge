@@ -62,6 +62,9 @@ _EXCLUDE_PATTERNS: tuple[str, ...] = (
     ".DS_Store",
     "Thumbs.db",
     "desktop.ini",
+    # ドキュメント生成ツールのインフラファイル（検索索引・TOC・xref 等）
+    "docdata/",
+    "xrefmap.yml",
 )
 
 _EXCLUDE_SPEC: pathspec.PathSpec = pathspec.PathSpec.from_lines(

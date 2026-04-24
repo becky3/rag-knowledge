@@ -624,6 +624,29 @@ class TestIsSourceFile:
         assert is_source_file("web/https/example.com/Thumbs.db") is False
         assert is_source_file("desktop.ini") is False
 
+    def test_docdata_directory_excluded_any_depth(self) -> None:
+        """docdata/ 配下はドキュメント生成ツールのインフラファイルとして除外される."""
+        from rag.store.source_store import is_source_file
+
+        assert is_source_file("local/Unity/Docs/Manual/docdata/index.js") is False
+        assert is_source_file("local/Unity/Docs/Manual/docdata/toc.js") is False
+        assert is_source_file("local/Unity/Docs/Manual/docdata/index.json") is False
+        assert is_source_file("local/Unity/Docs/Manual/docdata/toc.json") is False
+        assert is_source_file("local/other-docs/docdata/search.js") is False
+
+    def test_xrefmap_excluded_any_depth(self) -> None:
+        """xrefmap.yml はドキュメント生成ツールのインフラファイルとして除外される."""
+        from rag.store.source_store import is_source_file
+
+        assert is_source_file("local/Unity/Docs/Manual/xrefmap.yml") is False
+        assert is_source_file("local/other-docs/xrefmap.yml") is False
+
+    def test_docdata_name_in_non_directory_context_not_excluded(self) -> None:
+        """docdata がディレクトリではなくファイル名の一部の場合は除外しない."""
+        from rag.store.source_store import is_source_file
+
+        assert is_source_file("local/my-notes/docdata-notes.md") is True
+
     def test_bluesky_attachment_excluded(self) -> None:
         """BlueSky の attachment（media/ 配下）は除外される."""
         from rag.store.source_store import is_source_file
