@@ -536,9 +536,14 @@ BlueSky 投稿内に含まれる URL を抽出し、URL の種別に応じて si
 
 | URL パターン | 委譲先 | 備考 |
 |-------------|--------|------|
-| `youtube.com/watch?v=`, `youtu.be/`, `youtube.com/shorts/` | YoutubeIngester.ingest_video | YouTube 動画の字幕・文字起こしを取り込む |
+| YouTube 動画 URL（対応する具体パターンは [youtube.md](youtube.md) を参照） | YoutubeIngester.ingest_video | YouTube 動画の字幕・文字起こしを取り込む |
+| 不正な YouTube 動画 URL（パターンには該当するが video_id 形式が不正） | エラー扱いでスキップ | site_ingest に流すと無駄な HTTP アクセスが発生し、リスクもあるため取り込まない。`errors` カウンタを増やし、`error_details` に記録する |
 | `bsky.app/profile/` | スキップ | BlueSky 投稿は既にインジェスト対象 |
-| 上記以外の HTTP/HTTPS URL | site_ingest（複数 URL モード） | Web ページをバッチ取得する |
+| 上記以外の HTTP/HTTPS URL | site_ingest（複数 URL モード） | Web ページをバッチ取得する。YouTube チャンネル URL（`/@handle`, `/c/`, `/channel/`）・プレイリスト URL（`/playlist?list=`）はこの分類に含まれる |
+
+YouTube 動画 URL の判定は YouTube インジェスター側で SSoT として定義された判定関数を使用する。ここに URL パターンを直接列挙すると分類器（BlueSky 側）と抽出器（YouTube 側）で drift する恐れがあるため、参照リンクで一元化する。
+
+「不正な YouTube 動画 URL」とは、YouTube 動画 URL のホスト・パスパターンには該当するが video_id 形式が不正な URL を指す（具体パターンと video_id 形式は [youtube.md](youtube.md) 側を SSoT とする）。例: `https://www.youtube.com/watch?v=`, `https://youtu.be/short`。
 
 #### 処理フロー
 
@@ -741,6 +746,7 @@ AppView のベース URL は設定可能とし、デフォルトは `https://pub
 | 同一 URL が複数投稿に出現 | URL 抽出時に重複排除し、1 回のみ取り込む |
 | URL 先が Safe Browsing で危険判定 | 複数 URL モードでは Safe Browsing チェックは実行されない（大量 URL への API 呼び出しは非現実的なため）。SSRF チェック（プライベート IP 拒否）のみ実行される |
 | YouTube URL の字幕取得に失敗 | YouTube インジェスターの既存のエラーハンドリングでスキップされる |
+| 投稿内の URL が「不正な YouTube 動画 URL」（パターン該当・video_id 形式不正） | 警告ログを出力し、いずれのインジェスターにも委譲しない。詳細は「URL 種別判定と委譲先」を参照 |
 | Web URL が 0 件の場合 | site_ingest 呼び出しをスキップする |
 | site_ingest subprocess が失敗 | エラーをログに記録し、`errors` に `delegation` カテゴリで計上する。BlueSky 投稿の取り込みには影響しない |
 | `--force` 時に上書き投稿の YouTube 再取り込みが `rag_bluesky_force_youtube_reingest` で抑制されている | 上書き投稿の YouTube URL をスキップし、Web URL とメディアのみ再取得する。新規投稿の YouTube URL は常に取り込む |

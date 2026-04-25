@@ -27,6 +27,7 @@ from rag.pipeline.ingesters._common import (
     fetch_get,
     now_iso,
 )
+from rag.pipeline.ingesters.youtube import classify_youtube_url
 from typing import TYPE_CHECKING, Any, Literal
 
 if TYPE_CHECKING:
@@ -178,11 +179,6 @@ def _collect_media_from_embed(embed: dict[str, Any], image_urls: list[str]) -> N
                     image_urls.append(fullsize)
 
 
-# YouTube URL 判定パターン
-_YOUTUBE_URL_RE = re.compile(
-    r"^https?://(?:www\.)?(?:youtube\.com/(?:watch\?.*v=|shorts/)|youtu\.be/)",
-)
-
 # BlueSky URL 判定パターン（スキップ対象）
 _BSKY_URL_RE = re.compile(
     r"^https?://bsky\.app/profile/",
@@ -259,16 +255,26 @@ def extract_urls_from_item(item: dict[str, Any]) -> list[str]:
     return urls
 
 
-def classify_url(url: str) -> Literal["youtube", "web", "skip"]:
+def classify_url(url: str) -> Literal["youtube", "web", "skip", "invalid_youtube"]:
     """URL を種別判定する.
 
+    YouTube 動画 URL の判定は YouTube インジェスター側の SSoT を参照する
+    （対応パターンは docs/specs/ingesters/youtube.md「対応 URL 形式」）。
+
     Returns:
-        "youtube", "web", or "skip"
+        - "youtube": 認識可能な YouTube 動画 URL
+        - "invalid_youtube": YouTube 動画 URL のパターンに見えるが video_id 形式が不正。
+          site_ingest に流すと無駄な HTTP アクセスが発生するため、呼び出し側でエラーとして扱う
+        - "skip": BlueSky 投稿 URL 等の取り込み対象外
+        - "web": 上記以外（チャンネル URL・プレイリスト URL・一般 Web ページ等）
     """
     if _BSKY_URL_RE.match(url):
         return "skip"
-    if _YOUTUBE_URL_RE.match(url):
+    yt = classify_youtube_url(url)
+    if yt == "video":
         return "youtube"
+    if yt == "malformed":
+        return "invalid_youtube"
     return "web"
 
 
@@ -1086,10 +1092,25 @@ class BlueskyIngester:
                         web_urls.append(url)
                     elif url_type == "youtube":
                         youtube_urls.append(url)
+                    elif url_type == "invalid_youtube":
+                        logger.warning("不正な YouTube URL を検出したためスキップ: %s", url)
+                        stats["errors"] += 1
+                        if result is not None:
+                            result.errors += 1
+                            result.error_details.append(
+                                {
+                                    "category": "delegation",
+                                    "target": url,
+                                    "url": url,
+                                    "message": "invalid youtube url",
+                                },
+                            )
                     else:
                         stats["skipped"] += 1
 
-        all_url_count = len(web_urls) + len(youtube_urls) + stats["skipped"]
+        all_url_count = (
+            len(web_urls) + len(youtube_urls) + stats["skipped"] + stats["errors"]
+        )
         if all_url_count == 0:
             return stats
 

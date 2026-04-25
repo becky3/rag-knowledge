@@ -442,15 +442,63 @@ class TestClassifyUrl:
 
     def test_youtube_watch(self) -> None:
         """YouTube watch URL が youtube に分類されること."""
-        assert classify_url("https://www.youtube.com/watch?v=abc123") == "youtube"
+        assert classify_url("https://www.youtube.com/watch?v=TestVideo01") == "youtube"
 
     def test_youtube_short(self) -> None:
         """youtu.be 短縮 URL が youtube に分類されること."""
-        assert classify_url("https://youtu.be/abc123") == "youtube"
+        assert classify_url("https://youtu.be/TestVideo01") == "youtube"
 
     def test_youtube_shorts(self) -> None:
         """YouTube Shorts URL が youtube に分類されること."""
-        assert classify_url("https://youtube.com/shorts/abc123") == "youtube"
+        assert classify_url("https://youtube.com/shorts/TestVideo01") == "youtube"
+
+    def test_youtube_live(self) -> None:
+        """YouTube ライブ配信 URL が youtube に分類されること."""
+        assert classify_url("https://www.youtube.com/live/TestVideo01") == "youtube"
+
+    def test_youtube_live_with_query(self) -> None:
+        """クエリ付きの live URL も youtube に分類されること."""
+        assert classify_url("https://www.youtube.com/live/TestVideo01?si=abc") == "youtube"
+
+    def test_youtube_embed(self) -> None:
+        """YouTube embed URL が youtube に分類されること."""
+        assert classify_url("https://www.youtube.com/embed/TestVideo01") == "youtube"
+
+    def test_youtube_legacy_v(self) -> None:
+        """YouTube レガシー /v/ URL が youtube に分類されること."""
+        assert classify_url("https://www.youtube.com/v/TestVideo01") == "youtube"
+
+    def test_youtube_mobile(self) -> None:
+        """m.youtube.com URL が youtube に分類されること."""
+        assert classify_url("https://m.youtube.com/watch?v=TestVideo01") == "youtube"
+
+    def test_youtube_channel_handle_classified_as_web(self) -> None:
+        """YouTube チャンネルハンドル URL は動画ではないため web に分類されること."""
+        assert classify_url("https://www.youtube.com/@SampleHandle") == "web"
+
+    def test_youtube_playlist_classified_as_web(self) -> None:
+        """YouTube プレイリスト URL は動画ではないため web に分類されること."""
+        assert classify_url("https://www.youtube.com/playlist?list=PLtest") == "web"
+
+    def test_invalid_video_id_in_watch_classified_as_invalid_youtube(self) -> None:
+        """video_id が 11 文字でない watch URL は invalid_youtube に分類されること."""
+        assert classify_url("https://www.youtube.com/watch?v=short") == "invalid_youtube"
+
+    def test_invalid_video_id_in_shorts_classified_as_invalid_youtube(self) -> None:
+        """video_id が 11 文字でない shorts URL は invalid_youtube に分類されること."""
+        assert classify_url("https://www.youtube.com/shorts/short") == "invalid_youtube"
+
+    def test_invalid_video_id_in_live_classified_as_invalid_youtube(self) -> None:
+        """video_id が 11 文字でない live URL は invalid_youtube に分類されること."""
+        assert classify_url("https://www.youtube.com/live/short") == "invalid_youtube"
+
+    def test_invalid_video_id_in_youtu_be_classified_as_invalid_youtube(self) -> None:
+        """video_id が 11 文字でない youtu.be URL は invalid_youtube に分類されること."""
+        assert classify_url("https://youtu.be/short") == "invalid_youtube"
+
+    def test_watch_without_v_param_classified_as_invalid_youtube(self) -> None:
+        """v パラメータが空の watch URL は invalid_youtube に分類されること."""
+        assert classify_url("https://www.youtube.com/watch?v=") == "invalid_youtube"
 
     def test_bsky_url_skip(self) -> None:
         """BlueSky URL が skip に分類されること."""
@@ -500,7 +548,7 @@ class TestFollowUrls:
                 "features": [
                     {
                         "$type": "app.bsky.richtext.facet#link",
-                        "uri": "https://www.youtube.com/watch?v=test123",
+                        "uri": "https://www.youtube.com/watch?v=DummyVidA01",
                     }
                 ]
             }
@@ -518,7 +566,7 @@ class TestFollowUrls:
         )
 
         mock_yt.ingest_video.assert_called_once_with(
-            video_url="https://www.youtube.com/watch?v=test123"
+            video_url="https://www.youtube.com/watch?v=DummyVidA01"
         )
         assert stats["youtube_placed"] == 1
 
@@ -532,7 +580,7 @@ class TestFollowUrls:
                 "features": [
                     {
                         "$type": "app.bsky.richtext.facet#link",
-                        "uri": "https://www.youtube.com/watch?v=vid1",
+                        "uri": "https://www.youtube.com/watch?v=DummyVidA02",
                     }
                 ]
             },
@@ -540,7 +588,7 @@ class TestFollowUrls:
                 "features": [
                     {
                         "$type": "app.bsky.richtext.facet#link",
-                        "uri": "https://www.youtube.com/watch?v=vid2",
+                        "uri": "https://www.youtube.com/watch?v=DummyVidA03",
                     }
                 ]
             },
@@ -548,7 +596,7 @@ class TestFollowUrls:
                 "features": [
                     {
                         "$type": "app.bsky.richtext.facet#link",
-                        "uri": "https://www.youtube.com/watch?v=vid3",
+                        "uri": "https://www.youtube.com/watch?v=DummyVidA04",
                     }
                 ]
             },
@@ -1052,7 +1100,7 @@ class TestFollowUrlsYoutubeOverwrite:
                 "features": [
                     {
                         "$type": "app.bsky.richtext.facet#link",
-                        "uri": "https://www.youtube.com/watch?v=test123",
+                        "uri": "https://www.youtube.com/watch?v=DummyVidA01",
                     }
                 ]
             }
@@ -1086,7 +1134,7 @@ class TestFollowUrlsYoutubeOverwrite:
                 "features": [
                     {
                         "$type": "app.bsky.richtext.facet#link",
-                        "uri": "https://www.youtube.com/watch?v=test123",
+                        "uri": "https://www.youtube.com/watch?v=DummyVidA01",
                     }
                 ]
             }
@@ -1119,7 +1167,7 @@ class TestFollowUrlsYoutubeOverwrite:
                 "features": [
                     {
                         "$type": "app.bsky.richtext.facet#link",
-                        "uri": "https://www.youtube.com/watch?v=new123",
+                        "uri": "https://www.youtube.com/watch?v=DummyVidA05",
                     }
                 ]
             }
@@ -1153,7 +1201,7 @@ class TestFollowUrlsYoutubeOverwrite:
                 "features": [
                     {
                         "$type": "app.bsky.richtext.facet#link",
-                        "uri": "https://www.youtube.com/watch?v=new456",
+                        "uri": "https://www.youtube.com/watch?v=DummyVidA06",
                     }
                 ]
             }
@@ -1166,7 +1214,7 @@ class TestFollowUrlsYoutubeOverwrite:
                 "features": [
                     {
                         "$type": "app.bsky.richtext.facet#link",
-                        "uri": "https://www.youtube.com/watch?v=old789",
+                        "uri": "https://www.youtube.com/watch?v=DummyVidA07",
                     }
                 ]
             }
@@ -1186,7 +1234,7 @@ class TestFollowUrlsYoutubeOverwrite:
 
         # 新規の YouTube のみ取り込まれ、上書きはスキップ
         mock_yt.ingest_video.assert_called_once_with(
-            video_url="https://www.youtube.com/watch?v=new456"
+            video_url="https://www.youtube.com/watch?v=DummyVidA06"
         )
         assert stats["youtube_placed"] == 1
         assert stats["skipped"] == 1
@@ -1947,7 +1995,7 @@ class TestPartialFailureObservability:
                 "features": [
                     {
                         "$type": "app.bsky.richtext.facet#link",
-                        "uri": "https://www.youtube.com/watch?v=broken",
+                        "uri": "https://www.youtube.com/watch?v=DummyVidA08",
                     },
                 ],
             },
@@ -1968,8 +2016,50 @@ class TestPartialFailureObservability:
         assert result.errors == 1
         assert result.error_details[0]["category"] == "delegation"
         assert result.error_details[0]["url"] == (
-            "https://www.youtube.com/watch?v=broken"
+            "https://www.youtube.com/watch?v=DummyVidA08"
         )
+
+    @pytest.mark.asyncio()
+    async def test_invalid_youtube_url_recorded_as_errors(
+        self, source_store: SourceStore,
+    ) -> None:
+        """follow_urls 経由で不正な YouTube URL が errors + delegation に計上されること.
+
+        site_ingest にも YouTube インジェスターにも委譲されず、
+        warning ログ + errors カウンタ + error_details への記録のみ行われる。
+        """
+        item = _make_feed_item()
+        item["post"]["record"]["facets"] = [
+            {
+                "features": [
+                    {
+                        "$type": "app.bsky.richtext.facet#link",
+                        "uri": "https://www.youtube.com/watch?v=short",
+                    },
+                ],
+            },
+        ]
+
+        mock_yt = AsyncMock()
+        mock_yt.ingest_video = AsyncMock()
+        mock_yt.request_interval = 0
+
+        ingester = make_bluesky_ingester(source_store)
+        result = IngestResult()
+        stats = await ingester.follow_urls(
+            [item],
+            youtube_ingester=mock_yt,
+            result=result,
+        )
+
+        assert stats["errors"] == 1
+        assert stats["web_placed"] == 0
+        assert stats["youtube_placed"] == 0
+        assert result.errors == 1
+        assert result.error_details[0]["category"] == "delegation"
+        assert result.error_details[0]["message"] == "invalid youtube url"
+        assert result.error_details[0]["url"] == "https://www.youtube.com/watch?v=short"
+        mock_yt.ingest_video.assert_not_called()
 
     @pytest.mark.asyncio()
     async def test_placement_failure_uses_dict_error_detail(
