@@ -4,6 +4,7 @@
 
 テスト方針:
 - URL パース・バリデーション
+- URL 種別分類（video / malformed / not_youtube）
 - max_videos のバリデーション・クランプ
 - 字幕取得（モック）
 - Whisper フォールバック（モック）
@@ -25,8 +26,10 @@ from rag.pipeline.ingesters._common import IngestResult
 from rag.pipeline.ingesters.youtube import (
     MAX_VIDEOS_HARD_LIMIT,
     _validate_max_videos,
+    classify_youtube_url,
     extract_playlist_id,
     extract_video_id,
+    is_youtube_video_url,
 )
 
 from factories import make_youtube_ingester
@@ -37,16 +40,16 @@ from factories import make_youtube_ingester
 
 class TestExtractVideoId:
     def test_standard_url(self) -> None:
-        assert extract_video_id("https://www.youtube.com/watch?v=JV3KOJ_Z4Vs") == "JV3KOJ_Z4Vs"
+        assert extract_video_id("https://www.youtube.com/watch?v=TestVideo01") == "TestVideo01"
 
     def test_short_url(self) -> None:
-        assert extract_video_id("https://youtu.be/JV3KOJ_Z4Vs") == "JV3KOJ_Z4Vs"
+        assert extract_video_id("https://youtu.be/TestVideo01") == "TestVideo01"
 
     def test_url_with_extra_params(self) -> None:
-        assert extract_video_id("https://www.youtube.com/watch?v=JV3KOJ_Z4Vs&t=30s") == "JV3KOJ_Z4Vs"
+        assert extract_video_id("https://www.youtube.com/watch?v=TestVideo01&t=30s") == "TestVideo01"
 
     def test_mobile_url(self) -> None:
-        assert extract_video_id("https://m.youtube.com/watch?v=JV3KOJ_Z4Vs") == "JV3KOJ_Z4Vs"
+        assert extract_video_id("https://m.youtube.com/watch?v=TestVideo01") == "TestVideo01"
 
     def test_invalid_url_raises(self) -> None:
         with pytest.raises(ValueError, match="不正な YouTube URL"):
@@ -59,6 +62,140 @@ class TestExtractVideoId:
     def test_invalid_video_id_format_raises(self) -> None:
         with pytest.raises(ValueError, match="不正な YouTube URL"):
             extract_video_id("https://www.youtube.com/watch?v=short")
+
+    def test_shorts_url(self) -> None:
+        assert extract_video_id("https://www.youtube.com/shorts/TestVideo01") == "TestVideo01"
+
+    def test_live_url(self) -> None:
+        assert extract_video_id("https://www.youtube.com/live/TestVideo01") == "TestVideo01"
+
+    def test_live_url_with_query(self) -> None:
+        assert (
+            extract_video_id("https://www.youtube.com/live/TestVideo01?si=abc123")
+            == "TestVideo01"
+        )
+
+    def test_embed_url(self) -> None:
+        assert extract_video_id("https://www.youtube.com/embed/TestVideo01") == "TestVideo01"
+
+    def test_legacy_v_url(self) -> None:
+        assert extract_video_id("https://www.youtube.com/v/TestVideo01") == "TestVideo01"
+
+    def test_youtube_com_without_subdomain(self) -> None:
+        assert extract_video_id("https://youtube.com/watch?v=TestVideo01") == "TestVideo01"
+
+    def test_invalid_video_id_in_shorts_path_raises(self) -> None:
+        with pytest.raises(ValueError, match="不正な YouTube URL"):
+            extract_video_id("https://www.youtube.com/shorts/short")
+
+    def test_playlist_url_is_rejected(self) -> None:
+        with pytest.raises(ValueError, match="不正な YouTube URL"):
+            extract_video_id("https://www.youtube.com/playlist?list=PLtest")
+
+    def test_channel_handle_url_is_rejected(self) -> None:
+        with pytest.raises(ValueError, match="不正な YouTube URL"):
+            extract_video_id("https://www.youtube.com/@SampleHandle")
+
+    def test_video_id_with_underscore(self) -> None:
+        """`_` を含む video_id (11 文字) が抽出できること."""
+        assert extract_video_id("https://www.youtube.com/watch?v=Test_Video1") == "Test_Video1"
+
+    def test_video_id_with_hyphen(self) -> None:
+        """`-` を含む video_id (11 文字) が抽出できること."""
+        assert extract_video_id("https://www.youtube.com/watch?v=Test-Video1") == "Test-Video1"
+
+    def test_video_id_with_underscore_in_shorts(self) -> None:
+        """`_` を含む video_id が shorts URL から抽出できること."""
+        assert (
+            extract_video_id("https://www.youtube.com/shorts/Test_Video1") == "Test_Video1"
+        )
+
+    def test_video_id_case_is_preserved(self) -> None:
+        """video_id の大文字小文字が保持されること（パス判定が大文字小文字無視でも）."""
+        assert (
+            extract_video_id("https://www.youtube.com/SHORTS/MixedCase11") == "MixedCase11"
+        )
+
+
+class TestIsYoutubeVideoUrl:
+    @pytest.mark.parametrize(
+        "url",
+        [
+            "https://www.youtube.com/watch?v=TestVideo01",
+            "https://youtube.com/watch?v=TestVideo01",
+            "https://m.youtube.com/watch?v=TestVideo01",
+            "https://youtu.be/TestVideo01",
+            "https://www.youtube.com/shorts/TestVideo01",
+            "https://www.youtube.com/live/TestVideo01",
+            "https://www.youtube.com/live/TestVideo01?si=abc",
+            "https://www.youtube.com/embed/TestVideo01",
+            "https://www.youtube.com/v/TestVideo01",
+        ],
+    )
+    def test_video_urls_are_recognized(self, url: str) -> None:
+        assert is_youtube_video_url(url) is True
+
+    @pytest.mark.parametrize(
+        "url",
+        [
+            "https://example.com/watch?v=TestVideo01",
+            "https://www.youtube.com/playlist?list=PLtest",
+            "https://www.youtube.com/@SampleHandle",
+            "https://www.youtube.com/c/somechannel",
+            "https://www.youtube.com/channel/UCxxxx",
+            "https://www.youtube.com/watch?v=short",
+            "https://www.youtube.com/watch",
+        ],
+    )
+    def test_non_video_urls_are_rejected(self, url: str) -> None:
+        assert is_youtube_video_url(url) is False
+
+
+class TestClassifyYoutubeUrl:
+    @pytest.mark.parametrize(
+        "url",
+        [
+            "https://www.youtube.com/watch?v=TestVideo01",
+            "https://youtu.be/TestVideo01",
+            "https://www.youtube.com/shorts/TestVideo01",
+            "https://www.youtube.com/live/TestVideo01",
+            "https://www.youtube.com/embed/TestVideo01",
+            "https://www.youtube.com/v/TestVideo01",
+            "https://m.youtube.com/watch?v=TestVideo01",
+        ],
+    )
+    def test_valid_video_urls(self, url: str) -> None:
+        assert classify_youtube_url(url) == "video"
+
+    @pytest.mark.parametrize(
+        "url",
+        [
+            "https://www.youtube.com/watch?v=short",
+            "https://www.youtube.com/watch?v=",
+            "https://www.youtube.com/shorts/short",
+            "https://www.youtube.com/live/short",
+            "https://www.youtube.com/embed/short",
+            "https://www.youtube.com/v/short",
+            "https://youtu.be/short",
+        ],
+    )
+    def test_malformed_video_urls(self, url: str) -> None:
+        assert classify_youtube_url(url) == "malformed"
+
+    @pytest.mark.parametrize(
+        "url",
+        [
+            "https://example.com/watch?v=TestVideo01",
+            "https://www.youtube.com/playlist?list=PLtest",
+            "https://www.youtube.com/@SampleHandle",
+            "https://www.youtube.com/c/somechannel",
+            "https://www.youtube.com/channel/UCxxxx",
+            "https://www.youtube.com/watch",
+            "https://youtu.be/",
+        ],
+    )
+    def test_not_youtube_video_urls(self, url: str) -> None:
+        assert classify_youtube_url(url) == "not_youtube"
 
 
 class TestExtractPlaylistId:
@@ -123,7 +260,7 @@ def source_store(tmp_path: Path) -> Any:
 def _make_metadata(*, channel_id: str = "UCtest123456789012345", duration: int = 120) -> dict[str, Any]:
     """テスト用メタデータを生成する."""
     return {
-        "id": "JV3KOJ_Z4Vs",
+        "id": "TestVideo01",
         "title": "Test Video Title",
         "channel_id": channel_id,
         "uploader": "Test Channel",
@@ -160,7 +297,7 @@ class TestIngestVideo:
                 return_value=(snippets, "subtitle", "ja"),
             ),
         ):
-            result = await ingester.ingest_video("https://www.youtube.com/watch?v=JV3KOJ_Z4Vs")
+            result = await ingester.ingest_video("https://www.youtube.com/watch?v=TestVideo01")
 
         assert result.placed == 1
         assert result.errors == 0
@@ -169,18 +306,18 @@ class TestIngestVideo:
         source_store.place_file.assert_called_once()
         call_kwargs = source_store.place_file.call_args
         assert call_kwargs.kwargs["source_type"] == "youtube"
-        assert call_kwargs.kwargs["rel_path"] == "youtube/UCtest123456789012345/JV3KOJ_Z4Vs.json"
+        assert call_kwargs.kwargs["rel_path"] == "youtube/UCtest123456789012345/TestVideo01.json"
 
         # JSON データの検証
         data = json.loads(call_kwargs.kwargs["data"].decode("utf-8"))
-        assert data["video_id"] == "JV3KOJ_Z4Vs"
+        assert data["video_id"] == "TestVideo01"
         assert data["transcript_source"] == "subtitle"
         assert len(data["snippets"]) == 3
 
         # メタデータの検証
         meta = call_kwargs.kwargs["metadata"]
         assert meta["source_type"] == "youtube"
-        assert meta["video_id"] == "JV3KOJ_Z4Vs"
+        assert meta["video_id"] == "TestVideo01"
 
     @pytest.mark.asyncio()
     async def test_duration_exceeded_skipped(self, source_store: Any) -> None:
@@ -190,7 +327,7 @@ class TestIngestVideo:
         metadata = _make_metadata(duration=3600)
 
         with patch.object(ingester, "_fetch_metadata", new_callable=AsyncMock, return_value=metadata):
-            result = await ingester.ingest_video("https://www.youtube.com/watch?v=JV3KOJ_Z4Vs")
+            result = await ingester.ingest_video("https://www.youtube.com/watch?v=TestVideo01")
 
         assert result.placed == 0
         assert result.skipped == 1
@@ -206,12 +343,12 @@ class TestIngestVideo:
             new_callable=AsyncMock,
             side_effect=Exception("API error"),
         ):
-            result = await ingester.ingest_video("https://www.youtube.com/watch?v=JV3KOJ_Z4Vs")
+            result = await ingester.ingest_video("https://www.youtube.com/watch?v=TestVideo01")
 
         assert result.errors == 1
         detail = result.error_details[0]
         assert detail["category"] == "metadata_fetch"
-        assert detail["target"] == "JV3KOJ_Z4Vs"
+        assert detail["target"] == "TestVideo01"
         assert "メタデータ取得失敗" in detail["message"]
 
     @pytest.mark.asyncio()
@@ -223,13 +360,13 @@ class TestIngestVideo:
         metadata["channel_id"] = None
 
         with patch.object(ingester, "_fetch_metadata", new_callable=AsyncMock, return_value=metadata):
-            result = await ingester.ingest_video("https://www.youtube.com/watch?v=JV3KOJ_Z4Vs")
+            result = await ingester.ingest_video("https://www.youtube.com/watch?v=TestVideo01")
 
         assert result.placed == 0
         assert result.errors == 1
         detail = result.error_details[0]
         assert detail["category"] == "metadata_fetch"
-        assert detail["target"] == "JV3KOJ_Z4Vs"
+        assert detail["target"] == "TestVideo01"
         assert "channel_id" in detail["message"]
 
     @pytest.mark.asyncio()
@@ -249,7 +386,7 @@ class TestIngestVideo:
                 return_value=(snippets, "whisper", "ja"),
             ),
         ):
-            result = await ingester.ingest_video("https://www.youtube.com/watch?v=JV3KOJ_Z4Vs")
+            result = await ingester.ingest_video("https://www.youtube.com/watch?v=TestVideo01")
 
         assert result.placed == 1
         call_kwargs = source_store.place_file.call_args
@@ -273,12 +410,12 @@ class TestIngestVideo:
             patch.object(ingester, "_fetch_metadata", new_callable=AsyncMock, return_value=metadata),
             patch.object(ingester, "_fetch_transcript", new_callable=AsyncMock, return_value=(snippets, "subtitle", "ja")),
         ):
-            result1 = await ingester.ingest_video("https://www.youtube.com/watch?v=JV3KOJ_Z4Vs")
+            result1 = await ingester.ingest_video("https://www.youtube.com/watch?v=TestVideo01")
         assert result1.placed == 1
         assert result1.overwritten == 0
 
         # 2 回目: dest に実ファイルを作成して exists() が True になるようにする
-        dest = source_store.root_dir / "youtube" / "UCtest123456789012345" / "JV3KOJ_Z4Vs.json"
+        dest = source_store.root_dir / "youtube" / "UCtest123456789012345" / "TestVideo01.json"
         dest.parent.mkdir(parents=True, exist_ok=True)
         dest.write_text("{}", encoding="utf-8")
 
@@ -286,7 +423,7 @@ class TestIngestVideo:
             patch.object(ingester, "_fetch_metadata", new_callable=AsyncMock, return_value=metadata),
             patch.object(ingester, "_fetch_transcript", new_callable=AsyncMock, return_value=(snippets, "subtitle", "ja")),
         ):
-            result2 = await ingester.ingest_video("https://www.youtube.com/watch?v=JV3KOJ_Z4Vs")
+            result2 = await ingester.ingest_video("https://www.youtube.com/watch?v=TestVideo01")
         # 排他計上: 既存ファイル上書き時は placed=0, overwritten=1
         assert result2.placed == 0
         assert result2.overwritten == 1
@@ -311,10 +448,10 @@ class TestIngestVideo:
                 ingester,
                 "_fetch_subtitle",
                 new_callable=AsyncMock,
-                side_effect=RequestBlocked("JV3KOJ_Z4Vs"),
+                side_effect=RequestBlocked("TestVideo01"),
             ),
         ):
-            result = await ingester.ingest_video("https://www.youtube.com/watch?v=JV3KOJ_Z4Vs")
+            result = await ingester.ingest_video("https://www.youtube.com/watch?v=TestVideo01")
 
         # Whisper フォールバックされず、エラーとして処理される
         assert result.errors == 1
@@ -335,7 +472,7 @@ class TestIngestVideo:
                 ingester,
                 "_fetch_subtitle",
                 new_callable=AsyncMock,
-                side_effect=TranscriptsDisabled("JV3KOJ_Z4Vs"),
+                side_effect=TranscriptsDisabled("TestVideo01"),
             ),
             patch.object(
                 ingester,
@@ -344,7 +481,7 @@ class TestIngestVideo:
                 return_value=(snippets, "ja"),
             ),
         ):
-            result = await ingester.ingest_video("https://www.youtube.com/watch?v=JV3KOJ_Z4Vs")
+            result = await ingester.ingest_video("https://www.youtube.com/watch?v=TestVideo01")
 
         assert result.placed == 1
         assert result.errors == 0

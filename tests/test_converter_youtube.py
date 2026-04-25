@@ -57,7 +57,7 @@ class TestConvertJsonYoutube:
         duration: int = 120,
     ) -> dict[str, Any]:
         return {
-            "video_id": "JV3KOJ_Z4Vs",
+            "video_id": "TestVideo01",
             "title": "Test Video",
             "uploader": "Test Channel",
             "upload_date": "20240901",
@@ -132,7 +132,7 @@ class TestConvertJsonYoutube:
         data = self._make_data()
         result = convert_json_youtube(data)
         assert result is not None
-        assert "https://www.youtube.com/watch?v=JV3KOJ_Z4Vs" in result
+        assert "https://www.youtube.com/watch?v=TestVideo01" in result
 
     def test_continuous_snippets_merged(self) -> None:
         """連続するスニペットが結合されることを検証する."""

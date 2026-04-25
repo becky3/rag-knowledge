@@ -81,6 +81,27 @@ youtube-transcript-api は非公式 API を使用しており、短時間に多�
 - `--no-limit` 等の制約バイパス手段は一切設けない
 - `0 = 無制限` のセマンティクスを排除する
 
+### 対応 URL 形式
+
+YouTube インジェスターは以下の URL パターンを単一動画として認識する。判定ロジックは YouTube インジェスター内で一元定義し、BlueSky インジェスターから投稿内 URL の種別判定にも参照される（分類器と抽出器の drift 防止）。BlueSky 側の参照箇所は [bluesky.md](bluesky.md) を参照。
+
+| URL パターン | 用途 |
+|---|---|
+| `https://{host}/watch?v={video_id}` | 通常の動画ページ |
+| `https://youtu.be/{video_id}` | 短縮 URL |
+| `https://{host}/shorts/{video_id}` | Shorts |
+| `https://{host}/live/{video_id}` | ライブ配信 |
+| `https://{host}/embed/{video_id}` | 埋め込みプレイヤー |
+| `https://{host}/v/{video_id}` | レガシー埋め込み形式 |
+
+補足:
+
+- `{host}` は `www.youtube.com` / `youtube.com` / `m.youtube.com` のいずれか。ホストとパスは直交し、`m.youtube.com/shorts/{video_id}` 等の組み合わせも受理される
+- `{video_id}` は 11 文字固定の識別子。各文字は半角英大文字・半角英小文字・半角数字、またはアンダースコア（`_`）・ハイフン（`-`）のいずれか
+- `/watch?v={video_id}` の `v` 以外のクエリパラメータ（`t=30s`, `si=...` 等）と、短縮 URL・パスベース URL に付加されたクエリは判定で無視される
+- ホスト名・パスのプレフィックス比較は大文字小文字を区別しない。一方 `{video_id}` 部分は大文字小文字を保持して抽出する
+- プレイリスト URL（`/playlist?list=`）およびチャンネル URL（`/@handle`, `/c/`, `/channel/`）は本判定の対象外
+
 ### 重複検出
 
 [インジェスター共通仕様](common.md) のファイルシステムベース方式に従う。source_id（source_store 内の相対パス）で該当ファイルの存在有無を判定する。
@@ -118,7 +139,7 @@ youtube-transcript-api は非公式 API を使用しており、短時間に多�
 
 | パラメータ | 型 | 必須 | 説明 |
 |-----------|-----|------|------|
-| `video_url` | 文字列 | はい | YouTube 動画 URL。対応形式: `youtube.com/watch?v={id}` および `youtu.be/{id}` |
+| `video_url` | 文字列 | はい | YouTube 動画 URL。対応形式は[対応 URL 形式](#対応-url-形式) を参照 |
 
 #### rag_crawl_youtube パラメータ
 

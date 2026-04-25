@@ -17,7 +17,7 @@ import shutil
 import tempfile
 import threading
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, Literal
 from urllib.parse import parse_qs, urlparse
 
 from rag.pipeline.ingesters._common import IngestResult, ProgressCallback, now_iso
@@ -37,33 +37,81 @@ CIRCUIT_BREAKER_THRESHOLD = 5
 # video_id の正規表現
 _VIDEO_ID_RE = re.compile(r"^[A-Za-z0-9_-]{11}$")
 
+# 仕様: docs/specs/ingesters/youtube.md「対応 URL 形式」が SSoT
+_YOUTUBE_HOSTS = ("www.youtube.com", "youtube.com", "m.youtube.com")
+_VIDEO_PATH_PREFIXES = ("/shorts/", "/live/", "/embed/", "/v/")
+
+
+def _extract_video_id_candidate(url: str) -> str | None:
+    """URL から video_id 候補を抽出する.
+
+    Returns:
+        - str (空文字の可能性あり): URL が動画 URL のパターンに該当する場合の video_id 候補。
+          形式（11 文字）の妥当性は呼び出し側で別途検証する。
+        - None: 動画 URL のパターンに該当しない場合（チャンネル URL、プレイリスト URL、別ホスト等）。
+    """
+    parsed = urlparse(url)
+    host = (parsed.hostname or "").lower()
+    # host を lowercase 化している以上、一貫性のためパスのプレフィックス判定も
+    # 大文字小文字を区別せずに行う。video_id 部分は大文字小文字を保持するため、
+    # 抽出は parsed.path（元のパス）から行う
+    path_lower = parsed.path.lower()
+
+    if host == "youtu.be":
+        if not path_lower.lstrip("/"):
+            return None
+        return parsed.path.lstrip("/").split("/")[0]
+
+    if host in _YOUTUBE_HOSTS:
+        if path_lower in ("/watch", "/watch/"):
+            qs = parse_qs(parsed.query, keep_blank_values=True)
+            video_ids = qs.get("v")
+            if video_ids is not None:
+                return video_ids[0]
+        for prefix in _VIDEO_PATH_PREFIXES:
+            if path_lower.startswith(prefix):
+                return parsed.path[len(prefix) :].split("/")[0]
+
+    return None
+
+
+def is_youtube_video_url(url: str) -> bool:
+    """URL が有効な YouTube 動画 URL かを判定する.
+
+    仕様: docs/specs/ingesters/youtube.md「対応 URL 形式」
+    """
+    return classify_youtube_url(url) == "video"
+
+
+def classify_youtube_url(url: str) -> Literal["video", "malformed", "not_youtube"]:
+    """URL を YouTube 動画 URL の観点で分類する.
+
+    仕様: docs/specs/ingesters/youtube.md「対応 URL 形式」
+
+    Returns:
+        - "video": 動画 URL のパターンに該当し、video_id 形式（11 文字）も有効
+        - "malformed": 動画 URL のパターンに該当するが video_id 形式が不正
+        - "not_youtube": 動画 URL のパターンに該当しない
+    """
+    candidate = _extract_video_id_candidate(url)
+    if candidate is None:
+        return "not_youtube"
+    if _VIDEO_ID_RE.match(candidate):
+        return "video"
+    return "malformed"
+
 
 def extract_video_id(url: str) -> str:
     """YouTube URL から video_id を抽出する.
 
-    対応形式:
-    - https://www.youtube.com/watch?v={id}
-    - https://youtu.be/{id}
+    仕様: docs/specs/ingesters/youtube.md「対応 URL 形式」
 
     Raises:
         ValueError: 不正な URL 形式の場合
     """
-    parsed = urlparse(url)
-    host = parsed.hostname or ""
-
-    # youtube.com/watch?v=
-    if host in ("www.youtube.com", "youtube.com", "m.youtube.com"):
-        qs = parse_qs(parsed.query)
-        video_ids = qs.get("v")
-        if video_ids and _VIDEO_ID_RE.match(video_ids[0]):
-            return video_ids[0]
-
-    # youtu.be/{id}
-    if host == "youtu.be":
-        vid = parsed.path.lstrip("/").split("/")[0].split("?")[0]
-        if _VIDEO_ID_RE.match(vid):
-            return vid
-
+    candidate = _extract_video_id_candidate(url)
+    if candidate and _VIDEO_ID_RE.match(candidate):
+        return candidate
     raise ValueError(f"不正な YouTube URL です: {url}")
 
 
@@ -74,8 +122,8 @@ def extract_playlist_id(url: str) -> str:
         ValueError: 不正な URL 形式の場合
     """
     parsed = urlparse(url)
-    host = parsed.hostname or ""
-    if host not in ("www.youtube.com", "youtube.com", "m.youtube.com"):
+    host = (parsed.hostname or "").lower()
+    if host not in _YOUTUBE_HOSTS:
         raise ValueError(f"不正な YouTube プレイリスト URL です: {url}")
     qs = parse_qs(parsed.query)
     playlist_ids = qs.get("list")
