@@ -114,7 +114,7 @@ QA 検証グループ:
 2. worktree を作成する（配置: リポジトリの親ディレクトリ、命名: `<リポジトリ名>-wt-<Issue番号>`）
 3. メインリポジトリから `.env` をコピーし、ストレージパスを worktree 内の絶対パスに変更する。以下も設定する:
    - `CHROMADB_SERVER_PORT=8001`（メインリポジトリの MCP サーバーとのポート競合回避）
-   - `CHROMADB_AUTO_START=false`（worktree では手動起動するため。`true` のままだと MCP サーバー起動時に競合する可能性がある）
+   - `CHROMADB_AUTO_START` はデフォルト（`true`）のままでよい（`ChromaDBServerManager` は起動前に heartbeat チェックを行い、既存インスタンスが応答すれば起動をスキップするため競合しない）
 4. LM Studio の接続先を確認し、必要に応じて `localhost` に変更する
 5. `.tmp` ディレクトリを作成する
 6. メインリポジトリから `.qa/` ディレクトリをコピーする（`.qa/` は `.gitignore` 対象のため worktree に含まれない）
