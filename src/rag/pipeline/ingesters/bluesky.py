@@ -1227,6 +1227,12 @@ class BlueskyIngester:
         プロセス内で site-ingest のコア処理を呼び出す（#686）。Scrapy 自体は
         site-ingest 内部で別 subprocess として起動される（reactor 制約のため）。
 
+        URL バリデーション (validate_url) と SSRF チェック (check_ssrf) を冒頭で
+        実施する。subprocess 経由から Python API 直呼出しに変更したことで、
+        従来 CLI ``site-ingest`` の入口で行われていた多層防御の初回チェック層が
+        欠落するため、bluesky 側で補完する（Scrapy Downloader Middleware の
+        per-request チェックは引き続き有効）。
+
         Args:
             urls: 取得対象の Web URL リスト
             source_store: 配置先の SourceStore
@@ -1234,39 +1240,80 @@ class BlueskyIngester:
 
         Returns:
             (配置されたファイル数の合計, エラー件数, errors の dict リスト)。
-            site-ingest 全体の失敗時は各 URL に category="delegation" の dict を
-            1 件ずつ生成する。
+            ``error_details`` の件数とエラー件数は常に一致する。
         """
+        from rag.utils.url import check_ssrf, validate_url
+
         logger.info("site-ingest（複数 URL モード）で %d 件の Web URL を取り込みます", len(urls))
+
+        validated_urls: list[str] = []
+        validation_errors: list[dict[str, Any]] = []
+        for url in urls:
+            try:
+                validated = validate_url(url)
+                check_ssrf(validated)
+            except ValueError as exc:
+                logger.warning("Web URL バリデーション失敗: %s (%s)", url, exc)
+                validation_errors.append(
+                    {
+                        "category": "delegation",
+                        "target": url,
+                        "url": url,
+                        "message": f"url validation failed: {exc}",
+                    },
+                )
+                continue
+            validated_urls.append(validated)
+
+        if not validated_urls:
+            return 0, len(validation_errors), validation_errors
 
         try:
             execution = await execute_site_ingest(
-                urls=urls,
+                urls=validated_urls,
                 source_store=source_store,
                 settings=settings,
             )
         except Exception as exc:
-            logger.exception("site-ingest 実行に失敗: %d 件", len(urls))
-            return 0, len(urls), [
+            logger.exception("site-ingest 実行に失敗: %d 件", len(validated_urls))
+            execute_errors = [
                 {
                     "category": "delegation",
                     "target": url,
                     "url": url,
                     "message": f"site-ingest failed: {exc}",
                 }
-                for url in urls
+                for url in validated_urls
             ]
+            all_errors = validation_errors + execute_errors
+            return 0, len(all_errors), all_errors
 
         bridge = execution.bridge
         placed = bridge.ingest.placed + bridge.ingest.overwritten
-        bridge_errors = bridge.ingest.errors + bridge.parse_errors
+        # bridge.ingest.errors は error_details に対応するエントリを持つ。
+        # bridge.parse_errors は JSONL 行単位のパースエラー件数で個別 detail を
+        # 持たないため、件数整合のため集約エントリを 1 件追加する。
+        error_details: list[dict[str, Any]] = list(bridge.ingest.error_details)
+        if bridge.parse_errors > 0:
+            error_details.append(
+                {
+                    "category": "delegation",
+                    "target": "site-ingest:jsonl",
+                    "message": (
+                        f"JSONL のパースに失敗した行が {bridge.parse_errors} 件"
+                        "あります（site-ingest 出力）"
+                    ),
+                },
+            )
+        all_error_details = validation_errors + error_details
+        total_errors = len(all_error_details)
         logger.info(
             "site-ingest 完了: 合計 %d 件配置, %d 件エラー",
-            placed, bridge_errors,
+            placed, total_errors,
         )
         # 正常完了後のクリーンアップ（仕様: docs/specs/site-ingest.md）。
         # BlueSky 経由では bridge 完了後ただちに cleanup してよい
         # （後続のインデックス化は親 controller が一括で実行する）
         if execution.scrapy_success and execution.crawl_result is not None:
             execution.crawl_result.cleanup()
-        return placed, bridge_errors, list(bridge.ingest.error_details)
+        return placed, total_errors, all_error_details

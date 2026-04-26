@@ -2203,7 +2203,12 @@ class TestFetchWebUrlsPythonApi:
         bridge_result.ingest.overwritten = 0
         bridge_result.ingest.errors = 1
         bridge_result.ingest.error_details = [
-            {"category": "placement", "url": "https://example.com/x", "message": "boom"},
+            {
+                "category": "placement",
+                "target": "web/https/example.com/x",
+                "url": "https://example.com/x",
+                "message": "boom",
+            },
         ]
         bridge_result.parse_errors = 0
         execution = MagicMock()
@@ -2225,8 +2230,52 @@ class TestFetchWebUrlsPythonApi:
         assert placed == 0
         assert errors == 1
         assert error_details == [
-            {"category": "placement", "url": "https://example.com/x", "message": "boom"},
+            {
+                "category": "placement",
+                "target": "web/https/example.com/x",
+                "url": "https://example.com/x",
+                "message": "boom",
+            },
         ]
+
+    async def test_parse_errors_aggregated_into_error_details(
+        self, source_store: SourceStore,
+    ) -> None:
+        """bridge.parse_errors が error_details の集約エントリ 1 件として計上され、件数整合が取れること."""
+        from rag.pipeline.ingesters._common import IngestResult
+
+        ingester = make_bluesky_ingester(source_store)
+        bridge_result = MagicMock()
+        bridge_result.ingest = IngestResult()
+        bridge_result.ingest.placed = 1
+        bridge_result.ingest.overwritten = 0
+        bridge_result.ingest.errors = 0
+        bridge_result.ingest.error_details = []
+        bridge_result.parse_errors = 3
+        execution = MagicMock()
+        execution.bridge = bridge_result
+        execution.scrapy_success = True
+        execution.crawl_result = MagicMock()
+
+        with patch(
+            "rag.pipeline.ingesters.bluesky.execute_site_ingest",
+            new_callable=AsyncMock,
+            return_value=execution,
+        ):
+            placed, errors, error_details = await ingester._fetch_web_urls(
+                ["https://example.com/x"],
+                source_store=source_store,
+                settings=MagicMock(),
+            )
+
+        assert placed == 1
+        # bridge_errors と error_details 件数が一致する（旧実装では parse_errors 分が
+        # error_details に出ず、呼び出し元の集計が乖離していた）
+        assert errors == len(error_details)
+        assert errors == 1
+        assert error_details[0]["category"] == "delegation"
+        assert "JSONL" in error_details[0]["message"]
+        assert "3" in error_details[0]["message"]
 
     async def test_records_delegation_failure_when_execute_raises(
         self, source_store: SourceStore,
@@ -2253,6 +2302,71 @@ class TestFetchWebUrlsPythonApi:
             assert detail["category"] == "delegation"
             assert detail["url"] == url
             assert "scrapy crashed" in detail["message"]
+
+    async def test_invalid_url_recorded_as_delegation_error_without_calling_execute(
+        self, source_store: SourceStore,
+    ) -> None:
+        """無効な URL（スキーム不正）は execute_site_ingest を呼ばず delegation エラーとして計上されること."""
+        ingester = make_bluesky_ingester(source_store)
+
+        with patch(
+            "rag.pipeline.ingesters.bluesky.execute_site_ingest",
+            new_callable=AsyncMock,
+        ) as mock_execute:
+            placed, errors, error_details = await ingester._fetch_web_urls(
+                ["ftp://example.com/x"],
+                source_store=source_store,
+                settings=MagicMock(),
+            )
+
+        # 全 URL が validate で弾かれた場合 execute_site_ingest は呼ばれない
+        mock_execute.assert_not_called()
+        assert placed == 0
+        assert errors == 1
+        assert error_details[0]["category"] == "delegation"
+        assert error_details[0]["url"] == "ftp://example.com/x"
+        assert "url validation failed" in error_details[0]["message"]
+
+    async def test_ssrf_url_recorded_as_delegation_error_and_valid_urls_proceed(
+        self, source_store: SourceStore,
+    ) -> None:
+        """SSRF 対象 URL は弾かれ、有効 URL のみ execute_site_ingest に渡ること."""
+        from rag.pipeline.ingesters._common import IngestResult
+
+        ingester = make_bluesky_ingester(source_store)
+        bridge_result = MagicMock()
+        bridge_result.ingest = IngestResult()
+        bridge_result.ingest.placed = 1
+        bridge_result.ingest.overwritten = 0
+        bridge_result.ingest.errors = 0
+        bridge_result.ingest.error_details = []
+        bridge_result.parse_errors = 0
+        execution = MagicMock()
+        execution.bridge = bridge_result
+        execution.scrapy_success = True
+        execution.crawl_result = MagicMock()
+
+        with patch(
+            "rag.pipeline.ingesters.bluesky.execute_site_ingest",
+            new_callable=AsyncMock,
+            return_value=execution,
+        ) as mock_execute:
+            placed, errors, error_details = await ingester._fetch_web_urls(
+                ["http://127.0.0.1/admin", "https://example.com/article"],
+                source_store=source_store,
+                settings=MagicMock(),
+            )
+
+        # 有効な URL のみ execute_site_ingest に渡る
+        mock_execute.assert_awaited_once()
+        called_urls = mock_execute.await_args.kwargs["urls"]
+        assert called_urls == ["https://example.com/article"]
+
+        assert placed == 1
+        assert errors == 1
+        assert error_details[0]["category"] == "delegation"
+        assert error_details[0]["url"] == "http://127.0.0.1/admin"
+        assert "url validation failed" in error_details[0]["message"]
 
 
 # ===========================================================================
