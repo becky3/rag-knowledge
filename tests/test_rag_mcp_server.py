@@ -842,6 +842,43 @@ class TestFormatCliIngestResult:
         text = mod._format_cli_ingest_result(result)
         assert "1件配置" in text
 
+    def test_with_url_follow(self) -> None:
+        """url_follow キーがあれば Web/YouTube 件数が含まれること.
+
+        BlueSky 系（rag_crawl_bluesky / rag_add_bluesky）の CLI が出力する
+        url_follow 統計を MCP 応答に反映する。
+        """
+        mod = import_module("rag.server")
+        result = {
+            "placed": 1, "skipped": 0, "overwritten": 0,
+            "errors": 0, "error_details": [],
+            "url_follow": {
+                "web_placed": 3,
+                "youtube_placed": 2,
+                "errors": 1,
+            },
+        }
+        text = mod._format_cli_ingest_result(result)
+        assert "URL 自動取り込み" in text
+        assert "Web 3件" in text
+        assert "YouTube 2件" in text
+        assert "エラー 1件" in text
+
+    def test_with_empty_url_follow(self) -> None:
+        """url_follow が全て 0 の場合は URL セクションが出力されないこと."""
+        mod = import_module("rag.server")
+        result = {
+            "placed": 1, "skipped": 0, "overwritten": 0,
+            "errors": 0, "error_details": [],
+            "url_follow": {
+                "web_placed": 0,
+                "youtube_placed": 0,
+                "errors": 0,
+            },
+        }
+        text = mod._format_cli_ingest_result(result)
+        assert "URL 自動取り込み" not in text
+
 
 class TestRagDeleteTool:
     """rag_delete ツールのテスト（CLI サブプロセス移行後）."""

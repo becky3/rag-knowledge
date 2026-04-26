@@ -406,23 +406,29 @@ class BlueskyIngester:
 
                 total_processed += 1
 
-                placed_ok = await self._place_single_post(
+                place_outcome = await self._place_single_post(
                     item,
                     is_repost=is_repost,
                     force=force,
                     client=client,
                     result=result,
                     seen_paths=seen_paths,
-                    placed_items=placed_items,
                 )
 
-                if progress_callback is not None and placed_ok is not None:
-                    post = item.get("post", {})
-                    author = post.get("author", {})
-                    post_uri = post.get("uri", "")
-                    rkey = post_uri.rsplit("/", 1)[-1] if "/" in post_uri else ""
-                    bsky_url = f"https://bsky.app/profile/{author.get('handle', '')}/post/{rkey}"
-                    progress_callback(total_processed, effective_max, bsky_url)
+                if place_outcome is not None:
+                    placed_ok, is_overwrite = place_outcome
+                    if placed_ok:
+                        # 上書き投稿の YouTube URL は force_youtube_reingest 設定で抑制可
+                        placed_items.append(
+                            {**item, "_suppress_youtube_reingest": is_overwrite},
+                        )
+                    if progress_callback is not None:
+                        post = item.get("post", {})
+                        author = post.get("author", {})
+                        post_uri = post.get("uri", "")
+                        rkey = post_uri.rsplit("/", 1)[-1] if "/" in post_uri else ""
+                        bsky_url = f"https://bsky.app/profile/{author.get('handle', '')}/post/{rkey}"
+                        progress_callback(total_processed, effective_max, bsky_url)
 
             # 次ページの確認
             cursor = data.get("cursor")
@@ -444,12 +450,18 @@ class BlueskyIngester:
         client: ConstrainedClient,
         result: IngestResult,
         seen_paths: set[str] | None = None,
-        placed_items: list[dict[str, Any]] | None = None,
-    ) -> bool | None:
+    ) -> tuple[bool, bool] | None:
         """単一投稿を source_store に配置する.
 
+        placed_items の組み立ては呼び出し側の責務とする。本関数は配置結果（成功可否と
+        既存ファイル上書きだったかの事実）のみを返す。呼び出し側は用途に応じて
+        ``_suppress_youtube_reingest`` 等のポリシーフラグを決定し、placed_items を
+        構築する。
+
         Returns:
-            True: 配置成功, False: 配置失敗, None: スキップ
+            (placed_ok, is_overwrite) のタプル、またはスキップ時は None。
+            placed_ok=True なら配置成功、False なら配置失敗。
+            is_overwrite はファイル配置の事実（既存ファイルを上書きしたか）。
         """
         post = item.get("post", {})
         post_uri = post.get("uri", "")
@@ -549,10 +561,6 @@ class BlueskyIngester:
                 result.overwritten += 1
             else:
                 result.placed += 1
-            if placed_items is not None:
-                placed_items.append(
-                    {**item, "_is_overwrite": is_overwrite},
-                )
         except Exception as exc:
             logger.exception("投稿の配置に失敗しました: %s", rel_path)
             result.errors += 1
@@ -563,7 +571,7 @@ class BlueskyIngester:
                     "message": str(exc),
                 },
             )
-            return False
+            return False, is_overwrite
 
         if has_images or has_video:
             media_dir = (
@@ -583,22 +591,32 @@ class BlueskyIngester:
                 rel_path=rel_path,
             )
 
-        return True
+        return True, is_overwrite
 
     async def ingest_posts(
         self,
         urls: list[str],
         *,
         client: ConstrainedClient,
-    ) -> IngestResult:
+    ) -> tuple[IngestResult, list[dict[str, Any]]]:
         """指定 URL の BlueSky 投稿を取得して source_store に配置する.
 
-        仕様: docs/specs/ingesters/bluesky.md
+        仕様: docs/specs/ingesters/bluesky.md「投稿取得フロー（rag_add_bluesky）」
+
+        投稿配置完了後、呼び出し側が `follow_urls` を実行することで投稿内 URL の
+        自動取り込みが走る。`rag_add_bluesky` はピンポイント修復用途のため、
+        placed_items の各 item には ``_suppress_youtube_reingest=False`` を付与する。
+        これにより follow_urls 側で常に取り込み対象となり、`force_youtube_reingest`
+        設定の値に関わらず YouTube URL を常に再取得する。
+
+        Returns:
+            (配置結果, 配置済みフィードアイテムのリスト)
         """
         result = IngestResult()
+        placed_items: list[dict[str, Any]] = []
 
         if not urls:
-            return result
+            return result, placed_items
 
         parsed: list[tuple[str, str]] = []
         for url in urls:
@@ -617,7 +635,7 @@ class BlueskyIngester:
             parsed.append(hr)
 
         if not parsed:
-            return result
+            return result, placed_items
 
         # handle → DID 解決（同一 handle はまとめる）
         handle_to_did: dict[str, str] = {}
@@ -691,19 +709,25 @@ class BlueskyIngester:
             post_obj = posts[0]
             item: dict[str, Any] = {"post": post_obj, "reason": None}
 
-            await self._place_single_post(
+            place_outcome = await self._place_single_post(
                 item,
                 is_repost=False,
                 force=True,
                 client=client,
                 result=result,
             )
+            if place_outcome is not None and place_outcome[0]:
+                # ピンポイント修復用途のため、新規/上書きいずれも抑制対象外として記録し、
+                # follow_urls 側で常に取り込み対象とする
+                placed_items.append(
+                    {**item, "_suppress_youtube_reingest": False},
+                )
 
         logger.info(
             "BlueSky ingest_posts completed: placed=%d, overwritten=%d, errors=%d",
             result.placed, result.overwritten, result.errors,
         )
-        return result
+        return result, placed_items
 
     async def _download_media(
         self,
@@ -1050,14 +1074,15 @@ class BlueskyIngester:
         Web URL は CLI の site-ingest コマンド（複数 URL モード）でバッチ取得する。
         YouTube URL は個別に YoutubeIngester で取り込む。
 
-        各 placed_item の ``_is_overwrite`` フラグにより新規/上書きを判定する。
-        上書き投稿の YouTube URL は ``force_youtube_reingest`` が True の場合のみ
-        再取得する。新規投稿の YouTube URL は常に取り込む。
+        各 placed_item の ``_suppress_youtube_reingest`` フラグにより YouTube 抑制対象
+        判定を行う。抑制対象（True）の URL は ``force_youtube_reingest`` が True の場合
+        のみ取り込む。抑制対象外（False）の URL は常に取り込む。
 
         Args:
-            placed_items: 配置済みフィードアイテムのリスト（``_is_overwrite`` フラグ付き）
+            placed_items: 配置済みフィードアイテムのリスト
+                （``_suppress_youtube_reingest`` フラグ付き）
             youtube_ingester: YoutubeIngester インスタンス
-            force_youtube_reingest: 上書き投稿の YouTube URL を再取得するか
+            force_youtube_reingest: 抑制対象の YouTube URL を強制的に取り込むか
             result: 委譲失敗の計上先 IngestResult。指定時は errors + category="delegation"
                 を追加する（従来の stats 返却は互換維持）
 
@@ -1072,19 +1097,19 @@ class BlueskyIngester:
         }
 
         # 全投稿から URL を一括抽出・重複排除・種別分類
-        # YouTube URL は投稿の is_overwrite 情報を保持する（新規投稿由来は常に取り込むため）
-        # 同一 URL が新規と上書き両方に存在する場合は安全側（新規=取り込む）に倒す
+        # YouTube URL は投稿の suppress 情報を保持する（抑制対象外なら常に取り込むため）
+        # 同一 URL が「抑制対象」と「抑制対象外」両方に存在する場合は安全側（取り込む）に倒す
         web_urls: list[str] = []
         youtube_urls: list[str] = []
         seen: set[str] = set()
-        youtube_url_overwrite: dict[str, bool] = {}
+        youtube_url_suppressed: dict[str, bool] = {}
         for item in placed_items:
-            item_is_overwrite = item.get("_is_overwrite", False)
+            item_suppressed = item.get("_suppress_youtube_reingest", False)
             for url in extract_urls_from_item(item):
                 url_type = classify_url(url)
                 if url_type == "youtube":
-                    youtube_url_overwrite[url] = (
-                        youtube_url_overwrite.get(url, True) and item_is_overwrite
+                    youtube_url_suppressed[url] = (
+                        youtube_url_suppressed.get(url, True) and item_suppressed
                     )
                 if url not in seen:
                     seen.add(url)
@@ -1128,22 +1153,22 @@ class BlueskyIngester:
                 result.error_details.extend(web_error_details)
 
         # YouTube URL を個別取り込み（URL 間にレート制限スリープを挿入）
-        # 上書き投稿の YouTube URL は force_youtube_reingest 設定に従う
-        # 新規投稿の YouTube URL は常に取り込む
+        # 抑制対象の YouTube URL は force_youtube_reingest 設定に従う
+        # 抑制対象外の YouTube URL は常に取り込む
         if not force_youtube_reingest:
-            new_youtube_urls = [
-                u for u in youtube_urls if not youtube_url_overwrite.get(u, False)
+            target_youtube_urls = [
+                u for u in youtube_urls if not youtube_url_suppressed.get(u, False)
             ]
-            skipped_count = len(youtube_urls) - len(new_youtube_urls)
+            skipped_count = len(youtube_urls) - len(target_youtube_urls)
             if skipped_count > 0:
                 logger.info(
-                    "上書き投稿の YouTube 再取り込みは無効です"
-                    "（%d 件スキップ、新規 %d 件は取り込み）",
+                    "抑制対象の YouTube 再取り込みは無効です"
+                    "（%d 件スキップ、抑制対象外 %d 件は取り込み）",
                     skipped_count,
-                    len(new_youtube_urls),
+                    len(target_youtube_urls),
                 )
                 stats["skipped"] += skipped_count
-            youtube_urls = new_youtube_urls
+            youtube_urls = target_youtube_urls
 
         if youtube_urls:
             for i, url in enumerate(youtube_urls):

@@ -69,14 +69,26 @@ BlueSky 投稿は**複合ソース**として扱われる。投稿 JSON が親�
 | 最悪ケース所要時間 | BlueSky API: リクエスト数 x リクエスト間隔（デフォルト・許容範囲は pydantic Field で定義）。URL 先取り込み: Scrapy subprocess の所要時間。直列実行のため合計時間 |
 | 想定エラー率 | AT Protocol API 依存。リトライ機構なし。ConstrainedClient のサーキットブレーカー閾値で操作中断。中断時は取得済みデータを処理する |
 
+### rag_add_bluesky（BlueSky 投稿ピンポイント取り込み）
+
+入力 URL 数を `N`、URL 先取り込み対象数を `M_yt`（YouTube 動画）・`M_web`（Web ページ）とする。
+
+| 項目 | 内容 |
+|------|------|
+| 最悪ケースリクエスト数 | BlueSky API: `resolveHandle`（同一 handle 重複排除後の handle 数）+ `getPosts` N 回（ConstrainedClient バジェット消費）。URL 先取り込み: site_ingest（Scrapy subprocess）と YouTube インジェスター（`youtube-transcript-api` / `yt-dlp`）が独立して HTTP リクエストを管理するため、ConstrainedClient バジェットを消費しない |
+| 最悪ケース所要時間 | BlueSky API: 上記リクエスト数 × リクエスト間隔（pydantic Field 定義）。URL 先取り込み: Scrapy subprocess + YouTube `M_yt` 件分（URL 間に `rag_youtube_request_interval` 秒のスリープを挿入）の合計。直列実行のため合計時間 |
+| 想定エラー率 | AT Protocol API 依存。リトライ機構なし。ConstrainedClient のサーキットブレーカー閾値で操作中断。`getPosts` が空配列を返す（投稿削除済み）の場合は `errors` に計上し他 URL の処理は継続する |
+
+ピンポイント修復用途のため、典型的には `N` は 1〜数件、`M_yt`・`M_web` は投稿あたり数件以下の小規模な処理を想定している。タイムライン一括取り込み用途には `rag_crawl_bluesky` を使用する。
+
 ## インターフェース
 
 ### MCP ツール
 
 | ツール | 入力 | 振る舞い |
 |--------|------|---------|
-| rag_crawl_bluesky | handle、max_posts（任意）、include_reposts（任意）、force（任意） | 指定ユーザーの BlueSky 投稿を AT Protocol API 経由で取得し、source_store に JSON ファイルとして配置する。通常は既存ファイルと一致する投稿をスキップする。`force` 指定時は全データを上書き再取得する |
-| rag_add_bluesky | urls | 指定 URL の BlueSky 投稿を `getPosts` API 経由で取得し、source_store に配置する。既存ファイルは上書きする。メディア（画像・動画）も DL する。複数 URL を一括指定可能 |
+| rag_crawl_bluesky | handle、max_posts（任意）、include_reposts（任意）、force（任意） | 指定ユーザーの BlueSky 投稿を AT Protocol API 経由で取得し、source_store に JSON ファイルとして配置する。通常は既存ファイルと一致する投稿をスキップする。`force` 指定時は全データを上書き再取得する。投稿配置後に投稿内 URL の自動取り込み（YouTube/Web）を実行する |
+| rag_add_bluesky | urls | 指定 URL の BlueSky 投稿を `getPosts` API 経由で取得し、source_store に配置する。既存ファイルは上書きする。メディア（画像・動画）も DL する。複数 URL を一括指定可能。投稿配置後に投稿内 URL の自動取り込み（YouTube/Web）を実行する。詳細な振る舞いは [投稿取得フロー（rag_add_bluesky）](#投稿取得フローrag_add_bluesky) を参照 |
 
 ツール入力パラメータ:
 
@@ -100,7 +112,8 @@ BlueSky 投稿は**複合ソース**として扱われる。投稿 JSON が親�
 各 URL から `handle` と `rkey` をパースし、handle ごとに `resolveHandle` API で DID を解決した上で `getPosts` API で投稿データを取得する。
 同一 handle の投稿は DID 解決を 1 回にまとめる。
 常に上書き動作（`force=True` 相当）で source_store のファイルを更新する。メディア（画像・動画）も DL する。
-投稿内 URL の自動取り込みは実行しない（本ツールの目的は対象投稿自体の取得であり、URL 先の取り込みは `crawl_bluesky --force` の責務）。
+
+投稿配置完了後、投稿内 URL の自動取り込みを実行する。詳細な振る舞いは [投稿取得フロー（rag_add_bluesky）](#投稿取得フローrag_add_bluesky) を参照。
 
 各 URL は独立して処理し、1 件の失敗が他の URL の処理を妨げない。
 
@@ -473,7 +486,47 @@ embed の `$type` が `app.bsky.embed.recordWithMedia` の場合、メディア�
 5. レスポンスの投稿オブジェクトをフィードアイテム形式（`{"post": ..., "reason": null}`）に変換する
 6. 既存の単一投稿保存ロジック（JSON 配置 + .meta 生成）で source_store に上書き配置する
 7. メディア（画像・動画）が添付されている場合、既存のメディア DL 処理で再 DL する
-8. 全 URL の処理が完了したらパイプライン制御に取り込み完了を通知する
+8. 配置済み投稿から URL を抽出し、[投稿内 URL の自動取り込み](#投稿内-url-の自動取り込み) に従って
+   site_ingest / YouTube インジェスターに委譲する。本ツールはピンポイント修復用途のため、
+   配置済み投稿は **YouTube 抑制対象外** として渡される（投稿が新規/上書きいずれの場合も YouTube URL は
+   常に取り込まれ、`rag_bluesky_force_youtube_reingest` 設定の影響を受けない）
+9. 全 URL の処理が完了したらパイプライン制御に取り込み完了を通知する
+
+```mermaid
+flowchart TD
+    START["rag_add_bluesky(urls)"]
+    PARSE["URL パース（handle, rkey 抽出）"]
+    PARSE_FAIL{"パース成功?"}
+    RESOLVE["handle 重複排除 → resolveHandle API で DID 解決"]
+    EACH_URL{"各 URL に未処理がある?"}
+    GET_POSTS["getPosts API で投稿データ取得"]
+    CHECK_POST{"投稿が存在する?"}
+    SAVE["JSON 配置 + .meta 生成（force=True 上書き）"]
+    MEDIA_CHECK{"メディア添付あり?"}
+    MEDIA_DL["メディア DL（画像/動画）"]
+    URL_FOLLOW["URL 自動取り込み委譲（YouTube 抑制対象外）"]
+    NOTIFY["パイプライン制御に完了通知"]
+    RESULT["結果サマリーを返却"]
+    ERR["errors に計上"]
+
+    START --> PARSE
+    PARSE --> PARSE_FAIL
+    PARSE_FAIL -->|"いいえ"| ERR
+    PARSE_FAIL -->|"はい"| RESOLVE
+    RESOLVE --> EACH_URL
+    EACH_URL -->|"はい"| GET_POSTS
+    EACH_URL -->|"いいえ（全件処理済み）"| URL_FOLLOW
+    GET_POSTS --> CHECK_POST
+    CHECK_POST -->|"いいえ（削除済み等）"| ERR
+    CHECK_POST -->|"はい"| SAVE
+    SAVE --> MEDIA_CHECK
+    MEDIA_CHECK -->|"はい"| MEDIA_DL
+    MEDIA_CHECK -->|"いいえ"| EACH_URL
+    MEDIA_DL --> EACH_URL
+    ERR --> EACH_URL
+    URL_FOLLOW --> NOTIFY
+    NOTIFY --> RESULT
+```
 
 ### --force オプション（上書き再取得）
 
@@ -513,7 +566,9 @@ BlueSky の投稿は最大 300 文字の短文であり、1 投稿が意味の�
 
 ### 投稿内 URL の自動取り込み
 
-BlueSky 投稿内に含まれる URL を抽出し、URL の種別に応じて site_ingest / YouTube インジェスターに委譲して取り込む。この機能はデフォルトで有効であり、`crawl_bluesky` 実行時に常に動作する。
+BlueSky 投稿内に含まれる URL を抽出し、URL の種別に応じて site_ingest / YouTube インジェスターに委譲して取り込む。この機能はデフォルトで有効であり、`rag_crawl_bluesky` および `rag_add_bluesky` の実行時に常に動作する。
+
+呼び出し元ごとの振る舞い差（YouTube 抑制の扱い等）は [投稿一括取り込みフロー](#投稿一括取り込みフロー) および [投稿取得フロー（rag_add_bluesky）](#投稿取得フローrag_add_bluesky) を参照。
 
 #### URL 抽出対象
 
@@ -547,12 +602,21 @@ YouTube 動画 URL の判定は YouTube インジェスター側で SSoT とし�
 
 #### 処理フロー
 
-1. 全投稿の source_store への配置が完了した後、配置した投稿の JSON から URL を一括抽出する
+呼び出し元（`rag_crawl_bluesky` または `rag_add_bluesky`）が配置済み投稿群と「上書き投稿の YouTube
+再取り込み許可フラグ」を渡す。`rag_crawl_bluesky` は `--force` + `rag_bluesky_force_youtube_reingest`
+の組み合わせに従ってフラグを決め、`rag_add_bluesky` はピンポイント修復用途のため常にフラグを `true`
+相当に設定する。
+
+1. 受け取った配置済み投稿の JSON から URL を一括抽出する
 2. 抽出した URL を重複排除する（同一 URL が複数投稿に出現する場合）
 3. URL 種別を判定し、Web / YouTube / スキップに分類する
 4. Web URL を全てバッチ収集し、CLI の `site-ingest` コマンド（複数 URL モード）で 1 回の Scrapy subprocess として取り込む。`--download-only` と `--output json` を指定し、パイプライン処理は BlueSky 側で一括実行する。subprocess の JSON 出力から配置数を取得する
-5. YouTube インジェスターで動画を取り込む（個別処理、URL 間に `rag_youtube_request_interval` に基づくスリープを挿入）
-6. 全 URL の処理が完了した後、パイプライン制御に取り込み完了を通知する
+5. YouTube URL の取得対象判定:
+   - 新規投稿由来の YouTube URL は常に取得する
+   - 上書き投稿由来の YouTube URL は、呼び出し元から受け取った再取り込み許可フラグが `true` の場合のみ取得する
+   - `rag_add_bluesky` 経由では全投稿が YouTube 抑制対象外として渡されるため、上記判定の結果として YouTube URL は常に取得対象となる
+6. YouTube インジェスターで動画を取り込む（個別処理、URL 間に `rag_youtube_request_interval` に基づくスリープを挿入）
+7. 全 URL の処理が完了した後、パイプライン制御に取り込み完了を通知する
 
 #### エラーハンドリング
 
@@ -755,6 +819,8 @@ AppView のベース URL は設定可能とし、デフォルトは `https://pub
 | `rag_add_bluesky` に指定された URL の投稿が削除済み | `getPosts` が空の `posts` 配列を返す。エラーメッセージとして「投稿が見つかりません」を返す |
 | `rag_add_bluesky` に指定された URL の投稿が未取り込み | 新規配置として扱う（`placed` に計上） |
 | `rag_add_bluesky` で `resolveHandle` が失敗 | エラーメッセージを返す（DID 解決なしには `getPosts` を呼べない） |
+| `rag_add_bluesky` で対象投稿に YouTube URL が含まれる | YouTube インジェスターに委譲して再取得する（振る舞いの詳細は [投稿取得フロー（rag_add_bluesky）](#投稿取得フローrag_add_bluesky) のステップ 8 を参照） |
+| `rag_add_bluesky` で対象投稿に Web URL が含まれる | site_ingest（複数 URL モード）に委譲して取得する。site_ingest の Bridge は既存ファイルを上書きするため、URL 先データの修復経路として機能する |
 
 以下の `media_download` 系失敗はすべて `partial_failures` に計上する。投稿 JSON 自体の取り込みには影響しない（親成功）:
 

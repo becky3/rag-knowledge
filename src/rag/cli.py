@@ -2353,6 +2353,45 @@ def _print_ingest_result(
                 print(f"  - {_format_pipeline_error(entry)}")
 
 
+def _emit_bluesky_result(
+    *,
+    json_out: bool,
+    ingest_result: "IngestResult",
+    pipeline_summary: "PipelineSummary | None",
+    url_stats: dict[str, int],
+    context: str,
+) -> None:
+    """BlueSky 取り込み結果（パイプライン + URL 自動取り込み統計）を出力する.
+
+    run_crawl_bluesky / run_ingest_bluesky で共通利用する。
+    """
+    if json_out:
+        data = _ingest_result_to_dict(ingest_result, pipeline_summary)
+        if url_stats:
+            data["url_follow"] = {
+                "web_placed": url_stats.get("web_placed", 0),
+                "youtube_placed": url_stats.get("youtube_placed", 0),
+                "errors": url_stats.get("errors", 0),
+            }
+        _output_result(data)
+        return
+
+    _print_ingest_result(ingest_result, pipeline_summary, context=context)
+    if not url_stats:
+        return
+    if not any(url_stats.get(k, 0) > 0 for k in ("web_placed", "youtube_placed", "errors")):
+        return
+    parts = ["URL 自動取り込み:"]
+    web_n = url_stats.get("web_placed", 0)
+    yt_n = url_stats.get("youtube_placed", 0)
+    err_n = url_stats.get("errors", 0)
+    if web_n > 0 or yt_n > 0:
+        parts.append(f"Web {web_n}件, YouTube {yt_n}件")
+    if err_n > 0:
+        parts.append(f"エラー {err_n}件")
+    print(" ".join(parts))
+
+
 async def run_ingest_youtube(args: argparse.Namespace) -> None:
     """YouTube 単一動画取り込み."""
     from .pipeline.ingesters.youtube import YoutubeIngester
@@ -2527,27 +2566,13 @@ async def run_crawl_bluesky(args: argparse.Namespace) -> None:
             progress_callback=progress_cb,
         concurrency=settings.rag_embedding_concurrency,
         )
-        if json_out:
-            data = _ingest_result_to_dict(ingest_result, pipeline_summary)
-            if url_stats:
-                data["url_follow"] = {
-                    "web_placed": url_stats.get("web_placed", 0),
-                    "youtube_placed": url_stats.get("youtube_placed", 0),
-                    "errors": url_stats.get("errors", 0),
-                }
-            _output_result(data)
-        else:
-            _print_ingest_result(ingest_result, pipeline_summary, context=f"ハンドル: {args.handle}")
-            if url_stats and any(url_stats.get(k, 0) > 0 for k in ("web_placed", "youtube_placed", "errors")):
-                parts = ["URL 自動取り込み:"]
-                web_n = url_stats.get("web_placed", 0)
-                yt_n = url_stats.get("youtube_placed", 0)
-                err_n = url_stats.get("errors", 0)
-                if web_n > 0 or yt_n > 0:
-                    parts.append(f"Web {web_n}件, YouTube {yt_n}件")
-                if err_n > 0:
-                    parts.append(f"エラー {err_n}件")
-                print(" ".join(parts))
+        _emit_bluesky_result(
+            json_out=json_out,
+            ingest_result=ingest_result,
+            pipeline_summary=pipeline_summary,
+            url_stats=url_stats,
+            context=f"ハンドル: {args.handle}",
+        )
 
 
 async def run_crawl_zenn(args: argparse.Namespace) -> None:
@@ -2627,15 +2652,27 @@ async def run_ingest_bluesky(args: argparse.Namespace) -> None:
     with _write_lock_or_exit(
         Path(controller.source_store.root_dir), json_out=json_out,
     ):
+        url_stats: dict[str, int] = {}
         try:
             async with ConstrainedClient(
                 request_timeout=settings.rag_bluesky_request_timeout,
                 request_interval=settings.rag_bluesky_request_interval,
             ) as client:
-                ingest_result = await bluesky_ingester.ingest_posts(
+                ingest_result, placed_items = await bluesky_ingester.ingest_posts(
                     args.url,
                     client=client,
                 )
+
+                # 投稿内 URL の自動取り込み（仕様: 投稿取得フロー（rag_add_bluesky））。
+                # placed_items は _suppress_youtube_reingest=False で渡されるため、
+                # force_youtube_reingest 設定の値に関わらず YouTube/Web ともに取り込まれる
+                if placed_items:
+                    youtube_ingester = _create_youtube_ingester_cli(controller.source_store, settings)
+                    url_stats = await bluesky_ingester.follow_urls(
+                        placed_items,
+                        youtube_ingester=youtube_ingester,
+                        result=ingest_result,
+                    )
         except (ValueError, TypeError) as e:
             if json_out:
                 _output_error(CliErrorCode.DEPENDENCY_UNAVAILABLE, str(e))
@@ -2651,7 +2688,13 @@ async def run_ingest_bluesky(args: argparse.Namespace) -> None:
             progress_callback=_output_progress if json_out else None,
             concurrency=settings.rag_embedding_concurrency,
         )
-        _print_ingest_result(ingest_result, pipeline_summary, context="BlueSky ingest", json_output=json_out)
+        _emit_bluesky_result(
+            json_out=json_out,
+            ingest_result=ingest_result,
+            pipeline_summary=pipeline_summary,
+            url_stats=url_stats,
+            context="BlueSky ingest",
+        )
 
 
 async def run_ingest_zenn(args: argparse.Namespace) -> None:
