@@ -1094,7 +1094,7 @@ class TestFollowUrlsYoutubeOverwrite:
     ) -> None:
         """上書き投稿かつ force_youtube_reingest=False で YouTube がスキップされること."""
         item = _make_feed_item()
-        item["_is_overwrite"] = True
+        item["_suppress_youtube_reingest"] = True
         item["post"]["record"]["facets"] = [
             {
                 "features": [
@@ -1128,7 +1128,7 @@ class TestFollowUrlsYoutubeOverwrite:
     ) -> None:
         """上書き投稿かつ force_youtube_reingest=True で YouTube が再取り込みされること."""
         item = _make_feed_item()
-        item["_is_overwrite"] = True
+        item["_suppress_youtube_reingest"] = True
         item["post"]["record"]["facets"] = [
             {
                 "features": [
@@ -1161,7 +1161,7 @@ class TestFollowUrlsYoutubeOverwrite:
     ) -> None:
         """新規投稿の YouTube URL は force_youtube_reingest=False でも取り込まれること."""
         item = _make_feed_item()
-        item["_is_overwrite"] = False
+        item["_suppress_youtube_reingest"] = False
         item["post"]["record"]["facets"] = [
             {
                 "features": [
@@ -1195,7 +1195,7 @@ class TestFollowUrlsYoutubeOverwrite:
     ) -> None:
         """新規と上書きが混在する場合、新規の YouTube のみ取り込まれること."""
         new_item = _make_feed_item()
-        new_item["_is_overwrite"] = False
+        new_item["_suppress_youtube_reingest"] = False
         new_item["post"]["record"]["facets"] = [
             {
                 "features": [
@@ -1208,7 +1208,7 @@ class TestFollowUrlsYoutubeOverwrite:
         ]
 
         overwrite_item = _make_feed_item()
-        overwrite_item["_is_overwrite"] = True
+        overwrite_item["_suppress_youtube_reingest"] = True
         overwrite_item["post"]["record"]["facets"] = [
             {
                 "features": [
@@ -2217,13 +2217,16 @@ class TestIngestPosts:
         client = AsyncMock()
         client.get = AsyncMock(side_effect=[resolve_resp, posts_resp])
 
-        result = await ingester.ingest_posts(
+        result, placed_items = await ingester.ingest_posts(
             ["https://bsky.app/profile/alice.bsky.social/post/xyz789"],
             client=client,
         )
 
         assert result.placed == 1
         assert result.errors == 0
+        assert len(placed_items) == 1
+        # ピンポイント修復用途のため新規扱いで記録される
+        assert placed_items[0]["_suppress_youtube_reingest"] is False
 
     @pytest.mark.asyncio
     async def test_ingest_invalid_url_reports_error(self, source_store: SourceStore) -> None:
@@ -2231,13 +2234,14 @@ class TestIngestPosts:
         ingester = make_bluesky_ingester(source_store)
         client = AsyncMock()
 
-        result = await ingester.ingest_posts(
+        result, placed_items = await ingester.ingest_posts(
             ["https://example.com/not-bluesky"],
             client=client,
         )
 
         assert result.errors == 1
         assert result.error_details[0]["category"] == "metadata_fetch"
+        assert placed_items == []
 
     @pytest.mark.asyncio
     async def test_ingest_deleted_post_reports_error(self, source_store: SourceStore) -> None:
@@ -2255,13 +2259,14 @@ class TestIngestPosts:
         client = AsyncMock()
         client.get = AsyncMock(side_effect=[resolve_resp, posts_resp])
 
-        result = await ingester.ingest_posts(
+        result, placed_items = await ingester.ingest_posts(
             ["https://bsky.app/profile/alice.bsky.social/post/deleted123"],
             client=client,
         )
 
         assert result.errors == 1
         assert "not found" in result.error_details[0]["message"].lower()
+        assert placed_items == []
 
     @pytest.mark.asyncio
     async def test_ingest_multiple_urls(self, source_store: SourceStore) -> None:
@@ -2290,7 +2295,7 @@ class TestIngestPosts:
         client = AsyncMock()
         client.get = AsyncMock(side_effect=[resolve_resp, posts_resp_ok, posts_resp_empty])
 
-        result = await ingester.ingest_posts(
+        result, placed_items = await ingester.ingest_posts(
             [
                 "https://bsky.app/profile/alice.bsky.social/post/ok1",
                 "https://bsky.app/profile/alice.bsky.social/post/deleted1",
@@ -2300,6 +2305,7 @@ class TestIngestPosts:
 
         assert result.placed == 1
         assert result.errors == 1
+        assert len(placed_items) == 1
 
     @pytest.mark.asyncio
     async def test_ingest_empty_urls_returns_empty_result(self, source_store: SourceStore) -> None:
@@ -2307,7 +2313,213 @@ class TestIngestPosts:
         ingester = make_bluesky_ingester(source_store)
         client = AsyncMock()
 
-        result = await ingester.ingest_posts([], client=client)
+        result, placed_items = await ingester.ingest_posts([], client=client)
 
         assert result.placed == 0
         assert result.errors == 0
+        assert placed_items == []
+
+    @pytest.mark.asyncio
+    async def test_ingest_post_with_youtube_url_is_followed_regardless_of_force_setting(
+        self, source_store: SourceStore,
+    ) -> None:
+        """ingest_posts 経由の YouTube URL は force_youtube_reingest=False でも常に取り込まれる.
+
+        仕様: docs/specs/ingesters/bluesky.md
+        投稿取得フロー（rag_add_bluesky）でピンポイント修復の意図を満たすため、
+        placed_items は _suppress_youtube_reingest=False で渡され、follow_urls 側で新規扱いとなる。
+        """
+        ingester = make_bluesky_ingester(source_store)
+
+        resolve_resp = MagicMock()
+        resolve_resp.json.return_value = {"did": "did:plc:abc123"}
+        resolve_resp.is_success = True
+
+        youtube_url = "https://www.youtube.com/watch?v=dQw4w9WgXcQ"
+        posts_resp = MagicMock()
+        posts_resp.json.return_value = {
+            "posts": [{
+                "uri": "at://did:plc:abc123/app.bsky.feed.post/withlink",
+                "cid": "cid-yt",
+                "author": {"did": "did:plc:abc123", "handle": "alice.bsky.social", "displayName": "Alice"},
+                "record": {
+                    "text": "Check this video!",
+                    "createdAt": "2026-01-15T09:00:00Z",
+                    "facets": [
+                        {
+                            "features": [
+                                {
+                                    "$type": "app.bsky.richtext.facet#link",
+                                    "uri": youtube_url,
+                                },
+                            ],
+                        },
+                    ],
+                },
+            }],
+        }
+        posts_resp.is_success = True
+
+        client = AsyncMock()
+        client.get = AsyncMock(side_effect=[resolve_resp, posts_resp])
+
+        result, placed_items = await ingester.ingest_posts(
+            ["https://bsky.app/profile/alice.bsky.social/post/withlink"],
+            client=client,
+        )
+
+        assert result.placed == 1
+        assert len(placed_items) == 1
+
+        # YouTube インジェスターのモック
+        youtube_ingester = MagicMock()
+        youtube_ingester.request_interval = 0.0
+        yt_result = MagicMock()
+        yt_result.placed = 1
+        yt_result.errors = 0
+        youtube_ingester.ingest_video = AsyncMock(return_value=yt_result)
+
+        # force_youtube_reingest=False でも、_suppress_youtube_reingest=False のため取り込まれる
+        stats = await ingester.follow_urls(
+            placed_items,
+            youtube_ingester=youtube_ingester,
+            force_youtube_reingest=False,
+        )
+
+        assert stats["youtube_placed"] == 1
+        assert stats["skipped"] == 0
+        youtube_ingester.ingest_video.assert_awaited_once_with(video_url=youtube_url)
+
+    @pytest.mark.asyncio
+    async def test_ingest_post_with_web_url_is_followed_via_site_ingest(
+        self, source_store: SourceStore,
+    ) -> None:
+        """ingest_posts 経由の Web URL は site_ingest（複数 URL モード）に委譲される.
+
+        Issue #681 のテスト方針:
+        rag_add_bluesky で Web URL を含む投稿を指定 → site_ingest 経由の取り込みが走ること
+        """
+        ingester = make_bluesky_ingester(source_store)
+
+        resolve_resp = MagicMock()
+        resolve_resp.json.return_value = {"did": "did:plc:abc123"}
+        resolve_resp.is_success = True
+
+        web_url = "https://example.com/article-to-repair"
+        posts_resp = MagicMock()
+        posts_resp.json.return_value = {
+            "posts": [{
+                "uri": "at://did:plc:abc123/app.bsky.feed.post/withweb",
+                "cid": "cid-web",
+                "author": {"did": "did:plc:abc123", "handle": "alice.bsky.social", "displayName": "Alice"},
+                "record": {
+                    "text": "Article link",
+                    "createdAt": "2026-01-15T09:00:00Z",
+                    "embed": {
+                        "$type": "app.bsky.embed.external",
+                        "external": {
+                            "uri": web_url,
+                            "title": "Sample Article",
+                            "description": "An article",
+                        },
+                    },
+                },
+            }],
+        }
+        posts_resp.is_success = True
+
+        client = AsyncMock()
+        client.get = AsyncMock(side_effect=[resolve_resp, posts_resp])
+
+        result, placed_items = await ingester.ingest_posts(
+            ["https://bsky.app/profile/alice.bsky.social/post/withweb"],
+            client=client,
+        )
+
+        assert result.placed == 1
+        assert len(placed_items) == 1
+
+        with patch.object(
+            ingester, "_fetch_web_urls",
+            new=AsyncMock(return_value=(1, 0, [])),
+        ) as mock_fetch:
+            stats = await ingester.follow_urls(placed_items)
+
+        assert stats["web_placed"] == 1
+        assert stats["errors"] == 0
+        mock_fetch.assert_awaited_once_with([web_url])
+
+    @pytest.mark.asyncio
+    async def test_ingest_post_overwrite_keeps_suppress_false(
+        self, source_store: SourceStore,
+    ) -> None:
+        """既存ファイルがある状態で ingest_posts を呼んでも _suppress_youtube_reingest=False が維持される.
+
+        ピンポイント修復用途の核心仕様: 上書きであっても YouTube URL を抑制しない。
+        """
+        ingester = make_bluesky_ingester(source_store)
+
+        # 事前に同じ rkey のファイルを配置（上書き対象を作る）
+        existing_dir = source_store.root_dir / "bluesky" / "did：plc：abc123" / "2026" / "01"
+        existing_dir.mkdir(parents=True, exist_ok=True)
+        (existing_dir / "overwrite1.json").write_text("{\"old\": true}", encoding="utf-8")
+
+        resolve_resp = MagicMock()
+        resolve_resp.json.return_value = {"did": "did:plc:abc123"}
+        resolve_resp.is_success = True
+
+        youtube_url = "https://www.youtube.com/watch?v=DummyVidA09"
+        posts_resp = MagicMock()
+        posts_resp.json.return_value = {
+            "posts": [{
+                "uri": "at://did:plc:abc123/app.bsky.feed.post/overwrite1",
+                "cid": "cid-ow",
+                "author": {"did": "did:plc:abc123", "handle": "alice.bsky.social", "displayName": "Alice"},
+                "record": {
+                    "text": "Updated post with YouTube link",
+                    "createdAt": "2026-01-15T09:00:00Z",
+                    "facets": [
+                        {
+                            "features": [
+                                {
+                                    "$type": "app.bsky.richtext.facet#link",
+                                    "uri": youtube_url,
+                                },
+                            ],
+                        },
+                    ],
+                },
+            }],
+        }
+        posts_resp.is_success = True
+
+        client = AsyncMock()
+        client.get = AsyncMock(side_effect=[resolve_resp, posts_resp])
+
+        result, placed_items = await ingester.ingest_posts(
+            ["https://bsky.app/profile/alice.bsky.social/post/overwrite1"],
+            client=client,
+        )
+
+        # 上書き動作になっている
+        assert result.overwritten == 1
+        assert result.placed == 0
+        # 上書きであっても抑制対象外として記録される（ピンポイント修復用途）
+        assert len(placed_items) == 1
+        assert placed_items[0]["_suppress_youtube_reingest"] is False
+
+        # follow_urls で YouTube が取り込まれる（force_youtube_reingest=False でも）
+        youtube_ingester = MagicMock()
+        youtube_ingester.request_interval = 0.0
+        youtube_ingester.ingest_video = AsyncMock(
+            return_value=MagicMock(placed=1, errors=0),
+        )
+
+        stats = await ingester.follow_urls(
+            placed_items,
+            youtube_ingester=youtube_ingester,
+            force_youtube_reingest=False,
+        )
+
+        assert stats["youtube_placed"] == 1
+        assert stats["skipped"] == 0

@@ -120,6 +120,7 @@ def _format_ingest_response(
     pipeline_summary: PipelineSummary | None,
     *,
     context: str = "",
+    url_follow: dict[str, int] | None = None,
 ) -> str:
     """IngestResult + PipelineSummary を統合レスポンスに変換する."""
     parts = [ingest_result.summary(context=context)]
@@ -133,6 +134,15 @@ def _format_ingest_response(
                 _format_pipeline_error(e) for e in pipeline_summary.errors[:5]
             )
             parts.append(f"パイプラインエラー: {len(pipeline_summary.errors)}件 ({details})")
+    if url_follow:
+        web_n = url_follow.get("web_placed", 0)
+        yt_n = url_follow.get("youtube_placed", 0)
+        err_n = url_follow.get("errors", 0)
+        if web_n > 0 or yt_n > 0 or err_n > 0:
+            seg = [f"URL 自動取り込み: Web {web_n}件, YouTube {yt_n}件"]
+            if err_n > 0:
+                seg.append(f"エラー {err_n}件")
+            parts.append(" ".join(seg))
     return " / ".join(parts)
 
 
@@ -1316,7 +1326,18 @@ def _format_cli_ingest_result(
     pipeline_data = result.get("pipeline")
     pipeline_summary = _parse_pipeline_summary(pipeline_data) if pipeline_data else None
 
-    return _format_ingest_response(ingest_result, pipeline_summary, context=context)
+    url_follow_data = result.get("url_follow")
+    url_follow: dict[str, int] | None = None
+    if isinstance(url_follow_data, dict):
+        url_follow = {
+            "web_placed": int(url_follow_data.get("web_placed", 0)),
+            "youtube_placed": int(url_follow_data.get("youtube_placed", 0)),
+            "errors": int(url_follow_data.get("errors", 0)),
+        }
+
+    return _format_ingest_response(
+        ingest_result, pipeline_summary, context=context, url_follow=url_follow,
+    )
 
 
 def _parse_pipeline_summary(data: dict[str, Any]) -> PipelineSummary | None:

@@ -273,15 +273,21 @@ CLI / MCP 対応: `rag_site_ingest`（`url` パラメータ / `urls` パラメ�
 
 ### C) SNS
 
-目的: Zenn・BlueSky インジェスターの動作確認。BlueSky メディア DL と --force オプションの検証を含む。
+目的: Zenn・BlueSky インジェスターの動作確認。BlueSky メディア DL と --force オプション、および投稿内 URL 自動取り込み（`rag_crawl_bluesky` / `rag_add_bluesky` 経由）の検証を含む。
 
 | # | コマンド（CLI） | 期待結果 | 検証種別 |
 |---|----------------|---------|---------|
 | 1 | `crawl-zenn rhythmcan --max-articles 1` | Zenn 記事 1 件取り込み成功 | `ingest` |
-| 2 | `crawl-bluesky rhythmcan.bsky.social --max-posts 5` | BlueSky 投稿取り込み成功。メディア付き投稿がある場合、source_store の `bluesky/{did}/{year}/{month}/media/{rkey}/` にメディアファイル（`image_0.{ext}` / `video_0.ts`）が配置されていること | `ingest` |
+| 2 | `crawl-bluesky rhythmcan.bsky.social --max-posts 5` | BlueSky 投稿取り込み成功。メディア付き投稿がある場合、source_store の `bluesky/{did}/{year}/{month}/media/{rkey}/` にメディアファイル（`image_0.{ext}` / `video_0.ts`）が配置されていること。投稿内に外部リンクを含む投稿がある場合、site_ingest 経由で URL 先が取得され `URL 自動取り込み: Web N件` が表示されること | `ingest` |
 | 3 | `crawl-bluesky rhythmcan.bsky.social --max-posts 1 --force` | `--force` による上書き再取得成功。既存投稿が上書きされ、CLI に `完了: N件配置`（N > 0）と表示されること | `ingest` |
+| 4 | `ingest-bluesky <Web リンク付き投稿 URL>` | 投稿 1 件配置 + `URL 自動取り込み: Web N件` が表示される。site_ingest が呼ばれ URL 先 Web ページが source_store に配置されること（ピンポイント修復シナリオ） | `ingest` |
+| 5 | 同 URL で `ingest-bluesky` を再実行 | 投稿 1 件上書き（`overwritten=1`）。`URL 自動取り込み: Web N件` が再度表示され、site_ingest Bridge が URL 先 Web ページを上書き配置すること | `ingest` |
 
-CLI / MCP 対応: `rag_crawl_zenn` / `rag_crawl_bluesky`（`force=True` で --force 相当）
+CLI / MCP 対応: `rag_crawl_zenn` / `rag_crawl_bluesky`（`force=True` で --force 相当）/ `rag_add_bluesky`（C-4/C-5 用、`urls` パラメータに投稿 URL リストを渡す）
+
+**MCP テスト時の追加確認:**
+
+- C-4 / C-5: MCP 応答テキストに `URL 自動取り込み: Web N件` のフォーマット文字列が含まれること（`_format_ingest_response` の url_follow 反映を確認）
 
 ### D) YouTube
 
