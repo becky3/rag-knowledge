@@ -55,7 +55,7 @@ QA 検証グループ:
    - 配置: リポジトリの親ディレクトリ、命名: `<リポジトリ名>-wt-<Issue番号>`
 3. メインリポジトリから `.env` をコピーする
 4. ストレージパスは相対パスのため worktree ディレクトリ基準で解決される（書き換え不要）。以下を確認・設定する:
-   - `CHROMADB_AUTO_START=false`（worktree では手動起動するため。`true` のままだと MCP サーバー起動時に競合する可能性がある）
+   - `CHROMADB_AUTO_START` はデフォルト（`true`）のままでよい（`ChromaDBServerManager` は起動前に heartbeat チェックを行い、既存インスタンスが応答すれば起動をスキップするため競合しない）
    - ポート競合時（前セッションの停止漏れ等）は `CHROMADB_SERVER_PORT` を変更すること
 5. LM Studio の接続先を確認し、必要に応じて `localhost` に変更する
 6. `.tmp` ディレクトリを作成する
