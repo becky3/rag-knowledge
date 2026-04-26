@@ -474,7 +474,7 @@ class TestCliSiteIngestFlow:
         with (
             patch.object(ScrapyRunner, "run", new_callable=AsyncMock, return_value=mock_crawl_result),
             patch("rag.cli._build_cli_pipeline_controller", return_value=(mock_controller, _make_cli_mock_settings())),
-            patch("rag.scrapy.bridge.import_to_source_store", return_value=mock_bridge_result),
+            patch("rag.pipeline.site_ingest_runner.import_to_source_store", return_value=mock_bridge_result),
         ):
             from rag.cli import run_site_ingest
 
@@ -546,7 +546,7 @@ class TestCliSiteIngestFlow:
         with (
             patch.object(ScrapyRunner, "run", new_callable=AsyncMock, return_value=mock_crawl_result),
             patch("rag.cli._build_cli_pipeline_controller", return_value=(mock_controller, _make_cli_mock_settings())),
-            patch("rag.scrapy.bridge.import_to_source_store", return_value=mock_bridge_result),
+            patch("rag.pipeline.site_ingest_runner.import_to_source_store", return_value=mock_bridge_result),
         ):
             from rag.cli import run_site_ingest
 
@@ -603,7 +603,7 @@ class TestCliSiteIngestFlow:
         with (
             patch.object(ScrapyRunner, "run", new_callable=AsyncMock, return_value=mock_crawl_result),
             patch("rag.cli._build_cli_pipeline_controller", return_value=(mock_controller, _make_cli_mock_settings())),
-            patch("rag.scrapy.bridge.import_to_source_store", return_value=mock_bridge_result),
+            patch("rag.pipeline.site_ingest_runner.import_to_source_store", return_value=mock_bridge_result),
         ):
             from rag.cli import run_site_ingest
 

@@ -2551,6 +2551,8 @@ async def run_crawl_bluesky(args: argparse.Namespace) -> None:
                     youtube_ingester = _create_youtube_ingester_cli(controller.source_store, settings)
                     url_stats = await bluesky_ingester.follow_urls(
                         placed_items,
+                        source_store=controller.source_store,
+                        settings=settings,
                         youtube_ingester=youtube_ingester,
                         force_youtube_reingest=settings.rag_bluesky_force_youtube_reingest,
                         result=ingest_result,
@@ -2670,6 +2672,8 @@ async def run_ingest_bluesky(args: argparse.Namespace) -> None:
                     youtube_ingester = _create_youtube_ingester_cli(controller.source_store, settings)
                     url_stats = await bluesky_ingester.follow_urls(
                         placed_items,
+                        source_store=controller.source_store,
+                        settings=settings,
                         youtube_ingester=youtube_ingester,
                         result=ingest_result,
                     )
@@ -2925,8 +2929,7 @@ async def run_site_ingest(args: argparse.Namespace) -> None:
     import re
     import time as time_mod
 
-    from .scrapy.bridge import import_to_source_store
-    from .scrapy.runner import ScrapyRunner
+    from .pipeline.site_ingest_runner import execute_site_ingest
     from .utils.url import check_ssrf, validate_url
 
     json_out = _is_json_output(args)
@@ -2977,50 +2980,22 @@ async def run_site_ingest(args: argparse.Namespace) -> None:
                 effective_max_pages = 1000
                 logger.warning("max_pages を 1000 にクランプしました")
 
-        # ドメイン導出
-        from urllib.parse import urlparse
-        if multi_url_mode:
-            # 複数 URL モード: 全ドメインの和集合
-            domains = []
-            for u in validated_urls:
-                hostname = urlparse(u).hostname
-                if hostname and hostname not in domains:
-                    domains.append(hostname)
-            allowed_domains = ",".join(domains)
-        else:
-            parsed = urlparse(validated_urls[0])
-            allowed_domains = parsed.hostname or ""
-
-        start_time = time_mod.monotonic()
-
-        # Scrapy Runner でクロール / 複数 URL 取得
-        runner = ScrapyRunner(
-            temp_dir=settings.site_ingest_temp_dir,
-            delay_sec=settings.site_ingest_delay_sec,
-            max_pages=effective_max_pages or settings.site_ingest_max_pages,
-            download_timeout=settings.site_ingest_download_timeout,
-            timeout_sec=settings.site_ingest_timeout_sec,
-            error_count=settings.site_ingest_error_count,
+        outer_start = time_mod.monotonic()
+        execution = await execute_site_ingest(
+            urls=validated_urls,
+            source_store=controller.source_store,
+            settings=settings,
+            url_pattern=args.url_pattern if not multi_url_mode else None,
+            max_pages=effective_max_pages,
+            force=args.force if not multi_url_mode else False,
         )
 
-        if multi_url_mode:
-            crawl_result = await runner.run(
-                start_urls=validated_urls,
-                allowed_domains=allowed_domains,
-            )
-        else:
-            crawl_result = await runner.run(
-                start_url=validated_urls[0],
-                allowed_domains=allowed_domains,
-                url_pattern=args.url_pattern,
-                max_pages=effective_max_pages,
-                force=args.force,
-            )
+        display_url = (
+            validated_urls[0] if not multi_url_mode else f"{len(validated_urls)} URLs"
+        )
 
-        display_url = validated_urls[0] if not multi_url_mode else f"{len(validated_urls)} URLs"
-
-        if not crawl_result.jsonl_path.exists():
-            elapsed = time_mod.monotonic() - start_time
+        if execution.no_output:
+            elapsed = time_mod.monotonic() - outer_start
             if json_out:
                 _output_result({
                     "placed": 0,
@@ -3028,22 +3003,18 @@ async def run_site_ingest(args: argparse.Namespace) -> None:
                     "skipped": 0,
                     "errors": 0,
                     "elapsed": round(elapsed, 1),
-                    "scrapy_exit_code": crawl_result.exit_code,
+                    "scrapy_exit_code": execution.scrapy_exit_code,
                     "no_output": True,
                 })
             else:
                 print(
                     f"クロールが完了しましたが、メタデータが出力されませんでした。"
-                    f" exit_code={crawl_result.exit_code}, 所要時間={elapsed:.1f}秒",
+                    f" exit_code={execution.scrapy_exit_code},"
+                    f" 所要時間={elapsed:.1f}秒",
                 )
             return
 
-        # Bridge: JSONL + HTML → source_store
-        bridge_result = import_to_source_store(
-            jsonl_path=crawl_result.jsonl_path,
-            html_dir=crawl_result.output_dir,
-            source_store=controller.source_store,
-        )
+        bridge_result = execution.bridge
 
         # パイプライン処理
         pipeline_summary = None
@@ -3052,24 +3023,26 @@ async def run_site_ingest(args: argparse.Namespace) -> None:
             pipeline_summary = await controller.ingest_and_index(
                 f"ingest(web): site-ingest {display_url}",
                 progress_callback=progress_cb,
-            concurrency=settings.rag_embedding_concurrency,
+                concurrency=settings.rag_embedding_concurrency,
             )
         elif has_changes and args.download_only:
             controller.commit(f"ingest(web): site-ingest {display_url} (download_only)")
 
         # 正常完了後のクリーンアップ（仕様: docs/specs/site-ingest.md）
-        if crawl_result.success:
-            crawl_result.cleanup()
+        if execution.scrapy_success and execution.crawl_result is not None:
+            execution.crawl_result.cleanup()
 
         # 操作全体の所要時間（クロール + Bridge + パイプライン）
-        elapsed = time_mod.monotonic() - start_time
+        elapsed = time_mod.monotonic() - outer_start
 
         if json_out:
-            data: dict[str, object] = _ingest_result_to_dict(bridge_result.ingest, pipeline_summary)
+            data: dict[str, object] = _ingest_result_to_dict(
+                bridge_result.ingest, pipeline_summary,
+            )
             data["elapsed"] = round(elapsed, 1)
             data["download_only"] = args.download_only
-            if not crawl_result.success:
-                data["scrapy_exit_code"] = crawl_result.exit_code
+            if not execution.scrapy_success:
+                data["scrapy_exit_code"] = execution.scrapy_exit_code
             _output_result(data)
         else:
             _print_ingest_result(
@@ -3081,8 +3054,10 @@ async def run_site_ingest(args: argparse.Namespace) -> None:
             print(f"所要時間: {elapsed:.1f}秒")
             if args.download_only:
                 print("パイプライン処理: スキップ（download_only）")
-            if not crawl_result.success:
-                print(f"Scrapy exit_code={crawl_result.exit_code}（部分的な結果）")
+            if not execution.scrapy_success:
+                print(
+                    f"Scrapy exit_code={execution.scrapy_exit_code}（部分的な結果）",
+                )
 
 
 async def run_update_aozora_catalog(args: argparse.Namespace) -> None:

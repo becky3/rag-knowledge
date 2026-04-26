@@ -532,12 +532,19 @@ class TestFollowUrls:
         ]
 
         ingester = make_bluesky_ingester(source_store)
+        settings = MagicMock()
         with patch.object(ingester, "_fetch_web_urls", new_callable=AsyncMock, return_value=(1, 0, [])) as mock_fetch:
             stats = await ingester.follow_urls(
                 [item],
+                source_store=source_store,
+                settings=settings,
                 youtube_ingester=None,
             )
-            mock_fetch.assert_called_once_with(["https://example.com/article"])
+            mock_fetch.assert_called_once_with(
+                ["https://example.com/article"],
+                source_store=source_store,
+                settings=settings,
+            )
         assert stats["web_placed"] == 1
 
     async def test_youtube_url_delegated(self, source_store: SourceStore) -> None:
@@ -562,6 +569,8 @@ class TestFollowUrls:
         ingester = make_bluesky_ingester(source_store)
         stats = await ingester.follow_urls(
             [item],
+            source_store=source_store,
+            settings=MagicMock(),
             youtube_ingester=mock_yt,
         )
 
@@ -612,6 +621,8 @@ class TestFollowUrls:
         with patch("asyncio.sleep", new_callable=AsyncMock) as mock_sleep:
             stats = await ingester.follow_urls(
                 [item],
+                source_store=source_store,
+                settings=MagicMock(),
                 youtube_ingester=mock_yt,
             )
 
@@ -637,7 +648,10 @@ class TestFollowUrls:
 
         ingester = make_bluesky_ingester(source_store)
         stats = await ingester.follow_urls(
-            [item], youtube_ingester=None,
+            [item],
+            source_store=source_store,
+            settings=MagicMock(),
+            youtube_ingester=None,
         )
 
         assert stats["skipped"] == 1
@@ -674,6 +688,8 @@ class TestFollowUrls:
         ):
             stats = await ingester.follow_urls(
                 [item],
+                source_store=source_store,
+                settings=MagicMock(),
                 youtube_ingester=None,
             )
 
@@ -694,20 +710,28 @@ class TestFollowUrls:
         item2["post"]["record"]["facets"] = [facet]
 
         ingester = make_bluesky_ingester(source_store)
+        settings = MagicMock()
         with patch.object(ingester, "_fetch_web_urls", new_callable=AsyncMock, return_value=(1, 0, [])) as mock_fetch:
             stats = await ingester.follow_urls(
                 [item1, item2],
+                source_store=source_store,
+                settings=settings,
                 youtube_ingester=None,
             )
             # URL は重複排除されるので 1 件のリストで呼ばれる
-            mock_fetch.assert_called_once_with([url])
+            mock_fetch.assert_called_once_with(
+                [url], source_store=source_store, settings=settings,
+            )
         assert stats["web_placed"] == 1
 
     async def test_empty_items(self, source_store: SourceStore) -> None:
         """配置済みアイテムが空の場合、何も実行されないこと."""
         ingester = make_bluesky_ingester(source_store)
         stats = await ingester.follow_urls(
-            [], youtube_ingester=None,
+            [],
+            source_store=source_store,
+            settings=MagicMock(),
+            youtube_ingester=None,
         )
 
         assert stats["web_placed"] == 0
@@ -1114,6 +1138,8 @@ class TestFollowUrlsYoutubeOverwrite:
         ingester = make_bluesky_ingester(source_store)
         stats = await ingester.follow_urls(
             [item],
+            source_store=source_store,
+            settings=MagicMock(),
             youtube_ingester=mock_yt,
             force_youtube_reingest=False,
         )
@@ -1149,6 +1175,8 @@ class TestFollowUrlsYoutubeOverwrite:
         ingester = make_bluesky_ingester(source_store)
         stats = await ingester.follow_urls(
             [item],
+            source_store=source_store,
+            settings=MagicMock(),
             youtube_ingester=mock_yt,
             force_youtube_reingest=True,
         )
@@ -1181,6 +1209,8 @@ class TestFollowUrlsYoutubeOverwrite:
         ingester = make_bluesky_ingester(source_store)
         stats = await ingester.follow_urls(
             [item],
+            source_store=source_store,
+            settings=MagicMock(),
             youtube_ingester=mock_yt,
             force_youtube_reingest=False,
         )
@@ -1228,6 +1258,8 @@ class TestFollowUrlsYoutubeOverwrite:
         ingester = make_bluesky_ingester(source_store)
         stats = await ingester.follow_urls(
             [new_item, overwrite_item],
+            source_store=source_store,
+            settings=MagicMock(),
             youtube_ingester=mock_yt,
             force_youtube_reingest=False,
         )
@@ -1976,6 +2008,8 @@ class TestPartialFailureObservability:
         ):
             stats = await ingester.follow_urls(
                 [item],
+                source_store=source_store,
+                settings=MagicMock(),
                 youtube_ingester=None,
                 result=result,
             )
@@ -2009,6 +2043,8 @@ class TestPartialFailureObservability:
         result = IngestResult()
         await ingester.follow_urls(
             [item],
+            source_store=source_store,
+            settings=MagicMock(),
             youtube_ingester=mock_yt,
             result=result,
         )
@@ -2048,6 +2084,8 @@ class TestPartialFailureObservability:
         result = IngestResult()
         stats = await ingester.follow_urls(
             [item],
+            source_store=source_store,
+            settings=MagicMock(),
             youtube_ingester=mock_yt,
             result=result,
         )
@@ -2098,63 +2136,123 @@ class TestPartialFailureObservability:
 
 
 @pytest.mark.asyncio()
-class TestRunSiteIngestBatch:
-    """_run_site_ingest_batch の JSON パーステスト."""
+class TestFetchWebUrlsPythonApi:
+    """_fetch_web_urls が site-ingest の Python API を直接呼び出すこと.
 
-    async def test_parses_json_result(self, source_store: SourceStore) -> None:
-        """JSON Lines の result 行から placed を正しく抽出すること."""
+    仕様: docs/specs/ingesters/bluesky.md「投稿内 URL の自動取り込み」
+    背景: #686 — 二重 subprocess 構造によるロック競合を回避するため、
+    bluesky から site-ingest CLI subprocess を起動せず、Python API を直接呼ぶ。
+    """
+
+    async def test_invokes_execute_site_ingest_in_process(
+        self, source_store: SourceStore,
+    ) -> None:
+        """site-ingest が subprocess ではなく Python API として呼ばれ、配置数が返ること."""
+        from rag.pipeline.ingesters._common import IngestResult
+
         ingester = make_bluesky_ingester(source_store)
-        json_output = (
-            '{"type": "progress", "processed": 1, "total": 1, "current": "https://example.com"}\n'
-            '{"type": "result", "placed": 3, "overwritten": 0, "skipped": 1, "errors": 0, "elapsed": 1.5}\n'
+        settings = MagicMock()
+        bridge_result = MagicMock()
+        bridge_result.ingest = IngestResult()
+        bridge_result.ingest.placed = 2
+        bridge_result.ingest.overwritten = 1
+        bridge_result.parse_errors = 0
+        execution = MagicMock()
+        execution.bridge = bridge_result
+        execution.scrapy_success = True
+        execution.crawl_result = MagicMock()
+
+        with (
+            patch("asyncio.create_subprocess_exec") as mock_subprocess,
+            patch(
+                "rag.pipeline.ingesters.bluesky.execute_site_ingest",
+                new_callable=AsyncMock,
+                return_value=execution,
+            ) as mock_execute,
+        ):
+            placed, errors, error_details = await ingester._fetch_web_urls(
+                ["https://example.com/a"],
+                source_store=source_store,
+                settings=settings,
+            )
+
+        # 重要: subprocess を起動していないこと（二重 subprocess 構造の解消）
+        mock_subprocess.assert_not_called()
+        mock_execute.assert_awaited_once_with(
+            urls=["https://example.com/a"],
+            source_store=source_store,
+            settings=settings,
         )
-        mock_proc = AsyncMock()
-        mock_proc.communicate.return_value = (json_output.encode("utf-8"), b"")
-        mock_proc.returncode = 0
+        # placed は ingest.placed + overwritten の合計
+        assert placed == 3
+        assert errors == 0
+        assert error_details == []
+        # 正常完了時は cleanup が呼ばれる
+        execution.crawl_result.cleanup.assert_called_once()
 
-        with patch("asyncio.create_subprocess_exec", return_value=mock_proc):
-            result = await ingester._run_site_ingest_batch(["https://example.com"])
+    async def test_propagates_bridge_errors(
+        self, source_store: SourceStore,
+    ) -> None:
+        """bridge の行単位エラーが errors と error_details として返ること."""
+        from rag.pipeline.ingesters._common import IngestResult
 
-        assert result == 3
-
-    async def test_returns_zero_when_no_result_line(self, source_store: SourceStore) -> None:
-        """result 行がない場合 0 を返すこと."""
         ingester = make_bluesky_ingester(source_store)
-        json_output = '{"type": "progress", "processed": 1, "total": 1, "current": "x"}\n'
-        mock_proc = AsyncMock()
-        mock_proc.communicate.return_value = (json_output.encode("utf-8"), b"")
-        mock_proc.returncode = 0
+        bridge_result = MagicMock()
+        bridge_result.ingest = IngestResult()
+        bridge_result.ingest.placed = 0
+        bridge_result.ingest.overwritten = 0
+        bridge_result.ingest.errors = 1
+        bridge_result.ingest.error_details = [
+            {"category": "placement", "url": "https://example.com/x", "message": "boom"},
+        ]
+        bridge_result.parse_errors = 0
+        execution = MagicMock()
+        execution.bridge = bridge_result
+        execution.scrapy_success = True
+        execution.crawl_result = MagicMock()
 
-        with patch("asyncio.create_subprocess_exec", return_value=mock_proc):
-            result = await ingester._run_site_ingest_batch(["https://example.com"])
+        with patch(
+            "rag.pipeline.ingesters.bluesky.execute_site_ingest",
+            new_callable=AsyncMock,
+            return_value=execution,
+        ):
+            placed, errors, error_details = await ingester._fetch_web_urls(
+                ["https://example.com/x"],
+                source_store=source_store,
+                settings=MagicMock(),
+            )
 
-        assert result == 0
+        assert placed == 0
+        assert errors == 1
+        assert error_details == [
+            {"category": "placement", "url": "https://example.com/x", "message": "boom"},
+        ]
 
-    async def test_raises_on_nonzero_exit(self, source_store: SourceStore) -> None:
-        """subprocess の exit code != 0 で RuntimeError を送出すること."""
+    async def test_records_delegation_failure_when_execute_raises(
+        self, source_store: SourceStore,
+    ) -> None:
+        """execute_site_ingest が例外送出時、各 URL を delegation エラーとして計上すること."""
         ingester = make_bluesky_ingester(source_store)
-        mock_proc = AsyncMock()
-        mock_proc.communicate.return_value = (b"", b"some error")
-        mock_proc.returncode = 1
+        urls = ["https://example.com/a", "https://example.com/b"]
 
-        with patch("asyncio.create_subprocess_exec", return_value=mock_proc):
-            with pytest.raises(RuntimeError, match="site-ingest failed"):
-                await ingester._run_site_ingest_batch(["https://example.com"])
+        with patch(
+            "rag.pipeline.ingesters.bluesky.execute_site_ingest",
+            new_callable=AsyncMock,
+            side_effect=RuntimeError("scrapy crashed"),
+        ):
+            placed, errors, error_details = await ingester._fetch_web_urls(
+                urls,
+                source_store=source_store,
+                settings=MagicMock(),
+            )
 
-    async def test_passes_output_json_flag(self, source_store: SourceStore) -> None:
-        """CLI コマンドに --output json フラグが含まれること."""
-        ingester = make_bluesky_ingester(source_store)
-        json_output = '{"type": "result", "placed": 0}\n'
-        mock_proc = AsyncMock()
-        mock_proc.communicate.return_value = (json_output.encode("utf-8"), b"")
-        mock_proc.returncode = 0
-
-        with patch("asyncio.create_subprocess_exec", return_value=mock_proc) as mock_exec:
-            await ingester._run_site_ingest_batch(["https://example.com"])
-
-        cmd_args = mock_exec.call_args[0]
-        output_index = cmd_args.index("--output")
-        assert cmd_args[output_index + 1] == "json"
+        assert placed == 0
+        assert errors == 2
+        assert len(error_details) == 2
+        for detail, url in zip(error_details, urls, strict=True):
+            assert detail["category"] == "delegation"
+            assert detail["url"] == url
+            assert "scrapy crashed" in detail["message"]
 
 
 # ===========================================================================
@@ -2382,6 +2480,8 @@ class TestIngestPosts:
         # force_youtube_reingest=False でも、_suppress_youtube_reingest=False のため取り込まれる
         stats = await ingester.follow_urls(
             placed_items,
+            source_store=source_store,
+            settings=MagicMock(),
             youtube_ingester=youtube_ingester,
             force_youtube_reingest=False,
         )
@@ -2439,15 +2539,22 @@ class TestIngestPosts:
         assert result.placed == 1
         assert len(placed_items) == 1
 
+        settings = MagicMock()
         with patch.object(
             ingester, "_fetch_web_urls",
             new=AsyncMock(return_value=(1, 0, [])),
         ) as mock_fetch:
-            stats = await ingester.follow_urls(placed_items)
+            stats = await ingester.follow_urls(
+                placed_items,
+                source_store=source_store,
+                settings=settings,
+            )
 
         assert stats["web_placed"] == 1
         assert stats["errors"] == 0
-        mock_fetch.assert_awaited_once_with([web_url])
+        mock_fetch.assert_awaited_once_with(
+            [web_url], source_store=source_store, settings=settings,
+        )
 
     @pytest.mark.asyncio
     async def test_ingest_post_overwrite_keeps_suppress_false(
@@ -2517,6 +2624,8 @@ class TestIngestPosts:
 
         stats = await ingester.follow_urls(
             placed_items,
+            source_store=source_store,
+            settings=MagicMock(),
             youtube_ingester=youtube_ingester,
             force_youtube_reingest=False,
         )
