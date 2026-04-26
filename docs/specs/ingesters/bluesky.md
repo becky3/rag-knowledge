@@ -486,7 +486,10 @@ embed の `$type` が `app.bsky.embed.recordWithMedia` の場合、メディア�
 5. レスポンスの投稿オブジェクトをフィードアイテム形式（`{"post": ..., "reason": null}`）に変換する
 6. 既存の単一投稿保存ロジック（JSON 配置 + .meta 生成）で source_store に上書き配置する
 7. メディア（画像・動画）が添付されている場合、既存のメディア DL 処理で再 DL する
-8. 配置済み投稿から URL を抽出し、[投稿内 URL の自動取り込み](#投稿内-url-の自動取り込み) に従って site_ingest / YouTube インジェスターに委譲する。本ツールはピンポイント修復用途のため、配置済み投稿は **YouTube 抑制対象外** として渡される（投稿が新規/上書きいずれの場合も YouTube URL は常に取り込まれ、`rag_bluesky_force_youtube_reingest` 設定の影響を受けない）
+8. 配置済み投稿から URL を抽出し、[投稿内 URL の自動取り込み](#投稿内-url-の自動取り込み) に従って
+   site_ingest / YouTube インジェスターに委譲する。本ツールはピンポイント修復用途のため、
+   配置済み投稿は **YouTube 抑制対象外** として渡される（投稿が新規/上書きいずれの場合も YouTube URL は
+   常に取り込まれ、`rag_bluesky_force_youtube_reingest` 設定の影響を受けない）
 9. 全 URL の処理が完了したらパイプライン制御に取り込み完了を通知する
 
 ```mermaid
@@ -599,7 +602,10 @@ YouTube 動画 URL の判定は YouTube インジェスター側で SSoT とし�
 
 #### 処理フロー
 
-呼び出し元（`rag_crawl_bluesky` または `rag_add_bluesky`）が配置済み投稿群と「上書き投稿の YouTube 再取り込み許可フラグ」を渡す。`rag_crawl_bluesky` は `--force` + `rag_bluesky_force_youtube_reingest` の組み合わせに従ってフラグを決め、`rag_add_bluesky` はピンポイント修復用途のため常にフラグを `true` 相当に設定する。
+呼び出し元（`rag_crawl_bluesky` または `rag_add_bluesky`）が配置済み投稿群と「上書き投稿の YouTube
+再取り込み許可フラグ」を渡す。`rag_crawl_bluesky` は `--force` + `rag_bluesky_force_youtube_reingest`
+の組み合わせに従ってフラグを決め、`rag_add_bluesky` はピンポイント修復用途のため常にフラグを `true`
+相当に設定する。
 
 1. 受け取った配置済み投稿の JSON から URL を一括抽出する
 2. 抽出した URL を重複排除する（同一 URL が複数投稿に出現する場合）
