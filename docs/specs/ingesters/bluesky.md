@@ -65,8 +65,8 @@ BlueSky 投稿は**複合ソース**として扱われる。投稿 JSON が親�
 
 | 項目 | 内容 |
 |------|------|
-| 最悪ケースリクエスト数 | BlueSky API: ceil(投稿取得上限/ページサイズ) 回（ConstrainedClient バジェット消費）。URL 先取り込み: site_ingest（Scrapy subprocess）が独立して HTTP リクエストを管理するため、ConstrainedClient バジェットを消費しない |
-| 最悪ケース所要時間 | BlueSky API: リクエスト数 x リクエスト間隔（デフォルト・許容範囲は pydantic Field で定義）。URL 先取り込み: Scrapy subprocess の所要時間。直列実行のため合計時間 |
+| 最悪ケースリクエスト数 | BlueSky API: ceil(投稿取得上限/ページサイズ) 回（ConstrainedClient バジェット消費）。URL 先取り込み: site_ingest を同一プロセス内で呼び出し、site_ingest が内部で起動する Scrapy subprocess が独立して HTTP リクエストを管理するため、ConstrainedClient バジェットを消費しない |
+| 最悪ケース所要時間 | BlueSky API: リクエスト数 x リクエスト間隔（デフォルト・許容範囲は pydantic Field で定義）。URL 先取り込み: site_ingest 内部の Scrapy subprocess の所要時間。直列実行のため合計時間 |
 | 想定エラー率 | AT Protocol API 依存。リトライ機構なし。ConstrainedClient のサーキットブレーカー閾値で操作中断。中断時は取得済みデータを処理する |
 
 ### rag_add_bluesky（BlueSky 投稿ピンポイント取り込み）
@@ -75,8 +75,8 @@ BlueSky 投稿は**複合ソース**として扱われる。投稿 JSON が親�
 
 | 項目 | 内容 |
 |------|------|
-| 最悪ケースリクエスト数 | BlueSky API: `resolveHandle`（同一 handle 重複排除後の handle 数）+ `getPosts` N 回（ConstrainedClient バジェット消費）。URL 先取り込み: site_ingest（Scrapy subprocess）と YouTube インジェスター（`youtube-transcript-api` / `yt-dlp`）が独立して HTTP リクエストを管理するため、ConstrainedClient バジェットを消費しない |
-| 最悪ケース所要時間 | BlueSky API: 上記リクエスト数 × リクエスト間隔（pydantic Field 定義）。URL 先取り込み: Scrapy subprocess + YouTube `M_yt` 件分（URL 間に `rag_youtube_request_interval` 秒のスリープを挿入）の合計。直列実行のため合計時間 |
+| 最悪ケースリクエスト数 | BlueSky API: `resolveHandle`（同一 handle 重複排除後の handle 数）+ `getPosts` N 回（ConstrainedClient バジェット消費）。URL 先取り込み: site_ingest を同一プロセス内で呼び出し、site_ingest 内部の Scrapy subprocess と YouTube インジェスター（`youtube-transcript-api` / `yt-dlp`）が独立して HTTP リクエストを管理するため、ConstrainedClient バジェットを消費しない |
+| 最悪ケース所要時間 | BlueSky API: 上記リクエスト数 × リクエスト間隔（pydantic Field 定義）。URL 先取り込み: site_ingest 内部の Scrapy subprocess + YouTube `M_yt` 件分（URL 間に `rag_youtube_request_interval` 秒のスリープを挿入）の合計。直列実行のため合計時間 |
 | 想定エラー率 | AT Protocol API 依存。リトライ機構なし。ConstrainedClient のサーキットブレーカー閾値で操作中断。`getPosts` が空配列を返す（投稿削除済み）の場合は `errors` に計上し他 URL の処理は継続する |
 
 ピンポイント修復用途のため、典型的には `N` は 1〜数件、`M_yt`・`M_web` は投稿あたり数件以下の小規模な処理を想定している。タイムライン一括取り込み用途には `rag_crawl_bluesky` を使用する。
@@ -610,7 +610,11 @@ YouTube 動画 URL の判定は YouTube インジェスター側で SSoT とし�
 1. 受け取った配置済み投稿の JSON から URL を一括抽出する
 2. 抽出した URL を重複排除する（同一 URL が複数投稿に出現する場合）
 3. URL 種別を判定し、Web / YouTube / スキップに分類する
-4. Web URL を全てバッチ収集し、CLI の `site-ingest` コマンド（複数 URL モード）で 1 回の Scrapy subprocess として取り込む。`--download-only` と `--output json` を指定し、パイプライン処理は BlueSky 側で一括実行する。subprocess の JSON 出力から配置数を取得する
+4. Web URL を全てバッチ収集し、site-ingest（複数 URL モード）の Python API を直接呼び出して取り込む。
+   - 子 CLI subprocess として起動しない理由: BlueSky 取り込みの呼び出し元 CLI が既に source_store の write_lock を保持しており、子プロセス側での再取得がロック競合で失敗するため
+   - site-ingest 内部の Scrapy subprocess 起動は維持される（reactor 制約のため）
+   - bridge 結果の配置件数（新規配置と上書きの合算）とエラーを BlueSky 側の集計に反映する
+   - 後続のインデックス処理は BlueSky 側で一括実行する
 5. YouTube URL の取得対象判定:
    - 新規投稿由来の YouTube URL は常に取得する
    - 上書き投稿由来の YouTube URL は、呼び出し元から受け取った再取り込み許可フラグが `true` の場合のみ取得する
@@ -626,7 +630,7 @@ YouTube 動画 URL の判定は YouTube インジェスター側で SSoT とし�
 
 #### 外部インジェスターとの連携
 
-- Web URL の取り込みは CLI の `site-ingest` コマンドを subprocess で呼び出す。Scrapy が独自に HTTP リクエストを管理するため、ConstrainedClient のバジェットは消費しない
+- Web URL の取り込みは site-ingest の Python API を同一プロセス内で直接呼び出す。site-ingest 内部で起動される Scrapy subprocess が独自に HTTP リクエストを管理するため、ConstrainedClient のバジェットは消費しない
 - BlueSky API 呼び出しのみ ConstrainedClient のバジェットを消費する
 - YouTube インジェスターは内部で `youtube-transcript-api` / `yt-dlp` を使用しており、ConstrainedClient は適用外
 - YouTube URL を複数処理する場合、URL 間に YouTube インジェスターの `request_interval`（デフォルト 5.0 秒）のスリープを挿入する。最後の URL の後はスリープしない。これはプレイリスト処理と同様のレート制御であり、連続リクエストによる IP ブロックを防止する
@@ -812,7 +816,8 @@ AppView のベース URL は設定可能とし、デフォルトは `https://pub
 | YouTube URL の字幕取得に失敗 | YouTube インジェスターの既存のエラーハンドリングでスキップされる |
 | 投稿内の URL が「不正な YouTube 動画 URL」（パターン該当・video_id 形式不正） | 警告ログを出力し、いずれのインジェスターにも委譲しない。詳細は「URL 種別判定と委譲先」を参照 |
 | Web URL が 0 件の場合 | site_ingest 呼び出しをスキップする |
-| site_ingest subprocess が失敗 | エラーをログに記録し、`errors` に `delegation` カテゴリで計上する。BlueSky 投稿の取り込みには影響しない |
+| site_ingest 委譲が失敗（Scrapy subprocess の異常終了等） | エラーをログに記録し、`errors` に `delegation` カテゴリで計上する。BlueSky 投稿の取り込みには影響しない |
+| site_ingest 委譲中に bridge ステップで例外が発生（環境異常: ディスクフル・書き込み権限喪失等） | バッチ全 URL を `delegation` エラーとして計上する（Scrapy が完了していても source_store への配置が完了していないため）。Scrapy が出力した一時ディレクトリは cleanup されず残存し、次回起動時に再利用または手動削除が必要。BlueSky 投稿の取り込みには影響しない |
 | `--force` 時に上書き投稿の YouTube 再取り込みが `rag_bluesky_force_youtube_reingest` で抑制されている | 上書き投稿の YouTube URL をスキップし、Web URL とメディアのみ再取得する。新規投稿の YouTube URL は常に取り込む |
 | メディアが添付されていない投稿 | メディア DL フェーズをスキップし、JSON のみ配置する（既存動作と同じ） |
 | `rag_add_bluesky` に BlueSky 以外の URL が指定された | バリデーションエラーとして拒否する |

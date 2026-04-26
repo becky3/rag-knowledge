@@ -12,7 +12,6 @@ import asyncio
 import json
 import logging
 import re
-import sys
 import tempfile
 from datetime import datetime
 from pathlib import Path
@@ -28,10 +27,12 @@ from rag.pipeline.ingesters._common import (
     now_iso,
 )
 from rag.pipeline.ingesters.youtube import classify_youtube_url
+from rag.pipeline.site_ingest_runner import execute_site_ingest
 from typing import TYPE_CHECKING, Any, Literal
 
 if TYPE_CHECKING:
     from py_common_lib.httpx import ConstrainedClient
+    from rag.config import RAGSettings
     from rag.pipeline.ingesters.youtube import YoutubeIngester
     from rag.store.source_store import SourceStore
 
@@ -1063,6 +1064,8 @@ class BlueskyIngester:
         self,
         placed_items: list[dict[str, Any]],
         *,
+        source_store: SourceStore,
+        settings: RAGSettings,
         youtube_ingester: YoutubeIngester | None = None,
         force_youtube_reingest: bool = False,
         result: IngestResult | None = None,
@@ -1071,7 +1074,9 @@ class BlueskyIngester:
 
         仕様: docs/specs/ingesters/bluesky.md「投稿内 URL の自動取り込み」
 
-        Web URL は CLI の site-ingest コマンド（複数 URL モード）でバッチ取得する。
+        Web URL は site-ingest（複数 URL モード）の Python API を直接呼び出してバッチ
+        取得する。親 CLI が write_lock を保持した状態で動作させるため、subprocess
+        による二重ロック取得を避ける（#686）。
         YouTube URL は個別に YoutubeIngester で取り込む。
 
         各 placed_item の ``_suppress_youtube_reingest`` フラグにより YouTube 抑制対象
@@ -1081,6 +1086,8 @@ class BlueskyIngester:
         Args:
             placed_items: 配置済みフィードアイテムのリスト
                 （``_suppress_youtube_reingest`` フラグ付き）
+            source_store: site-ingest の配置先 SourceStore
+            settings: site-ingest のパラメータ参照用
             youtube_ingester: YoutubeIngester インスタンス
             force_youtube_reingest: 抑制対象の YouTube URL を強制的に取り込むか
             result: 委譲失敗の計上先 IngestResult。指定時は errors + category="delegation"
@@ -1141,10 +1148,10 @@ class BlueskyIngester:
 
         logger.info("投稿内から %d 件の URL を抽出しました", all_url_count)
 
-        # Web URL をバッチ取得（site-ingest 複数 URL モード、download_only）
+        # Web URL をバッチ取得（site-ingest 複数 URL モード、Python API 直呼出し）
         if web_urls:
             web_placed, web_errors, web_error_details = await self._fetch_web_urls(
-                web_urls,
+                web_urls, source_store=source_store, settings=settings,
             )
             stats["web_placed"] = web_placed
             stats["errors"] += web_errors
@@ -1207,89 +1214,106 @@ class BlueskyIngester:
         )
         return stats
 
-    # Windows コマンドライン長制限（約32K文字）を考慮したバッチサイズ
-    # URL あたり平均 ~80 文字 × 200 = ~16K文字で安全マージンを確保
-    _URL_BATCH_SIZE = 200
-
     async def _fetch_web_urls(
-        self, urls: list[str],
+        self,
+        urls: list[str],
+        *,
+        source_store: SourceStore,
+        settings: RAGSettings,
     ) -> tuple[int, int, list[dict[str, Any]]]:
-        """Web URL を site-ingest CLI subprocess（複数 URL モード）でバッチ取得する.
+        """Web URL を site-ingest（複数 URL モード）の Python API で取得する.
 
-        Windows のコマンドライン長制限を考慮し、URL リストが大きい場合は
-        バッチに分割して複数回の subprocess を実行する。
+        親プロセスが既に write_lock を保持している前提で、subprocess を介さず同一
+        プロセス内で site-ingest のコア処理を呼び出す（#686）。Scrapy 自体は
+        site-ingest 内部で別 subprocess として起動される（reactor 制約のため）。
+
+        URL バリデーション (validate_url) と SSRF チェック (check_ssrf) を冒頭で
+        実施する。subprocess 経由から Python API 直呼出しに変更したことで、
+        従来 CLI ``site-ingest`` の入口で行われていた多層防御の初回チェック層が
+        欠落するため、bluesky 側で補完する（Scrapy Downloader Middleware の
+        per-request チェックは引き続き有効）。
 
         Args:
             urls: 取得対象の Web URL リスト
+            source_store: 配置先の SourceStore
+            settings: site-ingest 設定の参照元
 
         Returns:
             (配置されたファイル数の合計, エラー件数, errors の dict リスト)。
-            errors は各 URL に対し category="delegation" の dict を 1 件ずつ生成する。
+            ``error_details`` の件数とエラー件数は常に一致する。
         """
+        from rag.utils.url import check_ssrf, validate_url
+
         logger.info("site-ingest（複数 URL モード）で %d 件の Web URL を取り込みます", len(urls))
 
-        total_placed = 0
-        total_errors = 0
-        error_details: list[dict[str, Any]] = []
-        for i in range(0, len(urls), self._URL_BATCH_SIZE):
-            batch = urls[i:i + self._URL_BATCH_SIZE]
+        validated_urls: list[str] = []
+        validation_errors: list[dict[str, Any]] = []
+        for url in urls:
             try:
-                placed = await self._run_site_ingest_batch(batch)
-                total_placed += placed
-            except Exception as exc:
-                logger.exception(
-                    "site-ingest バッチ処理に失敗（スキップして続行）: batch_size=%d",
-                    len(batch),
+                validated = validate_url(url)
+                check_ssrf(validated)
+            except ValueError as exc:
+                logger.warning("Web URL バリデーション失敗: %s (%s)", url, exc)
+                validation_errors.append(
+                    {
+                        "category": "delegation",
+                        "target": url,
+                        "url": url,
+                        "message": f"url validation failed: {exc}",
+                    },
                 )
-                total_errors += len(batch)
-                for url in batch:
-                    error_details.append(
-                        {
-                            "category": "delegation",
-                            "target": url,
-                            "url": url,
-                            "message": f"site-ingest batch failed: {exc}",
-                        },
-                    )
-
-        logger.info("site-ingest 完了: 合計 %d 件配置, %d 件エラー", total_placed, total_errors)
-        return total_placed, total_errors, error_details
-
-    async def _run_site_ingest_batch(
-        self, urls: list[str],
-    ) -> int:
-        """site-ingest CLI subprocess を 1 バッチ分実行する."""
-        cmd = [
-            sys.executable, "-m", "rag.cli",
-            "site-ingest", *urls, "--download-only", "--output", "json",
-        ]
-
-        process = await asyncio.create_subprocess_exec(
-            *cmd,
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.PIPE,
-        )
-        stdout, stderr = await process.communicate()
-
-        if process.returncode != 0:
-            stderr_text = stderr.decode("utf-8", errors="replace")
-            logger.error(
-                "site-ingest subprocess が失敗: exit_code=%d, stderr=%s",
-                process.returncode, stderr_text[:500],
-            )
-            raise RuntimeError(f"site-ingest failed with exit_code={process.returncode}")
-
-        stdout_text = stdout.decode("utf-8", errors="replace")
-        for line in reversed(stdout_text.strip().splitlines()):
-            try:
-                data = json.loads(line)
-                if isinstance(data, dict) and data.get("type") == "result":
-                    return int(data.get("placed", 0))
-            except (json.JSONDecodeError, ValueError, TypeError):
                 continue
+            validated_urls.append(validated)
 
-        logger.warning(
-            "site-ingest の JSON 出力から result を取得できませんでした: %s",
-            stdout_text[:200],
+        if not validated_urls:
+            return 0, len(validation_errors), validation_errors
+
+        try:
+            execution = await execute_site_ingest(
+                urls=validated_urls,
+                source_store=source_store,
+                settings=settings,
+            )
+        except Exception as exc:
+            logger.exception("site-ingest 実行に失敗: %d 件", len(validated_urls))
+            execute_errors = [
+                {
+                    "category": "delegation",
+                    "target": url,
+                    "url": url,
+                    "message": f"site-ingest failed: {exc}",
+                }
+                for url in validated_urls
+            ]
+            all_errors = validation_errors + execute_errors
+            return 0, len(all_errors), all_errors
+
+        bridge = execution.bridge
+        placed = bridge.ingest.placed + bridge.ingest.overwritten
+        # bridge.ingest.errors は error_details に対応するエントリを持つ。
+        # bridge.parse_errors は JSONL 行単位のパースエラー件数で個別 detail を
+        # 持たないため、件数整合のため集約エントリを 1 件追加する。
+        error_details: list[dict[str, Any]] = list(bridge.ingest.error_details)
+        if bridge.parse_errors > 0:
+            error_details.append(
+                {
+                    "category": "delegation",
+                    "target": "site-ingest:jsonl",
+                    "message": (
+                        f"JSONL のパースに失敗した行が {bridge.parse_errors} 件"
+                        "あります（site-ingest 出力）"
+                    ),
+                },
+            )
+        all_error_details = validation_errors + error_details
+        total_errors = len(all_error_details)
+        logger.info(
+            "site-ingest 完了: 合計 %d 件配置, %d 件エラー",
+            placed, total_errors,
         )
-        return 0
+        # 正常完了後のクリーンアップ（仕様: docs/specs/site-ingest.md）。
+        # BlueSky 経由では bridge 完了後ただちに cleanup してよい
+        # （後続のインデックス化は親 controller が一括で実行する）
+        if execution.scrapy_success and execution.crawl_result is not None:
+            execution.crawl_result.cleanup()
+        return placed, total_errors, all_error_details
