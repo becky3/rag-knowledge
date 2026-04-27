@@ -34,6 +34,10 @@ class IngestResult:
 
     `category` は全媒体で上記 4 種に統一する（仕様: `docs/specs/ingesters/common.md`）。
     列挙外の値は使用しない。集計・再取り込み判定で信頼できる集合として扱えるようにするため。
+
+    不変条件:
+    - `aborted=True` のときは必ず `errors > 0`、`placed > 0`、`overwritten > 0` のいずれかが成立する。
+      `aborted` 単独で結果有無を判定してはならない（CLI の早期 return 判定でも `is_empty()` を使う）。
     """
 
     placed: int = 0
@@ -45,6 +49,15 @@ class IngestResult:
     partial_failure_details: list[dict[str, Any]] = field(default_factory=list)
     aborted: bool = False
     abort_reason: str | None = None
+
+    def is_empty(self) -> bool:
+        """配置・上書き・エラーが全て 0 件かを判定する.
+
+        CLI の早期 return 判定（パイプライン処理スキップ可否）の SSoT。
+        この戻り値が True のときに限り、後段のパイプライン処理（git commit + index 更新）を
+        スキップしてよい。`overwritten > 0` の場合はパイプライン処理が必要なため False を返す。
+        """
+        return self.placed == 0 and self.overwritten == 0 and self.errors == 0
 
     def summary(self, *, context: str = "") -> str:
         """結果サマリーテキストを生成する."""

@@ -2426,7 +2426,7 @@ async def run_ingest_youtube(args: argparse.Namespace) -> None:
             logger.error("エラー: %s", e)
             sys.exit(1)
 
-        if ingest_result.placed == 0:
+        if ingest_result.is_empty():
             _print_ingest_result(ingest_result, None, context=f"動画: {args.video_url}", json_output=json_out)
             return
 
@@ -2479,7 +2479,7 @@ async def run_ingest_youtube_playlist(args: argparse.Namespace) -> None:
             logger.error("エラー: %s", e)
             sys.exit(1)
 
-        if ingest_result.placed == 0:
+        if ingest_result.is_empty():
             _print_ingest_result(ingest_result, None, context=f"プレイリスト: {args.playlist_url}", json_output=json_out)
             return
 
@@ -2626,7 +2626,7 @@ async def run_crawl_zenn(args: argparse.Namespace) -> None:
             logger.error("エラー: %s", e)
             sys.exit(1)
 
-        if ingest_result.placed == 0 and ingest_result.errors == 0:
+        if ingest_result.is_empty():
             _print_ingest_result(
                 ingest_result, None, context=f"ユーザー: {args.username}", json_output=json_out,
             )
@@ -2691,7 +2691,7 @@ async def run_ingest_bluesky(args: argparse.Namespace) -> None:
             logger.error("エラー: %s", e)
             sys.exit(1)
 
-        if ingest_result.placed == 0 and ingest_result.overwritten == 0 and ingest_result.errors == 0:
+        if ingest_result.is_empty():
             _print_ingest_result(ingest_result, None, context="BlueSky ingest", json_output=json_out)
             return
 
@@ -2742,7 +2742,7 @@ async def run_ingest_zenn(args: argparse.Namespace) -> None:
             logger.error("エラー: %s", e)
             sys.exit(1)
 
-        if ingest_result.placed == 0 and ingest_result.overwritten == 0 and ingest_result.errors == 0:
+        if ingest_result.is_empty():
             _print_ingest_result(ingest_result, None, context="Zenn ingest", json_output=json_out)
             return
 
@@ -2860,7 +2860,7 @@ async def run_add_document(args: argparse.Namespace) -> None:
             print(f"エラー: {msg}", file=sys.stderr)
             raise SystemExit(1)
 
-        if ingest_result.placed == 0 and ingest_result.errors == 0:
+        if ingest_result.is_empty():
             _print_ingest_result(
                 ingest_result, None, context=display_name, json_output=json_out,
             )
@@ -2910,7 +2910,7 @@ async def run_crawl_documents(args: argparse.Namespace) -> None:
             progress_callback=_wrap_progress(progress_cb, PipelinePhase.FETCH.display),
         )
 
-        if ingest_result.placed == 0 and ingest_result.errors == 0:
+        if ingest_result.is_empty():
             _print_ingest_result(
                 ingest_result, None, context=f"ディレクトリ: {args.dir_path}",
                 json_output=json_out,
