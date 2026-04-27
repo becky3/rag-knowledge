@@ -28,7 +28,12 @@ HNSW グラフの劣化はインデックス側の問題であり、ソースフ
 ## 制約
 
 - **index モード限定**: 定期バッチで実行するのは `rebuild --mode index` のみ。full rebuild は手動実行とする
-- **更新判定の基準**: `pipeline_history` を参照し、最後の **未フィルタの** `index` または `full` モードの実行（`filter_source_type = ''` かつ `filter_path = ''`）以降に新しい `pipeline_history` レコード（`incremental` や filter 付き rebuild 等）が存在するかで判定する。filter 付き rebuild は subset しか触っていないため判定基準には含めない（filter 付きを「全体 rebuild 完了」と誤認するとスキップ漏れが発生する）
+- **更新判定の基準**: `pipeline_history` を参照し、最後の **未フィルタの**
+  `index` または `full` モードの実行（`filter_source_type = ''` かつ
+  `filter_path = ''`）以降に新しい `pipeline_history` レコード
+  （`incremental` や filter 付き rebuild 等）が存在するかで判定する。
+  filter 付き rebuild は subset しか触っていないため判定基準には含めない
+  （filter 付きを「全体 rebuild 完了」と誤認するとスキップ漏れが発生する）
 - **スキップ時の挙動**: 更新がない場合は rebuild を実行せず、正常終了する（exit code 0）
 - **排他制御**: 既存の rebuild ロック機構を使用する。ロック取得失敗時はエラーとする
 - **実行環境**: Windows 11 の開発マシンを前提とする
@@ -56,7 +61,14 @@ uv run python -m rag.cli rebuild --mode index --if-needed
 
 `--if-needed` は `--mode` が `index` または `full` の場合のみ有効。それ以外のモードで指定された場合はパラメータ検証エラーとする。
 
-`--if-needed` と filter（`--source-type` / `--path`）の併用はパラメータ検証エラーとする。Why: filter 付き rebuild は `pipeline_history` の filter 列に記録され、`needs_index_rebuild()` の判定対象から除外される。filter 付きで `--if-needed` を実行すると「filter スコープが古ければ rebuild される」と誤期待されやすく、実際は「未フィルタの index/full」が古ければ filter スコープで rebuild が走るという挙動の乖離が起きる。スケジューラ運用では未フィルタの `--if-needed` 実行と、アドホックな filter 付き手動 rebuild を分離して運用する。
+`--if-needed` と filter（`--source-type` / `--path`）の併用はパラメータ検証エラーとする。
+
+Why: filter 付き rebuild は `pipeline_history` の filter 列に記録され、
+`needs_index_rebuild()` の判定対象から除外される。filter 付きで `--if-needed`
+を実行すると「filter スコープが古ければ rebuild される」と誤期待されやすく、
+実際は「未フィルタの index/full」が古ければ filter スコープで rebuild が走る
+という挙動の乖離が起きる。スケジューラ運用では未フィルタの `--if-needed`
+実行と、アドホックな filter 付き手動 rebuild を分離して運用する。
 
 ### 所要時間の表示形式
 

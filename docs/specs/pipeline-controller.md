@@ -66,15 +66,30 @@ path フィルタの SSoT セクション。CLI / MCP インターフェース�
 | 0 件正常終了 | 配下に該当ソースが 1 件もない場合（attachment ディレクトリのみを指定した場合等。例: `bluesky/{did}/{年}/{月}/media/{rkey}/`）は対象 0 件として正常終了する。クリアも空対象のため実質 no-op |
 | attachment の暗黙解決を行わない | rebuild は明示再構築のため、attachment 単独指定時の親ソースへの暗黙解決（`find_existing_parent`）は行わない。Why: ユーザー指定パスを暗黙拡張すると意図しないソースまで対象化されるため。incremental の差分処理での attachment 取扱いとは振る舞いが異なる |
 | 正規化 | 受け取った path はバックスラッシュを `/` に変換し、両端のスラッシュを除去する |
-| 無効パスのバリデーション | 以下を満たさない path はパラメータ検証エラー: <br>- 空文字列・正規化後に空となるもの（`/`, `//` 等）<br>- 先頭が `/` で始まる絶対パス、`X:` で始まる Windows ドライブレター<br>- `..` セグメントを含むパス（パストラバーサル）<br>- `.` セグメントを含むパス（冗長表現）<br>- 先頭セグメントが既知の `source_type`（`web`/`bluesky`/`zenn`/`youtube`/`aozora`/`local`/`journal`）でないもの。SSoT は [`_schema/enums.yml`](../../_schema/enums.yml) |
-| 多層防御 | バリデーションは CLI / MCP の入口で実施し、下層（metadata.db `search_sources`/`delete_sources_by_path`、source_store `list_files`/`rebuild_db`、converter `clear`、indexer `clear`、vector_store `delete_by_source_id_prefix`、bm25_index `delete_by_source_id_prefix`）でも同じバリデータを再実施する。Why: source_store / converted_store のルート外を誤って削除・走査する事故を防ぐ |
+| 無効パスのバリデーション | 詳細は下記「無効パスのバリデーション」を参照（パラメータ検証エラー） |
+| 多層防御 | バリデーションは CLI / MCP の入口で実施し、下層（metadata.db / source_store / converter / indexer / vector_store / bm25_index の各 path 受け取り経路）でも同じバリデータを再実施する。Why: source_store / converted_store のルート外を誤って削除・走査する事故を防ぐ |
 | ChromaDB 削除の最適化 | path の先頭セグメントから `source_type` を導出し、`where={"source_type": ...}` で事前絞り込みしてから Python 側で `source_id` の prefix 一致をフィルタする。ChromaDB は metadata に対する LIKE/startswith や文字列範囲比較をサポートしないため、媒体絞り込み + Python フィルタの組み合わせでスキャン量を圧縮する |
+
+##### 無効パスのバリデーション
+
+以下を満たさない path はパラメータ検証エラーとして拒否する:
+
+- 空文字列・正規化後に空となるもの（`/`, `//` 等）
+- 先頭が `/` で始まる絶対パス、`X:` で始まる Windows ドライブレター
+- `..` セグメントを含むパス（パストラバーサル）
+- `.` セグメントを含むパス（冗長表現）
+- 先頭セグメントが既知の `source_type` でないもの
+
+`source_type` の値リストの SSoT は [`_schema/enums.yml`](../../_schema/enums.yml) を参照。
 
 #### filter 付き rebuild と --if-needed
 
 `--if-needed`（[infrastructure/scheduled-rebuild.md](infrastructure/scheduled-rebuild.md) 参照）は「前回の **未フィルタの** index/full rebuild 以降に更新がなければスキップ」する判定を行う。
 
-filter 付き rebuild（`--source-type` / `--path`）は subset しか触っていないため、`pipeline_history` には `mode` に加えて `filter_source_type` / `filter_path` 列を記録し、`needs_index_rebuild()` は **両 filter 列が空**（未フィルタ）の `mode='full'` / `mode='index'` 行のみを判定基準にする。
+filter 付き rebuild（`--source-type` / `--path`）は subset しか触っていないため、
+`pipeline_history` には `mode` に加えて `filter_source_type` / `filter_path` 列を記録し、
+`needs_index_rebuild()` は **両 filter 列が空**（未フィルタ）の
+`mode='full'` / `mode='index'` 行のみを判定基準にする。
 
 Why: filter 付き rebuild を「全体 rebuild 完了」と誤認すると、配下外のソースが古いままでも `--if-needed` がスキップしてしまう。スケジューラ運用で「定期全体 rebuild」と「アドホックな部分 rebuild」を併用しても整合が取れる設計とする。
 
