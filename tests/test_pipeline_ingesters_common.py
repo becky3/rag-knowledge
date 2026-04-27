@@ -8,6 +8,10 @@
   （契約: 非 2xx は全て例外化。3xx の例外化は「リダイレクト追従は fetch_get
   ではなく媒体固有ヘルパーを使う」という設計の裏付けでもある）
 - 例外に URL とステータスコードが含まれること
+- IngestResult.is_empty() が CLI 早期 return 判定の SSoT として正しく動作すること
+  （回帰防止: overwritten>0 のときに is_empty()==False となることを保証する。
+  この保証が壊れると、CLI の早期 return が overwritten ケースでパイプライン処理を
+  スキップするバグが再発する）
 """
 
 from __future__ import annotations
@@ -17,7 +21,37 @@ from unittest.mock import AsyncMock
 import httpx
 import pytest
 
-from rag.pipeline.ingesters._common import fetch_get
+from rag.pipeline.ingesters._common import IngestResult, fetch_get
+
+
+class TestIngestResultIsEmpty:
+    """IngestResult.is_empty() の判定ロジックを検証する.
+
+    CLI の `run_ingest_*` 系コマンドが早期 return 判定にこのメソッドを使用するため、
+    placed=0 / overwritten=0 / errors=0 の AND 条件が崩れるとパイプライン処理スキップの
+    バグが再発する。
+    """
+
+    def test_all_zero_returns_true(self) -> None:
+        assert IngestResult().is_empty() is True
+
+    def test_placed_one_returns_false(self) -> None:
+        assert IngestResult(placed=1).is_empty() is False
+
+    def test_overwritten_one_returns_false(self) -> None:
+        """上書き 1 件で is_empty()==False になる（CLI 早期 return スキップを防ぐ）."""
+        assert IngestResult(overwritten=1).is_empty() is False
+
+    def test_errors_one_returns_false(self) -> None:
+        assert IngestResult(errors=1).is_empty() is False
+
+    def test_skipped_only_returns_true(self) -> None:
+        """skipped は is_empty() の判定対象外（CLI 早期 return が望ましいケース）."""
+        assert IngestResult(skipped=5).is_empty() is True
+
+    def test_aborted_with_errors_returns_false(self) -> None:
+        """aborted=True 時の不変条件（errors>0 なら is_empty()==False）."""
+        assert IngestResult(aborted=True, errors=1).is_empty() is False
 
 
 def _make_response(status_code: int, url: str = "https://example.com") -> httpx.Response:

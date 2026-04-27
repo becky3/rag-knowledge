@@ -22,6 +22,17 @@
 
 MCP の接続状態の変更はユーザーに `/mcp` での操作を依頼する。サーバープロセスの起動・停止はエージェントから実行可能。
 
+#### Fake モード状態の確認
+
+YouTube インジェスター等は Fake モード基盤（`docs/specs/infrastructure/fake-mode.md`）で実外部アクセス排除を制御する。MCP サーバーまたは CLI の起動ログで現在のモードを確認できる:
+
+- `WARNING: [FAKE MODE] YouTube は FAKE モードで起動中（fixture: ...）` → fake モード（実 YouTube アクセス発生せず）
+- `INFO: YouTube は REAL モードで起動中` → real モード（実 YouTube API アクセスあり）
+
+`.env` の `RAG_YOUTUBE_FAKE_MODE` が未設定の場合は安全側のデフォルト（fake 有効）で起動する。
+本番運用時のみ `RAG_YOUTUBE_FAKE_MODE=false` を `.env` に明示する必要がある。
+MCP ツール `rag_add_youtube` / `rag_crawl_youtube` の応答冒頭に `[FAKE MODE]` ラベルが付与される場合、fake モードで動作している。
+
 ### MCP サーバーと他プロセスの共存
 
 ChromaDB は HttpClient 経由でサーバーに接続するため、MCP と CLI の同時アクセスが可能。書き込み操作はファイルベースロック（fcntl/msvcrt）でプロセス間排他制御される。

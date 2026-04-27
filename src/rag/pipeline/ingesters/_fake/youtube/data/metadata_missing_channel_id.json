@@ -1,0 +1,9 @@
+{
+  "id": "TestVideo03",
+  "title": "Video Without Channel ID",
+  "channel_id": null,
+  "uploader": "Unknown Channel",
+  "upload_date": "20260101",
+  "duration": 60,
+  "description": "channel_id is missing in this fixture."
+}

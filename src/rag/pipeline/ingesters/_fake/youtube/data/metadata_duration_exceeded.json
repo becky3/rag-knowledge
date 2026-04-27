@@ -1,0 +1,9 @@
+{
+  "id": "TestVideo02",
+  "title": "Long Sample Video",
+  "channel_id": "UCtest123456789012345",
+  "uploader": "Sample Channel",
+  "upload_date": "20260101",
+  "duration": 90000,
+  "description": "Duration exceeds the configured max_duration limit."
+}

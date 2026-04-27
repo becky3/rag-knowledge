@@ -1,0 +1,22 @@
+{
+  "_comment": "実 yt-dlp.YoutubeDL.extract_info の info_dict 構造の参照サンプル。実 ID は synthetic 値に置換済み。契約検証テストではキーの存在と型のみを比較する（具体値は対象外）。",
+  "id": "TestVideo01",
+  "title": "Sample Video Title",
+  "channel_id": "UCtest123456789012345",
+  "uploader": "Sample Channel",
+  "upload_date": "20260101",
+  "duration": 120,
+  "description": "Description text",
+  "view_count": 0,
+  "like_count": 0,
+  "comment_count": 0,
+  "thumbnail": "https://example.invalid/test.jpg",
+  "webpage_url": "https://www.youtube.com/watch?v=TestVideo01",
+  "channel": "Sample Channel",
+  "channel_url": "https://www.youtube.com/channel/UCtest123456789012345",
+  "uploader_id": "@SampleChannel",
+  "uploader_url": "https://www.youtube.com/@SampleChannel",
+  "categories": ["Entertainment"],
+  "tags": [],
+  "language": "ja"
+}

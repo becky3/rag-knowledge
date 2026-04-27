@@ -1,9 +1,13 @@
 """YouTube インジェスター.
 
 仕様: docs/specs/ingesters/youtube.md
+仕様: docs/specs/infrastructure/fake-adapters/youtube.md
 
 YouTube 動画の字幕・音声文字起こしを取得し、
 source_store にファイルを配置する。
+
+外部アクセス処理は YoutubeFetcher Protocol を経由する。
+Real / Fake の切替は呼び出し元が create_youtube_fetcher() ファクトリで決定する。
 """
 
 from __future__ import annotations
@@ -13,16 +17,13 @@ import json
 import logging
 import random
 import re
-import shutil
-import tempfile
-import threading
-from pathlib import Path
 from typing import TYPE_CHECKING, Any, Literal
 from urllib.parse import parse_qs, urlparse
 
 from rag.pipeline.ingesters._common import IngestResult, ProgressCallback, now_iso
 
 if TYPE_CHECKING:
+    from rag.pipeline.ingesters.youtube_fetcher import YoutubeFetcher
     from rag.store.source_store import SourceStore
 
 logger = logging.getLogger(__name__)
@@ -30,9 +31,10 @@ logger = logging.getLogger(__name__)
 # ハードリミット
 MAX_VIDEOS_HARD_LIMIT = 500
 MIN_REQUEST_INTERVAL = 0.1
-MAX_AUDIO_FILE_SIZE_MB = 500
 JITTER_MIN_RATIO = 0.3
 CIRCUIT_BREAKER_THRESHOLD = 5
+# Whisper 処理時の音声ファイルサイズ上限（動画長上限と相補的にストレージ・処理コストを抑制）
+MAX_AUDIO_FILE_SIZE_MB = 500
 
 # video_id の正規表現
 _VIDEO_ID_RE = re.compile(r"^[A-Za-z0-9_-]{11}$")
@@ -164,6 +166,7 @@ class YoutubeIngester:
         self,
         source_store: SourceStore,
         *,
+        fetcher: YoutubeFetcher,
         max_videos: int,
         request_interval: float,
         request_timeout: int,
@@ -173,6 +176,7 @@ class YoutubeIngester:
         max_duration: int,
     ) -> None:
         self._store = source_store
+        self._fetcher = fetcher
         self._max_videos = _validate_max_videos(max_videos)
         self._request_interval = max(request_interval, MIN_REQUEST_INTERVAL)
         self._request_timeout = request_timeout
@@ -180,8 +184,6 @@ class YoutubeIngester:
         self._whisper_device = whisper_device
         self._transcript_languages = transcript_languages or ["ja", "en"]
         self._max_duration = max_duration
-        self._whisper_model_instance: Any = None  # 遅延初期化キャッシュ
-        self._whisper_lock = threading.Lock()  # スレッドセーフなモデルアクセス
 
     @property
     def request_interval(self) -> float:
@@ -210,7 +212,9 @@ class YoutubeIngester:
 
         # メタデータ取得
         try:
-            metadata = await self._fetch_metadata(video_id)
+            metadata = await self._fetcher.fetch_metadata(
+                video_id, self._request_timeout,
+            )
         except Exception as e:
             # プログラミングエラーは伝播させる
             if isinstance(e, (TypeError, AttributeError, ImportError)):
@@ -475,27 +479,6 @@ class YoutubeIngester:
         )
         return result
 
-    async def _fetch_metadata(self, video_id: str) -> dict[str, Any]:
-        """yt-dlp でメタデータを取得する."""
-        import yt_dlp  # safety:allowed
-
-        loop = asyncio.get_running_loop()
-
-        def _extract() -> dict[str, Any]:
-            ydl_opts: dict[str, Any] = {
-                "quiet": True,
-                "no_warnings": True,
-                "socket_timeout": self._request_timeout,
-            }
-            with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-                info: dict[str, Any] = ydl.extract_info(
-                    f"https://www.youtube.com/watch?v={video_id}",
-                    download=False,
-                )
-                return info
-
-        return await loop.run_in_executor(None, _extract)
-
     async def _fetch_transcript(
         self, video_id: str
     ) -> tuple[list[dict[str, Any]], str, str]:
@@ -505,6 +488,8 @@ class YoutubeIngester:
         NoTranscriptFound）のみ発動する。API エラー（IP ブロック等）では
         フォールバックせずエラーを伝播する。
 
+        外部アクセス自体は YoutubeFetcher Protocol 経由で実行する。
+
         Returns:
             (snippets, transcript_source, language)
         """
@@ -513,9 +498,10 @@ class YoutubeIngester:
             TranscriptsDisabled,
         )
 
-        # 字幕取得を試みる
         try:
-            snippets, language = await self._fetch_subtitle(video_id)
+            snippets, language = await self._fetcher.fetch_subtitle(
+                video_id, self._transcript_languages
+            )
             return snippets, "subtitle", language
         except (TranscriptsDisabled, NoTranscriptFound) as e:
             logger.info(
@@ -524,148 +510,20 @@ class YoutubeIngester:
                 type(e).__name__,
             )
 
-        # Whisper フォールバック（字幕が存在しない場合のみ）
-        snippets, language = await self._transcribe_with_whisper(video_id)
+        snippets, language = await self._fetcher.transcribe_audio(
+            video_id,
+            self._transcript_languages,
+            self._whisper_model_name,
+            self._whisper_device,
+            self._request_timeout,
+        )
         return snippets, "whisper", language
-
-    async def _fetch_subtitle(
-        self, video_id: str
-    ) -> tuple[list[dict[str, Any]], str]:
-        """youtube-transcript-api で字幕を取得する.
-
-        Returns:
-            (snippets, language)
-        """
-        from youtube_transcript_api import YouTubeTranscriptApi  # safety:allowed
-
-        loop = asyncio.get_running_loop()
-
-        def _fetch() -> tuple[list[dict[str, Any]], str]:
-            ytt_api = YouTubeTranscriptApi()
-            transcript = ytt_api.fetch(
-                video_id, languages=self._transcript_languages
-            )
-            snippets: list[dict[str, Any]] = []
-            for s in transcript.snippets:
-                snippets.append({
-                    "start": s.start,
-                    "end": s.start + s.duration,
-                    "text": s.text,
-                })
-            language = transcript.language if hasattr(transcript, "language") else self._transcript_languages[0]
-            return snippets, language
-
-        return await loop.run_in_executor(None, _fetch)
-
-    async def _transcribe_with_whisper(
-        self, video_id: str
-    ) -> tuple[list[dict[str, Any]], str]:
-        """yt-dlp で音声DL → faster-whisper で文字起こし.
-
-        Returns:
-            (snippets, language)
-        """
-        from faster_whisper import WhisperModel  # safety:allowed
-
-        loop = asyncio.get_running_loop()
-        tmpdir = tempfile.mkdtemp(prefix="rag_youtube_")
-
-        try:
-            # 音声ダウンロード
-            audio_path = await self._download_audio(video_id, tmpdir)
-
-            # ファイルサイズチェック（超過時は警告 + 空 snippets で返す）
-            file_size_mb = Path(audio_path).stat().st_size / (1024 * 1024)
-            if file_size_mb > MAX_AUDIO_FILE_SIZE_MB:
-                logger.warning(
-                    "音声ファイルサイズが上限を超えています (video_id=%s): %.0fMB > %dMB。スキップします",
-                    video_id,
-                    file_size_mb,
-                    MAX_AUDIO_FILE_SIZE_MB,
-                )
-                return [], self._transcript_languages[0]
-
-            # faster-whisper で文字起こし（モデルは遅延初期化 + キャッシュ、Lock で排他）
-            def _transcribe() -> tuple[list[dict[str, Any]], str]:
-                with self._whisper_lock:
-                    if self._whisper_model_instance is None:
-                        self._whisper_model_instance = WhisperModel(
-                            self._whisper_model_name,
-                            device=self._whisper_device,
-                            compute_type="float16" if self._whisper_device == "cuda" else "int8",
-                        )
-                    model = self._whisper_model_instance
-                    segments, info = model.transcribe(
-                        audio_path,
-                        language=self._transcript_languages[0],
-                        beam_size=5,
-                        vad_filter=True,
-                    )
-                    snippets: list[dict[str, Any]] = []
-                    for seg in segments:
-                        snippets.append({
-                            "start": seg.start,
-                            "end": seg.end,
-                            "text": seg.text.strip(),
-                        })
-                    return snippets, info.language if hasattr(info, "language") else self._transcript_languages[0]
-
-            return await loop.run_in_executor(None, _transcribe)
-        finally:
-            shutil.rmtree(tmpdir, ignore_errors=True)
-
-    async def _download_audio(self, video_id: str, tmpdir: str) -> str:
-        """yt-dlp で音声をダウンロードする."""
-        import yt_dlp  # safety:allowed
-
-        loop = asyncio.get_running_loop()
-
-        def _download() -> str:
-            outtmpl = str(Path(tmpdir) / "%(id)s.%(ext)s")
-            ydl_opts: dict[str, Any] = {
-                "format": "ba[ext=m4a]/ba/b",
-                "postprocessors": [
-                    {"key": "FFmpegExtractAudio", "preferredcodec": "wav"},
-                ],
-                "outtmpl": outtmpl,
-                "quiet": True,
-                "no_warnings": True,
-                "socket_timeout": self._request_timeout,
-            }
-            with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-                ydl.download([f"https://www.youtube.com/watch?v={video_id}"])
-            # WAV ファイルを探す
-            wav_files = list(Path(tmpdir).glob("*.wav"))
-            if not wav_files:
-                raise FileNotFoundError(
-                    f"音声ファイルが見つかりません: {tmpdir}"
-                )
-            return str(wav_files[0])
-
-        return await loop.run_in_executor(None, _download)
 
     async def _expand_playlist(
         self, playlist_url: str, max_videos: int
     ) -> list[dict[str, Any]]:
-        """yt-dlp でプレイリストを展開する."""
-        import yt_dlp  # safety:allowed
-
-        loop = asyncio.get_running_loop()
-
-        def _expand() -> list[dict[str, Any]]:
-            ydl_opts: dict[str, Any] = {
-                "extract_flat": True,
-                "quiet": True,
-                "no_warnings": True,
-                "socket_timeout": self._request_timeout,
-                "playlistend": max_videos,
-            }
-            with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-                info: dict[str, Any] = ydl.extract_info(
-                    playlist_url, download=False
-                )
-                entries: list[dict[str, Any]] = list(info.get("entries", []) or [])
-                return entries
-
-        return await loop.run_in_executor(None, _expand)
+        """YoutubeFetcher 経由でプレイリストを展開する."""
+        return await self._fetcher.expand_playlist(
+            playlist_url, max_videos, self._request_timeout
+        )
 

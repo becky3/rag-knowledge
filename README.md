@@ -25,6 +25,7 @@
 | **Upload HTTP API** | HTTP モードでのファイル直接アップロード（multipart/form-data） |
 | **メディア解析** | 画像・動画を Vision モデル（LM Studio）でテキスト化し、RAG 検索対象に含める |
 | **制約付き HTTP クライアント** | バジェット・サーキットブレーカー・レート制限を統合した安全な HTTP アクセス（py-common-lib 提供） |
+| **Fake モード基盤** | 外部 API・ライブラリの Fake Adapter 注入による実アクセス排除（テスト・QA・運用環境共通）。最初の対象は YouTube |
 
 ## 動作環境
 
@@ -368,6 +369,8 @@ git-flow ベースのブランチ戦略を採用。詳細は `~/.claude/docs/spe
 - [Upload HTTP API 認証](docs/specs/infrastructure/upload-auth.md)
 - [定期 index rebuild](docs/specs/infrastructure/scheduled-rebuild.md)
 - [メディア解析](docs/specs/infrastructure/media-analysis.md)
+- [Fake モード基盤](docs/specs/infrastructure/fake-mode.md)
+- [YouTube Fake Adapter](docs/specs/infrastructure/fake-adapters/youtube.md)
 
 ### インジェスター仕様
 

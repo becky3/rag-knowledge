@@ -35,6 +35,8 @@ RAG Knowledge は、外部 Web ページから収集した知識をベクトル 
 | 25 | 定期 index rebuild | 条件付き index rebuild の自動実行 | [infrastructure/scheduled-rebuild.md](infrastructure/scheduled-rebuild.md) |
 | 26 | メディア解析 | 画像・動画の Vision モデルによるテキスト変換 | [infrastructure/media-analysis.md](infrastructure/media-analysis.md) |
 | 27 | BM25 スケーラビリティ | BM25 インデックスの SQLite 外部化・トークンキャッシュによる大規模対応 | [infrastructure/bm25-scalability.md](infrastructure/bm25-scalability.md) |
+| 28 | Fake モード基盤 | 外部 API・ライブラリの Fake Adapter 注入による実アクセス排除（テスト・QA・運用環境共通） | [infrastructure/fake-mode.md](infrastructure/fake-mode.md) |
+| 29 | YouTube Fake Adapter | YouTube インジェスター用 FakeYoutubeFetcher（シナリオ切替・JSON 返却） | [infrastructure/fake-adapters/youtube.md](infrastructure/fake-adapters/youtube.md) |
 
 ## 3. 技術スタック
 

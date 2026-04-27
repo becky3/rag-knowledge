@@ -1,0 +1,9 @@
+{
+  "id": "TestVideo01",
+  "title": "Sample Video Title",
+  "channel_id": "UCtest123456789012345",
+  "uploader": "Sample Channel",
+  "upload_date": "20260101",
+  "duration": 120,
+  "description": "Sample description for fake fixture."
+}
