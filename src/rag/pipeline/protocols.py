@@ -57,12 +57,15 @@ class ConverterProtocol(Protocol):
         self,
         converted_store_dir: Path,
         source_type: SourceType | None = None,
+        *,
+        path: str | None = None,
     ) -> None:
         """converted_store をクリアする.
 
         Args:
             converted_store_dir: converted_store のルートディレクトリ
             source_type: 指定時はその媒体のみクリア
+            path: 指定時はそのディレクトリ配下のみクリア（source_type と排他）
         """
         ...
 
@@ -140,10 +143,16 @@ class IndexerProtocol(Protocol):
         """BM25 遅延 save のコンテキストマネージャ."""
         ...
 
-    async def clear(self, source_type: SourceType | None = None) -> None:
+    async def clear(
+        self,
+        source_type: SourceType | None = None,
+        *,
+        path: str | None = None,
+    ) -> None:
         """インデックスをクリアする.
 
         Args:
             source_type: 指定時はその媒体のみクリア
+            path: 指定時はそのディレクトリ配下のみクリア（source_type と排他）
         """
         ...

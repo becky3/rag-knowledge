@@ -44,6 +44,8 @@ class PipelineHistoryRecord:
     to_commit_id: str
     processed_at: str
     mode: str = "incremental"
+    filter_source_type: str = ""
+    filter_path: str = ""
 
 
 @dataclass

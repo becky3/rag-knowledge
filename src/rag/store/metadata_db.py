@@ -22,6 +22,7 @@ from rag.store.models import (
     SourceStatus,
     SourceType,
 )
+from rag.store.path_filter import escape_like, normalize_path_prefix
 
 logger = logging.getLogger(__name__)
 
@@ -43,11 +44,13 @@ CREATE TABLE IF NOT EXISTS sources (
 );
 
 CREATE TABLE IF NOT EXISTS pipeline_history (
-    id             INTEGER PRIMARY KEY AUTOINCREMENT,
-    from_commit_id TEXT NOT NULL,
-    to_commit_id   TEXT NOT NULL,
-    processed_at   TEXT NOT NULL,
-    mode           TEXT NOT NULL DEFAULT 'incremental'
+    id                 INTEGER PRIMARY KEY AUTOINCREMENT,
+    from_commit_id     TEXT NOT NULL,
+    to_commit_id       TEXT NOT NULL,
+    processed_at       TEXT NOT NULL,
+    mode               TEXT NOT NULL DEFAULT 'incremental',
+    filter_source_type TEXT NOT NULL DEFAULT '',
+    filter_path        TEXT NOT NULL DEFAULT ''
 );
 """
 
@@ -113,6 +116,29 @@ class MetadataDB:
             self._connection.commit()
             applied.append("pipeline_history に mode 列を追加")
             logger.info("pipeline_history に mode 列を追加しました")
+
+        # pipeline_history に filter_source_type / filter_path 列を追加
+        # （既存レコードは「未フィルタ」扱いで空文字列がデフォルト）
+        if "filter_source_type" not in ph_columns:
+            self._connection.execute(
+                "ALTER TABLE pipeline_history"
+                " ADD COLUMN filter_source_type TEXT NOT NULL DEFAULT ''"
+            )
+            self._connection.commit()
+            applied.append("pipeline_history に filter_source_type 列を追加")
+            logger.info(
+                "pipeline_history に filter_source_type 列を追加しました",
+            )
+        if "filter_path" not in ph_columns:
+            self._connection.execute(
+                "ALTER TABLE pipeline_history"
+                " ADD COLUMN filter_path TEXT NOT NULL DEFAULT ''"
+            )
+            self._connection.commit()
+            applied.append("pipeline_history に filter_path 列を追加")
+            logger.info(
+                "pipeline_history に filter_path 列を追加しました",
+            )
 
         # sources に published_at 列を追加（既存レコードは collected_at で埋める）
         cursor = self._connection.execute("PRAGMA table_info(sources)")
@@ -361,8 +387,17 @@ class MetadataDB:
         *,
         source_type: SourceType | None = None,
         status: SourceStatus | None = None,
+        path_prefix: str | None = None,
     ) -> list[SourceRecord]:
-        """条件に合致するソースを検索する."""
+        """条件に合致するソースを検索する.
+
+        Args:
+            source_type: 媒体フィルタ
+            status: ステータスフィルタ
+            path_prefix: source_id（= source_store 内 rel_path）の prefix
+                一致フィルタ。指定パス配下（再帰的）のソースのみを返す。
+                LIKE のメタ文字（%, _, バックスラッシュ）は ESCAPE される
+        """
         conditions: list[str] = []
         params: list[Any] = []
 
@@ -372,6 +407,11 @@ class MetadataDB:
         if status is not None:
             conditions.append("status = ?")
             params.append(status)
+        if path_prefix is not None:
+            normalized = normalize_path_prefix(path_prefix)
+            escaped = escape_like(normalized)
+            conditions.append(r"source_id LIKE ? ESCAPE '\'")
+            params.append(f"{escaped}/%")
 
         where = " AND ".join(conditions) if conditions else "1=1"
         rows = self._connection.execute(
@@ -408,6 +448,21 @@ class MetadataDB:
         )
         self._connection.commit()
 
+    def delete_sources_by_path(self, path_prefix: str) -> None:
+        """指定パス配下のソースレコードを削除する（DB 部分再構築用）.
+
+        Args:
+            path_prefix: source_id の prefix。指定パス配下（再帰的）の
+                レコードを削除する
+        """
+        normalized = normalize_path_prefix(path_prefix)
+        escaped = escape_like(normalized)
+        self._connection.execute(
+            r"DELETE FROM sources WHERE source_id LIKE ? ESCAPE '\'",
+            (f"{escaped}/%",),
+        )
+        self._connection.commit()
+
     # --- pipeline_history ---
 
     def add_pipeline_history(
@@ -417,15 +472,28 @@ class MetadataDB:
         to_commit_id: str,
         processed_at: str,
         mode: str = "incremental",
+        filter_source_type: str = "",
+        filter_path: str = "",
     ) -> None:
-        """パイプライン実行履歴を追加する."""
+        """パイプライン実行履歴を追加する.
+
+        Args:
+            filter_source_type: source_type フィルタ付き rebuild の場合に
+                媒体名を記録（filter なしは空文字列）
+            filter_path: path フィルタ付き rebuild の場合にパスを記録
+                （filter なしは空文字列）
+        """
         self._connection.execute(
             """\
             INSERT INTO pipeline_history
-                (from_commit_id, to_commit_id, processed_at, mode)
-            VALUES (?, ?, ?, ?)
+                (from_commit_id, to_commit_id, processed_at, mode,
+                 filter_source_type, filter_path)
+            VALUES (?, ?, ?, ?, ?, ?)
             """,
-            (from_commit_id, to_commit_id, processed_at, mode),
+            (
+                from_commit_id, to_commit_id, processed_at, mode,
+                filter_source_type, filter_path,
+            ),
         )
         self._connection.commit()
 
@@ -454,26 +522,34 @@ class MetadataDB:
                 to_commit_id=row["to_commit_id"],
                 processed_at=row["processed_at"],
                 mode=row["mode"],
+                filter_source_type=row["filter_source_type"],
+                filter_path=row["filter_path"],
             )
             for row in rows
         ]
 
     def needs_index_rebuild(self) -> bool:
-        """前回の index/full rebuild 以降に更新があったかを判定する.
+        """前回の「未フィルタの index/full rebuild」以降に更新があったかを判定する.
+
+        filter 付き rebuild（source_type / path フィルタ）は subset しか
+        触っていないため、判定基準には含めない（filter 付きを「全体 rebuild
+        完了」と誤認するとスキップ漏れが発生する）。
 
         Returns:
-            True: rebuild が必要（更新あり or 履歴なし）
-            False: rebuild 不要（更新なし）
+            True: rebuild が必要（更新あり or 全体 rebuild 履歴なし）
+            False: rebuild 不要（前回の全体 rebuild 以降に更新なし）
         """
-        # 最後の index/full rebuild を取得
+        # 最後の「未フィルタの」index/full rebuild を取得
         row = self._connection.execute(
             "SELECT id FROM pipeline_history"
             " WHERE mode IN ('index', 'full')"
+            " AND filter_source_type = ''"
+            " AND filter_path = ''"
             " ORDER BY id DESC LIMIT 1"
         ).fetchone()
 
         if row is None:
-            # index/full rebuild の履歴なし → 必要
+            # 全体 index/full rebuild の履歴なし → 必要
             return True
 
         last_id = row["id"]

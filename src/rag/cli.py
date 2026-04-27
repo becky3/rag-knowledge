@@ -559,7 +559,17 @@ def main() -> None:
         "--source-type",
         choices=["web", "bluesky", "zenn", "youtube", "aozora", "local", "journal"],
         default=None,
-        help="対象媒体フィルタ（incremental では指定不可）",
+        help="対象媒体フィルタ（incremental では指定不可、--path と排他）",
+    )
+    rebuild_parser.add_argument(
+        "--path",
+        default=None,
+        help=(
+            "対象パスフィルタ。source_store ルート相対のディレクトリパスを指定し、"
+            "配下（再帰的）のソースのみを対象にする。"
+            "空文字列・絶対パス・`..`/`.` を含むパスはバリデーションエラー。"
+            "incremental では指定不可、--source-type と排他"
+        ),
     )
     rebuild_parser.add_argument(
         "--commit-message",
@@ -1421,11 +1431,25 @@ async def run_rebuild(args: argparse.Namespace) -> None:
 
     json_out = _is_json_output(args)
 
+    from .store.path_filter import PathFilterError, normalize_path_prefix
+
     mode: str = args.mode
     source_type: SourceType | None = args.source_type
+    path: str | None = args.path
     if_needed: bool = args.if_needed
 
-    # incremental + source_type のバリデーション
+    # path 指定時は早期に正規化・バリデーション（空文字列・パストラバーサル拒否）
+    if path is not None:
+        try:
+            path = normalize_path_prefix(path)
+        except PathFilterError as e:
+            msg = f"--path が不正です: {e}"
+            if json_out:
+                _output_error(CliErrorCode.VALIDATION_ERROR, msg)
+            logger.error(msg)
+            sys.exit(1)
+
+    # incremental + source_type / path のバリデーション
     if mode == "incremental" and source_type is not None:
         if json_out:
             _output_error(CliErrorCode.VALIDATION_ERROR, "incremental モードでは source_type を指定できません")
@@ -1433,10 +1457,39 @@ async def run_rebuild(args: argparse.Namespace) -> None:
             "incremental モードでは source_type を指定できません"
         )
         sys.exit(1)
+    if mode == "incremental" and path is not None:
+        msg = "incremental モードでは path を指定できません"
+        if json_out:
+            _output_error(CliErrorCode.VALIDATION_ERROR, msg)
+        logger.error(msg)
+        sys.exit(1)
+    if source_type is not None and path is not None:
+        msg = "--source-type と --path は同時に指定できません"
+        if json_out:
+            _output_error(CliErrorCode.VALIDATION_ERROR, msg)
+        logger.error(msg)
+        sys.exit(1)
 
     # --if-needed は index/full のみ有効
     if if_needed and mode not in ("index", "full"):
         msg = "--if-needed は --mode index または --mode full でのみ使用できます"
+        if json_out:
+            _output_error(CliErrorCode.VALIDATION_ERROR, msg)
+        logger.error(msg)
+        sys.exit(1)
+
+    # --if-needed と filter（--source-type / --path）の併用は禁止
+    # Why: filter 付き rebuild は pipeline_history の filter 列に記録され、
+    # needs_index_rebuild() の判定対象から除外される（subset しか触っていない
+    # ため「全体 rebuild 完了」と誤認するとスキップ漏れが発生する）。
+    # filter 付きで --if-needed を実行すると「filter スコープが古ければ
+    # rebuild される」と誤期待されやすいため明示的に禁止する。
+    # 詳細は docs/specs/infrastructure/scheduled-rebuild.md を参照
+    if if_needed and (source_type is not None or path is not None):
+        msg = (
+            "--if-needed は --source-type / --path と併用できません"
+            "（filter 付き rebuild は --if-needed の判定対象外）"
+        )
         if json_out:
             _output_error(CliErrorCode.VALIDATION_ERROR, msg)
         logger.error(msg)
@@ -1507,6 +1560,8 @@ async def run_rebuild(args: argparse.Namespace) -> None:
         logger.info("再構築を開始します（モード: %s）", mode)
         if source_type:
             logger.info("対象媒体: %s", source_type)
+        if path:
+            logger.info("対象パス: %s", path)
 
         start = time.monotonic()
 
@@ -1536,18 +1591,21 @@ async def run_rebuild(args: argparse.Namespace) -> None:
         if mode == "full":
             full_result = await controller.run_full_rebuild(
                 source_type=source_type,
+                path=path,
                 progress_callback=progress_cb,
                 concurrency=concurrency,
             )
         elif mode == "convert":
             summary = await controller.run_convert_only(
                 source_type=source_type,
+                path=path,
                 progress_callback=progress_cb,
                 concurrency=concurrency,
             )
         elif mode == "index":
             summary = await controller.run_index_only(
                 source_type=source_type,
+                path=path,
                 progress_callback=progress_cb,
                 concurrency=concurrency,
             )

@@ -16,7 +16,7 @@ import shutil
 from collections.abc import Callable
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any
+from typing import Any, get_args
 
 import pathspec
 
@@ -71,10 +71,9 @@ _EXCLUDE_SPEC: pathspec.PathSpec = pathspec.PathSpec.from_lines(
     "gitignore", _EXCLUDE_PATTERNS,
 )
 
-# source_type 値の集合（_schema/enums.yml が SSoT）
-_SOURCE_TYPE_VALUES: frozenset[SourceType] = frozenset(
-    {"web", "bluesky", "zenn", "youtube", "aozora", "local", "journal"},
-)
+# source_type 値の集合: SourceType Literal から導出する
+# （SourceType Literal 自体は CI で _schema/enums.yml と同期検証される）
+_SOURCE_TYPE_VALUES: frozenset[SourceType] = frozenset(get_args(SourceType))
 
 
 def detect_source_type(rel_path: str) -> SourceType:
@@ -433,6 +432,7 @@ class SourceStore:
         self,
         *,
         source_type: SourceType | None = None,
+        path: str | None = None,
     ) -> list[Path]:
         """source_store 内の独立ソースを列挙する.
 
@@ -442,12 +442,21 @@ class SourceStore:
 
         Args:
             source_type: 指定時はそのディレクトリのみ
+            path: 指定時はそのディレクトリ配下（再帰的）のみ。
+                source_store ルート相対のディレクトリパス（POSIX 形式）
 
         Returns:
             独立ソースのパスリスト（source_store ルートからの相対パス）
         """
+        if source_type and path:
+            msg = "source_type と path は同時に指定できません"
+            raise ValueError(msg)
         if source_type:
             search_dir = self._root / source_type
+        elif path:
+            from rag.store.path_filter import normalize_path_prefix
+
+            search_dir = self._root / normalize_path_prefix(path)
         else:
             search_dir = self._root
 
@@ -560,22 +569,34 @@ class SourceStore:
 
     # --- DB 再構築 ---
 
-    def rebuild_db(self, source_type: SourceType | None = None) -> int:
+    def rebuild_db(
+        self,
+        source_type: SourceType | None = None,
+        *,
+        path: str | None = None,
+    ) -> int:
         """source_store のファイルと .meta から metadata.db を再構築する.
 
         Args:
             source_type: 対象媒体フィルタ。指定時は対象 type のみ
-                DELETE → INSERT する。None で全件再構築。
+                DELETE → INSERT する。None で全件再構築
+            path: パスフィルタ（source_type と排他）。指定時は配下の
+                レコードのみ DELETE → INSERT する
 
         Returns:
             登録されたソース数
         """
-        if source_type is not None:
+        if source_type is not None and path is not None:
+            msg = "source_type と path は同時に指定できません"
+            raise ValueError(msg)
+        if path is not None:
+            self._db.delete_sources_by_path(path)
+        elif source_type is not None:
             self._db.delete_sources_by_type(source_type)
         else:
             self._db.delete_all_sources()
 
-        files = self.list_files(source_type=source_type)
+        files = self.list_files(source_type=source_type, path=path)
         count = 0
         now = datetime.now(timezone.utc).isoformat()
 

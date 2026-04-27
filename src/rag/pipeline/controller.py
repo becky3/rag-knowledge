@@ -238,6 +238,7 @@ class PipelineController:
         self,
         source_type: SourceType | None = None,
         *,
+        path: str | None = None,
         progress_callback: ProgressCallback | None = None,
         concurrency: int = 1,
     ) -> FullRebuildResult:
@@ -248,26 +249,32 @@ class PipelineController:
 
         Args:
             source_type: 対象媒体フィルタ（None で全媒体）
+            path: パスフィルタ（source_type と排他）。指定時は配下の
+                ソースのみを対象にする
             progress_callback: 進捗コールバック
             concurrency: convert / index フェーズの同時実行数
 
         Raises:
             RuntimeError: source_store に未コミットの変更がある場合
+            ValueError: source_type と path が同時指定された場合
         """
+        _validate_filter_exclusivity(source_type, path)
         logger.info(
-            "Full rebuild started (source_type=%s)", source_type or "all",
+            "Full rebuild started (source_type=%s, path=%s)",
+            source_type or "all", path or "-",
         )
         self._git.init_repo()
-        self._check_uncommitted_changes(source_type)
+        self._check_uncommitted_changes(source_type, path=path)
 
         # 1. metadata.db 再構築
-        self._source_store.rebuild_db(source_type)
+        self._source_store.rebuild_db(source_type, path=path)
 
         # 2. active レコードを取得（rebuild_db が list_files 経由で登録するため、
         # is_source_file=False のファイルは DB に登録されない）
         records = list(self.db.search_sources(
             source_type=source_type,
             status="active",
+            path_prefix=path,
         ))
 
         empty_convert = PipelineSummary(
@@ -292,7 +299,7 @@ class PipelineController:
 
         # --- Phase 1: Convert ---
         logger.info("Phase 1: Convert started (%d files)", len(records))
-        self._converter.clear(self._converted_store_dir, source_type)
+        self._converter.clear(self._converted_store_dir, source_type, path=path)
 
         def _convert_single(record: SourceRecord) -> None:
             self._converter.convert(
@@ -319,7 +326,7 @@ class PipelineController:
         )
 
         # --- Phase 2: Index (convert 成功分のみ) ---
-        await self._indexer.clear(source_type)
+        await self._indexer.clear(source_type, path=path)
 
         convert_failed = convert_summary.failed_paths()
         convert_warned: set[str] = set()
@@ -390,6 +397,8 @@ class PipelineController:
                 to_commit_id=to_commit,
                 processed_at=datetime.now(timezone.utc).isoformat(),
                 mode="full",
+                filter_source_type=source_type or "",
+                filter_path=path or "",
             )
 
         return FullRebuildResult(convert=convert_summary, index=index_summary)
@@ -397,17 +406,29 @@ class PipelineController:
     def _check_uncommitted_changes(
         self,
         source_type: SourceType | None = None,
+        *,
+        path: str | None = None,
     ) -> None:
         """source_store に未コミットの変更がないか確認する.
 
         Args:
             source_type: チェック対象の媒体ディレクトリ（None で全体）
+            path: チェック対象のディレクトリパス（source_type と排他）
 
         Raises:
             RuntimeError: 未コミットの変更がある場合
+            ValueError: source_type と path が同時指定された場合
         """
+        _validate_filter_exclusivity(source_type, path)
+        check_path: str | None
+        if path is not None:
+            from rag.store.path_filter import normalize_path_prefix
+
+            check_path = normalize_path_prefix(path)
+        else:
+            check_path = source_type
         if self._git.has_uncommitted_changes(
-            path=source_type,
+            path=check_path,
         ):
             msg = (
                 "source_store に未コミットの変更があります。"
@@ -429,6 +450,7 @@ class PipelineController:
         self,
         source_type: SourceType | None = None,
         *,
+        path: str | None = None,
         progress_callback: ProgressCallback | None = None,
         concurrency: int = 1,
     ) -> PipelineSummary:
@@ -439,27 +461,31 @@ class PipelineController:
 
         Args:
             source_type: 対象媒体フィルタ（None で全媒体）
+            path: パスフィルタ（source_type と排他）
             progress_callback: 進捗コールバック
             concurrency: 同時実行数
 
         Raises:
             RuntimeError: source_store に未コミットの変更がある場合
+            ValueError: source_type と path が同時指定された場合
         """
+        _validate_filter_exclusivity(source_type, path)
         logger.info(
-            "Convert-only rebuild started (source_type=%s)",
-            source_type or "all",
+            "Convert-only rebuild started (source_type=%s, path=%s)",
+            source_type or "all", path or "-",
         )
         self._git.init_repo()
-        self._check_uncommitted_changes(source_type)
+        self._check_uncommitted_changes(source_type, path=path)
 
         # 1. converted_store クリア
-        self._converter.clear(self._converted_store_dir, source_type)
+        self._converter.clear(self._converted_store_dir, source_type, path=path)
 
         # 2. active レコードを取得（is_source_file=False のファイルは rebuild_db で
         # 登録されないため、DB 側フィルタは不要）
         records = list(self.db.search_sources(
             source_type=source_type,
             status="active",
+            path_prefix=path,
         ))
 
         logger.info("Target files: %d", len(records))
@@ -501,6 +527,7 @@ class PipelineController:
         self,
         source_type: SourceType | None = None,
         *,
+        path: str | None = None,
         progress_callback: ProgressCallback | None = None,
         concurrency: int = 1,
     ) -> PipelineSummary:
@@ -511,25 +538,29 @@ class PipelineController:
 
         Args:
             source_type: 対象媒体フィルタ（None で全媒体）
+            path: パスフィルタ（source_type と排他）
 
         Raises:
             RuntimeError: source_store に未コミットの変更がある場合
+            ValueError: source_type と path が同時指定された場合
         """
+        _validate_filter_exclusivity(source_type, path)
         logger.info(
-            "Index-only rebuild started (source_type=%s)",
-            source_type or "all",
+            "Index-only rebuild started (source_type=%s, path=%s)",
+            source_type or "all", path or "-",
         )
         self._git.init_repo()
-        self._check_uncommitted_changes(source_type)
+        self._check_uncommitted_changes(source_type, path=path)
 
         # 1. インデックスクリア
-        await self._indexer.clear(source_type)
+        await self._indexer.clear(source_type, path=path)
 
         # 2. active なレコードを取得（is_source_file=False のファイルは DB に登録
         # されないため、フィルタは不要）
         records = list(self.db.search_sources(
             source_type=source_type,
             status="active",
+            path_prefix=path,
         ))
 
         logger.info("Target files: %d", len(records))
@@ -582,6 +613,8 @@ class PipelineController:
                 to_commit_id=to_commit,
                 processed_at=datetime.now(timezone.utc).isoformat(),
                 mode="index",
+                filter_source_type=source_type or "",
+                filter_path=path or "",
             )
 
         return summary
@@ -1154,3 +1187,13 @@ class PipelineController:
 # --- モジュールレベルユーティリティ ---
 # resolve_title / resolve_published_at は rag.store.resolve に一元化
 # source_id は file_path をそのまま使用（resolve 不要）
+
+
+def _validate_filter_exclusivity(
+    source_type: SourceType | None,
+    path: str | None,
+) -> None:
+    """source_type と path の排他性を検証する."""
+    if source_type is not None and path is not None:
+        msg = "source_type と path は同時に指定できません"
+        raise ValueError(msg)

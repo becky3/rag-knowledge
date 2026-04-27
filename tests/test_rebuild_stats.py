@@ -7,6 +7,8 @@ rag_rebuild MCP ツール・CLI、rag_stats 拡張の振る舞いを検証する
 
 from __future__ import annotations
 
+import argparse
+import asyncio
 import json
 from unittest.mock import AsyncMock, patch
 
@@ -187,6 +189,35 @@ class TestRagRebuild:
         )
 
     @pytest.mark.asyncio
+    async def test_rebuild_with_path(self) -> None:
+        """path 指定の rebuild が正しい引数で CLI を呼ぶこと."""
+        from rag.server import rag_rebuild
+
+        mock_cli_result: dict[str, object] = {
+            "type": "result",
+            "mode": "convert",
+            "total_files": 2,
+            "processed": 2,
+            "errors": [],
+            "warnings": [],
+            "elapsed": 0.3,
+        }
+
+        with patch(
+            "rag.server._run_cli_subprocess",
+            new_callable=AsyncMock,
+            return_value=mock_cli_result,
+        ) as mock_subprocess:
+            result = await rag_rebuild(mode="convert", path="local/unity-docs")
+
+        assert "再構築完了" in result
+        mock_subprocess.assert_called_once_with(
+            "rebuild",
+            ["--mode", "convert", "--path", "local/unity-docs"],
+            ctx=None,
+        )
+
+    @pytest.mark.asyncio
     async def test_incremental_mode(self) -> None:
         """incremental モードが正常に動作すること."""
         from rag.server import rag_rebuild
@@ -212,6 +243,113 @@ class TestRagRebuild:
         mock_subprocess.assert_called_once_with(
             "rebuild", ["--mode", "incremental"], ctx=None,
         )
+
+
+class TestRebuildCliValidation:
+    """CLI run_rebuild のバリデーションテスト."""
+
+    @staticmethod
+    def _make_args(
+        *,
+        mode: str = "full",
+        source_type: str | None = None,
+        path: str | None = None,
+    ) -> argparse.Namespace:
+        return argparse.Namespace(
+            mode=mode,
+            source_type=source_type,
+            path=path,
+            commit_message=None,
+            if_needed=False,
+            concurrency=None,
+            output_format="json",
+        )
+
+    def _parse_error(self, captured_out: str) -> dict[str, object]:
+        parsed: dict[str, object] = json.loads(captured_out.strip())
+        assert parsed["type"] == "error", parsed
+        return parsed
+
+    def test_source_type_and_path_combination_rejected(
+        self, capsys: pytest.CaptureFixture[str],
+    ) -> None:
+        """--source-type と --path 同時指定はバリデーションエラー."""
+        from rag.cli import run_rebuild
+
+        args = self._make_args(source_type="local", path="local/foo")
+        with pytest.raises(SystemExit) as exc:
+            asyncio.run(run_rebuild(args))
+        assert exc.value.code == 1
+        parsed = self._parse_error(capsys.readouterr().out)
+        assert parsed["code"] == "VALIDATION_ERROR"
+        assert "source-type" in str(parsed["message"])
+        assert "path" in str(parsed["message"])
+
+    def test_incremental_with_path_rejected(
+        self, capsys: pytest.CaptureFixture[str],
+    ) -> None:
+        """incremental モードでは --path 指定はバリデーションエラー."""
+        from rag.cli import run_rebuild
+
+        args = self._make_args(mode="incremental", path="local/foo")
+        with pytest.raises(SystemExit) as exc:
+            asyncio.run(run_rebuild(args))
+        assert exc.value.code == 1
+        parsed = self._parse_error(capsys.readouterr().out)
+        assert parsed["code"] == "VALIDATION_ERROR"
+        assert "path" in str(parsed["message"])
+
+    def test_if_needed_with_source_type_rejected(
+        self, capsys: pytest.CaptureFixture[str],
+    ) -> None:
+        """`--if-needed` と --source-type の併用はバリデーションエラー (#678)."""
+        from rag.cli import run_rebuild
+
+        args = self._make_args(mode="full", source_type="local")
+        args.if_needed = True
+        with pytest.raises(SystemExit) as exc:
+            asyncio.run(run_rebuild(args))
+        assert exc.value.code == 1
+        parsed = self._parse_error(capsys.readouterr().out)
+        assert parsed["code"] == "VALIDATION_ERROR"
+        assert "--if-needed" in str(parsed["message"])
+
+    def test_if_needed_with_path_rejected(
+        self, capsys: pytest.CaptureFixture[str],
+    ) -> None:
+        """`--if-needed` と --path の併用はバリデーションエラー (#678)."""
+        from rag.cli import run_rebuild
+
+        args = self._make_args(mode="index", path="local/foo")
+        args.if_needed = True
+        with pytest.raises(SystemExit) as exc:
+            asyncio.run(run_rebuild(args))
+        assert exc.value.code == 1
+        parsed = self._parse_error(capsys.readouterr().out)
+        assert parsed["code"] == "VALIDATION_ERROR"
+        assert "--if-needed" in str(parsed["message"])
+
+    @pytest.mark.parametrize(
+        "bad_path",
+        ["", "/", "..", "../foo", "local/../etc", "/abs/path", "."],
+    )
+    def test_unsafe_path_rejected(
+        self, capsys: pytest.CaptureFixture[str], bad_path: str,
+    ) -> None:
+        """空文字列・絶対パス・`..`/`.` を含む --path はバリデーションエラー."""
+        from rag.cli import run_rebuild
+
+        args = self._make_args(mode="full", path=bad_path)
+        with pytest.raises(SystemExit) as exc:
+            asyncio.run(run_rebuild(args))
+        assert exc.value.code == 1
+        parsed = self._parse_error(capsys.readouterr().out)
+        assert parsed["code"] == "VALIDATION_ERROR"
+        assert "path" in str(parsed["message"])
+
+
+class TestRebuildStructuredErrors:
+    """非バリデーション系の rag_rebuild MCP レスポンスのテスト."""
 
     @pytest.mark.asyncio
     async def test_structured_errors_reach_mcp_response(self) -> None:

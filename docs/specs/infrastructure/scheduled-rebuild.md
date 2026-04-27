@@ -7,7 +7,7 @@ HNSW インデックスの品質劣化対策として、前回の index rebuild 
 スコープ:
 
 - `rebuild` コマンドの `--if-needed` オプション（条件付き実行）
-- `pipeline_history` テーブルへの `mode` 列追加（rebuild モード識別）
+- `pipeline_history` テーブルへの `mode` / `filter_source_type` / `filter_path` 列追加（rebuild モードと filter スコープの識別）
 - エラー時の Windows ダイアログ通知
 - Windows タスクスケジューラによる定期実行のセットアップ手順
 
@@ -28,7 +28,12 @@ HNSW グラフの劣化はインデックス側の問題であり、ソースフ
 ## 制約
 
 - **index モード限定**: 定期バッチで実行するのは `rebuild --mode index` のみ。full rebuild は手動実行とする
-- **更新判定の基準**: `pipeline_history` の `mode` 列を参照し、最後の `index` または `full` モードの実行以降に新しい `pipeline_history` レコード（`incremental` 等）が存在するかで判定する
+- **更新判定の基準**: `pipeline_history` を参照し、最後の **未フィルタの**
+  `index` または `full` モードの実行（`filter_source_type = ''` かつ
+  `filter_path = ''`）以降に新しい `pipeline_history` レコード
+  （`incremental` や filter 付き rebuild 等）が存在するかで判定する。
+  filter 付き rebuild は subset しか触っていないため判定基準には含めない
+  （filter 付きを「全体 rebuild 完了」と誤認するとスキップ漏れが発生する）
 - **スキップ時の挙動**: 更新がない場合は rebuild を実行せず、正常終了する（exit code 0）
 - **排他制御**: 既存の rebuild ロック機構を使用する。ロック取得失敗時はエラーとする
 - **実行環境**: Windows 11 の開発マシンを前提とする
@@ -49,12 +54,21 @@ uv run python -m rag.cli rebuild --mode index --if-needed
 
 振る舞い:
 
-1. `pipeline_history` から最後の `index` または `full` モードのレコードを取得する
-2. そのレコードより後に他のモードのレコード（`incremental` 等）が存在するか確認する
+1. `pipeline_history` から最後の **未フィルタの** `index` または `full` モードのレコードを取得する（`filter_source_type = ''` かつ `filter_path = ''`）
+2. そのレコードより後に他のレコード（`incremental` や filter 付き rebuild 等）が存在するか確認する
 3. 存在すれば rebuild を実行、存在しなければスキップして正常終了する
-4. `pipeline_history` が空の場合（初回）は rebuild を実行する
+4. 該当レコードが空の場合（初回 / 過去の rebuild がすべて filter 付き）は rebuild を実行する
 
 `--if-needed` は `--mode` が `index` または `full` の場合のみ有効。それ以外のモードで指定された場合はパラメータ検証エラーとする。
+
+`--if-needed` と filter（`--source-type` / `--path`）の併用はパラメータ検証エラーとする。
+
+Why: filter 付き rebuild は `pipeline_history` の filter 列に記録され、
+`needs_index_rebuild()` の判定対象から除外される。filter 付きで `--if-needed`
+を実行すると「filter スコープが古ければ rebuild される」と誤期待されやすく、
+実際は「未フィルタの index/full」が古ければ filter スコープで rebuild が走る
+という挙動の乖離が起きる。スケジューラ運用では未フィルタの `--if-needed`
+実行と、アドホックな filter 付き手動 rebuild を分離して運用する。
 
 ### 所要時間の表示形式
 
@@ -90,7 +104,7 @@ rebuild 実行中にエラーが発生した場合、ログ出力に加えて Wi
 ```mermaid
 flowchart TD
     START["rebuild --mode index --if-needed"]
-    GET_LAST["pipeline_history から最後の index/full レコードを取得"]
+    GET_LAST["pipeline_history から最後の未フィルタ index/full レコードを取得"]
     CHECK_EXIST{"レコードが存在する?"}
     CHECK_NEWER{"それ以降に他のレコードがある?"}
     SKIP["スキップ（正常終了）"]
@@ -112,17 +126,23 @@ flowchart TD
     ERROR_LOG --> ERROR_DIALOG
 ```
 
-### `pipeline_history` テーブルの `mode` 列
+### `pipeline_history` テーブルの `mode` / `filter_source_type` / `filter_path` 列
 
-`pipeline_history` テーブルの `mode` 列（[source-store.md](../source-store.md) で定義済み）を使用して、rebuild 実行時のモードを記録する。
+`pipeline_history` テーブルの `mode` 列（[source-store.md](../source-store.md) で定義済み）に加え、`filter_source_type` / `filter_path` 列で filter 付き rebuild のスコープを記録する。
 
-マイグレーション: `mode` 列が存在しない既存 DB に対しては `ALTER TABLE pipeline_history ADD COLUMN mode TEXT NOT NULL DEFAULT 'incremental'` を実行する。既存レコードは `incremental` として扱う（安全側に倒す: index rebuild が必要と判定される）。
+マイグレーション:
 
-最後の index/full rebuild の取得:
+- `mode` 列: `ALTER TABLE pipeline_history ADD COLUMN mode TEXT NOT NULL DEFAULT 'incremental'`。既存レコードは `incremental` として扱う（安全側に倒す: index rebuild が必要と判定される）
+- `filter_source_type` 列: `ALTER TABLE pipeline_history ADD COLUMN filter_source_type TEXT NOT NULL DEFAULT ''`。既存レコードは未フィルタ扱い
+- `filter_path` 列: `ALTER TABLE pipeline_history ADD COLUMN filter_path TEXT NOT NULL DEFAULT ''`。既存レコードは未フィルタ扱い
+
+最後の **未フィルタの** index/full rebuild の取得:
 
 ```
 SELECT id FROM pipeline_history
 WHERE mode IN ('index', 'full')
+  AND filter_source_type = ''
+  AND filter_path = ''
 ORDER BY id DESC LIMIT 1
 ```
 
@@ -140,7 +160,7 @@ SELECT EXISTS(
 | ファイル | 変更内容 |
 |---------|---------|
 | `src/rag/cli.py` | `--if-needed` オプション追加、所要時間の時分秒表記、エラー時 Windows ダイアログ |
-| `src/rag/store/metadata_db.py` | `pipeline_history` への `mode` 列追加、マイグレーション、判定クエリ |
+| `src/rag/store/metadata_db.py` | `pipeline_history` への `mode` / `filter_source_type` / `filter_path` 列追加、マイグレーション、判定クエリ |
 | `src/rag/pipeline/controller.py` | `pipeline_history` 記録時に `mode` を渡す |
 
 ## タスクスケジューラ設定手順

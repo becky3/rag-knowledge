@@ -471,6 +471,85 @@ class VectorStore:
             )
         return count
 
+    async def delete_by_source_id_prefix(self, path_prefix: str) -> int:
+        """source_id の prefix 指定でチャンクを一括削除する.
+
+        ChromaDB は metadata に対する LIKE/startswith や文字列範囲比較を
+        サポートしないため、コレクションから metadata を取得して Python 側で
+        prefix 一致をフィルタする。path の先頭セグメントは必ず source_type で
+        あるため（path_filter で検証済み）、`source_type` の事前 where 絞りで
+        スキャン量を媒体単位に圧縮する。
+
+        媒体内チャンク数が多くても一括取得でメモリを圧迫しないよう、
+        ChromaDB の `limit`/`offset` で分割取得しながら ids_to_delete を構築する。
+
+        Args:
+            path_prefix: source_store ルート相対のディレクトリパス
+
+        Returns:
+            削除件数
+        """
+        from rag.store.path_filter import (
+            derive_source_type,
+            normalize_path_prefix,
+        )
+
+        normalized = normalize_path_prefix(path_prefix)
+        prefix = f"{normalized}/"
+        source_type = derive_source_type(normalized)
+
+        ids_to_delete: list[str] = []
+        page_size = self._BATCH_SIZE
+        offset = 0
+
+        while True:
+            results = await asyncio.to_thread(
+                self._collection.get,
+                where={"source_type": source_type},
+                include=["metadatas"],
+                limit=page_size,
+                offset=offset,
+            )
+            chunk_ids: list[str] = results["ids"]
+            # ChromaDB は include="metadatas" 指定時に通常 ids と同じ長さで
+            # metadatas を返すが、None や長さ不一致が返る防御として ids 長に揃える
+            raw_metadatas = results["metadatas"] or []
+            if len(raw_metadatas) < len(chunk_ids):
+                metadatas = [
+                    *raw_metadatas,
+                    *([{}] * (len(chunk_ids) - len(raw_metadatas))),
+                ]
+            else:
+                metadatas = list(raw_metadatas[: len(chunk_ids)])
+
+            if not chunk_ids:
+                break
+
+            for chunk_id, metadata in zip(chunk_ids, metadatas, strict=True):
+                source_id = (metadata or {}).get("source_id", "")
+                if isinstance(source_id, str) and source_id.startswith(prefix):
+                    ids_to_delete.append(chunk_id)
+
+            fetched_count = len(chunk_ids)
+            offset += fetched_count
+            if fetched_count < page_size:
+                break
+
+        count = len(ids_to_delete)
+        if count == 0:
+            return 0
+
+        for batch_offset in range(0, count, self._BATCH_SIZE):
+            batch = ids_to_delete[batch_offset : batch_offset + self._BATCH_SIZE]
+            await asyncio.to_thread(
+                self._collection.delete,
+                ids=batch,
+            )
+        logger.info(
+            "Deleted %d documents from vector store (path: %s)", count, normalized,
+        )
+        return count
+
     async def delete_stale_chunks(self, source_id: str, valid_ids: set[str]) -> int:
         """ソースのチャンクのうち、valid_idsに含まれないものを削除.
 
