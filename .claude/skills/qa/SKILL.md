@@ -102,7 +102,7 @@ qa スキル自身はステップ間の制御（次ステップへの遷移、ST
 
 - 環境確認: `git branch --show-current`, `curl http://localhost:<CHROMADB_SERVER_PORT>/api/v2/heartbeat`, `curl http://localhost:<LM_STUDIO_PORT>/v1/models` 等の読み取り専用コマンド
 - グループ準備・片付け: `.env` 変更、サーバー起動・停止、worktree セットアップ・クリーンアップ
-- YouTube 事前確認: グループ D 実行前の AskUserQuestion
+- YouTube 事前確認: グループ D 実行前の AskUserQuestion + 選択結果に応じた `.env` の `RAG_YOUTUBE_FAKE_MODE` 書き換え
 
 インターフェース選択に応じた実行方針:
 
@@ -119,12 +119,13 @@ qa スキル自身はステップ間の制御（次ステップへの遷移、ST
 
 **YouTube（D）選択時の必須確認:**
 
-グループ D の実行直前に以下を表示し、ユーザー確認を取る。確認なしに実行してはならない（qa-execute の都度確認とは別に、グループレベルで事前確認する）:
+グループ D の実行直前に AskUserQuestion で「mock を使うか（fake モード）/ 使わないか（real モード）」を確認し、選択結果に応じて qa スキルが worktree の `.env` の `RAG_YOUTUBE_FAKE_MODE` を書き換える。仕様: `docs/specs/infrastructure/fake-mode.md`。
 
 ```
-YouTube 検証を実行します。
-YouTube API へのアクセスにより IP ブロックのリスクがあります。
-実行しますか？ (y/n)
+YouTube 検証で mock を使いますか？
+
+  使う（fake モード、推奨）: 実 YouTube アクセスなし、synthetic ID で動作確認
+  使わない（real モード）: 実 YouTube API へのアクセスが発生（IP ブロックリスクあり）
 ```
 
 **MCP フェーズでの追加確認:**

@@ -69,7 +69,7 @@
 
 CLI / MCP サーバー / pytest のいずれの起動経路でも、**起動時に 1 回のみ**現在のモードを以下の形で出力する:
 
-- **fake モード**: WARNING レベルでログ出力する。「fake モードで起動中、実外部アクセスは発生しません」「本番運用時は `RAG_{SOURCE_TYPE}_FAKE_MODE=false` を `.env` に設定してください」のガイドを含める
+- **fake モード**: WARNING レベルでログ出力する。メッセージ冒頭に `[FAKE MODE]` ラベルを付与し、「fake モードで起動中、実外部アクセスは発生しません」「本番運用時は `RAG_{SOURCE_TYPE}_FAKE_MODE=false` を `.env` に設定してください」のガイドを含める
 - **real モード**: INFO レベルでログ出力する。「real モードで起動中、実外部アクセスが発生します」と明示
 
 複数 source_type が混在する場合、各 source_type ごとに状態を出力する。
@@ -219,7 +219,7 @@ flowchart TB
 3. インジェスター生成箇所がファクトリ関数を呼び出す: `fetcher = create_youtube_fetcher(settings)`
 4. ファクトリ関数が Settings の `youtube_fake_mode=True` を確認し、`FakeYoutubeFetcher(fixture_dir)` を返す
 5. インジェスターは `fetcher` を Protocol 型で受け取り、外部アクセス時に Fake Fetcher を呼び出す
-6. 起動直後にログ出力: `WARNING: YouTube は FAKE モードで起動中（fixture: tests/fixtures/youtube）`
+6. 起動直後にログ出力: `WARNING: [FAKE MODE] YouTube は FAKE モードで起動中（fixture: src/rag/pipeline/ingesters/_fake/youtube/data）`
 7. MCP ツール応答時、応答テキスト冒頭に `[FAKE MODE]` ラベルを付与
 
 ## 想定プロファイル

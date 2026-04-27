@@ -281,8 +281,20 @@ def make_zenn_ingester(source_store: Any, **overrides: Any) -> Any:
 
 
 def make_youtube_ingester(source_store: Any, **overrides: Any) -> Any:
-    """YoutubeIngester のテスト用ファクトリ."""
+    """YoutubeIngester のテスト用ファクトリ.
+
+    fetcher は省略可。省略時は FakeYoutubeFetcher(scenario="happy") を注入する。
+    シナリオ・カスタムデータを使う場合は overrides で `fetcher=...` を渡す。
+    """
     from rag.pipeline.ingesters.youtube import YoutubeIngester
+
+    if "fetcher" not in overrides:
+        from pathlib import Path
+
+        from rag.pipeline.ingesters._fake.youtube import FakeYoutubeFetcher
+
+        fixture_dir = Path(__file__).parent.parent / "src" / "rag" / "pipeline" / "ingesters" / "_fake" / "youtube" / "data"
+        overrides["fetcher"] = FakeYoutubeFetcher(fixture_dir=fixture_dir)
 
     defaults: dict[str, Any] = {
         "max_videos": 100,

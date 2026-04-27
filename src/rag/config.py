@@ -85,6 +85,11 @@ class _EnvLoader(BaseSettings):
     rag_youtube_whisper_model: str = "base"
     rag_youtube_whisper_device: Literal["cuda", "cpu"] = "cuda"
 
+    # YouTube Fake モード — テスト・QA で実 YouTube アクセスを排除する。デフォルトは安全側（fake 有効）
+    rag_youtube_fake_mode: bool = True
+    # Fake Fetcher が読み込む fixture ディレクトリ。プロジェクトルートからの相対パス
+    rag_youtube_fake_fixture_dir: str = "src/rag/pipeline/ingesters/_fake/youtube/data"
+
     # サイト一括取り込み一時ディレクトリ（Scrapy クロール結果の一時保管）
     site_ingest_temp_dir: str = ".tmp/site_ingest"
 
@@ -129,6 +134,10 @@ class RAGSettings(BaseModel):
     rag_log_dir: str | None = None
     rag_youtube_whisper_model: str
     rag_youtube_whisper_device: Literal["cuda", "cpu"]
+    # YouTube Fake モード切替。デフォルト fake（安全側）、本番運用時のみ false を .env で明示
+    rag_youtube_fake_mode: bool
+    # Fake Fetcher が読み込む fixture ディレクトリ
+    rag_youtube_fake_fixture_dir: str
     site_ingest_temp_dir: str
     rag_embedding_concurrency: int = Field(ge=1)
 
@@ -337,6 +346,29 @@ def get_settings() -> RAGSettings:
     env_loader = _EnvLoader()  # type: ignore[call-arg]  # pydantic-settings が .env/環境変数から読み込み
     toml_data = _load_toml_config()
     return RAGSettings(**env_loader.model_dump(), **toml_data)
+
+
+def log_fake_mode_status(settings: RAGSettings) -> None:
+    """Fake モード設定の起動時ログを出力する.
+
+    仕様: docs/specs/infrastructure/fake-mode.md
+    Settings はシングルトン化されているため、各エントリポイントの起動時に
+    1 回だけ呼び出される。
+    """
+    import logging
+
+    logger = logging.getLogger("rag.config")
+    if settings.rag_youtube_fake_mode:
+        logger.warning(
+            "[FAKE MODE] YouTube は FAKE モードで起動中（fixture: %s）。"
+            "実 YouTube アクセスは発生しません。"
+            "本番運用時は RAG_YOUTUBE_FAKE_MODE=false を .env に設定してください",
+            settings.rag_youtube_fake_fixture_dir,
+        )
+    else:
+        logger.info(
+            "YouTube は REAL モードで起動中。実 YouTube アクセスが発生します"
+        )
 
 
 def ensure_utf8_streams(*, include_stdout: bool = False) -> None:

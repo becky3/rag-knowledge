@@ -393,3 +393,5 @@ flowchart TD
 - [source-store.md](../source-store.md) — source_store 仕様
 - [pipeline-controller.md](../pipeline-controller.md) — パイプライン制御仕様
 - [converter.md](../converter.md) — コンバーター仕様
+- [infrastructure/fake-mode.md](../infrastructure/fake-mode.md) — Fake モード基盤共通仕様
+- [infrastructure/fake-adapters/youtube.md](../infrastructure/fake-adapters/youtube.md) — YouTube Fake Adapter（`.env` で `RAG_YOUTUBE_FAKE_MODE` を切替可能）

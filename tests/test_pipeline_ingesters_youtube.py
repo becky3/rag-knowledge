@@ -1,16 +1,21 @@
 """YouTube インジェスターのテスト.
 
 仕様: docs/specs/ingesters/youtube.md
+仕様: docs/specs/infrastructure/fake-adapters/youtube.md
 
 テスト方針:
 - URL パース・バリデーション
 - URL 種別分類（video / malformed / not_youtube）
 - max_videos のバリデーション・クランプ
-- 字幕取得（モック）
-- Whisper フォールバック（モック）
+- 字幕取得（FakeYoutubeFetcher 経由）
+- Whisper フォールバック（FakeYoutubeFetcher の no_subtitle / transcripts_disabled シナリオ）
 - source_store 配置（JSON + .meta）
-- プレイリスト展開（モック）
-- エラーハンドリング
+- プレイリスト展開（FakeYoutubeFetcher の playlist_entries 注入）
+- エラーハンドリング（FakeYoutubeFetcher のシナリオ切替）
+
+外部ライブラリ（yt_dlp / youtube_transcript_api / faster_whisper）は
+tests/conftest.py の autouse 安全網で _RaiseOnUse に差し替えられているため、
+実 YouTube アクセスは発生しない。
 """
 
 from __future__ import annotations
@@ -23,6 +28,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 
 from rag.pipeline.ingesters._common import IngestResult
+from rag.pipeline.ingesters._fake.youtube import FakeYoutubeFetcher
 from rag.pipeline.ingesters.youtube import (
     MAX_VIDEOS_HARD_LIMIT,
     _validate_max_videos,
@@ -33,6 +39,17 @@ from rag.pipeline.ingesters.youtube import (
 )
 
 from factories import make_youtube_ingester
+
+
+_FIXTURE_DIR = (
+    Path(__file__).parent.parent
+    / "src" / "rag" / "pipeline" / "ingesters" / "_fake" / "youtube" / "data"
+)
+
+
+def _fake(**kwargs: Any) -> FakeYoutubeFetcher:
+    """FakeYoutubeFetcher を fixture_dir 込みで構築するヘルパー."""
+    return FakeYoutubeFetcher(fixture_dir=_FIXTURE_DIR, **kwargs)
 
 
 # --- URL パーステスト ---
@@ -283,38 +300,26 @@ class TestIngestVideo:
     @pytest.mark.asyncio()
     async def test_successful_subtitle_ingest(self, source_store: Any) -> None:
         """字幕取得成功時に place_file が正しく呼ばれることを検証する."""
-        ingester = make_youtube_ingester(source_store, max_duration=14400)
-
         metadata = _make_metadata()
         snippets = _make_snippets()
+        fetcher = _fake(metadata=metadata, snippets=snippets, language="ja")
+        ingester = make_youtube_ingester(source_store, fetcher=fetcher, max_duration=14400)
 
-        with (
-            patch.object(ingester, "_fetch_metadata", new_callable=AsyncMock, return_value=metadata),
-            patch.object(
-                ingester,
-                "_fetch_transcript",
-                new_callable=AsyncMock,
-                return_value=(snippets, "subtitle", "ja"),
-            ),
-        ):
-            result = await ingester.ingest_video("https://www.youtube.com/watch?v=TestVideo01")
+        result = await ingester.ingest_video("https://www.youtube.com/watch?v=TestVideo01")
 
         assert result.placed == 1
         assert result.errors == 0
 
-        # place_file の呼び出し検証
         source_store.place_file.assert_called_once()
         call_kwargs = source_store.place_file.call_args
         assert call_kwargs.kwargs["source_type"] == "youtube"
         assert call_kwargs.kwargs["rel_path"] == "youtube/UCtest123456789012345/TestVideo01.json"
 
-        # JSON データの検証
         data = json.loads(call_kwargs.kwargs["data"].decode("utf-8"))
         assert data["video_id"] == "TestVideo01"
         assert data["transcript_source"] == "subtitle"
         assert len(data["snippets"]) == 3
 
-        # メタデータの検証
         meta = call_kwargs.kwargs["metadata"]
         assert meta["source_type"] == "youtube"
         assert meta["video_id"] == "TestVideo01"
@@ -322,12 +327,11 @@ class TestIngestVideo:
     @pytest.mark.asyncio()
     async def test_duration_exceeded_skipped(self, source_store: Any) -> None:
         """動画長上限超過時にスキップされることを検証する."""
-        ingester = make_youtube_ingester(source_store, max_duration=60)
-
         metadata = _make_metadata(duration=3600)
+        fetcher = _fake(metadata=metadata)
+        ingester = make_youtube_ingester(source_store, fetcher=fetcher, max_duration=60)
 
-        with patch.object(ingester, "_fetch_metadata", new_callable=AsyncMock, return_value=metadata):
-            result = await ingester.ingest_video("https://www.youtube.com/watch?v=TestVideo01")
+        result = await ingester.ingest_video("https://www.youtube.com/watch?v=TestVideo01")
 
         assert result.placed == 0
         assert result.skipped == 1
@@ -335,15 +339,10 @@ class TestIngestVideo:
     @pytest.mark.asyncio()
     async def test_metadata_error_handled(self, source_store: Any) -> None:
         """メタデータ取得失敗時のエラーハンドリングを検証する."""
-        ingester = make_youtube_ingester(source_store)
+        fetcher = _fake(scenario="metadata_error")
+        ingester = make_youtube_ingester(source_store, fetcher=fetcher)
 
-        with patch.object(
-            ingester,
-            "_fetch_metadata",
-            new_callable=AsyncMock,
-            side_effect=Exception("API error"),
-        ):
-            result = await ingester.ingest_video("https://www.youtube.com/watch?v=TestVideo01")
+        result = await ingester.ingest_video("https://www.youtube.com/watch?v=TestVideo01")
 
         assert result.errors == 1
         detail = result.error_details[0]
@@ -354,13 +353,12 @@ class TestIngestVideo:
     @pytest.mark.asyncio()
     async def test_missing_channel_id_causes_error(self, source_store: Any) -> None:
         """channel_id が取得できない場合にエラーになることを検証する."""
-        ingester = make_youtube_ingester(source_store)
-
         metadata = _make_metadata()
         metadata["channel_id"] = None
+        fetcher = _fake(metadata=metadata)
+        ingester = make_youtube_ingester(source_store, fetcher=fetcher)
 
-        with patch.object(ingester, "_fetch_metadata", new_callable=AsyncMock, return_value=metadata):
-            result = await ingester.ingest_video("https://www.youtube.com/watch?v=TestVideo01")
+        result = await ingester.ingest_video("https://www.youtube.com/watch?v=TestVideo01")
 
         assert result.placed == 0
         assert result.errors == 1
@@ -372,21 +370,15 @@ class TestIngestVideo:
     @pytest.mark.asyncio()
     async def test_whisper_model_recorded(self, source_store: Any) -> None:
         """Whisper 使用時に whisper_model が JSON に記録されることを検証する."""
-        ingester = make_youtube_ingester(source_store, whisper_model="base")
-
         metadata = _make_metadata()
         snippets = _make_snippets()
+        # no_subtitle で Whisper フォールバックを発動 → カスタム snippets を whisper でも返す
+        fetcher = _fake(scenario="no_subtitle", metadata=metadata, snippets=snippets, language="ja")
+        ingester = make_youtube_ingester(
+            source_store, fetcher=fetcher, whisper_model="base",
+        )
 
-        with (
-            patch.object(ingester, "_fetch_metadata", new_callable=AsyncMock, return_value=metadata),
-            patch.object(
-                ingester,
-                "_fetch_transcript",
-                new_callable=AsyncMock,
-                return_value=(snippets, "whisper", "ja"),
-            ),
-        ):
-            result = await ingester.ingest_video("https://www.youtube.com/watch?v=TestVideo01")
+        result = await ingester.ingest_video("https://www.youtube.com/watch?v=TestVideo01")
 
         assert result.placed == 1
         call_kwargs = source_store.place_file.call_args
@@ -400,17 +392,13 @@ class TestIngestVideo:
 
         仕様: docs/specs/ingesters/common.md「placed と overwritten の排他関係」
         """
-        ingester = make_youtube_ingester(source_store, max_duration=14400)
-
         metadata = _make_metadata()
         snippets = _make_snippets()
+        fetcher = _fake(metadata=metadata, snippets=snippets, language="ja")
+        ingester = make_youtube_ingester(source_store, fetcher=fetcher, max_duration=14400)
 
         # 1 回目: dest.exists() が False → placed=1, overwritten=0
-        with (
-            patch.object(ingester, "_fetch_metadata", new_callable=AsyncMock, return_value=metadata),
-            patch.object(ingester, "_fetch_transcript", new_callable=AsyncMock, return_value=(snippets, "subtitle", "ja")),
-        ):
-            result1 = await ingester.ingest_video("https://www.youtube.com/watch?v=TestVideo01")
+        result1 = await ingester.ingest_video("https://www.youtube.com/watch?v=TestVideo01")
         assert result1.placed == 1
         assert result1.overwritten == 0
 
@@ -419,39 +407,24 @@ class TestIngestVideo:
         dest.parent.mkdir(parents=True, exist_ok=True)
         dest.write_text("{}", encoding="utf-8")
 
-        with (
-            patch.object(ingester, "_fetch_metadata", new_callable=AsyncMock, return_value=metadata),
-            patch.object(ingester, "_fetch_transcript", new_callable=AsyncMock, return_value=(snippets, "subtitle", "ja")),
-        ):
-            result2 = await ingester.ingest_video("https://www.youtube.com/watch?v=TestVideo01")
+        result2 = await ingester.ingest_video("https://www.youtube.com/watch?v=TestVideo01")
         # 排他計上: 既存ファイル上書き時は placed=0, overwritten=1
         assert result2.placed == 0
         assert result2.overwritten == 1
-
 
     @pytest.mark.asyncio()
     async def test_api_error_does_not_fallback_to_whisper(self, source_store: Any) -> None:
         """API エラー（IP ブロック等）では Whisper フォールバックせずエラーになることを検証する.
 
-        _fetch_subtitle をパッチして RequestBlocked を投げさせることで、
-        _fetch_transcript 内の例外フィルタリング（TranscriptsDisabled/NoTranscriptFound のみ
+        FakeYoutubeFetcher の ip_blocked シナリオは fetch_subtitle で RequestBlocked を発生させる。
+        ingester の _fetch_transcript 内例外フィルタリング（TranscriptsDisabled/NoTranscriptFound のみ
         Whisper フォールバック）が正しく動作することを検証する。
         """
-        ingester = make_youtube_ingester(source_store, max_duration=14400)
         metadata = _make_metadata()
+        fetcher = _fake(scenario="ip_blocked", metadata=metadata)
+        ingester = make_youtube_ingester(source_store, fetcher=fetcher, max_duration=14400)
 
-        from youtube_transcript_api import RequestBlocked
-
-        with (
-            patch.object(ingester, "_fetch_metadata", new_callable=AsyncMock, return_value=metadata),
-            patch.object(
-                ingester,
-                "_fetch_subtitle",
-                new_callable=AsyncMock,
-                side_effect=RequestBlocked("TestVideo01"),
-            ),
-        ):
-            result = await ingester.ingest_video("https://www.youtube.com/watch?v=TestVideo01")
+        result = await ingester.ingest_video("https://www.youtube.com/watch?v=TestVideo01")
 
         # Whisper フォールバックされず、エラーとして処理される
         assert result.errors == 1
@@ -460,28 +433,18 @@ class TestIngestVideo:
     @pytest.mark.asyncio()
     async def test_transcripts_disabled_triggers_whisper_fallback(self, source_store: Any) -> None:
         """TranscriptsDisabled では Whisper フォールバックが発動することを検証する."""
-        from youtube_transcript_api import TranscriptsDisabled
-
-        ingester = make_youtube_ingester(source_store, max_duration=14400)
         metadata = _make_metadata()
         snippets = _make_snippets()
+        # transcripts_disabled シナリオ + カスタム snippets で Whisper の戻り値を制御
+        fetcher = _fake(
+            scenario="transcripts_disabled",
+            metadata=metadata,
+            snippets=snippets,
+            language="ja",
+        )
+        ingester = make_youtube_ingester(source_store, fetcher=fetcher, max_duration=14400)
 
-        with (
-            patch.object(ingester, "_fetch_metadata", new_callable=AsyncMock, return_value=metadata),
-            patch.object(
-                ingester,
-                "_fetch_subtitle",
-                new_callable=AsyncMock,
-                side_effect=TranscriptsDisabled("TestVideo01"),
-            ),
-            patch.object(
-                ingester,
-                "_transcribe_with_whisper",
-                new_callable=AsyncMock,
-                return_value=(snippets, "ja"),
-            ),
-        ):
-            result = await ingester.ingest_video("https://www.youtube.com/watch?v=TestVideo01")
+        result = await ingester.ingest_video("https://www.youtube.com/watch?v=TestVideo01")
 
         assert result.placed == 1
         assert result.errors == 0
@@ -518,27 +481,22 @@ class TestCrawlPlaylist:
     @pytest.mark.asyncio()
     async def test_successful_playlist_crawl(self, source_store: Any) -> None:
         """プレイリスト展開 + 各動画取り込みの正常系を検証する."""
-        ingester = make_youtube_ingester(source_store, max_videos=3, request_interval=0.1)
-
         entries = [
-            {"id": "video_id_0001", "url": "video_id_0001"},
-            {"id": "video_id_0002", "url": "video_id_0002"},
+            {"id": "video_id_01", "url": "video_id_01"},
+            {"id": "video_id_02", "url": "video_id_02"},
         ]
-        single_result = IngestResult(placed=1)
+        fetcher = _fake(playlist_entries=entries)
+        ingester = make_youtube_ingester(
+            source_store, fetcher=fetcher, max_videos=3, request_interval=0.1,
+        )
 
-        with (
-            patch.object(
-                ingester,
-                "_expand_playlist",
-                new_callable=AsyncMock,
-                return_value=entries,
-            ),
-            patch.object(
-                ingester,
-                "ingest_video",
-                new_callable=AsyncMock,
-                return_value=single_result,
-            ),
+        # ingest_video は public method なので patch.object 可（Fetcher 経由ではない）
+        single_result = IngestResult(placed=1)
+        with patch.object(
+            ingester,
+            "ingest_video",
+            new_callable=AsyncMock,
+            return_value=single_result,
         ):
             result = await ingester.crawl_playlist(
                 "https://www.youtube.com/playlist?list=PLtest123"
@@ -553,24 +511,18 @@ class TestCrawlPlaylist:
         from rag.pipeline.ingesters.youtube import JITTER_MIN_RATIO
 
         interval = 10.0
+        entries = [
+            {"id": "video_id_01", "url": "video_id_01"},
+            {"id": "video_id_02", "url": "video_id_02"},
+            {"id": "video_id_03", "url": "video_id_03"},
+        ]
+        fetcher = _fake(playlist_entries=entries)
         ingester = make_youtube_ingester(
-            source_store, max_videos=3, request_interval=interval
+            source_store, fetcher=fetcher, max_videos=3, request_interval=interval,
         )
 
-        entries = [
-            {"id": "video_id_0001", "url": "video_id_0001"},
-            {"id": "video_id_0002", "url": "video_id_0002"},
-            {"id": "video_id_0003", "url": "video_id_0003"},
-        ]
         single_result = IngestResult(placed=1)
-
         with (
-            patch.object(
-                ingester,
-                "_expand_playlist",
-                new_callable=AsyncMock,
-                return_value=entries,
-            ),
             patch.object(
                 ingester,
                 "ingest_video",
@@ -599,24 +551,19 @@ class TestCrawlPlaylist:
         """ジッター値が MIN_REQUEST_INTERVAL 未満の場合にクランプされることを検証する."""
         from rag.pipeline.ingesters.youtube import MIN_REQUEST_INTERVAL
 
+        entries = [
+            {"id": "video_id_01", "url": "video_id_01"},
+            {"id": "video_id_02", "url": "video_id_02"},
+        ]
+        fetcher = _fake(playlist_entries=entries)
         ingester = make_youtube_ingester(
-            source_store, max_videos=2, request_interval=MIN_REQUEST_INTERVAL
+            source_store, fetcher=fetcher, max_videos=2, request_interval=MIN_REQUEST_INTERVAL,
         )
 
-        entries = [
-            {"id": "video_id_0001", "url": "video_id_0001"},
-            {"id": "video_id_0002", "url": "video_id_0002"},
-        ]
         single_result = IngestResult(placed=1)
         jitter_below_min = MIN_REQUEST_INTERVAL * 0.01
 
         with (
-            patch.object(
-                ingester,
-                "_expand_playlist",
-                new_callable=AsyncMock,
-                return_value=entries,
-            ),
             patch.object(
                 ingester,
                 "ingest_video",
@@ -636,9 +583,11 @@ class TestCrawlPlaylist:
     @pytest.mark.asyncio()
     async def test_circuit_breaker_on_consecutive_errors(self, source_store: Any) -> None:
         """5 回連続失敗でサーキットブレーカーが発動することを検証する."""
-        ingester = make_youtube_ingester(source_store, max_videos=10, request_interval=0.1)
-
         entries = [{"id": f"vid_{i:011d}", "url": f"vid_{i:011d}"} for i in range(10)]
+        fetcher = _fake(playlist_entries=entries)
+        ingester = make_youtube_ingester(
+            source_store, fetcher=fetcher, max_videos=10, request_interval=0.1,
+        )
 
         def _make_error_result() -> IngestResult:
             return IngestResult(
@@ -650,19 +599,11 @@ class TestCrawlPlaylist:
                 }],
             )
 
-        with (
-            patch.object(
-                ingester,
-                "_expand_playlist",
-                new_callable=AsyncMock,
-                return_value=entries,
-            ),
-            patch.object(
-                ingester,
-                "ingest_video",
-                new_callable=AsyncMock,
-                side_effect=lambda *args, **kwargs: _make_error_result(),
-            ),
+        with patch.object(
+            ingester,
+            "ingest_video",
+            new_callable=AsyncMock,
+            side_effect=lambda *args, **kwargs: _make_error_result(),
         ):
             result = await ingester.crawl_playlist(
                 "https://www.youtube.com/playlist?list=PLtest123"
@@ -677,17 +618,12 @@ class TestCrawlPlaylist:
     @pytest.mark.asyncio()
     async def test_empty_playlist(self, source_store: Any) -> None:
         """空プレイリストで placed=0 の正常終了を検証する."""
-        ingester = make_youtube_ingester(source_store)
+        fetcher = _fake(scenario="empty_playlist")
+        ingester = make_youtube_ingester(source_store, fetcher=fetcher)
 
-        with patch.object(
-            ingester,
-            "_expand_playlist",
-            new_callable=AsyncMock,
-            return_value=[],
-        ):
-            result = await ingester.crawl_playlist(
-                "https://www.youtube.com/playlist?list=PLtest123"
-            )
+        result = await ingester.crawl_playlist(
+            "https://www.youtube.com/playlist?list=PLtest123"
+        )
 
         assert result.placed == 0
         assert result.errors == 0
@@ -695,40 +631,29 @@ class TestCrawlPlaylist:
     @pytest.mark.asyncio()
     async def test_playlist_expand_error_dict(self, source_store: Any) -> None:
         """プレイリスト展開失敗時の error_details dict 構造を検証する."""
-        ingester = make_youtube_ingester(source_store)
+        fetcher = _fake(scenario="playlist_expand_error")
+        ingester = make_youtube_ingester(source_store, fetcher=fetcher)
 
-        with patch.object(
-            ingester,
-            "_expand_playlist",
-            new_callable=AsyncMock,
-            side_effect=Exception("Playlist API error"),
-        ):
-            result = await ingester.crawl_playlist(
-                "https://www.youtube.com/playlist?list=PLtest123"
-            )
+        result = await ingester.crawl_playlist(
+            "https://www.youtube.com/playlist?list=PLtest123"
+        )
 
         assert result.errors == 1
         detail = result.error_details[0]
         assert detail["category"] == "metadata_fetch"
         assert detail["target"] == "PLtest123"
-        assert "Playlist API error" in detail["message"]
+        assert "Fake playlist expand error" in detail["message"]
 
     @pytest.mark.asyncio()
     async def test_missing_video_id_in_entry_dict(self, source_store: Any) -> None:
         """entry に video_id がない場合の error_details dict."""
-        ingester = make_youtube_ingester(source_store, max_videos=10)
-
         entries = [{"id": "", "url": ""}]
+        fetcher = _fake(playlist_entries=entries)
+        ingester = make_youtube_ingester(source_store, fetcher=fetcher, max_videos=10)
 
-        with patch.object(
-            ingester,
-            "_expand_playlist",
-            new_callable=AsyncMock,
-            return_value=entries,
-        ):
-            result = await ingester.crawl_playlist(
-                "https://www.youtube.com/playlist?list=PLtest123"
-            )
+        result = await ingester.crawl_playlist(
+            "https://www.youtube.com/playlist?list=PLtest123"
+        )
 
         assert result.errors == 1
         detail = result.error_details[0]

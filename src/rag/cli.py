@@ -2401,8 +2401,11 @@ async def run_ingest_youtube(args: argparse.Namespace) -> None:
 
     controller, settings = _build_cli_pipeline_controller()
 
+    from .pipeline.ingesters.youtube_fetcher import create_youtube_fetcher
+
     youtube_ingester = YoutubeIngester(
         controller.source_store,
+        fetcher=create_youtube_fetcher(settings),
         max_videos=settings.rag_youtube_max_videos,
         request_interval=settings.rag_youtube_request_interval,
         request_timeout=settings.rag_youtube_request_timeout,
@@ -2445,8 +2448,11 @@ async def run_ingest_youtube_playlist(args: argparse.Namespace) -> None:
 
     max_videos = args.max_videos if args.max_videos is not None else settings.rag_youtube_max_videos
 
+    from .pipeline.ingesters.youtube_fetcher import create_youtube_fetcher
+
     youtube_ingester = YoutubeIngester(
         controller.source_store,
+        fetcher=create_youtube_fetcher(settings),
         max_videos=max_videos,
         request_interval=settings.rag_youtube_request_interval,
         request_timeout=settings.rag_youtube_request_timeout,
@@ -2491,9 +2497,11 @@ def _create_youtube_ingester_cli(
 ) -> YoutubeIngester:
     """CLI 用 YoutubeIngester を生成する."""
     from .pipeline.ingesters.youtube import YoutubeIngester
+    from .pipeline.ingesters.youtube_fetcher import create_youtube_fetcher
 
     return YoutubeIngester(
         source_store,
+        fetcher=create_youtube_fetcher(settings),
         max_videos=settings.rag_youtube_max_videos,
         request_interval=settings.rag_youtube_request_interval,
         request_timeout=settings.rag_youtube_request_timeout,
@@ -3244,7 +3252,7 @@ async def run_ingest_aozora_author(args: argparse.Namespace) -> None:
 
 
 if __name__ == "__main__":
-    from .config import ensure_utf8_streams
+    from .config import ensure_utf8_streams, get_settings, log_fake_mode_status
 
     ensure_utf8_streams(include_stdout=True)
 
@@ -3252,4 +3260,8 @@ if __name__ == "__main__":
         level=logging.INFO,
         format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
     )
+
+    # Fake モード状態の起動時ログ（仕様: docs/specs/infrastructure/fake-mode.md）
+    log_fake_mode_status(get_settings())
+
     main()

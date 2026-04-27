@@ -37,10 +37,10 @@ YouTube インジェスターの外部アクセス処理を以下のメソッド
 
 | メソッド | 引数 | 戻り値 | 振る舞い |
 |---|---|---|---|
-| `fetch_metadata` | `video_id: str` | `dict[str, Any]`（yt-dlp `extract_info` の info_dict 形式） | 動画メタデータ取得 |
+| `fetch_metadata` | `video_id: str`、`request_timeout: int` | `dict[str, Any]`（yt-dlp `extract_info` の info_dict 形式） | 動画メタデータ取得 |
 | `fetch_subtitle` | `video_id: str`、`languages: list[str]` | `tuple[list[dict[str, Any]], str]`（snippets, language） | 字幕取得 |
-| `transcribe_audio` | `video_id: str`、`languages: list[str]`、`whisper_model: str`、`whisper_device: str` | `tuple[list[dict[str, Any]], str]`（snippets, language） | 音声 DL + Whisper 文字起こし |
-| `expand_playlist` | `playlist_url: str`、`max_videos: int` | `list[dict[str, Any]]`（entries） | プレイリスト展開 |
+| `transcribe_audio` | `video_id: str`、`languages: list[str]`、`whisper_model: str`、`whisper_device: str`、`request_timeout: int` | `tuple[list[dict[str, Any]], str]`（snippets, language） | 音声 DL + Whisper 文字起こし |
+| `expand_playlist` | `playlist_url: str`、`max_videos: int`、`request_timeout: int` | `list[dict[str, Any]]`（entries） | プレイリスト展開 |
 
 すべて `async` メソッド。Real / Fake で同じシグネチャを実装する。
 
@@ -68,17 +68,18 @@ Fake Fetcher は単一の戻り値だけでなく、テスト・QA で必要な�
 
 ### カスタムデータ注入
 
-シナリオ切替で対応できない細かい振る舞い検証（特定の値・特定の構造）には、コンストラクタ引数でカスタムデータを直接渡す方式を提供する。コンストラクタは以下のキーワード引数を受け取る:
+シナリオ切替で対応できない細かい振る舞い検証（特定の値・特定の構造）には、コンストラクタ引数でカスタムデータを直接渡す方式を提供する。コンストラクタは以下の引数を受け取る:
 
-| 引数名 | 型 | 用途 |
-|---|---|---|
-| `scenario` | str | シナリオ名（既定: `happy`） |
-| `metadata` | dict | `fetch_metadata` の戻り値を上書き |
-| `snippets` | list | `fetch_subtitle` / `transcribe_audio` の snippets を上書き |
-| `language` | str | `fetch_subtitle` / `transcribe_audio` の language を上書き |
-| `playlist_entries` | list | `expand_playlist` の戻り値を上書き |
+| 引数名 | 種別 | 型 | 用途 |
+|---|---|---|---|
+| `fixture_dir` | 位置引数（必須） | Path | Fake データの配置ディレクトリ（存在しない場合は `__init__` で fail-fast） |
+| `scenario` | キーワード引数 | str | シナリオ名（既定: `happy`） |
+| `metadata` | キーワード引数 | dict | `fetch_metadata` の戻り値を上書き |
+| `snippets` | キーワード引数 | list | `fetch_subtitle` / `transcribe_audio` の snippets を上書き |
+| `language` | キーワード引数 | str | `fetch_subtitle` / `transcribe_audio` の language を上書き |
+| `playlist_entries` | キーワード引数 | list | `expand_playlist` の戻り値を上書き |
 
-カスタムデータが指定された場合は、シナリオ設定よりも優先される。
+カスタムデータが指定された場合は、シナリオ設定よりも優先される（ただしエラー系シナリオは例外を発生させ、戻り値カスタマイズより raise が優先される）。
 
 ### Fake データ JSON の構造
 

@@ -71,6 +71,8 @@
 | `infrastructure/upload-auth.md` | `src/rag/server.py`, `src/rag/config.py` |
 | `infrastructure/scheduled-rebuild.md` | `src/rag/server.py` |
 | `infrastructure/media-analysis.md` | `src/rag/media/` |
+| `infrastructure/fake-mode.md` | `src/rag/config.py`（`*_fake_*` フィールド + `log_fake_mode_status`）, `src/rag/pipeline/ingesters/{source_type}_fetcher.py` 群, `src/rag/pipeline/ingesters/_fake/`, `tests/conftest.py` |
+| `infrastructure/fake-adapters/youtube.md` | `src/rag/pipeline/ingesters/youtube_fetcher.py`, `src/rag/pipeline/ingesters/_fake/youtube/` |
 | `ingesters/common.md` | `src/rag/pipeline/ingesters/_common.py` |
 | `ingesters/bluesky.md` | `src/rag/pipeline/ingesters/bluesky.py` |
 | `ingesters/youtube.md` | `src/rag/pipeline/ingesters/youtube.py` |

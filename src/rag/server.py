@@ -396,6 +396,14 @@ async def rag_add_bluesky(
         return "エラー: BlueSky 投稿の取り込みに失敗しました"
 
 
+def _youtube_fake_label() -> str:
+    """fake モード時の応答ラベル（先頭に付与する）.
+
+    仕様: docs/specs/infrastructure/fake-mode.md
+    """
+    return "[FAKE MODE] " if get_settings().rag_youtube_fake_mode else ""
+
+
 @mcp.tool()
 async def rag_add_youtube(
     video_url: str,
@@ -412,16 +420,17 @@ async def rag_add_youtube(
     Returns:
         取り込み結果のサマリーテキスト
     """
+    label = _youtube_fake_label()
     try:
         result = await _run_cli_subprocess("ingest-youtube", [video_url], ctx=ctx)
-        return _format_cli_ingest_result(result, context=f"動画: {video_url}")
+        return label + _format_cli_ingest_result(result, context=f"動画: {video_url}")
     except CLISubprocessError as e:
-        return e.format_mcp_error(f"YouTube 動画の取り込みに失敗しました: {video_url}")
+        return label + e.format_mcp_error(f"YouTube 動画の取り込みに失敗しました: {video_url}")
     except Exception:
         logger.exception(
             "Failed to ingest YouTube video: %s", video_url
         )
-        return f"エラー: YouTube 動画の取り込みに失敗しました: {video_url}"
+        return f"{label}エラー: YouTube 動画の取り込みに失敗しました: {video_url}"
 
 
 @mcp.tool()
@@ -446,16 +455,17 @@ async def rag_crawl_youtube(
     if max_videos is not None:
         args.extend(["--max-videos", str(max_videos)])
 
+    label = _youtube_fake_label()
     try:
         result = await _run_cli_subprocess("ingest-youtube-playlist", args, ctx=ctx)
-        return _format_cli_ingest_result(result, context=f"プレイリスト: {playlist_url}")
+        return label + _format_cli_ingest_result(result, context=f"プレイリスト: {playlist_url}")
     except CLISubprocessError as e:
-        return e.format_mcp_error(f"YouTube プレイリストの取り込みに失敗しました: {playlist_url}")
+        return label + e.format_mcp_error(f"YouTube プレイリストの取り込みに失敗しました: {playlist_url}")
     except Exception:
         logger.exception(
             "Failed to crawl YouTube playlist: %s", playlist_url
         )
-        return f"エラー: YouTube プレイリストの取り込みに失敗しました: {playlist_url}"
+        return f"{label}エラー: YouTube プレイリストの取り込みに失敗しました: {playlist_url}"
 
 
 _VALID_UPLOAD_MODES: frozenset[str] = frozenset({"fail", "replace"})
@@ -2105,6 +2115,12 @@ def _configure_and_run() -> None:
     # uvicorn の dictConfig が parent chain を再構成するため、
     # rag.server ロガーにも直接レベルを設定する
     logger.setLevel(log_level)
+
+    # Fake モード状態の起動時ログ（仕様: docs/specs/infrastructure/fake-mode.md）
+    from .config import log_fake_mode_status
+
+    log_fake_mode_status(settings)
+
     transport = settings.rag_transport
 
     # HTTP モードの事前検証（外部依存の起動前に設定の妥当性を確認する）
