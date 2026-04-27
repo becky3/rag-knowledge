@@ -164,6 +164,77 @@ class TestSourcesCRUD:
         assert len(web_results) == 1
         assert web_results[0].source_id == "web/https/a.com/p.html"
 
+    def test_search_by_path_prefix(self, db: MetadataDB) -> None:
+        for source_id in (
+            "local/unity-docs/intro.md",
+            "local/unity-docs/sub/api.md",
+            "local/other/x.md",
+        ):
+            db.register_source(
+                source_id=source_id,
+                source_type="local",
+                title=source_id,
+                content_hash="h",
+                file_size=10,
+                collected_at="2026-01-01T00:00:00Z",
+                updated_at="2026-01-01T00:00:00Z",
+            )
+
+        results = db.search_sources(path_prefix="local/unity-docs")
+        ids = sorted(r.source_id for r in results)
+        assert ids == [
+            "local/unity-docs/intro.md",
+            "local/unity-docs/sub/api.md",
+        ]
+
+    def test_search_by_path_prefix_escapes_like_metacharacters(
+        self, db: MetadataDB,
+    ) -> None:
+        """LIKE のメタ文字（%, _）が含まれるパスでも誤マッチしない."""
+        db.register_source(
+            source_id="local/a_dir/x.md",  # LIKE _ は任意1文字なので注意
+            source_type="local",
+            title="t",
+            content_hash="h",
+            file_size=10,
+            collected_at="2026-01-01T00:00:00Z",
+            updated_at="2026-01-01T00:00:00Z",
+        )
+        db.register_source(
+            source_id="local/aXdir/y.md",  # _ が任意1文字としてマッチしてはならない
+            source_type="local",
+            title="t",
+            content_hash="h",
+            file_size=10,
+            collected_at="2026-01-01T00:00:00Z",
+            updated_at="2026-01-01T00:00:00Z",
+        )
+
+        results = db.search_sources(path_prefix="local/a_dir")
+        ids = [r.source_id for r in results]
+        assert ids == ["local/a_dir/x.md"]
+
+    def test_delete_sources_by_path(self, db: MetadataDB) -> None:
+        for source_id in (
+            "local/foo/x.md",
+            "local/foo/sub/y.md",
+            "local/bar/z.md",
+        ):
+            db.register_source(
+                source_id=source_id,
+                source_type="local",
+                title=source_id,
+                content_hash="h",
+                file_size=10,
+                collected_at="2026-01-01T00:00:00Z",
+                updated_at="2026-01-01T00:00:00Z",
+            )
+
+        db.delete_sources_by_path("local/foo")
+
+        remaining = sorted(r.source_id for r in db.search_sources())
+        assert remaining == ["local/bar/z.md"]
+
     def test_search_by_status(self, db: MetadataDB) -> None:
         db.register_source(
             source_id="local/active.md",
@@ -560,6 +631,81 @@ class TestPipelineHistory:
             mode="incremental",
         )
         assert db.needs_index_rebuild() is True
+
+    def test_needs_index_rebuild_ignores_filtered_full(
+        self, db: MetadataDB,
+    ) -> None:
+        """filter 付き full rebuild は判定基準から除外される (#678).
+
+        filter 付きは subset しか触っていないため、未フィルタの full/index
+        履歴がない限り True（rebuild 必要）を返す。
+        """
+        db.add_pipeline_history(
+            from_commit_id=NULL_COMMIT_HASH,
+            to_commit_id="c1",
+            processed_at="2026-01-01T00:00:00Z",
+            mode="full",
+            filter_path="local/foo",
+        )
+        assert db.needs_index_rebuild() is True
+
+    def test_needs_index_rebuild_ignores_filtered_source_type(
+        self, db: MetadataDB,
+    ) -> None:
+        """filter (source_type) 付き index rebuild も判定基準から除外される."""
+        db.add_pipeline_history(
+            from_commit_id=NULL_COMMIT_HASH,
+            to_commit_id="c1",
+            processed_at="2026-01-01T00:00:00Z",
+            mode="index",
+            filter_source_type="local",
+        )
+        assert db.needs_index_rebuild() is True
+
+    def test_needs_index_rebuild_unfiltered_after_filtered(
+        self, db: MetadataDB,
+    ) -> None:
+        """filter 付き → 未フィルタの順で記録されると未フィルタが基準になる."""
+        db.add_pipeline_history(
+            from_commit_id=NULL_COMMIT_HASH,
+            to_commit_id="c1",
+            processed_at="2026-01-01T00:00:00Z",
+            mode="full",
+            filter_path="local/foo",
+        )
+        db.add_pipeline_history(
+            from_commit_id="c1",
+            to_commit_id="c2",
+            processed_at="2026-01-02T00:00:00Z",
+            mode="full",
+        )
+        assert db.needs_index_rebuild() is False
+
+    def test_add_pipeline_history_records_filter(
+        self, db: MetadataDB,
+    ) -> None:
+        """filter スコープが pipeline_history に保存される."""
+        db.add_pipeline_history(
+            from_commit_id=NULL_COMMIT_HASH,
+            to_commit_id="c1",
+            processed_at="2026-01-01T00:00:00Z",
+            mode="full",
+            filter_source_type="local",
+            filter_path="",
+        )
+        db.add_pipeline_history(
+            from_commit_id="c1",
+            to_commit_id="c2",
+            processed_at="2026-01-02T00:00:00Z",
+            mode="index",
+            filter_source_type="",
+            filter_path="local/foo",
+        )
+        history = db.get_pipeline_history()
+        assert history[0].filter_source_type == "local"
+        assert history[0].filter_path == ""
+        assert history[1].filter_source_type == ""
+        assert history[1].filter_path == "local/foo"
 
 
 class TestDeleteAllSources:

@@ -55,17 +55,20 @@
 |-----------|-----|------|------|
 | `mode` | str | はい | 再構築モード（下表参照） |
 | `source_type` | str | いいえ | 対象媒体フィルタ（値は [`_schema/enums.yml`](../../_schema/enums.yml) の `source_type` を参照）。未指定時は全媒体 |
+| `path` | str | いいえ | source_store ルート相対のディレクトリパス。指定したディレクトリ配下（再帰的な全サブディレクトリを含む）のソースのみを対象にする。未指定時は全パス |
 
 再構築モード:
 
-| モード値 | 対応するパイプライン操作 | `source_type` フィルタ | 用途 |
+| モード値 | 対応するパイプライン操作 | `source_type` / `path` フィルタ | 用途 |
 |---------|----------------------|----------------------|------|
 | `full` | 全再構築 | 適用可 | データ破損時や大規模な設計変更時。未コミット変更があればエラー |
 | `convert` | コンバートのみ再実行 | 適用可 | コンバーターの変換ロジック改修時。未コミット変更があればエラー |
 | `index` | インデックスのみ再構築 | 適用可 | Embedding モデル変更時やチャンクパラメータ変更時。未コミット変更があればエラー |
 | `incremental` | 差分更新 | 適用不可（git diff に従う） | 通常運用。未コミット変更は自動コミットされる |
 
-- `source_type` フィルタが適用不可のモード（`incremental`）で `source_type` が指定された場合、エラーを返す
+- `source_type` / `path` フィルタが適用不可のモード（`incremental`）でこれらが指定された場合、エラーを返す
+- `source_type` と `path` の同時指定はエラーを返す
+- `path` の解釈・正規化・バリデーション・配下解決の振る舞いは [pipeline-controller.md](pipeline-controller.md) の「path フィルタ」セクションを参照（SSoT）。本ドキュメントは CLI / MCP のインターフェース定義のみを扱う
 - 戻り値: 処理結果サマリ（処理件数、エラー件数、所要時間）をテキストで返す。`full` モードは Convert / Index の2フェーズ結果を表示する
 
 #### rag_stats（拡張）
@@ -80,13 +83,14 @@
 #### rebuild コマンド
 
 ```
-uv run python -m rag.cli rebuild --mode <MODE> [--source-type <TYPE>]
+uv run python -m rag.cli rebuild --mode <MODE> [--source-type <TYPE> | --path <PATH>]
 ```
 
 | オプション | 型 | 必須 | 内容 |
 |-----------|-----|------|------|
 | `--mode` | str | はい | 再構築モード: `full`、`convert`、`index`、`incremental` |
 | `--source-type` | str | いいえ | 対象媒体フィルタ（値は [`_schema/enums.yml`](../../_schema/enums.yml) の `source_type` を参照） |
+| `--path` | str | いいえ | source_store ルート相対のディレクトリパス。指定したディレクトリ配下（再帰的な全サブディレクトリを含む）のソースのみを対象にする |
 | `--if-needed` | flag | いいえ | 前回の index/full rebuild 以降に更新がなければスキップする。`--mode` が `index` または `full` の場合のみ有効 |
 | `--concurrency` | int | いいえ | インデックス再構築の並列数。`.env` の `RAG_EMBEDDING_CONCURRENCY` を上書きする。`index` / `full` モードで有効。CLI 限定（MCP ツールでは `.env` の設定値が使用される） |
 
@@ -374,9 +378,12 @@ source_store のパスは [source-store.md](source-store.md) の設定項目、c
 | `CONVERTED_STORE_DIR` が未設定の場合 | `rag_stats` は converted_store セクションを「未設定」と表示する。`rag_rebuild` はエラーを返す |
 | source_store ディレクトリが存在しない場合 | `rag_stats` は source_store の各項目を 0 で表示する。`rag_rebuild` はエラーを返す |
 | 再構築中に別の再構築が要求された場合 | 後発の要求にエラーを返す（排他制御） |
-| `incremental` モードで `source_type` が指定された場合 | パラメータ検証エラーを返す |
+| `incremental` モードで `source_type` または `path` が指定された場合 | パラメータ検証エラーを返す |
+| `source_type` と `path` が同時に指定された場合 | パラメータ検証エラーを返す（排他指定） |
 | metadata.db が存在しない場合の `rag_stats` | パイプラインセクションを「未初期化」と表示する。source_store のファイルシステムベースの統計は表示する |
 | `full` モードで `source_type` が指定された場合 | metadata.db の再構築は指定 type のレコードのみ削除・再登録する。他の type のレコードは保持される。converted_store・インデックスも指定 type のみクリア・再構築する |
+| `full` / `convert` / `index` モードで `path` が指定された場合の振る舞い・無効パスのバリデーション・attachment 単独指定時の振る舞い | [pipeline-controller.md](pipeline-controller.md) の「path フィルタ」セクションを参照 |
+| `--if-needed` と filter 付き rebuild の関係 | filter 付き rebuild は subset しか触らないため `pipeline_history` の `mode='full'`/`'index'` 行であっても `--if-needed` の判定材料にはならない。詳細は [pipeline-controller.md](pipeline-controller.md) の「filter 付き rebuild と --if-needed」を参照 |
 | 再構築中にエラーが発生した場合 | パイプライン制御のエラーハンドリングに従う（エラーファイルをスキップし残りを処理続行。`pipeline_history` に履歴を追加しない） |
 
 ## 関連ドキュメント

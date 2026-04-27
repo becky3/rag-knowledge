@@ -38,6 +38,7 @@ class StubConverter:
         self.converted: list[str] = []
         self.deleted: list[str] = []
         self.cleared: list[SourceType | None] = []
+        self.cleared_calls: list[tuple[SourceType | None, str | None]] = []
         self.fail_on: set[str] = set()
         # ConversionFailedError を送出させたいパス（convert 系のエラー経路検証用）
         self.fail_on_with_failed_error: set[str] = set()
@@ -75,9 +76,14 @@ class StubConverter:
         self,
         converted_store_dir: Path,
         source_type: SourceType | None = None,
+        *,
+        path: str | None = None,
     ) -> None:
         self.cleared.append(source_type)
-        if source_type:
+        self.cleared_calls.append((source_type, path))
+        if path:
+            target = converted_store_dir / path
+        elif source_type:
             target = converted_store_dir / source_type
         else:
             target = converted_store_dir
@@ -95,6 +101,7 @@ class StubIndexer:
         self.deleted_ids: list[str] = []
         self.upserted: list[str] = []
         self.cleared: list[SourceType | None] = []
+        self.cleared_calls: list[tuple[SourceType | None, str | None]] = []
         self.fail_on: set[str] = set()
 
     async def add(
@@ -126,8 +133,14 @@ class StubIndexer:
     ) -> None:
         self.upserted.append(source_id)
 
-    async def clear(self, source_type: SourceType | None = None) -> None:
+    async def clear(
+        self,
+        source_type: SourceType | None = None,
+        *,
+        path: str | None = None,
+    ) -> None:
         self.cleared.append(source_type)
+        self.cleared_calls.append((source_type, path))
 
     def set_bm25_deferred_save(self, enabled: bool) -> None:
         pass
@@ -953,6 +966,89 @@ class TestRunFullRebuild:
         result = await ctrl.run_full_rebuild()
         assert result.convert.total_files == 0
         assert result.index.total_files == 0
+
+    async def test_path_filter_targets_subdirectory_only(
+        self,
+        controller: tuple[PipelineController, StubConverter, StubIndexer],
+        workspace: dict[str, Path],
+    ) -> None:
+        """path 指定の rebuild が指定パス配下（再帰的）のみを対象にする."""
+        ctrl, converter, indexer = controller
+        _place_local_file(workspace["source"], "local/unity-docs/intro.md")
+        _place_local_file(workspace["source"], "local/unity-docs/sub/api.md")
+        _place_local_file(workspace["source"], "local/other/x.md")
+        ctrl.commit("initial")
+        await ctrl.run_incremental()
+
+        converter.converted.clear()
+        indexer.added.clear()
+
+        result = await ctrl.run_full_rebuild(path="local/unity-docs")
+
+        assert result.convert.processed == 2
+        assert sorted(converter.converted) == [
+            "local/unity-docs/intro.md",
+            "local/unity-docs/sub/api.md",
+        ]
+        assert converter.cleared_calls[-1] == (None, "local/unity-docs")
+        assert indexer.cleared_calls[-1] == (None, "local/unity-docs")
+
+        # path 配下外のレコードは保持される
+        other_record = ctrl.db.get_source("local/other/x.md")
+        assert other_record is not None
+
+    async def test_path_filter_with_no_matching_sources_returns_empty(
+        self,
+        controller: tuple[PipelineController, StubConverter, StubIndexer],
+        workspace: dict[str, Path],
+    ) -> None:
+        """配下に is_source_file=True のソースがない path 指定は対象 0 件で正常終了."""
+        ctrl, converter, _ = controller
+        _place_local_file(workspace["source"], "local/foo/x.md")
+        ctrl.commit("initial")
+        await ctrl.run_incremental()
+
+        converter.converted.clear()
+
+        # 存在しないパス（attachment 単独想定）
+        result = await ctrl.run_full_rebuild(path="local/foo/empty-subdir")
+
+        assert result.convert.total_files == 0
+        assert result.index.total_files == 0
+        assert converter.converted == []
+
+    async def test_source_type_and_path_exclusive(
+        self,
+        controller: tuple[PipelineController, StubConverter, StubIndexer],
+    ) -> None:
+        """source_type と path の併用は ValueError を返す."""
+        ctrl, _, _ = controller
+        ctrl.init_repo()
+        ctrl.commit("initial")
+        with pytest.raises(ValueError, match="同時に指定"):
+            await ctrl.run_full_rebuild(source_type="local", path="local/foo")
+        with pytest.raises(ValueError, match="同時に指定"):
+            await ctrl.run_convert_only(source_type="local", path="local/foo")
+        with pytest.raises(ValueError, match="同時に指定"):
+            await ctrl.run_index_only(source_type="local", path="local/foo")
+
+    @pytest.mark.parametrize(
+        "bad_path",
+        ["", "/", "..", "../foo", "local/../etc", "/abs/path", "."],
+    )
+    async def test_path_validation_rejects_unsafe_input(
+        self,
+        controller: tuple[PipelineController, StubConverter, StubIndexer],
+        bad_path: str,
+    ) -> None:
+        """空文字列・絶対パス・`..`/`.` を含む path は PathFilterError."""
+        from rag.store.path_filter import PathFilterError
+
+        ctrl, _, _ = controller
+        ctrl.init_repo()
+        ctrl.commit("initial")
+        with pytest.raises(PathFilterError):
+            await ctrl.run_full_rebuild(path=bad_path)
 
     async def test_concurrent_full_rebuild(
         self,

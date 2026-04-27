@@ -569,6 +569,8 @@ source_store 内の全ファイルのメタデータ索引。
 | `to_commit_id` | TEXT | NOT NULL | 処理後のコミット ID |
 | `processed_at` | TEXT | NOT NULL | 処理日時（ISO 8601） |
 | `mode` | TEXT | NOT NULL | 実行モード: `full`, `convert`, `index`, `incremental` |
+| `filter_source_type` | TEXT | NOT NULL, DEFAULT '' | filter 付き rebuild の `source_type` フィルタ値（未フィルタは空文字列）。`--if-needed` 判定で「未フィルタの全体 rebuild」のみを参照対象にするために使用する |
+| `filter_path` | TEXT | NOT NULL, DEFAULT '' | filter 付き rebuild の `path` フィルタ値（未フィルタは空文字列）。詳細は [pipeline-controller.md](pipeline-controller.md) の「filter 付き rebuild と --if-needed」を参照 |
 
 - `last_commit_id` の取得: `SELECT to_commit_id FROM pipeline_history ORDER BY id DESC LIMIT 1`
 - 初回実行時の `from_commit_id` には git の null commit hash `0000000000000000000000000000000000000000`（40文字ゼロ）を使用する

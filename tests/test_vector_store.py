@@ -272,6 +272,81 @@ class TestDeleteBySourceType:
         assert stats["total_chunks"] == 1
 
 
+class TestDeleteBySourceIdPrefix:
+    """VectorStore.delete_by_source_id_prefix() の path prefix 一括削除 (#678)."""
+
+    @pytest.mark.asyncio
+    async def test_delete_by_source_id_prefix(self, ephemeral_store: VectorStore) -> None:
+        """指定パス配下（再帰的）のチャンクを一括削除できる."""
+        chunks = [
+            DocumentChunk(
+                id="c1",
+                text="intro",
+                metadata={
+                    "source_id": "local/unity-docs/intro.md",
+                    "source_type": "local",
+                    "chunk_index": 0,
+                },
+            ),
+            DocumentChunk(
+                id="c2",
+                text="api",
+                metadata={
+                    "source_id": "local/unity-docs/sub/api.md",
+                    "source_type": "local",
+                    "chunk_index": 0,
+                },
+            ),
+            DocumentChunk(
+                id="c3",
+                text="other",
+                metadata={
+                    "source_id": "local/other/x.md",
+                    "source_type": "local",
+                    "chunk_index": 0,
+                },
+            ),
+        ]
+        await ephemeral_store.add_documents(chunks)
+
+        deleted = await ephemeral_store.delete_by_source_id_prefix(
+            "local/unity-docs",
+        )
+        assert deleted == 2
+        assert ephemeral_store.get_stats()["total_chunks"] == 1
+
+    @pytest.mark.asyncio
+    async def test_delete_by_source_id_prefix_excludes_sibling(
+        self, ephemeral_store: VectorStore,
+    ) -> None:
+        """`local/foo` 指定は `local/foobar/...` にはマッチしない (lex range の境界)."""
+        chunks = [
+            DocumentChunk(
+                id="c1",
+                text="in foo",
+                metadata={
+                    "source_id": "local/foo/a.md",
+                    "source_type": "local",
+                    "chunk_index": 0,
+                },
+            ),
+            DocumentChunk(
+                id="c2",
+                text="in foobar",
+                metadata={
+                    "source_id": "local/foobar/a.md",
+                    "source_type": "local",
+                    "chunk_index": 0,
+                },
+            ),
+        ]
+        await ephemeral_store.add_documents(chunks)
+
+        deleted = await ephemeral_store.delete_by_source_id_prefix("local/foo")
+        assert deleted == 1
+        assert ephemeral_store.get_stats()["total_chunks"] == 1
+
+
 class TestAC11GetStats:
     """AC11: VectorStore.get_stats() で総チャンク数を取得できること."""
 

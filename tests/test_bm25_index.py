@@ -109,6 +109,48 @@ class TestBM25Index:
         assert deleted == 0
         assert index.get_document_count() == 1
 
+    def test_delete_by_source_id_prefix(self) -> None:
+        """path prefix 指定でドキュメントを一括削除できる (#678)."""
+        index = make_bm25_index()
+        docs = [
+            ("doc1", "intro", "local/unity-docs/intro.md", "local"),
+            ("doc2", "api", "local/unity-docs/sub/api.md", "local"),
+            ("doc3", "other", "local/other/x.md", "local"),
+        ]
+        index.add_documents(docs)
+
+        deleted = index.delete_by_source_id_prefix("local/unity-docs")
+        assert deleted == 2
+        assert index.get_document_count() == 1
+
+    def test_delete_by_source_id_prefix_excludes_sibling_starting_with_same_chars(
+        self,
+    ) -> None:
+        """`local/foo` 指定は `local/foobar/...` にはマッチしない (#678)."""
+        index = make_bm25_index()
+        docs = [
+            ("doc1", "in foo", "local/foo/a.md", "local"),
+            ("doc2", "in foobar", "local/foobar/a.md", "local"),
+        ]
+        index.add_documents(docs)
+
+        deleted = index.delete_by_source_id_prefix("local/foo")
+        assert deleted == 1
+        assert index.get_document_count() == 1
+
+    def test_delete_by_source_id_prefix_escapes_metacharacters(self) -> None:
+        """LIKE のメタ文字（_）を含むパスでも誤マッチしない (#678)."""
+        index = make_bm25_index()
+        docs = [
+            ("doc1", "match", "local/a_dir/x.md", "local"),
+            ("doc2", "no match", "local/aXdir/y.md", "local"),
+        ]
+        index.add_documents(docs)
+
+        deleted = index.delete_by_source_id_prefix("local/a_dir")
+        assert deleted == 1
+        assert index.get_document_count() == 1
+
     def test_search_empty_index_returns_empty_list(self) -> None:
         """AC6: 空のインデックスへの検索は空リストを返す."""
         index = make_bm25_index()

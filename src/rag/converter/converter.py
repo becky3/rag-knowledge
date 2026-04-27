@@ -250,14 +250,29 @@ class Converter:
         self,
         converted_store_dir: Path,
         source_type: SourceType | None = None,
+        *,
+        path: str | None = None,
     ) -> None:
         """converted_store をクリアする.
 
         Args:
             converted_store_dir: converted_store のルートディレクトリ
             source_type: 指定時はその媒体のディレクトリのみクリア
+            path: 指定時はそのディレクトリ配下（再帰的）のみクリア
+                （source_type と排他）
         """
-        if source_type is not None:
+        if source_type is not None and path is not None:
+            msg = "source_type と path は同時に指定できません"
+            raise ValueError(msg)
+        if path is not None:
+            from rag.store.path_filter import normalize_path_prefix
+
+            normalized = normalize_path_prefix(path)
+            target_dir = converted_store_dir / normalized
+            if target_dir.exists():
+                shutil.rmtree(target_dir)
+                logger.info("Cleared converted_store: %s", target_dir)
+        elif source_type is not None:
             target_dir = converted_store_dir / source_type
             if target_dir.exists():
                 shutil.rmtree(target_dir)

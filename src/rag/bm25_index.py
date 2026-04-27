@@ -222,6 +222,31 @@ class _BM25Store:
             self._conn.commit()
         return deleted_ids
 
+    def delete_by_source_id_prefix(self, path_prefix: str) -> list[str]:
+        """source_id の prefix で削除し、削除された doc_id リストを返す.
+
+        Args:
+            path_prefix: source_store ルート相対のディレクトリパス
+        """
+        from rag.store.path_filter import escape_like, normalize_path_prefix
+
+        normalized = normalize_path_prefix(path_prefix)
+        escaped = escape_like(normalized)
+        like_pattern = f"{escaped}/%"
+        rows = self._conn.execute(
+            r"SELECT doc_id FROM chunks WHERE source_id LIKE ? ESCAPE '\'",
+            (like_pattern,),
+        ).fetchall()
+        deleted_ids = [r[0] for r in rows]
+        if deleted_ids:
+            self._conn.execute(
+                r"DELETE FROM chunks WHERE source_id LIKE ? ESCAPE '\'",
+                (like_pattern,),
+            )
+            self._delete_token_cache(deleted_ids)
+            self._conn.commit()
+        return deleted_ids
+
     def delete_stale(self, source_id: str, valid_ids: set[str]) -> list[str]:
         """source_id のチャンクのうち valid_ids に含まれないものを削除する."""
         rows = self._conn.execute(
@@ -581,6 +606,28 @@ class BM25Index:
             logger.debug(
                 "Deleted %d documents from BM25 index (source_type: %s)",
                 len(deleted_ids), source_type,
+            )
+            if not self._deferred_save:
+                self._save_bm25s()
+
+        return len(deleted_ids)
+
+    def delete_by_source_id_prefix(self, path_prefix: str) -> int:
+        """source_id の prefix 指定でドキュメントを一括削除する.
+
+        Args:
+            path_prefix: source_store ルート相対のディレクトリパス
+
+        Returns:
+            削除されたドキュメント数
+        """
+        deleted_ids = self._store.delete_by_source_id_prefix(path_prefix)
+
+        if deleted_ids:
+            self._needs_rebuild = True
+            logger.debug(
+                "Deleted %d documents from BM25 index (path: %s)",
+                len(deleted_ids), path_prefix,
             )
             if not self._deferred_save:
                 self._save_bm25s()

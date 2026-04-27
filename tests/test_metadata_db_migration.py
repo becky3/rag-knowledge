@@ -106,8 +106,9 @@ class TestMigrateExplicit:
         db.initialize()
         applied = db.migrate()
 
-        # 4件のマイグレーションが適用される
-        assert len(applied) == 4
+        # 6件のマイグレーションが適用される
+        # (mode + filter_source_type + filter_path + published_at + file_path 移行 + meta)
+        assert len(applied) == 6
 
         # file_path カラムが削除されている
         cursor = db._connection.execute("PRAGMA table_info(sources)")
@@ -120,10 +121,12 @@ class TestMigrateExplicit:
         assert record is not None
         assert record.published_at == "2026-01-15T10:00:00Z"
 
-        # pipeline_history に mode 列が追加されている
+        # pipeline_history に mode / filter_source_type / filter_path 列が追加されている
         cursor = db._connection.execute("PRAGMA table_info(pipeline_history)")
         ph_columns = {row["name"] for row in cursor.fetchall()}
         assert "mode" in ph_columns
+        assert "filter_source_type" in ph_columns
+        assert "filter_path" in ph_columns
 
         db.close()
 
@@ -163,7 +166,7 @@ class TestMigrateExplicit:
         db.initialize()
 
         first = db.migrate()
-        assert len(first) == 4
+        assert len(first) == 6
 
         second = db.migrate()
         assert len(second) == 0
@@ -221,8 +224,8 @@ class TestMigrateExplicit:
         db.initialize()
         applied = db.migrate()
 
-        # published_at + file_path 移行 + meta の 3 件
-        assert len(applied) == 3
+        # filter_source_type + filter_path + published_at + file_path 移行 + meta の 5 件
+        assert len(applied) == 5
 
         for i in range(3):
             record = db.get_source(f"web/s{i}.html")
@@ -269,8 +272,9 @@ class TestMetaMigration:
         db.initialize()
         applied = db.migrate()
 
-        assert len(applied) == 1
-        assert "meta" in applied[0]
+        # filter_source_type + filter_path + meta の 3 件
+        assert len(applied) == 3
+        assert any("meta" in m for m in applied)
 
         cursor = db._connection.execute("PRAGMA table_info(sources)")
         columns = {row["name"] for row in cursor.fetchall()}
@@ -312,8 +316,9 @@ class TestMetaMigration:
         db.initialize()
         applied = db.migrate(source_store_dir=source_store)
 
-        assert len(applied) == 1
-        assert "1 件" in applied[0]
+        # filter_source_type + filter_path + meta の 3 件
+        assert len(applied) == 3
+        assert any("1 件" in m for m in applied)
 
         record = db.get_source("journal/repo-a/entry.md")
         assert record is not None
@@ -341,8 +346,9 @@ class TestMetaMigration:
         db.initialize()
         applied = db.migrate()
 
-        assert len(applied) == 1
-        assert "0 件" in applied[0]
+        # filter_source_type + filter_path + meta の 3 件
+        assert len(applied) == 3
+        assert any("0 件" in m for m in applied)
 
         record = db.get_source("local/test.md")
         assert record is not None

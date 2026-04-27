@@ -242,13 +242,25 @@ class Indexer:
             self.set_bm25_deferred_save(False)
             self.flush_bm25()
 
-    async def clear(self, source_type: SourceType | None = None) -> None:
+    async def clear(
+        self,
+        source_type: SourceType | None = None,
+        *,
+        path: str | None = None,
+    ) -> None:
         """インデックスをクリアする.
 
         Args:
             source_type: 指定時はその媒体のみクリア
+            path: 指定時はそのディレクトリ配下（再帰的）のみクリア
+                （source_type と排他）
         """
-        if source_type is None:
+        if source_type is not None and path is not None:
+            msg = "source_type と path は同時に指定できません"
+            raise ValueError(msg)
+        if path is not None:
+            await self._clear_by_path(path)
+        elif source_type is None:
             await self._clear_all()
         else:
             await self._clear_by_source_type(source_type)
@@ -382,6 +394,16 @@ class Indexer:
         logger.info(
             "source_type=%s のインデックスをクリア (vector: %d, bm25: %d)",
             source_type, vector_count, bm25_count,
+        )
+
+    async def _clear_by_path(self, path: str) -> None:
+        """指定パス配下のインデックスを一括クリアする."""
+        vector_count = await self._vector_store.delete_by_source_id_prefix(path)
+        bm25_count = self._bm25.delete_by_source_id_prefix(path)
+
+        logger.info(
+            "path=%s 配下のインデックスをクリア (vector: %d, bm25: %d)",
+            path, vector_count, bm25_count,
         )
 
 

@@ -953,6 +953,7 @@ _SEGFAULT_EXIT_CODES: frozenset[int] = frozenset({-1073741819, 3221225477, -11, 
 async def rag_rebuild(
     mode: str,
     source_type: str | None = None,
+    path: str | None = None,
     ctx: MCPContext | None = None,
 ) -> str:
     """[rag-knowledge] RAG rebuild - ナレッジベースの再構築を実行する.
@@ -969,7 +970,12 @@ async def rag_rebuild(
             "index" — インデックスのみ再構築（Embedding モデル変更時）
             "incremental" — 差分更新（通常運用。未コミット変更は自動コミット）
         source_type: 対象媒体フィルタ: "web", "bluesky", "zenn", "youtube", "aozora", "local", "journal"。
-            未指定時は全媒体。incremental モードでは指定不可。
+            未指定時は全媒体。incremental モードでは指定不可。path と排他指定。
+        path: 対象パスフィルタ。source_store ルート相対のディレクトリパスを指定し、
+            配下（再帰的）のソースのみを対象にする。
+            未指定時は全パス。incremental モードでは指定不可。source_type と排他指定。
+            空文字列・絶対パス・`..`/`.` を含むパスはバリデーションエラー
+            （全パス対象は引数を省略する）。
 
     Returns:
         処理結果サマリ（処理件数、エラー件数、所要時間）
@@ -977,6 +983,8 @@ async def rag_rebuild(
     args: list[str] = ["--mode", mode]
     if source_type is not None:
         args.extend(["--source-type", source_type])
+    if path is not None:
+        args.extend(["--path", path])
 
     try:
         result = await _run_cli_subprocess("rebuild", args, ctx=ctx)
