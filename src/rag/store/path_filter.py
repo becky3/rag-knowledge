@@ -48,13 +48,16 @@ def normalize_path_prefix(path: str) -> str:
     # - 空文字列 / `/` のみのパス
     # - 先頭スラッシュ付きの絶対パス
     # - Windows ドライブレター (`X:`) で始まるパス
+    # - 連続スラッシュを含むパス (DB の LIKE や prefix 文字列比較で別文字列扱い
+    #   になり、Path 結合は許容しても下流で no-op になるため一律拒否)
     # - `..` / `.` セグメントを含むパス
     # - 先頭セグメントが既知の source_type でないパス
     valid_roots = sorted(_VALID_ROOT_SOURCE_TYPES)
     invalid_msg = (
         f"path は source_store ルート相対のディレクトリパスを指定してください "
         f"(先頭セグメントが {valid_roots} のいずれか、空文字列・絶対パス・"
-        f"Windows ドライブレター・`..`/`.` セグメント不可): {path!r}"
+        f"Windows ドライブレター・連続スラッシュ・`..`/`.` セグメント不可): "
+        f"{path!r}"
     )
     if path is None or path == "":
         raise PathFilterError(invalid_msg)
@@ -67,6 +70,8 @@ def normalize_path_prefix(path: str) -> str:
     if stripped == "":
         raise PathFilterError(invalid_msg)
     segments = stripped.split("/")
+    if any(seg == "" for seg in segments):
+        raise PathFilterError(invalid_msg)
     if any(seg in ("..", ".") for seg in segments):
         raise PathFilterError(invalid_msg)
     root_segment = segments[0]

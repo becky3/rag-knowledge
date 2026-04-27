@@ -316,6 +316,34 @@ class TestDeleteBySourceIdPrefix:
         assert ephemeral_store.get_stats()["total_chunks"] == 1
 
     @pytest.mark.asyncio
+    async def test_delete_by_source_id_prefix_paginated(
+        self, ephemeral_store: VectorStore, monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """ChromaDB の limit/offset で分割取得しながら削除できる (#694 review)."""
+        # 小さい page size で複数ページに分かれるデータを構築
+        monkeypatch.setattr(type(ephemeral_store), "_BATCH_SIZE", 2)
+
+        chunks = [
+            DocumentChunk(
+                id=f"c{i}",
+                text=f"chunk {i}",
+                metadata={
+                    "source_id": f"local/target/{i}.md",
+                    "source_type": "local",
+                    "chunk_index": 0,
+                },
+            )
+            for i in range(5)
+        ]
+        await ephemeral_store.add_documents(chunks)
+
+        deleted = await ephemeral_store.delete_by_source_id_prefix(
+            "local/target",
+        )
+        assert deleted == 5
+        assert ephemeral_store.get_stats()["total_chunks"] == 0
+
+    @pytest.mark.asyncio
     async def test_delete_by_source_id_prefix_excludes_sibling(
         self, ephemeral_store: VectorStore,
     ) -> None:

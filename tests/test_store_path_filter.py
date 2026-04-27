@@ -52,6 +52,15 @@ class TestNormalizePathPrefix:
 
     @pytest.mark.parametrize(
         "bad_path",
+        ["local//foo", "local///foo", "local/foo//bar"],
+    )
+    def test_rejects_consecutive_slashes(self, bad_path: str) -> None:
+        """連続スラッシュは下流で別文字列扱いになるため拒否 (#694 review)."""
+        with pytest.raises(PathFilterError):
+            normalize_path_prefix(bad_path)
+
+    @pytest.mark.parametrize(
+        "bad_path",
         ["unknown_root/foo", "Local/foo", "tmp/foo"],
     )
     def test_rejects_unknown_root_source_type(self, bad_path: str) -> None:

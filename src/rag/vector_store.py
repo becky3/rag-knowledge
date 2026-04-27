@@ -480,6 +480,9 @@ class VectorStore:
         あるため（path_filter で検証済み）、`source_type` の事前 where 絞りで
         スキャン量を媒体単位に圧縮する。
 
+        媒体内チャンク数が多くても一括取得でメモリを圧迫しないよう、
+        ChromaDB の `limit`/`offset` で分割取得しながら ids_to_delete を構築する。
+
         Args:
             path_prefix: source_store ルート相対のディレクトリパス
 
@@ -495,26 +498,49 @@ class VectorStore:
         prefix = f"{normalized}/"
         source_type = derive_source_type(normalized)
 
-        results = await asyncio.to_thread(
-            self._collection.get,
-            where={"source_type": source_type},
-            include=["metadatas"],
-        )
-        chunk_ids: list[str] = results["ids"]
-        metadatas = results["metadatas"] or []
-
         ids_to_delete: list[str] = []
-        for chunk_id, metadata in zip(chunk_ids, metadatas, strict=True):
-            source_id = (metadata or {}).get("source_id", "")
-            if isinstance(source_id, str) and source_id.startswith(prefix):
-                ids_to_delete.append(chunk_id)
+        page_size = self._BATCH_SIZE
+        offset = 0
+
+        while True:
+            results = await asyncio.to_thread(
+                self._collection.get,
+                where={"source_type": source_type},
+                include=["metadatas"],
+                limit=page_size,
+                offset=offset,
+            )
+            chunk_ids: list[str] = results["ids"]
+            # ChromaDB は include="metadatas" 指定時に通常 ids と同じ長さで
+            # metadatas を返すが、None や長さ不一致が返る防御として ids 長に揃える
+            raw_metadatas = results["metadatas"] or []
+            if len(raw_metadatas) < len(chunk_ids):
+                metadatas = [
+                    *raw_metadatas,
+                    *([{}] * (len(chunk_ids) - len(raw_metadatas))),
+                ]
+            else:
+                metadatas = list(raw_metadatas[: len(chunk_ids)])
+
+            if not chunk_ids:
+                break
+
+            for chunk_id, metadata in zip(chunk_ids, metadatas, strict=True):
+                source_id = (metadata or {}).get("source_id", "")
+                if isinstance(source_id, str) and source_id.startswith(prefix):
+                    ids_to_delete.append(chunk_id)
+
+            fetched_count = len(chunk_ids)
+            offset += fetched_count
+            if fetched_count < page_size:
+                break
 
         count = len(ids_to_delete)
         if count == 0:
             return 0
 
-        for offset in range(0, count, self._BATCH_SIZE):
-            batch = ids_to_delete[offset : offset + self._BATCH_SIZE]
+        for batch_offset in range(0, count, self._BATCH_SIZE):
+            batch = ids_to_delete[batch_offset : batch_offset + self._BATCH_SIZE]
             await asyncio.to_thread(
                 self._collection.delete,
                 ids=batch,
