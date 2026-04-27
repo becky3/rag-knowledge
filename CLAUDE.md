@@ -29,7 +29,9 @@ YouTube インジェスター等は Fake モード基盤（`docs/specs/infrastru
 - `WARNING: [FAKE MODE] YouTube は FAKE モードで起動中（fixture: ...）` → fake モード（実 YouTube アクセス発生せず）
 - `INFO: YouTube は REAL モードで起動中` → real モード（実 YouTube API アクセスあり）
 
-`.env` の `RAG_YOUTUBE_FAKE_MODE` が未設定の場合は安全側のデフォルト（fake 有効）で起動する。本番運用時のみ `RAG_YOUTUBE_FAKE_MODE=false` を `.env` に明示する必要がある。MCP ツール `rag_add_youtube` / `rag_crawl_youtube` の応答冒頭に `[FAKE MODE]` ラベルが付与される場合、fake モードで動作している。
+`.env` の `RAG_YOUTUBE_FAKE_MODE` が未設定の場合は安全側のデフォルト（fake 有効）で起動する。
+本番運用時のみ `RAG_YOUTUBE_FAKE_MODE=false` を `.env` に明示する必要がある。
+MCP ツール `rag_add_youtube` / `rag_crawl_youtube` の応答冒頭に `[FAKE MODE]` ラベルが付与される場合、fake モードで動作している。
 
 ### MCP サーバーと他プロセスの共存
 

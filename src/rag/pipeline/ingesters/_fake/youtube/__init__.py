@@ -68,10 +68,10 @@ class FakeYoutubeFetcher:
     async def fetch_metadata(
         self, video_id: str, request_timeout: int
     ) -> dict[str, Any]:
-        if self._custom_metadata is not None:
-            return dict(self._custom_metadata)
         if self._scenario == "metadata_error":
             raise RuntimeError(f"Fake metadata error for {video_id}")
+        if self._custom_metadata is not None:
+            return dict(self._custom_metadata)
         if self._scenario == "duration_exceeded":
             data: dict[str, Any] = self._load_json("metadata_duration_exceeded.json")
             return {**data, "id": video_id}

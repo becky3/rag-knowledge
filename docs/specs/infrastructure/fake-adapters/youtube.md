@@ -46,7 +46,10 @@ YouTube インジェスターの外部アクセス処理を以下のメソッド
 
 戻り値の dict 構造の詳細フィールドは [YouTube インジェスター](../../ingesters/youtube.md) の「保存形式」セクション・既存実装の `_make_metadata()` テストヘルパーを参照（コード SSoT）。
 
-**Fetcher Protocol の境界性**: `YoutubeFetcher` Protocol は外部ライブラリ（yt-dlp 等）との境界に位置する。Real Fetcher の戻り値はライブラリの戻り値（`extract_info` の info_dict 等）をそのまま返す形を取り、Fake Fetcher も同形式の dict を返す。`dict[str, Any]` の使用が許容されるのは coding-standards.md の「`dict[str, Any]` は外部との境界での受信直後にのみ許容」ルールに該当する。インジェスター本体側は dict から必要な情報を取り出す責務を持ち、`dict[str, Any]` の越境は本 Protocol の境界で完結する。
+**Fetcher Protocol の境界性**: `YoutubeFetcher` Protocol は外部ライブラリ（yt-dlp 等）との境界に位置する。
+Real Fetcher の戻り値はライブラリの戻り値（`extract_info` の info_dict 等）をそのまま返す形を取り、Fake Fetcher も同形式の dict を返す。
+`dict[str, Any]` の使用が許容されるのは coding-standards.md の「`dict[str, Any]` は外部との境界での受信直後にのみ許容」ルールに該当する。
+インジェスター本体側は dict から必要な情報を取り出す責務を持ち、`dict[str, Any]` の越境は本 Protocol の境界で完結する。
 
 ### FakeYoutubeFetcher のシナリオ切替
 
@@ -143,7 +146,11 @@ JSON のフィールド構造は対応する Real Fetcher の戻り値と同じ�
 - 必須（required）: コーディング規約のフォールバック禁止に従い、デフォルト値を持たない
 - インジェスター本体（`ingest_video` / `crawl_playlist`）は `_fetch_metadata` 等の private メソッドを廃止し、Fetcher Protocol 経由で呼び出す
 - 既存の `_fetch_metadata` / `_fetch_transcript` / `_fetch_subtitle` / `_transcribe_with_whisper` / `_download_audio` / `_expand_playlist` メソッドは `RealYoutubeFetcher` に移植する（既存ロジックの単純な再配置）
-- **ハードリミット定数の所属**: 既存の `MAX_VIDEOS_HARD_LIMIT` / `MIN_REQUEST_INTERVAL` / `MAX_AUDIO_FILE_SIZE_MB` / `JITTER_MIN_RATIO` / `CIRCUIT_BREAKER_THRESHOLD` 等の定数は、本プロジェクトの既存慣例（モジュールトップレベル定数 + `# ハードリミット` コメント）に従い、インジェスター本体モジュール（`youtube.py`）のトップレベルに残す。Real Fetcher / Fake Fetcher は必要に応じてこれらを import して参照する。安全制約の種別は agent-commons の安全性ガイド `~/.claude/docs/specs/safety-guide.md` §2.5 の「ハードリミット」に該当する。記載パターンの規約化は別 Issue（becky3/agent-commons #275）で追跡する
+- **ハードリミット定数の所属**: 既存の `MAX_VIDEOS_HARD_LIMIT` / `MIN_REQUEST_INTERVAL` / `MAX_AUDIO_FILE_SIZE_MB` / `JITTER_MIN_RATIO` / `CIRCUIT_BREAKER_THRESHOLD` 等の定数は、
+  本プロジェクトの既存慣例（モジュールトップレベル定数 + `# ハードリミット` コメント）に従い、インジェスター本体モジュール（`youtube.py`）のトップレベルに残す。
+  Real Fetcher / Fake Fetcher は必要に応じてこれらを import して参照する。
+  安全制約の種別は agent-commons の安全性ガイド `~/.claude/docs/specs/safety-guide.md` §2.5 の「ハードリミット」に該当する。
+  記載パターンの規約化は別 Issue（becky3/agent-commons #275）で追跡する
 
 ### CLI / MCP からの利用
 

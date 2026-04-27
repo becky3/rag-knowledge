@@ -22,14 +22,12 @@ import threading
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Protocol
 
+from rag.pipeline.ingesters.youtube import MAX_AUDIO_FILE_SIZE_MB
+
 if TYPE_CHECKING:
     from rag.config import RAGSettings
 
 logger = logging.getLogger(__name__)
-
-# ハードリミット: Whisper 処理時の音声ファイルサイズ上限
-# 動画長上限と相補的にストレージ・処理コストを抑制する
-MAX_AUDIO_FILE_SIZE_MB = 500
 
 
 class YoutubeFetcher(Protocol):

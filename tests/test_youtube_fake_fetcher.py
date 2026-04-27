@@ -197,7 +197,8 @@ class TestFakeFixtureDirRequired:
 class TestContractWithReference:
     """実 YouTube レスポンス参照サンプルとの構造的等価性検証.
 
-    キーの存在のみを比較対象とし、値の実態（具体値）は検証しない。
+    キーの存在と型を比較対象とする（fake-adapters/youtube.md の契約検証スコープに準拠）。
+    値の実態（具体的な ID 文字列等）は検証対象外。
     """
 
     @pytest.mark.asyncio()
@@ -215,4 +216,30 @@ class TestContractWithReference:
         assert not unexpected, (
             f"Fake fetcher が参照サンプルにないキーを返しています: {unexpected}。"
             f"参照サンプルを更新するか fake データから該当キーを削除してください"
+        )
+
+    @pytest.mark.asyncio()
+    async def test_metadata_value_types_match_reference(self) -> None:
+        """fake metadata の各キーの値の型が参照サンプルと一致する（具体値は検証しない）."""
+        ref = json.loads((_REFERENCE_DIR / "metadata_real_sample.json").read_text(encoding="utf-8"))
+        ref_filtered = {k: v for k, v in ref.items() if k != "_comment"}
+
+        fetcher = _make_fake(scenario="happy")
+        meta = await fetcher.fetch_metadata("TestVideo01", 30)
+
+        # fake が返すキーごとに参照サンプルの型と一致することを確認
+        type_mismatches: list[str] = []
+        for key, fake_value in meta.items():
+            if key not in ref_filtered:
+                continue
+            ref_value = ref_filtered[key]
+            # None は許容（参照サンプルが None 値を持ち得るが fake は具体値を返すケースなど）
+            if fake_value is None or ref_value is None:
+                continue
+            if type(fake_value) is not type(ref_value):
+                type_mismatches.append(
+                    f"{key}: fake={type(fake_value).__name__} ref={type(ref_value).__name__}"
+                )
+        assert not type_mismatches, (
+            "Fake fetcher の値の型が参照サンプルと不一致: " + ", ".join(type_mismatches)
         )

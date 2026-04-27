@@ -33,6 +33,8 @@ MAX_VIDEOS_HARD_LIMIT = 500
 MIN_REQUEST_INTERVAL = 0.1
 JITTER_MIN_RATIO = 0.3
 CIRCUIT_BREAKER_THRESHOLD = 5
+# Whisper 処理時の音声ファイルサイズ上限（動画長上限と相補的にストレージ・処理コストを抑制）
+MAX_AUDIO_FILE_SIZE_MB = 500
 
 # video_id の正規表現
 _VIDEO_ID_RE = re.compile(r"^[A-Za-z0-9_-]{11}$")
