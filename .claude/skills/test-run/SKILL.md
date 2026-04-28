@@ -160,7 +160,7 @@ diff モードでは変更された `*.sh` ファイルのみを対象にする�
 - 具体的な修正案（ファイルパス、行番号、修正コード）
 - 修正の優先度（Critical/Warning/Suggestion）
 
-`~/.claude/rules/quality-gate.md`「問題スキップ禁止」に従うこと。
+`~/.claude/rules/quality-gate.md`「問題の取扱い決定禁止」に従うこと。
 
 ### 10. 修正適用と再実行
 
