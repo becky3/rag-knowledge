@@ -323,8 +323,8 @@ L1・L2 は CI で自動実行される。L3 のみ手動実施（`/qa` スキ�
 uv run pytest
 uv run pytest -n0      # シングルプロセスで実行（デバッグ時）
 
-# L2 Mock E2E（明示実行）
-uv run pytest tests/e2e/ -m e2e
+# L2 Mock E2E（明示実行、subprocess 動的ポート競合回避のためシングルプロセス）
+uv run pytest tests/e2e/ -m e2e -n0
 
 # 全 lint/型チェック
 uv run ruff check .

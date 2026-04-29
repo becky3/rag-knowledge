@@ -52,6 +52,8 @@ jobs:
         # tests/e2e/conftest.py の e2e_subprocess_env fixture が SSoT として
         # 完全カバーする。CI yml で env を再設定すると二重管理になるため設定しない。
         # PYTHON_KEYRING_BACKEND は前ステップで登録した keyring を読み出すために必要。
+        # -n0 は subprocess 起動時の動的ポート確保 TOCTOU race による flaky 化を防ぐため
+        # シングルプロセス実行を強制する（pyproject.toml の addopts は -n auto がデフォルト）。
         env:
           PYTHON_KEYRING_BACKEND: keyrings.alt.file.PlaintextKeyring
-        run: uv run pytest tests/e2e/ -m e2e
+        run: uv run pytest tests/e2e/ -m e2e -n0

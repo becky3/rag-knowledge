@@ -23,7 +23,7 @@ Fake Adapter の対象は 2 系統に分類される:
 - 個別 source_type の Fake Adapter の実装詳細（[fake-adapters/](fake-adapters/) 配下の個別仕様書で扱う）
 - ChromaDB / SQLite 等の永続化層の fake 化
 - Vision モデルの fake 化（メディア解析テスト等は別途扱う）
-- MCP server / CLI subprocess を含む End-to-End テスト基盤（[Issue #692](https://github.com/becky3/rag-knowledge/issues/692) で別途扱う。本仕様の Fake Adapter を再利用する）
+- 個別の L2 Mock E2E テストの実装詳細（subprocess 越境注入の構成・テスト分類・CI 統合方針は [QA 戦略](../workflows/qa-strategy.md) で定義する。本仕様の Fake Adapter を L2 Mock E2E で再利用する）
 
 ## 背景
 
