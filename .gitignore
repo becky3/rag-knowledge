@@ -227,3 +227,4 @@ scheduled_tasks.lock
 aidlc-archive/
 .pr-creation-authorized
 .claude/scheduled_tasks.lock
+aidlc-docs/

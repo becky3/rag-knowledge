@@ -23,3 +23,37 @@ jobs:
       lint_command: "uv run ruff check src/ tests/"
       typecheck_command: "uv run mypy src/"
       markdownlint: true
+
+  e2e-test:
+    # 仕様: docs/specs/infrastructure/fake-mode.md
+    # subprocess 越境 Mock E2E テスト。Fake モード（Embedding / YouTube 等）で動作するため
+    # CUDA / MinerU は不要。Quality Check (job: quality) と並列実行し、失敗時は workflow 全体が失敗する。
+    name: E2E (Mock)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          python-version: "3.11"
+      - name: Install dependencies (CPU only)
+        run: uv sync --no-group with-mineru
+      - name: Setup keyring with fake API key (CI-only)
+        # CI Linux 環境には keyring backend が無いため、keyrings.alt のファイルバックエンドを
+        # インストールし、MCP server (HTTP モード) が起動時に必須とする UPLOAD_API_KEY を
+        # 登録する。本番運用では OS のセキュアストレージを使用するため、本ステップは CI 専用。
+        env:
+          PYTHON_KEYRING_BACKEND: keyrings.alt.file.PlaintextKeyring
+        run: |
+          uv pip install keyrings.alt
+          uv run python -c "import keyring; keyring.set_password('rag-knowledge', 'UPLOAD_API_KEY', 'e2e-fake-upload-api-key-not-for-production')"
+      - name: Run E2E tests
+        # Fake モード強制は tests/conftest.py の autouse fixture と
+        # tests/e2e/conftest.py の e2e_subprocess_env fixture が SSoT として
+        # 完全カバーする。CI yml で env を再設定すると二重管理になるため設定しない。
+        # PYTHON_KEYRING_BACKEND は前ステップで登録した keyring を読み出すために必要。
+        # -n0 は subprocess 起動時の動的ポート確保 TOCTOU race による flaky 化を防ぐため
+        # シングルプロセス実行を強制する（pyproject.toml の addopts は -n auto がデフォルト）。
+        env:
+          PYTHON_KEYRING_BACKEND: keyrings.alt.file.PlaintextKeyring
+        run: uv run pytest tests/e2e/ -m e2e -n0

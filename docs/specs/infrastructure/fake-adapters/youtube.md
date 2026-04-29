@@ -234,8 +234,8 @@ QA スキルで実 YouTube アクセスなしで通すべき検証項目:
 2. **rag_crawl_bluesky** で YouTube URL を含む BlueSky 投稿を取り込み → YouTube インジェスターへの委譲確認（Issue #679 の URL パターン追加分の結合 QA）
 3. 不正 video_id を含む URL（例: `?v=`、`youtu.be/short`）の `rag_crawl_bluesky` 取り込み時に `errors` カウンタが増加し、site_ingest に流れていないこと
 4. 既存パターン（`?v=`, `youtu.be/`）の回帰確認
-5. MCP 応答冒頭に `[FAKE MODE]` ラベルが付与されていること
-6. 起動ログに「YouTube は FAKE モードで起動中」が出力されていること
+5. MCP 応答冒頭に `[FAKE MODE: youtube]` ラベルが付与されていること（Embedding fake も同時有効なら `[FAKE MODE: embedding]` も並列出力される）
+6. 起動ログに `[FAKE MODE: youtube] YouTube は FAKE モードで起動中` が出力されていること
 
 QA 結果はジャーナル または Issue コメントに記録する。
 
