@@ -12,6 +12,12 @@ argument-hint: ""
 
 各検証ステップの実行は `/qa-execute` スキル（`.claude/skills/qa-execute/SKILL.md`）に委譲する。プロダクトコマンドの直接実行・共通検証フローの省略は禁止（ホワイトリストに定義された環境確認・準備・片付けは例外）。
 
+## 実施タイミング基準
+
+`/qa` スキルは「L3 本番相当 QA」を実行するための手段であり、L1 Unit Test（pytest 単体）・L2 Mock E2E（pytest e2e marker）が PR ごとの regression 検出を担うため、本スキルは本番相当検証として頻度を落として実施する。
+
+実施有無の判定基準（必須 / 推奨 / 不要）は [QA 戦略](../../../docs/specs/workflows/qa-strategy.md#l3-実施タイミング基準) が SSoT である。本スキルを呼び出す前に必ず参照すること。
+
 ## 処理手順
 
 ### 1. グループ選択

@@ -29,6 +29,14 @@ def get_embedding_provider(
     Returns:
         対応するEmbeddingプロバイダー
     """
+    # fake_mode の判定を provider_setting (local/online) より先に行う。
+    # これによりテスト・CI で OPENAI_API_KEY 未登録環境でも provider_setting="online"
+    # が指定されたときに実 OpenAI へ向かわず Fake が選択される。
+    # 仕様: docs/specs/infrastructure/fake-mode.md
+    if settings.rag_embedding_fake_mode:
+        from ._fake import FakeEmbedding
+
+        return FakeEmbedding(dimensions=settings.rag_embedding_fake_dimensions)
     if provider_setting == "online":
         try:
             api_key = get_secret("OPENAI_API_KEY", service=_SERVICE_NAME)

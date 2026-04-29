@@ -70,10 +70,11 @@ warn_unused_ignores = false
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
-addopts = "-n auto -m 'not slow'"
+addopts = "-n auto -m 'not slow and not e2e'"
 required_plugins = ["pytest-xdist"]
 markers = [
     "slow: E2E テストや長時間テスト。デフォルトの pytest 実行では skip され、明示的に -m slow で実行する",
+    "e2e: subprocess 越境 Mock E2E テスト（tests/e2e/）。デフォルトの pytest 実行では skip され、CI および明示的に -m e2e で実行する。仕様: docs/specs/workflows/qa-strategy.md",
 ]
 
 [tool.uv]

@@ -308,9 +308,25 @@ uv run python -m rag.cli evaluate \
 
 ## テスト
 
+QA は 3 レイヤーで構成される（詳細は [QA 戦略](docs/specs/workflows/qa-strategy.md)）:
+
+| Layer | 目的 | 実装 | 頻度 |
+|---|---|---|---|
+| L1 Unit Test | 関数・クラス単位の論理検証 | pytest | PR ごと CI |
+| L2 Mock E2E | パイプライン全体の regression 検出（subprocess 越境 mock 注入）| pytest + e2e marker | PR ごと CI |
+| L3 本番相当 QA | 実 LM Studio・実 ChromaDB・実外部 API 接続による検証 | `/qa` スキル（人間実施） | 設定変更 / 新インジェスター追加 / Fake Adapter 変更 等 |
+
+L1・L2 は CI で自動実行される。L3 のみ手動実施（`/qa` スキルで実施手順を提供。詳細は [QA 戦略](docs/specs/workflows/qa-strategy.md) を参照）。
+
 ```bash
-uv run pytest          # pytest-xdist で自動並列実行（-n auto）
+# L1 Unit Test（デフォルトで e2e を除外、pytest-xdist で自動並列）
+uv run pytest
 uv run pytest -n0      # シングルプロセスで実行（デバッグ時）
+
+# L2 Mock E2E（明示実行）
+uv run pytest tests/e2e/ -m e2e
+
+# 全 lint/型チェック
 uv run ruff check .
 uv run mypy src
 ```
@@ -371,6 +387,7 @@ git-flow ベースのブランチ戦略を採用。詳細は `~/.claude/docs/spe
 - [メディア解析](docs/specs/infrastructure/media-analysis.md)
 - [Fake モード基盤](docs/specs/infrastructure/fake-mode.md)
 - [YouTube Fake Adapter](docs/specs/infrastructure/fake-adapters/youtube.md)
+- [QA 戦略](docs/specs/workflows/qa-strategy.md)
 
 ### インジェスター仕様
 

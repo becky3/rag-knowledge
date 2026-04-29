@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import os
 import sys
+from collections.abc import Iterator
 from pathlib import Path
 from typing import Any
 
@@ -46,6 +47,40 @@ class _RaiseOnUse:
 
     def __getattr__(self, name: str) -> Any:
         raise RuntimeError(_RaiseOnUse._hint)
+
+
+@pytest.fixture(autouse=True, scope="session")
+def _force_embedding_fake_mode() -> Iterator[None]:
+    """テスト中は Embedding Fake モードを環境変数で強制する.
+
+    仕様: docs/specs/infrastructure/fake-mode.md
+
+    factory.get_embedding_provider が pydantic Settings 経由で
+    `RAG_EMBEDDING_FAKE_MODE=true` を読み込むため、ここで環境変数に
+    明示設定する。subprocess 越境テスト（e2e）でも同じ環境変数を引き継ぐ。
+    `RAG_TESTS_ALLOW_NETWORK=1` 設定時のみ強制を解除する。
+
+    AsyncOpenAI クライアントクラス自体を `_RaiseOnUse` に差し替える方式は
+    採用しない。Embedding 以外の用途で OpenAI クライアントを使う将来コードを
+    誤爆させるリスクがあるため、`.env` + DI ファクトリ経由で Fake を選択させる
+    本機構（production fake モードと同じ経路）に揃える。
+
+    pytest.MonkeyPatch.context() で session 終了時に環境変数を確実に元に戻す。
+    生 os.environ 書き換えだと session 跨ぎや test runner 並用時に副作用が残る。
+
+    個別テストで Real Embedding を要求する場合は、環境変数を上書きするのではなく
+    Settings インスタンスを直接構築して `rag_embedding_fake_mode=False` を渡す
+    パターンを使う:
+
+        settings = Settings(**{**TEST_SETTINGS_DEFAULTS, "rag_embedding_fake_mode": False})
+        provider = get_embedding_provider(settings, "local")
+    """
+    if os.environ.get("RAG_TESTS_ALLOW_NETWORK") == "1":
+        yield
+        return
+    with pytest.MonkeyPatch.context() as mp:
+        mp.setenv("RAG_EMBEDDING_FAKE_MODE", "true")
+        yield
 
 
 @pytest.fixture(autouse=True, scope="session")

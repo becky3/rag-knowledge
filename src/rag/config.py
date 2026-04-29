@@ -90,6 +90,11 @@ class _EnvLoader(BaseSettings):
     # Fake Fetcher が読み込む fixture ディレクトリ。プロジェクトルートからの相対パス
     rag_youtube_fake_fixture_dir: str = "src/rag/pipeline/ingesters/_fake/youtube/data"
 
+    # Embedding Fake モード — テスト・CI で LM Studio / OpenAI への実 Embedding アクセスを排除する。デフォルトは安全側（fake 有効）
+    rag_embedding_fake_mode: bool = True
+    # Fake Embedding が生成するベクトルの次元数。Real モデルの次元に合わせる
+    rag_embedding_fake_dimensions: int = Field(default=768, ge=1)
+
     # サイト一括取り込み一時ディレクトリ（Scrapy クロール結果の一時保管）
     site_ingest_temp_dir: str = ".tmp/site_ingest"
 
@@ -138,6 +143,10 @@ class RAGSettings(BaseModel):
     rag_youtube_fake_mode: bool
     # Fake Fetcher が読み込む fixture ディレクトリ
     rag_youtube_fake_fixture_dir: str
+    # Embedding Fake モード切替。デフォルト fake（安全側）、本番運用時のみ false を .env で明示
+    rag_embedding_fake_mode: bool
+    # Fake Embedding が生成するベクトルの次元数
+    rag_embedding_fake_dimensions: int = Field(ge=1)
     site_ingest_temp_dir: str
     rag_embedding_concurrency: int = Field(ge=1)
 
@@ -360,7 +369,7 @@ def log_fake_mode_status(settings: RAGSettings) -> None:
     logger = logging.getLogger("rag.config")
     if settings.rag_youtube_fake_mode:
         logger.warning(
-            "[FAKE MODE] YouTube は FAKE モードで起動中（fixture: %s）。"
+            "[FAKE MODE: youtube] YouTube は FAKE モードで起動中（fixture: %s）。"
             "実 YouTube アクセスは発生しません。"
             "本番運用時は RAG_YOUTUBE_FAKE_MODE=false を .env に設定してください",
             settings.rag_youtube_fake_fixture_dir,
@@ -368,6 +377,18 @@ def log_fake_mode_status(settings: RAGSettings) -> None:
     else:
         logger.info(
             "YouTube は REAL モードで起動中。実 YouTube アクセスが発生します"
+        )
+
+    if settings.rag_embedding_fake_mode:
+        logger.warning(
+            "[FAKE MODE: embedding] Embedding は FAKE モードで起動中（dimensions: %d）。"
+            "実 Embedding API アクセスは発生せず、決定論的な固定ベクトルを返します。"
+            "本番運用時は RAG_EMBEDDING_FAKE_MODE=false を .env に設定してください",
+            settings.rag_embedding_fake_dimensions,
+        )
+    else:
+        logger.info(
+            "Embedding は REAL モードで起動中。実 Embedding API アクセスが発生します"
         )
 
 

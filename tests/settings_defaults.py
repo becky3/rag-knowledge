@@ -68,6 +68,9 @@ TEST_SETTINGS_DEFAULTS: dict[str, object] = {
     # YouTube Fake モード（テストでは fake デフォルト）
     "rag_youtube_fake_mode": True,
     "rag_youtube_fake_fixture_dir": "src/rag/pipeline/ingesters/_fake/youtube/data",
+    # Embedding Fake モード（テストでは fake デフォルト）
+    "rag_embedding_fake_mode": True,
+    "rag_embedding_fake_dimensions": 768,
     "rag_youtube_max_videos": 100,
     "rag_youtube_request_interval": 30.0,
     "rag_youtube_request_timeout": 30,

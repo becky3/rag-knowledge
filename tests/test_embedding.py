@@ -117,16 +117,20 @@ async def test_openai_embedding_is_available() -> None:
     assert await provider_without_key.is_available() is False
 
 
+# Real Embedding ファクトリ動作を検証するテストは fake_mode=False で override する
+_REAL_EMBEDDING_DEFAULTS = {**TEST_SETTINGS_DEFAULTS, "rag_embedding_fake_mode": False}
+
+
 def test_factory_returns_correct_provider_local() -> None:
     """AC4: get_embedding_provider() が 'local' 設定で LMStudioEmbedding を返すこと."""
-    settings = Settings(**TEST_SETTINGS_DEFAULTS)
+    settings = Settings(**_REAL_EMBEDDING_DEFAULTS)
     provider = get_embedding_provider(settings, "local")
     assert isinstance(provider, LMStudioEmbedding)
 
 
 def test_factory_returns_correct_provider_online() -> None:
     """AC4: get_embedding_provider() が 'online' 設定で OpenAIEmbedding を返すこと."""
-    settings = Settings(**TEST_SETTINGS_DEFAULTS)
+    settings = Settings(**_REAL_EMBEDDING_DEFAULTS)
     with patch("rag.embedding.factory.get_secret", return_value="sk-test"):
         provider = get_embedding_provider(settings, "online")
     assert isinstance(provider, OpenAIEmbedding)
@@ -134,7 +138,7 @@ def test_factory_returns_correct_provider_online() -> None:
 
 def test_factory_raises_on_missing_api_key() -> None:
     """OPENAI_API_KEY 未登録時に ValueError を送出すること."""
-    settings = Settings(**TEST_SETTINGS_DEFAULTS)
+    settings = Settings(**_REAL_EMBEDDING_DEFAULTS)
     with patch(
         "rag.embedding.factory.get_secret",
         side_effect=SecretNotFoundError("not found"),
@@ -145,7 +149,7 @@ def test_factory_raises_on_missing_api_key() -> None:
 
 def test_factory_raises_on_empty_api_key() -> None:
     """OPENAI_API_KEY が空文字列の場合に ValueError を送出すること."""
-    settings = Settings(**TEST_SETTINGS_DEFAULTS)
+    settings = Settings(**_REAL_EMBEDDING_DEFAULTS)
     with patch("rag.embedding.factory.get_secret", return_value=""):
         with pytest.raises(ValueError, match="empty"):
             get_embedding_provider(settings, "online")
@@ -153,7 +157,7 @@ def test_factory_raises_on_empty_api_key() -> None:
 
 def test_factory_uses_settings_model_local() -> None:
     """AC4: ファクトリが Settings の embedding_model_local を使用すること."""
-    settings = Settings(**TEST_SETTINGS_DEFAULTS)
+    settings = Settings(**_REAL_EMBEDDING_DEFAULTS)
     provider = get_embedding_provider(settings, "local")
     assert isinstance(provider, LMStudioEmbedding)
     assert provider._model == settings.embedding_model_local
@@ -161,7 +165,7 @@ def test_factory_uses_settings_model_local() -> None:
 
 def test_factory_uses_settings_model_online() -> None:
     """AC4: ファクトリが Settings の embedding_model_online を使用すること."""
-    settings = Settings(**{**TEST_SETTINGS_DEFAULTS, "embedding_model_online": "text-embedding-3-large"})
+    settings = Settings(**{**_REAL_EMBEDDING_DEFAULTS, "embedding_model_online": "text-embedding-3-large"})
     with patch("rag.embedding.factory.get_secret", return_value="sk-test"):
         provider = get_embedding_provider(settings, "online")
     assert isinstance(provider, OpenAIEmbedding)
@@ -356,7 +360,7 @@ def test_embedding_prefix_enabled_setting_configurable() -> None:
 
 def test_factory_passes_prefix_enabled() -> None:
     """ファクトリが prefix_enabled を LMStudioEmbedding に渡すこと."""
-    settings = Settings(**{**TEST_SETTINGS_DEFAULTS, "embedding_prefix_enabled": True})
+    settings = Settings(**{**_REAL_EMBEDDING_DEFAULTS, "embedding_prefix_enabled": True})
     provider = get_embedding_provider(settings, "local")
     assert isinstance(provider, LMStudioEmbedding)
     assert provider._prefix_enabled is True
@@ -364,7 +368,7 @@ def test_factory_passes_prefix_enabled() -> None:
 
 def test_factory_passes_prefix_enabled_by_default() -> None:
     """ファクトリがデフォルトで prefix_enabled=True を渡すこと."""
-    settings = Settings(**TEST_SETTINGS_DEFAULTS)
+    settings = Settings(**_REAL_EMBEDDING_DEFAULTS)
     provider = get_embedding_provider(settings, "local")
     assert isinstance(provider, LMStudioEmbedding)
     assert provider._prefix_enabled is True
@@ -487,7 +491,7 @@ async def test_embed_no_retry_when_retry_count_zero() -> None:
 def test_factory_passes_retry_settings() -> None:
     """ファクトリがリトライ設定を LMStudioEmbedding に渡すこと."""
     settings = Settings(**{
-        **TEST_SETTINGS_DEFAULTS,
+        **_REAL_EMBEDDING_DEFAULTS,
         "rag_embedding_retry_count": 5,
         "rag_embedding_retry_base_delay": 2.0,
     })

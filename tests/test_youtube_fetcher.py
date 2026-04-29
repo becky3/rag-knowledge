@@ -56,17 +56,21 @@ class TestLogFakeModeStatus:
         with caplog.at_level(logging.WARNING, logger="rag.config"):
             log_fake_mode_status(settings)
         assert any(
-            "[FAKE MODE]" in r.message and r.levelno == logging.WARNING
+            "[FAKE MODE: youtube]" in r.message and r.levelno == logging.WARNING
             for r in caplog.records
         )
 
     def test_real_mode_emits_info(self, caplog: pytest.LogCaptureFixture) -> None:
-        settings = _make_settings(rag_youtube_fake_mode=False)
+        settings = _make_settings(
+            rag_youtube_fake_mode=False,
+            rag_embedding_fake_mode=False,
+        )
         with caplog.at_level(logging.INFO, logger="rag.config"):
             log_fake_mode_status(settings)
         records = [r for r in caplog.records if r.name == "rag.config"]
         assert any(
-            "REAL モード" in r.message and r.levelno == logging.INFO
+            "YouTube は REAL モードで起動中" in r.message
+            and r.levelno == logging.INFO
             for r in records
         )
-        assert not any("[FAKE MODE]" in r.message for r in records)
+        assert not any("[FAKE MODE:" in r.message for r in records)

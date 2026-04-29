@@ -36,7 +36,7 @@ import re
 import sys
 from datetime import datetime
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
 # ChromaDB テレメトリを無効化（import 前に設定する必要がある）
 os.environ.setdefault("ANONYMIZED_TELEMETRY", "False")
@@ -396,12 +396,51 @@ async def rag_add_bluesky(
         return "エラー: BlueSky 投稿の取り込みに失敗しました"
 
 
-def _youtube_fake_label() -> str:
+FakeSource = Literal["youtube", "embedding"]
+
+# YouTube インジェスト系 MCP ツールが利用する fake source の組
+_YOUTUBE_INGEST_FAKE_SOURCES: list[FakeSource] = ["youtube", "embedding"]
+
+
+def _fake_mode_labels(active_sources: list[FakeSource]) -> str:
     """fake モード時の応答ラベル（先頭に付与する）.
 
     仕様: docs/specs/infrastructure/fake-mode.md
+
+    呼び出し側は MCP ツールが利用する fake source 名を明示的に渡す。
+    fake モードは複数 source（youtube / embedding 等）で独立に切替可能なため、
+    ラベルは「何の」fake かを応答受信者が即座に判別できる必要がある。
+    そのため source ごとのラベルを改行で並列出力する形を採用する。
+
+    Args:
+        active_sources: ラベル付与対象とする fake source 名（例: ["youtube", "embedding"]）。
+            並列の複数 source を指定可能。各 source のうち fake モードが有効なもののみ
+            "[FAKE MODE: <source>]\n" 形式で連結して返す。
+            未知の source 名が含まれた場合は ValueError を発生させる（mypy で事前検出
+            可能だが、ランタイムガードも併設して未知 source の暗黙無視を防ぐ）。
+
+    Returns:
+        ラベル文字列（fake が 1 つも有効でなければ空文字列）。
+
+    Raises:
+        ValueError: active_sources に未知の source 名が含まれている場合。
     """
-    return "[FAKE MODE] " if get_settings().rag_youtube_fake_mode else ""
+    settings = get_settings()
+    flags: dict[FakeSource, bool] = {
+        "youtube": settings.rag_youtube_fake_mode,
+        "embedding": settings.rag_embedding_fake_mode,
+    }
+    parts: list[str] = []
+    for source in active_sources:
+        if source not in flags:
+            raise ValueError(
+                f"未知の fake source 名: {source!r}. 既知の source: {sorted(flags.keys())}"
+            )
+        if flags[source]:
+            parts.append(f"[FAKE MODE: {source}]")
+    if not parts:
+        return ""
+    return "\n".join(parts) + "\n"
 
 
 @mcp.tool()
@@ -420,7 +459,7 @@ async def rag_add_youtube(
     Returns:
         取り込み結果のサマリーテキスト
     """
-    label = _youtube_fake_label()
+    label = _fake_mode_labels(_YOUTUBE_INGEST_FAKE_SOURCES)
     try:
         result = await _run_cli_subprocess("ingest-youtube", [video_url], ctx=ctx)
         return label + _format_cli_ingest_result(result, context=f"動画: {video_url}")
@@ -455,7 +494,7 @@ async def rag_crawl_youtube(
     if max_videos is not None:
         args.extend(["--max-videos", str(max_videos)])
 
-    label = _youtube_fake_label()
+    label = _fake_mode_labels(_YOUTUBE_INGEST_FAKE_SOURCES)
     try:
         result = await _run_cli_subprocess("ingest-youtube-playlist", args, ctx=ctx)
         return label + _format_cli_ingest_result(result, context=f"プレイリスト: {playlist_url}")
