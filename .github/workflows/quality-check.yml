@@ -38,8 +38,20 @@ jobs:
           python-version: "3.11"
       - name: Install dependencies (CPU only)
         run: uv sync --no-group with-mineru
+      - name: Setup keyring with fake API key (CI-only)
+        # CI Linux 環境には keyring backend が無いため、keyrings.alt のファイルバックエンドを
+        # インストールし、MCP server (HTTP モード) が起動時に必須とする UPLOAD_API_KEY を
+        # 登録する。本番運用では OS のセキュアストレージを使用するため、本ステップは CI 専用。
+        env:
+          PYTHON_KEYRING_BACKEND: keyrings.alt.file.PlaintextKeyring
+        run: |
+          uv pip install keyrings.alt
+          uv run python -c "import keyring; keyring.set_password('rag-knowledge', 'UPLOAD_API_KEY', 'e2e-fake-upload-api-key-not-for-production')"
       - name: Run E2E tests
         # Fake モード強制は tests/conftest.py の autouse fixture と
         # tests/e2e/conftest.py の e2e_subprocess_env fixture が SSoT として
         # 完全カバーする。CI yml で env を再設定すると二重管理になるため設定しない。
+        # PYTHON_KEYRING_BACKEND は前ステップで登録した keyring を読み出すために必要。
+        env:
+          PYTHON_KEYRING_BACKEND: keyrings.alt.file.PlaintextKeyring
         run: uv run pytest tests/e2e/ -m e2e
