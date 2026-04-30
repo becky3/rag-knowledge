@@ -38,7 +38,7 @@ logger = logging.getLogger(__name__)
 
 # .meta を持たない媒体（source_store が SSoT）
 # enums.yml の `source_type.has_meta=false` から導出する。
-NO_META_TYPES: frozenset[SourceType] = source_types_without_meta()  # type: ignore[assignment]
+NO_META_TYPES: frozenset[SourceType] = source_types_without_meta()
 
 # source_type 値の集合: SourceType Literal から導出する
 # （SourceType Literal 自体は CI で _schema/enums.yml と同期検証されるため二重管理にならない）
