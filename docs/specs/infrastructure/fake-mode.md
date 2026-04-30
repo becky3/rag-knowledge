@@ -169,6 +169,16 @@ Embedding 層は外部の LM Studio / OpenAI API への HTTP 通信を伴うた�
 - **個別テストの上書き**: Real Embedding を要求する個別テストは `monkeypatch.setenv("RAG_EMBEDDING_FAKE_MODE", "false")` で上書きできる
 - インジェスター系 autouse 安全網（YouTube ライブラリの `_RaiseOnUse` ブロック）とは独立して機能する
 
+#### pytest 安全網（BlueSky 層）
+
+`tests/conftest.py` の session スコープ autouse fixture（`_force_bluesky_fake_mode`）でテスト中は `RAG_BLUESKY_FAKE_MODE=true` を環境変数で強制する。
+
+- **適用範囲**: pytest プロセス内および subprocess 越境テスト（e2e）。subprocess 起動時に環境変数が引き継がれることで、子プロセス内の `create_bluesky_fetcher` / `create_bluesky_media_downloader` も Fake を選択する
+- **解除条件**: `RAG_TESTS_ALLOW_NETWORK=1` 設定時のみ強制を解除する
+- **個別テストの上書き**: Real Adapter を要求する個別テストは factory に Real を直接渡すか、Settings インスタンスに `rag_bluesky_fake_mode=False` を渡す
+- **httpx クラス全体の `_RaiseOnUse` 差し替えは採用しない**: bluesky 以外で `httpx` を使う既存コードを誤爆させるため。`.env` + DI ファクトリ経由で Fake を選択させる本機構（production fake モードと同じ経路）に揃える
+- インジェスター系 autouse 安全網（YouTube ライブラリの `_RaiseOnUse` ブロック）とは独立して機能する
+
 ## インターフェース
 
 ### 環境変数

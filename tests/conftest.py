@@ -84,6 +84,37 @@ def _force_embedding_fake_mode() -> Iterator[None]:
 
 
 @pytest.fixture(autouse=True, scope="session")
+def _force_bluesky_fake_mode() -> Iterator[None]:
+    """テスト中は BlueSky Fake モードを環境変数で強制する.
+
+    仕様: docs/specs/infrastructure/fake-mode.md
+    仕様: docs/specs/infrastructure/fake-adapters/bluesky.md
+
+    create_bluesky_fetcher / create_bluesky_media_downloader が pydantic Settings
+    経由で `RAG_BLUESKY_FAKE_MODE=true` を読み込むため、ここで環境変数に明示設定
+    する。subprocess 越境テスト（e2e）でも同じ環境変数を引き継ぐ。
+
+    `RAG_TESTS_ALLOW_NETWORK=1` 設定時のみ強制を解除する（手動の本番回帰検証等の
+    特殊用途）。
+
+    httpx クライアントクラス自体を `_RaiseOnUse` に差し替える方式は採用しない。
+    bluesky 以外の用途で httpx を使う多くの既存コードを誤爆させるため、`.env` +
+    DI ファクトリ経由で Fake を選択させる本機構（production fake モードと同じ
+    経路）に揃える。
+
+    個別テストで Real Adapter を要求する場合は、環境変数を上書きするのではなく
+    factory に Real を直接渡すか、Settings インスタンスを直接構築して
+    `rag_bluesky_fake_mode=False` を渡すパターンを使う。
+    """
+    if os.environ.get("RAG_TESTS_ALLOW_NETWORK") == "1":
+        yield
+        return
+    with pytest.MonkeyPatch.context() as mp:
+        mp.setenv("RAG_BLUESKY_FAKE_MODE", "true")
+        yield
+
+
+@pytest.fixture(autouse=True, scope="session")
 def _block_real_youtube_access() -> None:
     """YouTube 関連の外部ライブラリトップレベルクラスを _RaiseOnUse に差し替える.
 
