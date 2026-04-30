@@ -18,7 +18,7 @@ import sys
 from collections.abc import Iterator
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import TYPE_CHECKING, TypedDict
+from typing import TYPE_CHECKING, Any, TypedDict
 from urllib.parse import urldefrag
 
 from .errors import CliErrorCode
@@ -687,7 +687,14 @@ def main() -> None:
     bs_parser = subparsers.add_parser("crawl-bluesky", help="BlueSky 投稿を一括取り込み")
     bs_parser.add_argument("handle", help="BlueSky ハンドル（例: user.bsky.social）")
     bs_parser.add_argument("--max-posts", type=int, default=None, help="取得する最大投稿数")
-    bs_parser.add_argument("--include-reposts", action="store_true", default=None, help="リポストを含める")
+    # BooleanOptionalAction で --include-reposts / --no-include-reposts の双方を受け付ける。
+    # default=None は「指定なし → 設定値 (rag_bluesky_include_reposts) を使用」のセマンティクス。
+    bs_parser.add_argument(
+        "--include-reposts",
+        action=argparse.BooleanOptionalAction,
+        default=None,
+        help="リポストを含めるか（--no-include-reposts で除外）",
+    )
     bs_parser.add_argument("--force", action="store_true", default=False, help="上書き再取得モード（既存ファイルを上書き + メディア再DL）")
     _add_output_option(bs_parser)
 
@@ -2571,10 +2578,49 @@ def _create_youtube_ingester_cli(
     )
 
 
+def _build_bluesky_ingester(
+    source_store: SourceStore,
+    settings: Settings,
+    client: Any,
+    *,
+    max_posts: int,
+    include_reposts: bool,
+) -> Any:
+    """CLI 用 BlueskyIngester を factory 経由で組み立てる.
+
+    fetcher / media_downloader / youtube_classifier / youtube_delegator /
+    site_ingest_runner を Protocol 注入する。``client`` は fetcher / media_downloader
+    に内包されるため、Ingester 本体メソッドに渡す必要はない。
+    """
+    from .pipeline.ingesters.bluesky import BlueskyIngester
+    from .pipeline.ingesters.bluesky_fetcher import create_bluesky_fetcher
+    from .pipeline.ingesters.bluesky_media_downloader import (
+        create_bluesky_media_downloader,
+    )
+    from .pipeline.ingesters.youtube_protocols import (
+        create_youtube_classifier,
+        create_youtube_delegator,
+    )
+    from .pipeline.site_ingest_runner import create_site_ingest_runner
+
+    youtube_ingester = _create_youtube_ingester_cli(source_store, settings)
+
+    return BlueskyIngester(
+        source_store,
+        fetcher=create_bluesky_fetcher(settings, client),
+        media_downloader=create_bluesky_media_downloader(settings, client),
+        youtube_classifier=create_youtube_classifier(),
+        youtube_delegator=create_youtube_delegator(youtube_ingester),
+        site_ingest_runner=create_site_ingest_runner(),
+        max_posts=max_posts,
+        include_reposts=include_reposts,
+        force_youtube_reingest=settings.rag_bluesky_force_youtube_reingest,
+        youtube_request_interval=settings.rag_youtube_request_interval,
+    )
+
+
 async def run_crawl_bluesky(args: argparse.Namespace) -> None:
     """BlueSky 投稿取り込み."""
-    from .pipeline.ingesters.bluesky import BlueskyIngester
-
     from py_common_lib.httpx import ConstrainedClient  # safety:allowed
 
     json_out = _is_json_output(args)
@@ -2583,13 +2629,6 @@ async def run_crawl_bluesky(args: argparse.Namespace) -> None:
 
     max_posts = args.max_posts if args.max_posts is not None else settings.rag_bluesky_max_posts
     include_reposts = args.include_reposts if args.include_reposts is not None else settings.rag_bluesky_include_reposts
-
-    bluesky_ingester = BlueskyIngester(
-        controller.source_store,
-        appview_url=settings.rag_bluesky_appview_url,
-        max_posts=max_posts,
-        include_reposts=include_reposts,
-    )
 
     progress_cb = _output_progress if json_out else None
 
@@ -2601,6 +2640,14 @@ async def run_crawl_bluesky(args: argparse.Namespace) -> None:
                 request_timeout=settings.rag_bluesky_request_timeout,
                 request_interval=settings.rag_bluesky_request_interval,
             ) as client:
+                bluesky_ingester = _build_bluesky_ingester(
+                    controller.source_store,
+                    settings,
+                    client,
+                    max_posts=max_posts,
+                    include_reposts=include_reposts,
+                )
+
                 force = args.force
 
                 ingest_result, placed_items = await bluesky_ingester.crawl_bluesky(
@@ -2608,20 +2655,15 @@ async def run_crawl_bluesky(args: argparse.Namespace) -> None:
                     max_posts=max_posts,
                     include_reposts=include_reposts,
                     force=force,
-                    client=client,
                     progress_callback=_wrap_progress(progress_cb, PipelinePhase.FETCH.display),
                 )
 
                 # 投稿内 URL の自動取り込み
                 url_stats: dict[str, int] = {}
                 if placed_items:
-                    youtube_ingester = _create_youtube_ingester_cli(controller.source_store, settings)
                     url_stats = await bluesky_ingester.follow_urls(
                         placed_items,
-                        source_store=controller.source_store,
                         settings=settings,
-                        youtube_ingester=youtube_ingester,
-                        force_youtube_reingest=settings.rag_bluesky_force_youtube_reingest,
                         result=ingest_result,
                     )
         except (ValueError, TypeError) as e:
@@ -2703,20 +2745,11 @@ async def run_crawl_zenn(args: argparse.Namespace) -> None:
 
 async def run_ingest_bluesky(args: argparse.Namespace) -> None:
     """BlueSky 投稿取り込み（URL 指定）."""
-    from .pipeline.ingesters.bluesky import BlueskyIngester
-
     from py_common_lib.httpx import ConstrainedClient  # safety:allowed
 
     json_out = _is_json_output(args)
 
     controller, settings = _build_cli_pipeline_controller()
-
-    bluesky_ingester = BlueskyIngester(
-        controller.source_store,
-        appview_url=settings.rag_bluesky_appview_url,
-        max_posts=settings.rag_bluesky_max_posts,
-        include_reposts=settings.rag_bluesky_include_reposts,
-    )
 
     with _write_lock_or_exit(
         Path(controller.source_store.root_dir), json_out=json_out,
@@ -2727,21 +2760,25 @@ async def run_ingest_bluesky(args: argparse.Namespace) -> None:
                 request_timeout=settings.rag_bluesky_request_timeout,
                 request_interval=settings.rag_bluesky_request_interval,
             ) as client:
+                bluesky_ingester = _build_bluesky_ingester(
+                    controller.source_store,
+                    settings,
+                    client,
+                    max_posts=settings.rag_bluesky_max_posts,
+                    include_reposts=settings.rag_bluesky_include_reposts,
+                )
+
                 ingest_result, placed_items = await bluesky_ingester.ingest_posts(
                     args.url,
-                    client=client,
                 )
 
                 # 投稿内 URL の自動取り込み（仕様: 投稿取得フロー（rag_add_bluesky））。
                 # placed_items は _suppress_youtube_reingest=False で渡されるため、
                 # force_youtube_reingest 設定の値に関わらず YouTube/Web ともに取り込まれる
                 if placed_items:
-                    youtube_ingester = _create_youtube_ingester_cli(controller.source_store, settings)
                     url_stats = await bluesky_ingester.follow_urls(
                         placed_items,
-                        source_store=controller.source_store,
                         settings=settings,
-                        youtube_ingester=youtube_ingester,
                         result=ingest_result,
                     )
         except (ValueError, TypeError) as e:

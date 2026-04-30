@@ -182,10 +182,23 @@ flowchart TB
 
 ### コンポーネント一覧
 
+`bluesky.py` は責務単位で `bluesky/` パッケージに分解されている（Issue #704）。
+詳細な依存関係と分解の根拠は [アーキテクチャ採用方針](../architecture.md) を参照。
+
 | コンポーネント | 役割 |
 |--------------|------|
-| BlueskyIngester | BlueSky 投稿取り込み用インジェスター。AT Protocol API 経由で投稿を取得し、source_store に JSON ファイルを配置する |
-| ConstrainedClient (py-common-lib) | 全外部 HTTP リクエストのゲートウェイ。ハードリミット・バジェット・サーキットブレーカーを統合する |
+| `BlueskyIngester` (`bluesky/_facade.py`) | facade クラス。Protocol 注入で受け取った Adapter 群にオーケストレーションを委譲する |
+| `bluesky/feed_fetcher.py` | AT Protocol API 利用層。pagination 制御 + DID 解決（`BlueskyFetcher` Protocol 経由） |
+| `bluesky/post_placer.py` | フィードアイテムの source_store 配置 + .meta 生成 + メディア DL のキック（`BlueskyMediaDownloader` Protocol 経由）|
+| `bluesky/url_routing.py` | URL 抽出 / 種別判定 / パース（純関数）。種別判定は `YoutubeClassifier` Protocol 経由 |
+| `bluesky/delegations.py` | 投稿内 URL の自動取り込み委譲（`YoutubeDelegator` / `SiteIngestRunner` Protocol 経由）|
+| `BlueskyFetcher` / Real / Fake | AT Protocol API への HTTP 通信抽象化（`bluesky_fetcher.py`、`_fake/bluesky/`）|
+| `BlueskyMediaDownloader` / Real / Fake | 画像 / HLS 動画 DL の抽象化（`bluesky_media_downloader.py`、`_fake/bluesky/`）|
+| `ConstrainedClient` (py-common-lib) | 全外部 HTTP リクエストのゲートウェイ。`Real*` Adapter のコンストラクタに注入する |
+
+各 Protocol は `create_*` ファクトリ関数（settings / ConstrainedClient を受け取る）経由で
+Real / Fake のいずれかが注入される。fake モード切替の詳細は
+[Fake モード基盤](../infrastructure/fake-mode.md) と [BlueSky Fake Adapter](../infrastructure/fake-adapters/bluesky.md) を参照。
 
 ### 複合ソース構造
 

@@ -119,7 +119,9 @@ Fake Fetcher が返すデータ内の識別子は実在の ID と衝突しない
 | YouTube | video_id | 11 文字、`Test` プレフィックス | `TestVideo01` |
 | YouTube | playlist_id | `PLtest` プレフィックス | `PLtest12345` |
 | YouTube | channel_id | `UCtest` プレフィックス | `UCtest123456789012345` |
-| BlueSky（将来）| DID | `did:plc:test` プレフィックス | `did:plc:test01234567` |
+| BlueSky | DID | `did:plc:test` プレフィックス | `did:plc:test01234567` |
+| BlueSky | handle | `*.bsky.social` の `test` プレフィックス | `test.bsky.social` |
+| BlueSky | rkey | `testrkey` プレフィックス | `testrkey00000` |
 | Zenn（将来）| slug | `test-` プレフィックス | `test-article-001` |
 
 新たな source_type を追加する際は、本テーブルに synthetic ID 規約を追記すること。
@@ -165,6 +167,16 @@ Embedding 層は外部の LM Studio / OpenAI API への HTTP 通信を伴うた�
 - **適用範囲**: pytest プロセス内および subprocess 越境テスト（e2e）。subprocess 起動時に環境変数が引き継がれることで、子プロセス内の `factory.get_embedding_provider` も Fake を選択する
 - **解除条件**: `RAG_TESTS_ALLOW_NETWORK=1` 設定時のみ強制を解除する（手動の本番回帰検証等の特殊用途）
 - **個別テストの上書き**: Real Embedding を要求する個別テストは `monkeypatch.setenv("RAG_EMBEDDING_FAKE_MODE", "false")` で上書きできる
+- インジェスター系 autouse 安全網（YouTube ライブラリの `_RaiseOnUse` ブロック）とは独立して機能する
+
+#### pytest 安全網（BlueSky 層）
+
+`tests/conftest.py` の session スコープ autouse fixture（`_force_bluesky_fake_mode`）でテスト中は `RAG_BLUESKY_FAKE_MODE=true` を環境変数で強制する。
+
+- **適用範囲**: pytest プロセス内および subprocess 越境テスト（e2e）。subprocess 起動時に環境変数が引き継がれることで、子プロセス内の `create_bluesky_fetcher` / `create_bluesky_media_downloader` も Fake を選択する
+- **解除条件**: `RAG_TESTS_ALLOW_NETWORK=1` 設定時のみ強制を解除する
+- **個別テストの上書き**: Real Adapter を要求する個別テストは factory に Real を直接渡すか、Settings インスタンスに `rag_bluesky_fake_mode=False` を渡す
+- **httpx クラス全体の `_RaiseOnUse` 差し替えは採用しない**: bluesky 以外で `httpx` を使う既存コードを誤爆させるため。`.env` + DI ファクトリ経由で Fake を選択させる本機構（production fake モードと同じ経路）に揃える
 - インジェスター系 autouse 安全網（YouTube ライブラリの `_RaiseOnUse` ブロック）とは独立して機能する
 
 ## インターフェース
@@ -288,8 +300,9 @@ flowchart TB
 ## 関連ドキュメント
 
 - [YouTube Fake Adapter](fake-adapters/youtube.md) — 最初の対象 source_type 個別仕様
+- [BlueSky Fake Adapter](fake-adapters/bluesky.md) — 2 番目の対象 source_type 個別仕様（Issue #704、U2 で実装）
 - [YouTube インジェスター](../ingesters/youtube.md) — Fetcher 抽象化対象のインジェスター仕様
-- [BlueSky インジェスター](../ingesters/bluesky.md) — 将来の水平展開対象
+- [BlueSky インジェスター](../ingesters/bluesky.md) — Fetcher 抽象化対象のインジェスター仕様（Issue #704）
 - [Zenn インジェスター](../ingesters/zenn.md) — 将来の水平展開対象
 - [RAG ナレッジ](../rag-knowledge.md) — Embedding 層の Real 実装（LM Studio / OpenAI）の SSoT
 - [Issue #692（MCP 取り込み系ツールの E2E mock 基盤）](https://github.com/becky3/rag-knowledge/issues/692) — 本仕様の Fake Adapter を subprocess 越境環境で再利用する E2E 基盤

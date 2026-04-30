@@ -42,6 +42,22 @@ youtube パターンは以下の構造を満たす:
 
 このパターンの本質は **Port を介した Adapter 注入**であり、Real / Fake の切替を構造的に保証することで、L2 Mock E2E テスト（[QA 戦略](workflows/qa-strategy.md)）を成立させる。
 
+### 2.1 適用例: bluesky インジェスター（package 化 + 複数 Port 注入）
+
+新規インジェスターは引き続き **youtube パターンを基本形** として参照する。
+bluesky インジェスターは youtube パターンを踏襲しつつ、規模・接続種別の事情に
+応じて構成を拡張した適用例である。bluesky のような拡張は、本セクションの
+「適用判断」列に該当する場合に検討する。
+
+| 観点 | bluesky の選択 | 適用判断 |
+|---|---|---|
+| facade の package 化 | `pipeline/ingesters/bluesky/` パッケージ（_facade / feed_fetcher / post_placer / url_routing / delegations 等）に分解 | 単一インジェスターが複数の責務（API / 配置 / URL 分類 / 委譲）を持ち、セクション 3 の LOC 参考値を超える場合 |
+| Port の複数分離 | AT Protocol API 用 (`BlueskyFetcher`) と CDN メディア DL 用 (`BlueskyMediaDownloader`) を独立 Port として分離 | 1 インジェスターが性質の異なる複数の外部接続を持つ場合、責務単位の Port として分離する |
+| 委譲先の Port 化 | youtube / site-ingest への越境直 import を `YoutubeClassifier` / `YoutubeDelegator` / `SiteIngestRunner` Port 経由に置換 | 他インジェスター・他ランナーへの委譲が必要な場合（セクション 3 の越境直 import 系統数の参考値も参照） |
+| factory の独立化 | `create_bluesky_fetcher` / `create_bluesky_media_downloader` をそれぞれ独立 factory として提供。ingester 全体の組み立ては起動経路（CLI / MCP）が担う | factory が「Settings → 単一 component」という単純な役割に保たれる |
+
+詳細は [BlueSky インジェスター仕様](ingesters/bluesky.md) と [BlueSky Fake Adapter](infrastructure/fake-adapters/bluesky.md) を参照。
+
 ## 3. 構造判断の定量基準（参考値）
 
 以下は構造問題のシグナルとなる定量値。**閾値超過は即座にリファクタ義務とはせず、レビュー / Issue 起票時の参考値として用いる**。

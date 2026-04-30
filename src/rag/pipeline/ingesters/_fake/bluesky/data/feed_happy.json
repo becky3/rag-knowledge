@@ -1,0 +1,115 @@
+{
+  "feed": [
+    {
+      "post": {
+        "uri": "at://did:plc:test01234567/app.bsky.feed.post/testrkey00001",
+        "cid": "bafyreitestcid000000000000000000000000000000000000000000000",
+        "author": {
+          "did": "did:plc:test01234567",
+          "handle": "test.bsky.social",
+          "displayName": "Test User"
+        },
+        "record": {
+          "$type": "app.bsky.feed.post",
+          "text": "Sample synthetic post for fake fixture.",
+          "createdAt": "2026-04-30T09:00:00.000Z"
+        },
+        "indexedAt": "2026-04-30T09:00:01.000Z"
+      },
+      "reason": null
+    },
+    {
+      "post": {
+        "uri": "at://did:plc:test01234567/app.bsky.feed.post/testrkey00002",
+        "cid": "bafyreitestcid000000000000000000000000000000000000000000001",
+        "author": {
+          "did": "did:plc:test01234567",
+          "handle": "test.bsky.social"
+        },
+        "record": {
+          "$type": "app.bsky.feed.post",
+          "text": "Reply post for fake fixture.",
+          "createdAt": "2026-04-30T09:05:00.000Z",
+          "reply": {
+            "root": {
+              "uri": "at://did:plc:test01234567/app.bsky.feed.post/testrkey00001",
+              "cid": "bafyreitestcid000000000000000000000000000000000000000000000"
+            },
+            "parent": {
+              "uri": "at://did:plc:test01234567/app.bsky.feed.post/testrkey00001",
+              "cid": "bafyreitestcid000000000000000000000000000000000000000000000"
+            }
+          }
+        }
+      },
+      "reason": null
+    },
+    {
+      "post": {
+        "uri": "at://did:plc:test98765432/app.bsky.feed.post/testrkey99999",
+        "cid": "bafyreitestcid000000000000000000000000000000000000000000099",
+        "author": {
+          "did": "did:plc:test98765432",
+          "handle": "other.bsky.social"
+        },
+        "record": {
+          "$type": "app.bsky.feed.post",
+          "text": "Original post being reposted.",
+          "createdAt": "2026-04-30T08:30:00.000Z"
+        }
+      },
+      "reason": {
+        "$type": "app.bsky.feed.defs#reasonRepost",
+        "by": {
+          "did": "did:plc:test01234567",
+          "handle": "test.bsky.social"
+        },
+        "indexedAt": "2026-04-30T09:10:00.000Z"
+      }
+    },
+    {
+      "post": {
+        "uri": "at://did:plc:test01234567/app.bsky.feed.post/testrkey00003",
+        "cid": "bafyreitestcid000000000000000000000000000000000000000000003",
+        "author": {
+          "did": "did:plc:test01234567",
+          "handle": "test.bsky.social"
+        },
+        "record": {
+          "$type": "app.bsky.feed.post",
+          "text": "Post with external link.",
+          "createdAt": "2026-04-30T09:15:00.000Z",
+          "facets": [
+            {
+              "features": [
+                {
+                  "$type": "app.bsky.richtext.facet#link",
+                  "uri": "https://example.com/test-article"
+                }
+              ],
+              "index": {"byteStart": 0, "byteEnd": 25}
+            }
+          ],
+          "embed": {
+            "$type": "app.bsky.embed.external",
+            "external": {
+              "uri": "https://example.com/test-article",
+              "title": "Test Article",
+              "description": "An example article"
+            }
+          }
+        },
+        "embed": {
+          "$type": "app.bsky.embed.external#view",
+          "external": {
+            "uri": "https://example.com/test-article",
+            "title": "Test Article",
+            "description": "An example article"
+          }
+        }
+      },
+      "reason": null
+    }
+  ],
+  "cursor": null
+}

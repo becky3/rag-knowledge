@@ -63,6 +63,7 @@ class TestLogFakeModeStatus:
     def test_real_mode_emits_info(self, caplog: pytest.LogCaptureFixture) -> None:
         settings = _make_settings(
             rag_youtube_fake_mode=False,
+            rag_bluesky_fake_mode=False,
             rag_embedding_fake_mode=False,
         )
         with caplog.at_level(logging.INFO, logger="rag.config"):

@@ -350,21 +350,27 @@ async def rag_crawl_bluesky(
     args: list[str] = [handle]
     if max_posts is not None:
         args.extend(["--max-posts", str(max_posts)])
+    # include_reposts=True/False の両方を CLI に伝播させる（None は設定値を使用）。
+    # CLI 側は argparse.BooleanOptionalAction で --include-reposts / --no-include-reposts
+    # の双方を受け付ける。
     if include_reposts is True:
         args.append("--include-reposts")
+    elif include_reposts is False:
+        args.append("--no-include-reposts")
     if force:
         args.append("--force")
 
+    label = _fake_mode_labels(_BLUESKY_INGEST_FAKE_SOURCES)
     try:
         result = await _run_cli_subprocess("crawl-bluesky", args, ctx=ctx)
-        return _format_cli_ingest_result(result, context=f"ハンドル: {handle}")
+        return label + _format_cli_ingest_result(result, context=f"ハンドル: {handle}")
     except CLISubprocessError as e:
-        return e.format_mcp_error(f"BlueSky 投稿の取り込みに失敗しました（ハンドル: {handle}）")
+        return label + e.format_mcp_error(f"BlueSky 投稿の取り込みに失敗しました（ハンドル: {handle}）")
     except Exception:
         logger.exception(
             "Failed to crawl BlueSky posts for handle: %s", handle
         )
-        return f"エラー: BlueSky 投稿の取り込みに失敗しました（ハンドル: {handle}）"
+        return label + f"エラー: BlueSky 投稿の取り込みに失敗しました（ハンドル: {handle}）"
 
 
 @mcp.tool()
@@ -386,20 +392,25 @@ async def rag_add_bluesky(
     """
     args: list[str] = list(urls)
 
+    label = _fake_mode_labels(_BLUESKY_INGEST_FAKE_SOURCES)
     try:
         result = await _run_cli_subprocess("ingest-bluesky", args, ctx=ctx)
-        return _format_cli_ingest_result(result, context="BlueSky ingest")
+        return label + _format_cli_ingest_result(result, context="BlueSky ingest")
     except CLISubprocessError as e:
-        return e.format_mcp_error("BlueSky 投稿の取り込みに失敗しました")
+        return label + e.format_mcp_error("BlueSky 投稿の取り込みに失敗しました")
     except Exception:
         logger.exception("Failed to ingest BlueSky posts")
-        return "エラー: BlueSky 投稿の取り込みに失敗しました"
+        return label + "エラー: BlueSky 投稿の取り込みに失敗しました"
 
 
-FakeSource = Literal["youtube", "embedding"]
+FakeSource = Literal["youtube", "bluesky", "embedding"]
 
 # YouTube インジェスト系 MCP ツールが利用する fake source の組
 _YOUTUBE_INGEST_FAKE_SOURCES: list[FakeSource] = ["youtube", "embedding"]
+
+# BlueSky インジェスト系 MCP ツールが利用する fake source の組
+# 投稿内 URL の自動取り込みで YouTube も委譲対象になるため、両方を並列で評価する
+_BLUESKY_INGEST_FAKE_SOURCES: list[FakeSource] = ["bluesky", "youtube", "embedding"]
 
 
 def _fake_mode_labels(active_sources: list[FakeSource]) -> str:
@@ -428,6 +439,7 @@ def _fake_mode_labels(active_sources: list[FakeSource]) -> str:
     settings = get_settings()
     flags: dict[FakeSource, bool] = {
         "youtube": settings.rag_youtube_fake_mode,
+        "bluesky": settings.rag_bluesky_fake_mode,
         "embedding": settings.rag_embedding_fake_mode,
     }
     parts: list[str] = []
