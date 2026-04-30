@@ -72,8 +72,6 @@ MCPContext = Context[Any, Any, Any]
 
 LOG_FILE_PREFIX = "rag-server-"
 
-validate_utf8_environment()
-
 logger = logging.getLogger("rag.server")
 
 mcp = FastMCP("rag")
@@ -1033,12 +1031,6 @@ async def rag_rebuild(
 class CLISubprocessError(Exception):
     """CLI サブプロセスの実行エラー."""
 
-    _LOCK_CONFLICT_MESSAGE_WRITE = "エラー: 別の取り込みが実行中のため受け付けられません"
-    _LOCK_CONFLICT_MESSAGE_REBUILD = "エラー: 再構築処理中のため受け付けられません"
-    _LOCK_CONFLICT_MESSAGE_GENERIC = (
-        "エラー: 別のプロセスがロックを保持しています"
-    )
-
     def __init__(
         self,
         message: str,
@@ -1058,17 +1050,19 @@ class CLISubprocessError(Exception):
     def format_mcp_error(self, context: str = "") -> str:
         """MCP ツール用のエラーメッセージを生成する.
 
-        ロック競合の場合は lock_type に応じたメッセージを返す。
+        全エラーで「エラー: <context>\\n原因: <cause>」形式に統一する。
         メッセージには再試行を促す文言を含めない（再試行タイミングは
         HTTP API では Retry-After ヘッダで伝達し、MCP ツールでは
         状態の事実のみを伝える）。
         """
         if self.lock_conflict:
             if self.lock_type == "rebuild":
-                return self._LOCK_CONFLICT_MESSAGE_REBUILD
-            if self.lock_type == "write":
-                return self._LOCK_CONFLICT_MESSAGE_WRITE
-            return self._LOCK_CONFLICT_MESSAGE_GENERIC
+                cause = "再構築処理中のためロックが取れません"
+            elif self.lock_type == "write":
+                cause = "別の取り込みが実行中のためロックが取れません"
+            else:
+                cause = "別のプロセスがロックを保持しています"
+            return f"エラー: ロック競合により処理を受け付けられません\n原因: {cause}"
         if context:
             return f"エラー: {context}\n原因: {self}"
         return f"エラー: {self}"
@@ -1239,7 +1233,7 @@ async def _run_cli_subprocess(
     assert process.returncode is not None  # noqa: S101
     exit_code = process.returncode
 
-    stderr_text = stderr_bytes.decode("utf-8") if stderr_bytes else ""
+    stderr_text = stderr_bytes.decode("utf-8", errors="replace") if stderr_bytes else ""
     stderr_lines = stderr_text.rstrip().splitlines()
     stderr_tail = "\n".join(stderr_lines[-10:])
 
@@ -2099,6 +2093,8 @@ def _attach_log_file_handler(
 
 def _configure_and_run() -> None:
     """トランスポート設定に基づいて MCP サーバーを起動する."""
+    validate_utf8_environment()
+
     # rag 名前空間ロガーの設定（uvicorn/FastMCP のルートロガーを上書きしない）
     rag_logger = logging.getLogger("rag")
     log_formatter = logging.Formatter(

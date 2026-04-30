@@ -111,16 +111,19 @@ export PYTHONIOENCODING=utf-8
 
 #### 違反時の挙動
 
-未設定または不一致のまま起動すると、エントリポイント（`python -m rag.server` / `python -m rag.cli` / `pytest`）が起動直後に以下のメッセージで終了する（メッセージは ASCII-only：stderr が cp932 等の場合でも mojibake せず確実に表示するため）:
+未設定または不一致のまま起動すると、エントリポイント（`python -m rag.server` / `python -m rag.cli` / `pytest`）が起動直後に以下のメッセージで終了する（メッセージは ASCII-only：stderr が cp932 等の場合でも mojibake せず確実に表示するため）。違反した env のみが該当行として出力される:
 
 ```
 ERROR: UTF-8 environment is not enforced.
-  PYTHONUTF8='<current>'   (expected: '1')
+  PYTHONUTF8='<current>'     (expected: '1')
   PYTHONIOENCODING='<current>' (expected: 'utf-8')
+  sys.stdout.encoding='<current>' (expected: 'utf-8')
 Set OS env to enforce UTF-8:
   Windows: setx PYTHONUTF8 1 / setx PYTHONIOENCODING utf-8
   Unix:    export PYTHONUTF8=1 / export PYTHONIOENCODING=utf-8
 ```
+
+ローカルで `uv run pytest` を実行する開発者環境にも同じ env 設定が必須（`tests/conftest.py` の `pytest_configure` で同検証が走る）。
 
 ### 前提: ffmpeg（メディア解析の動画処理に必要）
 

@@ -16,9 +16,12 @@ from mcp.client.streamable_http import streamablehttp_client
 _MOJIBAKE_MARKER = "�"
 
 # 子プロセス stderr 監視の対象ログレベル正規表現。
-# logging.basicConfig フォーマット `LEVEL - message` および
-# 単独行 `WARNING:` / `ERROR:` の双方を拾う。
-_STDERR_VIOLATION_RE = re.compile(r"\b(WARNING|ERROR|CRITICAL)\b")
+# logging.basicConfig のフォーマット（`LEVEL - message` / `LEVEL:logger:message`）
+# 末尾位置にあるレベル文字列のみを拾うことで、message 本文に "WARNING" 等の
+# 単語が含まれる INFO ログでの誤検出を防ぐ。
+_STDERR_VIOLATION_RE = re.compile(
+    r"(?:^|\] |- )(WARNING|ERROR|CRITICAL)(?: - |:)"
+)
 
 # allowlist: 仕様上 WARNING レベルで出力されるが silent regression ではないログ。
 # FAKE MODE 起動通知は fake-mode.md 仕様で WARNING 出力が必須なため除外する。
@@ -76,24 +79,18 @@ def assert_no_stderr_warnings(
 
 
 async def call_mcp_tool(
-    server: McpServerHandle | str,
+    server: McpServerHandle,
     tool_name: str,
     arguments: dict[str, Any],
 ) -> str:
     """MCP server (HTTP モード) で指定ツールを呼び出し、テキスト応答を返す.
 
-    server に McpServerHandle が渡された場合は、応答テキストの mojibake 検出 +
-    呼び出し中の子プロセス stderr WARNING/ERROR 監視を自動適用する。
-    str を渡すとレガシー互換モード（自動 assertion なし）。
+    応答テキストの mojibake 検出 + 呼び出し中の子プロセス stderr
+    WARNING/ERROR 監視を自動適用する。
     """
-    handle = server if isinstance(server, McpServerHandle) else None
-    base_url = handle.base_url if handle is not None else server
+    stderr_snapshot = len(server.stderr_lines)
 
-    stderr_snapshot = (
-        len(handle.stderr_lines) if handle is not None else 0
-    )
-
-    mcp_url = f"{base_url}/mcp"
+    mcp_url = f"{server.base_url}/mcp"
     async with streamablehttp_client(mcp_url) as (read, write, _):
         async with ClientSession(read, write) as session:
             await session.initialize()
@@ -104,9 +101,8 @@ async def call_mcp_tool(
                     texts.append(block.text)
             response = "\n".join(texts)
 
-    if handle is not None:
-        assert_no_mojibake(response, context=f"{tool_name} response")
-        new_lines = handle.stderr_lines[stderr_snapshot:]
-        assert_no_stderr_warnings(new_lines, context=f"{tool_name} call")
+    assert_no_mojibake(response, context=f"{tool_name} response")
+    new_lines = server.stderr_lines[stderr_snapshot:]
+    assert_no_stderr_warnings(new_lines, context=f"{tool_name} call")
 
     return response

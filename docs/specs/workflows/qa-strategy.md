@@ -103,6 +103,8 @@ MCP server / CLI / ChromaDB を実プロセスで起動し、外部 API・Embedd
 - 取り込み完了応答に含まれる `[FAKE MODE: <source>]` ラベル（`<source>` は `youtube` / `embedding` 等）
 - 重複検出・上書きモード（`overwritten` カウント）の subprocess 越境動作
 - ファイルベースロック競合の振る舞い
+- 応答テキスト中の文字化けマーカー（U+FFFD）の不在検証（subprocess 越境 encoding 違反の silent 発生検出）
+- 子プロセス stderr の WARNING / ERROR / CRITICAL 行の不在検証（想定外ログレベル混入による silent regression 検出。`[FAKE MODE: ...]` 等の意図的 WARNING は allowlist で除外）
 
 構成詳細は [L2 Mock E2E の構成](#l2-mock-e2e-の構成) を参照。失敗時対応は [L2 失敗時](#l2-失敗時) を参照。
 

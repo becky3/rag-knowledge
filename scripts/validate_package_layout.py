@@ -1,11 +1,10 @@
 """flat module + package の同名衝突を検出する CI 用バリデーションスクリプト.
 
 Python の import 解決順序は flat module（``foo.py``）と同名 package
-（``foo/__init__.py``）が共存する場合 implementation-defined になる。
-過去（Issue #704 セッション）に bluesky.py を bluesky/ パッケージへ解体した
-直後、flat module が誤って working tree に復活し新パッケージと共存する
-インシデントが発生した。pytest 起動時のガードに加え、本スクリプトを CI で
-独立 step として実行することで、テスト実行前段階で fail-fast を担保する。
+（``foo/__init__.py``）が共存する場合 implementation-defined になり、
+テストでは pass しても本番で予期せぬ挙動を招くリスクがある。pytest 起動時の
+ガードに加え、本スクリプトを CI で独立 step として実行することで、テスト
+実行前段階で fail-fast を担保する。
 
 検証対象は ``src/`` 配下の Python モジュール。衝突検出時は exit 1 で終了する。
 """

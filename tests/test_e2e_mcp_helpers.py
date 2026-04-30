@@ -81,3 +81,12 @@ class TestAssertNoStderrWarnings:
                     "WARNING - some other unexpected warning\n",
                 ]
             )
+
+    def test_info_log_with_warning_in_body_does_not_match(self) -> None:
+        """INFO ログ本文に "WARNING" が含まれていても誤検出しない."""
+        assert_no_stderr_warnings(
+            [
+                "INFO - tool returned: please pay attention to WARNING markers\n",
+                "INFO - status: ERROR field not present\n",
+            ]
+        )

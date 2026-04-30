@@ -102,7 +102,7 @@ MCP ツール `rag_site_ingest` と CLI コマンド `site-ingest` の 2 つの�
 
 ### Windows エンコーディング
 
-- cp932 コンソールでの `UnicodeEncodeError` 対策として、subprocess 起動時に `PYTHONIOENCODING=utf-8` を環境変数に設定する
+- cp932 コンソールでの `UnicodeEncodeError` 対策として、subprocess 起動時に `PYTHONUTF8=1` および `PYTHONIOENCODING=utf-8` を環境変数に設定する
 
 ### バリデーション
 
@@ -250,7 +250,7 @@ Scrapy プロセスの subprocess ラッパー。
 - stdin は `DEVNULL` に設定する（MCP stdio モードでの親プロセス stdin 干渉を防止）
 - stderr はファイルにリダイレクトする（Twisted の子プロセス/スレッドが stderr パイプを継承し、メインプロセス終了後もパイプが閉じない Windows 固有の問題を回避）
 - JOBDIR を指定して中断再開に対応する
-- 環境変数 `PYTHONIOENCODING=utf-8` を設定する
+- 環境変数 `PYTHONUTF8=1` および `PYTHONIOENCODING=utf-8` を設定する
 - `process.wait()` でプロセスの終了を待機し、exit code で成否を判定する
 - exit code 0 以外の場合はエラーログを出力する（stderr ファイルの末尾を読み取り）
 

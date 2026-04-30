@@ -226,6 +226,7 @@ class ScrapyRunner:
 
         # 環境変数の準備（Windows エンコーディング対策）
         env = os.environ.copy()
+        env["PYTHONUTF8"] = "1"
         env["PYTHONIOENCODING"] = "utf-8"
 
         if multi_url_mode:

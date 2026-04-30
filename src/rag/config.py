@@ -478,7 +478,6 @@ def validate_utf8_environment() -> None:
         "Set OS env to enforce UTF-8:",
         "  Windows: setx PYTHONUTF8 1 / setx PYTHONIOENCODING utf-8",
         "  Unix:    export PYTHONUTF8=1 / export PYTHONIOENCODING=utf-8",
-        "See README 'UTF-8 strict environment variables' section for details.",
     ]
     for line in msg_lines:
         print(line, file=sys.stderr)
