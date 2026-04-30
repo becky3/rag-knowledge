@@ -36,7 +36,8 @@ def _make_settings(**overrides: Any) -> RAGSettings:
 class TestCreateBlueskyMediaDownloader:
     def test_returns_fake_when_fake_mode_true(self) -> None:
         settings = _make_settings(rag_bluesky_fake_mode=True)
-        downloader = create_bluesky_media_downloader(settings, client=None)  # type: ignore[arg-type]
+        # fake モード時は client=None 許容（型注釈と実挙動が一致）
+        downloader = create_bluesky_media_downloader(settings, client=None)
         assert isinstance(downloader, FakeBlueskyMediaDownloader)
 
     def test_returns_real_when_fake_mode_false(self) -> None:
@@ -44,6 +45,12 @@ class TestCreateBlueskyMediaDownloader:
         client = AsyncMock()
         downloader = create_bluesky_media_downloader(settings, client=client)
         assert isinstance(downloader, RealBlueskyMediaDownloader)
+
+    def test_real_mode_with_none_client_raises(self) -> None:
+        # REAL モードで client=None を渡した場合は明示的に弾く
+        settings = _make_settings(rag_bluesky_fake_mode=False)
+        with pytest.raises(ValueError, match="REAL モード"):
+            create_bluesky_media_downloader(settings, client=None)
 
 
 class TestFakeBlueskyMediaDownloader:

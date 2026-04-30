@@ -156,12 +156,17 @@ class RealBlueskyFetcher:
 
 def create_bluesky_fetcher(
     settings: RAGSettings,
-    client: ConstrainedClient,
+    client: ConstrainedClient | None,
 ) -> BlueskyFetcher:
     """Settings から Real / Fake のいずれかを選択して返すファクトリ.
 
     .env の ``RAG_BLUESKY_FAKE_MODE`` が true の場合は ``FakeBlueskyFetcher``
     を返し、実 BlueSky AT Protocol アクセスを発生させない。
+
+    ``client`` は REAL モード時のみ必須。fake モード時は ``None`` を許容し
+    （fake fetcher は外部 HTTP を行わないため）、REAL モード時に ``None`` を
+    渡すと ``ValueError`` を送出する。型注釈と実挙動を一致させ、テスト側で
+    ``client=None`` を渡す際の ``type: ignore`` を不要化する設計。
     """
     if settings.rag_bluesky_fake_mode:
         from rag.pipeline.ingesters._fake.bluesky import FakeBlueskyFetcher
@@ -176,6 +181,11 @@ def create_bluesky_fetcher(
                 f"RAG_BLUESKY_FAKE_FIXTURE_DIR を確認してください"
             )
         return FakeBlueskyFetcher(fixture_dir=fixture_dir)
+    if client is None:
+        raise ValueError(
+            "REAL モードで create_bluesky_fetcher を呼ぶ場合は "
+            "ConstrainedClient を渡してください（fake モード時のみ None 許容）"
+        )
     return RealBlueskyFetcher(
         client,
         appview_url=settings.rag_bluesky_appview_url,

@@ -159,7 +159,8 @@ class TestCreateBlueskyFetcher:
 
     def test_returns_fake_fetcher_when_fake_mode_true(self) -> None:
         settings = _make_settings(rag_bluesky_fake_mode=True)
-        fetcher = create_bluesky_fetcher(settings, client=None)  # type: ignore[arg-type]
+        # fake モード時は client=None 許容（型注釈と実挙動が一致）
+        fetcher = create_bluesky_fetcher(settings, client=None)
         assert isinstance(fetcher, FakeBlueskyFetcher)
 
     def test_returns_real_fetcher_when_fake_mode_false(self) -> None:
@@ -169,6 +170,12 @@ class TestCreateBlueskyFetcher:
         fetcher = create_bluesky_fetcher(settings, client=client)
         assert isinstance(fetcher, RealBlueskyFetcher)
 
+    def test_real_mode_with_none_client_raises(self) -> None:
+        # REAL モードで client=None を渡した場合は明示的に弾く
+        settings = _make_settings(rag_bluesky_fake_mode=False)
+        with pytest.raises(ValueError, match="REAL モード"):
+            create_bluesky_fetcher(settings, client=None)
+
     def test_raises_when_fixture_dir_missing(self, tmp_path: Path) -> None:
         non_existent = tmp_path / "does_not_exist"
         settings = _make_settings(
@@ -176,7 +183,7 @@ class TestCreateBlueskyFetcher:
             rag_bluesky_fake_fixture_dir=str(non_existent),
         )
         with pytest.raises(FileNotFoundError, match="fake fixture"):
-            create_bluesky_fetcher(settings, client=None)  # type: ignore[arg-type]
+            create_bluesky_fetcher(settings, client=None)
 
 
 class TestRealBlueskyFetcher:

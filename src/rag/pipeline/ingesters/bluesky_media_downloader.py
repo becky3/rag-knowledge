@@ -284,12 +284,16 @@ class RealBlueskyMediaDownloader:
 
 def create_bluesky_media_downloader(
     settings: RAGSettings,
-    client: ConstrainedClient,
+    client: ConstrainedClient | None,
 ) -> BlueskyMediaDownloader:
     """Settings から Real / Fake のいずれかを選択して返すファクトリ.
 
     .env の ``RAG_BLUESKY_FAKE_MODE`` が true の場合は ``FakeBlueskyMediaDownloader``
     を返し、実 BlueSky CDN アクセスを発生させない。
+
+    ``client`` は REAL モード時のみ必須。fake モード時は ``None`` を許容し
+    （fake downloader は外部 HTTP を行わないため）、REAL モード時に ``None``
+    を渡すと ``ValueError`` を送出する（``create_bluesky_fetcher`` と同方針）。
     """
     if settings.rag_bluesky_fake_mode:
         from rag.pipeline.ingesters._fake.bluesky import (
@@ -299,4 +303,9 @@ def create_bluesky_media_downloader(
         # MediaDownloader は fixture ファイルを利用しないため fixture_dir 検証は不要
         # （bluesky_fake_fixture_dir は Fetcher 用、fail-fast は create_bluesky_fetcher 側で実施）
         return FakeBlueskyMediaDownloader()
+    if client is None:
+        raise ValueError(
+            "REAL モードで create_bluesky_media_downloader を呼ぶ場合は "
+            "ConstrainedClient を渡してください（fake モード時のみ None 許容）"
+        )
     return RealBlueskyMediaDownloader(client)
