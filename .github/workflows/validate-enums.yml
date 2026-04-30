@@ -21,6 +21,11 @@ on:
 permissions:
   contents: read
 
+# UTF-8 強制環境変数（仕様: README「前提: UTF-8 強制環境変数の設定」）
+env:
+  PYTHONUTF8: "1"
+  PYTHONIOENCODING: utf-8
+
 jobs:
   validate-enums:
     runs-on: ubuntu-latest

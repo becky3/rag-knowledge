@@ -13,13 +13,20 @@ on:
   pull_request:
     branches: [develop, main]
 
+# UTF-8 強制環境変数（ローカルジョブに適用、reusable workflow には伝播しないため
+# job: quality の test_command にも個別に PYTHONUTF8=1 を埋め込んでいる）。
+# 仕様: README「前提: UTF-8 強制環境変数の設定」
+env:
+  PYTHONUTF8: "1"
+  PYTHONIOENCODING: utf-8
+
 jobs:
   quality:
     uses: becky3/shared-workflows/.github/workflows/quality-check.yml@main
     with:
       python_version: "3.11"
       install_command: "uv sync --no-group with-mineru"
-      test_command: "uv run pytest"
+      test_command: "PYTHONUTF8=1 PYTHONIOENCODING=utf-8 uv run pytest"
       lint_command: "uv run ruff check src/ tests/"
       typecheck_command: "uv run mypy src/"
       markdownlint: true
