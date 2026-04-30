@@ -2949,8 +2949,8 @@ async def run_add_document(args: argparse.Namespace) -> None:
             ingest_result = local_ingester.add_document(
                 data, filename, upload_mode=args.upload_mode,
             )
-        except FileExistsError as e:
-            msg = f"同名ファイルが既に存在します: {filename} ({e})"
+        except FileExistsError:
+            msg = f"同名ファイルが既に存在します: {filename}"
             if json_out:
                 _output_error(CliErrorCode.VALIDATION_ERROR, msg)
             print(f"エラー: {msg}", file=sys.stderr)

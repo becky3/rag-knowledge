@@ -1070,7 +1070,7 @@ class CLISubprocessError(Exception):
                 return self._LOCK_CONFLICT_MESSAGE_WRITE
             return self._LOCK_CONFLICT_MESSAGE_GENERIC
         if context:
-            return f"エラー: {context} ({self})"
+            return f"エラー: {context}\n原因: {self}"
         return f"エラー: {self}"
 
 
