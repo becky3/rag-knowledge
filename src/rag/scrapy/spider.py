@@ -136,6 +136,8 @@ class SiteSpider(scrapy.Spider):  # type: ignore[misc]
     def parse(self, response: Response) -> Iterator[Any]:
         """レスポンスを処理し、HTML を保存してメタデータを yield する."""
         # 非テキストレスポンスのスキップ（仕様: エッジケース）
+        # HTTP ヘッダーは多様な相手サイトから受信するため非 UTF-8 が稀に混入する。
+        # クローラーの堅牢性のため errors="replace" を維持（#709 で確認済）
         content_type = response.headers.get("Content-Type", b"").decode(
             "utf-8", errors="replace"
         )

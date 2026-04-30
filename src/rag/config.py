@@ -19,7 +19,6 @@ config.toml が存在しない場合は FileNotFoundError、
 from __future__ import annotations
 
 import functools
-import io
 import os
 import sys
 import tomllib
@@ -486,32 +485,6 @@ def validate_utf8_environment() -> None:
     sys.exit(1)
 
 
-def ensure_utf8_streams(*, include_stdout: bool = False) -> None:
-    """stderr（およびオプションで stdout）を UTF-8 に再構成する.
-
-    Windows 環境では stderr/stdout のデフォルトエンコーディングが cp932 等に
-    なり、日本語ログ出力時に UnicodeEncodeError が発生する。
-    MCP stdio プロトコルは stdout を使うため、stdout の再構成はCLI用途に限定する。
-
-    Args:
-        include_stdout: True の場合は stdout も UTF-8 に再構成する
-    """
-    if (
-        hasattr(sys.stderr, "buffer")
-        and hasattr(sys.stderr, "encoding")
-        and sys.stderr.encoding
-        and sys.stderr.encoding.lower().replace("-", "") != "utf8"
-    ):
-        sys.stderr = io.TextIOWrapper(
-            sys.stderr.buffer, encoding="utf-8", errors="replace"
-        )
-
-    if include_stdout and (
-        hasattr(sys.stdout, "buffer")
-        and hasattr(sys.stdout, "encoding")
-        and sys.stdout.encoding
-        and sys.stdout.encoding.lower().replace("-", "") != "utf8"
-    ):
-        sys.stdout = io.TextIOWrapper(
-            sys.stdout.buffer, encoding="utf-8", errors="replace"
-        )
+# ensure_utf8_streams は削除済み (#709 Phase C):
+# 起動時 validate_utf8_environment が PYTHONUTF8=1 / PYTHONIOENCODING=utf-8 を
+# 強制するため、stderr/stdout の再構成は不要。silent な mojibake 救済を防ぐ。

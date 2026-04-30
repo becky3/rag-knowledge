@@ -506,6 +506,7 @@ class AozoraIngester:
                 raise ValueError("ZIP 内に CSV ファイルが見つかりません")
             raw = zf.read(csv_names[0])
             # UTF-8 BOM 付き CSV（list_person_all_extended_utf8.zip）
+            # 外部 zip の想定内データ揺れ: errors="replace" で堅牢化（#709 で確認済）
             return raw.decode("utf-8-sig", errors="replace")
 
     @staticmethod

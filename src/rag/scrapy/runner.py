@@ -260,7 +260,7 @@ class ScrapyRunner:
             stderr_file.close()
 
         # stderr ファイルから末尾20行を読み取り
-        stderr_text = stderr_path.read_text(encoding="utf-8", errors="replace")
+        stderr_text = stderr_path.read_text(encoding="utf-8")
         stderr_lines = stderr_text.rstrip().splitlines()
         stderr_tail = "\n".join(stderr_lines[-20:])
 

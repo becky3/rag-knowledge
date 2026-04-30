@@ -3349,7 +3349,6 @@ async def run_ingest_aozora_author(args: argparse.Namespace) -> None:
 
 if __name__ == "__main__":
     from .config import (
-        ensure_utf8_streams,
         get_settings,
         log_fake_mode_status,
         validate_utf8_environment,
@@ -3358,9 +3357,6 @@ if __name__ == "__main__":
     # 起動時 env fail-fast チェック
     # 仕様: README「前提: UTF-8 強制環境変数の設定」
     validate_utf8_environment()
-
-    # Phase C で削除予定（validate 通過後は no-op）
-    ensure_utf8_streams(include_stdout=True)
 
     logging.basicConfig(
         level=logging.INFO,

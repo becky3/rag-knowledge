@@ -915,6 +915,8 @@ def get_document(
             try:
                 content = file_data.content.decode("utf-8")
             except UnicodeDecodeError:
+                # ユーザーアップロードの任意ファイル: 想定内のエンコーディング揺れ。
+                # silent な握り潰しではなく明示的フォールバック（#709 で確認済）
                 content = file_data.content.decode("utf-8", errors="replace")
 
             return DocumentResult(
@@ -948,6 +950,8 @@ def get_document(
     try:
         content = converted_path.read_text(encoding="utf-8")
     except UnicodeDecodeError:
+        # converted_store のテキスト: コンバーター由来で UTF-8 のはずだが、
+        # 過去ファイルの混在等を想定して明示的フォールバック（#709 で確認済）
         content = converted_path.read_bytes().decode("utf-8", errors="replace")
 
     return DocumentResult(
