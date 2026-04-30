@@ -22,7 +22,7 @@ import subprocess
 
 import pytest
 
-from ._mcp_helpers import McpServerHandle, call_mcp_tool
+from ._mcp_helpers import call_mcp_tool
 from .conftest import run_cli
 
 
@@ -43,7 +43,7 @@ class TestMcpYoutubeIngest:
 
     async def test_ingest_then_search_returns_chunk(
         self,
-        e2e_mcp_server: McpServerHandle,
+        e2e_mcp_server: str,
     ) -> None:
         """rag_add_youtube で取り込んだ動画が rag_search 経路で索引化される.
 
@@ -76,7 +76,7 @@ class TestMcpYoutubeIngest:
 
     async def test_response_contains_fake_mode_label(
         self,
-        e2e_mcp_server: McpServerHandle,
+        e2e_mcp_server: str,
     ) -> None:
         """fake モード時、取り込み系 MCP 応答冒頭に [FAKE MODE: <source>] ラベルが付与される.
 
@@ -93,7 +93,7 @@ class TestMcpYoutubeIngest:
 
     async def test_overwritten_count_via_subprocess(
         self,
-        e2e_mcp_server: McpServerHandle,
+        e2e_mcp_server: str,
     ) -> None:
         """同一動画 URL を 2 回投入した際、2 回目で overwritten カウントが反映される.
 
@@ -137,7 +137,7 @@ class TestCliYoutubeIngest:
     def test_cli_ingest_youtube_succeeds(
         self,
         e2e_subprocess_env: dict[str, str],
-        e2e_mcp_server: McpServerHandle,  # ChromaDB を auto_start させるため依存
+        e2e_mcp_server: str,  # noqa: ARG002 - ChromaDB を auto_start させるため依存
     ) -> None:
         """CLI から ingest-youtube を実行できる（subprocess 越境）.
 

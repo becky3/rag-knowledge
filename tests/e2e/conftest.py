@@ -26,8 +26,6 @@ from typing import IO
 import httpx
 import pytest
 
-from ._mcp_helpers import McpServerHandle
-
 
 _PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
 
@@ -221,7 +219,7 @@ def _drain_stream(stream: IO[str] | None, buffer: list[str]) -> None:
 def e2e_mcp_server(
     e2e_subprocess_env: dict[str, str],
     e2e_mcp_http_port: int,
-) -> Iterator[McpServerHandle]:
+) -> Iterator[str]:
     """MCP server を HTTP モードで起動する session fixture.
 
     内部で ChromaDB を auto_start するため、本 fixture を使うテストは
@@ -232,9 +230,7 @@ def e2e_mcp_server(
     fail message に含める。
 
     Yields:
-        McpServerHandle（base_url + stderr_lines バッファ）。stderr_lines は
-        テスト側で snapshot を取り、ツール呼び出し前後の WARNING/ERROR を
-        assertion 対象にできる
+        MCP server のベース URL（例: http://127.0.0.1:8081）
     """
     cmd = [sys.executable, "-m", "rag.server"]
     proc = subprocess.Popen(
@@ -274,7 +270,7 @@ def e2e_mcp_server(
         )
 
     try:
-        yield McpServerHandle(base_url=base_url, stderr_lines=stderr_buf)
+        yield base_url
     finally:
         _terminate_process(proc, "mcp_server")
         stdout_thread.join(timeout=_SHUTDOWN_TIMEOUT)
