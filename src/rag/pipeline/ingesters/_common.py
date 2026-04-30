@@ -8,6 +8,7 @@ from __future__ import annotations
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
+from enum import Enum
 from typing import TYPE_CHECKING, Any
 
 import httpx
@@ -18,6 +19,20 @@ if TYPE_CHECKING:
 ProgressCallback = Callable[[int, int, str], None]
 
 
+class IngestErrorCategory(Enum):
+    """インジェスト失敗の種別.
+
+    値定義の SSoT は `_schema/enums.yml` の `ingest_error_category` カテゴリ。
+    `IngestResult.error_details` / `partial_failure_details` の `category`
+    フィールドにはこの Enum の `value`（snake_case 文字列）を記録する。
+    """
+
+    METADATA_FETCH = "metadata_fetch"
+    MEDIA_DOWNLOAD = "media_download"
+    PLACEMENT = "placement"
+    DELEGATION = "delegation"
+
+
 @dataclass
 class IngestResult:
     """インジェスターの配置結果.
@@ -26,13 +41,13 @@ class IngestResult:
 
     | フィールド | 必須 | 内容 |
     |---|:-:|---|
-    | `category` | 必須 | 失敗種別。以下のいずれか: `metadata_fetch` / `media_download` / `placement` / `delegation` |
+    | `category` | 必須 | 失敗種別。`IngestErrorCategory` の `value`（`metadata_fetch` / `media_download` / `placement` / `delegation`） |
     | `target` | 必須 | 識別子（`rel_path` / `source_id` / `slug` / `book_id` 等） |
     | `status` | 任意 | HTTP ステータスコード |
     | `url` | 任意 | 失敗した URL |
     | `message` | 任意 | 追加説明（例外メッセージ等） |
 
-    `category` は全媒体で上記 4 種に統一する（仕様: `docs/specs/ingesters/common.md`）。
+    `category` は `IngestErrorCategory` の Enum 値に統一する（仕様: `docs/specs/ingesters/common.md`）。
     列挙外の値は使用しない。集計・再取り込み判定で信頼できる集合として扱えるようにするため。
 
     不変条件:

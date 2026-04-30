@@ -10,7 +10,11 @@ import logging
 from pathlib import Path
 from typing import TYPE_CHECKING, Literal
 
-from rag.pipeline.ingesters._common import IngestResult, ProgressCallback
+from rag.pipeline.ingesters._common import (
+    IngestErrorCategory,
+    IngestResult,
+    ProgressCallback,
+)
 
 if TYPE_CHECKING:
     from rag.store.source_store import SourceStore
@@ -65,7 +69,7 @@ class LocalIngester:
                 msg = f"同名ファイルが既に存在します: {rel_path}"
                 result.errors = 1
                 result.error_details.append({
-                    "category": "placement",
+                    "category": IngestErrorCategory.PLACEMENT.value,
                     "target": rel_path,
                     "message": msg,
                 })
@@ -81,7 +85,7 @@ class LocalIngester:
         except ValueError as e:
             result.errors = 1
             result.error_details.append({
-                "category": "placement",
+                "category": IngestErrorCategory.PLACEMENT.value,
                 "target": filename,
                 "message": str(e),
             })
@@ -89,7 +93,7 @@ class LocalIngester:
             logger.exception("Failed to place file: %s", filename)
             result.errors = 1
             result.error_details.append({
-                "category": "placement",
+                "category": IngestErrorCategory.PLACEMENT.value,
                 "target": filename,
                 "message": str(e),
             })
@@ -118,7 +122,7 @@ class LocalIngester:
         except ValueError as e:
             result.errors = 1
             result.error_details.append({
-                "category": "placement",
+                "category": IngestErrorCategory.PLACEMENT.value,
                 "target": dir_path,
                 "message": str(e),
             })
@@ -162,7 +166,7 @@ class LocalIngester:
                 logger.exception("Failed to copy file: %s", fp)
                 result.errors += 1
                 result.error_details.append({
-                    "category": "placement",
+                    "category": IngestErrorCategory.PLACEMENT.value,
                     "target": str(fp),
                     "message": str(exc),
                 })

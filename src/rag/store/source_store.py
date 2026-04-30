@@ -20,6 +20,7 @@ from typing import Any, get_args
 
 import pathspec
 
+from rag._schema_loader import source_types_without_meta
 from rag.infrastructure.file_lock import REBUILD_LOCK_FILENAME, WRITE_LOCK_FILENAME
 from rag.store.meta import meta_path_for, read_meta, write_meta
 from rag.store.metadata_db import MetadataDB
@@ -27,6 +28,7 @@ from rag.store.models import (
     FileData,
     SourceMetadata,
     SourceRecord,
+    SourceStatus,
     SourceType,
 )
 from rag.store.path_converter import url_to_path
@@ -35,7 +37,13 @@ from rag.store.resolve import resolve_published_at, resolve_title
 logger = logging.getLogger(__name__)
 
 # .meta を持たない媒体（source_store が SSoT）
-NO_META_TYPES: frozenset[SourceType] = frozenset({"local"})
+# enums.yml の `source_type.has_meta=false` から導出する。
+NO_META_TYPES: frozenset[SourceType] = source_types_without_meta()
+
+# source_type 値の集合: SourceType Literal から導出する
+# （SourceType Literal 自体は CI で _schema/enums.yml と同期検証されるため二重管理にならない）
+# detect_source_type / is_source_file の判定で使い回すモジュール定数。
+_SOURCE_TYPE_VALUES: frozenset[SourceType] = frozenset(get_args(SourceType))
 
 # --- ソース判定 ---
 #
@@ -71,16 +79,12 @@ _EXCLUDE_SPEC: pathspec.PathSpec = pathspec.PathSpec.from_lines(
     "gitignore", _EXCLUDE_PATTERNS,
 )
 
-# source_type 値の集合: SourceType Literal から導出する
-# （SourceType Literal 自体は CI で _schema/enums.yml と同期検証される）
-_SOURCE_TYPE_VALUES: frozenset[SourceType] = frozenset(get_args(SourceType))
-
-
 def detect_source_type(rel_path: str) -> SourceType:
     """相対パスから source_type を判定する.
 
     先頭ディレクトリが _schema/enums.yml の source_type 値に一致しない場合は
-    ValueError を送出する。
+    ValueError を送出する。値の集合は SourceType Literal から導出する
+    （Literal 自体は CI で _schema/enums.yml と同期検証される）。
 
     Args:
         rel_path: source_store ルート基準の相対パス
@@ -557,7 +561,7 @@ class SourceStore:
         Raises:
             KeyError: source_id が存在しない場合
         """
-        self._db.set_status(source_id, "deleted")
+        self._db.set_status(source_id, SourceStatus.DELETED)
 
     def restore(self, source_id: str) -> None:
         """論理削除を解除する.
@@ -565,7 +569,7 @@ class SourceStore:
         Raises:
             KeyError: source_id が存在しない場合
         """
-        self._db.set_status(source_id, "active")
+        self._db.set_status(source_id, SourceStatus.ACTIVE)
 
     # --- DB 再構築 ---
 

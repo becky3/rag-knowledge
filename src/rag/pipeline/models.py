@@ -40,28 +40,32 @@ class PipelineMode(Enum):
 class PipelinePhase(Enum):
     """パイプライン処理のフェーズ.
 
-    display は progress 通知のプレフィックス（人間向け表示）、
-    error_key は `PipelineErrorEntry.phase` に記録される列挙値。
+    値は `PipelineErrorEntry.phase` に記録される snake_case キー。
+    progress 表示用のラベルは `PIPELINE_PHASE_DISPLAY` mapping で管理する。
     """
 
-    FETCH = ("Fetch", "fetch")
-    CONVERT = ("Convert", "convert")
-    INDEX = ("Index", "index")
-    CONVERT_AND_INDEX = ("Convert & Index", "convert_and_index")
-
-    def __init__(self, display: str, error_key: str) -> None:
-        self._display = display
-        self._error_key = error_key
-
-    @property
-    def display(self) -> str:
-        """progress 表示・ログ出力用のフェーズ名."""
-        return self._display
+    FETCH = "fetch"
+    CONVERT = "convert"
+    INDEX = "index"
+    CONVERT_AND_INDEX = "convert_and_index"
 
     @property
     def error_key(self) -> str:
         """PipelineErrorEntry.phase に記録される snake_case キー."""
-        return self._error_key
+        return self.value
+
+    @property
+    def display(self) -> str:
+        """progress 表示・ログ出力用のフェーズ名."""
+        return PIPELINE_PHASE_DISPLAY[self]
+
+
+PIPELINE_PHASE_DISPLAY: dict[PipelinePhase, str] = {
+    PipelinePhase.FETCH: "Fetch",
+    PipelinePhase.CONVERT: "Convert",
+    PipelinePhase.INDEX: "Index",
+    PipelinePhase.CONVERT_AND_INDEX: "Convert & Index",
+}
 
 
 class PipelineErrorEntry(TypedDict):

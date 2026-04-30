@@ -16,6 +16,7 @@ from typing import TYPE_CHECKING, Any
 import httpx
 
 from rag.pipeline.ingesters._common import (
+    IngestErrorCategory,
     IngestResult,
     ProgressCallback,
     fetch_get,
@@ -225,7 +226,7 @@ class ZennIngester:
                 logger.exception("記事の取得に失敗しました: %s", slug)
                 result.errors += 1
                 fetch_detail: dict[str, Any] = {
-                    "category": "metadata_fetch",
+                    "category": IngestErrorCategory.METADATA_FETCH.value,
                     "target": f"articles/{slug}",
                     "message": str(exc),
                 }
@@ -254,7 +255,7 @@ class ZennIngester:
                 logger.exception("記事の配置に失敗しました: %s", rel_path)
                 result.errors += 1
                 result.error_details.append({
-                    "category": "placement",
+                    "category": IngestErrorCategory.PLACEMENT.value,
                     "target": rel_path,
                     "message": str(exc),
                 })
@@ -324,7 +325,7 @@ class ZennIngester:
                 logger.exception("スクラップの取得に失敗しました: %s", slug)
                 result.errors += 1
                 fetch_detail: dict[str, Any] = {
-                    "category": "metadata_fetch",
+                    "category": IngestErrorCategory.METADATA_FETCH.value,
                     "target": f"scraps/{slug}",
                     "message": str(exc),
                 }
@@ -353,7 +354,7 @@ class ZennIngester:
                 logger.exception("スクラップの配置に失敗しました: %s", rel_path)
                 result.errors += 1
                 result.error_details.append({
-                    "category": "placement",
+                    "category": IngestErrorCategory.PLACEMENT.value,
                     "target": rel_path,
                     "message": str(exc),
                 })
@@ -486,7 +487,7 @@ class ZennIngester:
                 logger.warning("コンテンツオブジェクトが空です: %s/%s", kind, slug)
                 result.errors += 1
                 result.error_details.append({
-                    "category": "metadata_fetch",
+                    "category": IngestErrorCategory.METADATA_FETCH.value,
                     "target": f"{kind}/{slug}",
                     "message": "Empty content object",
                 })
@@ -535,7 +536,7 @@ class ZennIngester:
             logger.exception("コンテンツの取得に失敗しました: %s/%s", kind, slug)
             result.errors += 1
             fetch_detail: dict[str, Any] = {
-                "category": "metadata_fetch",
+                "category": IngestErrorCategory.METADATA_FETCH.value,
                 "target": f"{kind}/{slug}",
                 "message": str(exc),
             }
@@ -561,7 +562,7 @@ class ZennIngester:
             logger.exception("コンテンツの配置に失敗しました: %s", rel_path)
             result.errors += 1
             result.error_details.append({
-                "category": "placement",
+                "category": IngestErrorCategory.PLACEMENT.value,
                 "target": rel_path,
                 "message": str(exc),
             })
@@ -587,7 +588,7 @@ class ZennIngester:
                 logger.warning("Zenn URL のパースに失敗しました: %s", url)
                 result.errors += 1
                 result.error_details.append({
-                    "category": "metadata_fetch",
+                    "category": IngestErrorCategory.METADATA_FETCH.value,
                     "target": url,
                     "message": "Invalid Zenn URL format",
                 })

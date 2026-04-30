@@ -9,6 +9,7 @@ from pathlib import Path
 
 import pytest
 
+from rag.store.models import SourceStatus
 from rag.store.source_store import SourceStore
 
 
@@ -41,7 +42,7 @@ class TestPlaceFile:
         assert record is not None
         assert record.source_type == "local"
         assert record.title == "test"
-        assert record.status == "active"
+        assert record.status is SourceStatus.ACTIVE
         assert record.file_size == len(data)
 
     def test_place_web_file_with_meta(self, store: SourceStore) -> None:
@@ -421,7 +422,7 @@ class TestSoftDelete:
         store.soft_delete("local/test.md")
         record = store.db.get_source("local/test.md")
         assert record is not None
-        assert record.status == "deleted"
+        assert record.status is SourceStatus.DELETED
 
         # ファイルはまだ存在する
         assert (store.root_dir / "local" / "test.md").exists()
@@ -429,7 +430,7 @@ class TestSoftDelete:
         store.restore("local/test.md")
         record = store.db.get_source("local/test.md")
         assert record is not None
-        assert record.status == "active"
+        assert record.status is SourceStatus.ACTIVE
 
     def test_soft_delete_nonexistent(self, store: SourceStore) -> None:
         with pytest.raises(KeyError):

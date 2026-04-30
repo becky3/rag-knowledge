@@ -18,6 +18,7 @@ from typing import TYPE_CHECKING, Any, Literal
 import httpx
 
 from rag.pipeline.ingesters._common import (
+    IngestErrorCategory,
     IngestResult,
     ProgressCallback,
     fetch_get,
@@ -349,7 +350,7 @@ class AozoraIngester:
                 logger.exception("作品の取得・配置に失敗しました: %s", book_id)
                 result.errors += 1
                 detail: dict[str, Any] = {
-                    "category": "metadata_fetch",
+                    "category": IngestErrorCategory.METADATA_FETCH.value,
                     "target": f"book_id={book_id}",
                     "message": str(exc),
                 }
@@ -400,7 +401,7 @@ class AozoraIngester:
             logger.warning("XHTML URL が欠落: book_id=%s", book_id)
             result.errors += 1
             result.error_details.append({
-                "category": "metadata_fetch",
+                "category": IngestErrorCategory.METADATA_FETCH.value,
                 "target": f"book_id={book_id}",
                 "message": "XHTML URL missing",
             })
@@ -429,7 +430,7 @@ class AozoraIngester:
             )
             result.errors += 1
             result.error_details.append({
-                "category": "metadata_fetch",
+                "category": IngestErrorCategory.METADATA_FETCH.value,
                 "target": f"book_id={book_id}",
                 "status": status_code,
                 "url": github_url,
@@ -468,7 +469,7 @@ class AozoraIngester:
             logger.exception("作品の配置に失敗しました: %s", rel_path)
             result.errors += 1
             result.error_details.append({
-                "category": "placement",
+                "category": IngestErrorCategory.PLACEMENT.value,
                 "target": rel_path,
                 "message": str(exc),
             })

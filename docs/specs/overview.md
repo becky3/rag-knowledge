@@ -38,6 +38,7 @@ RAG Knowledge は、外部 Web ページから収集した知識をベクトル 
 | 28 | Fake モード基盤 | 外部 API・ライブラリの Fake Adapter 注入による実アクセス排除（テスト・QA・運用環境共通） | [infrastructure/fake-mode.md](infrastructure/fake-mode.md) |
 | 29 | YouTube Fake Adapter | YouTube インジェスター用 FakeYoutubeFetcher（シナリオ切替・JSON 返却） | [infrastructure/fake-adapters/youtube.md](infrastructure/fake-adapters/youtube.md) |
 | 30 | QA 戦略（3 レイヤー） | L1 Unit Test / L2 Mock E2E / L3 本番相当 QA の責務分離と実施頻度ポリシー | [workflows/qa-strategy.md](workflows/qa-strategy.md) |
+| 31 | アーキテクチャ採用方針 | rag-knowledge のアーキテクチャ説明・正解パターン（youtube）・構造判断 SSoT | [architecture.md](architecture.md) |
 
 ## 3. 技術スタック
 

@@ -550,7 +550,7 @@ source_store 内の全ファイルのメタデータ索引。
 | `source_id` | TEXT | PRIMARY KEY | ソース識別子（= source_store 内の相対パス） |
 | `source_type` | TEXT | NOT NULL | 媒体種別（値は [`_schema/enums.yml`](../../_schema/enums.yml) の `source_type` を参照） |
 | `title` | TEXT | NOT NULL | コンテンツのタイトル |
-| `status` | TEXT | NOT NULL, DEFAULT 'active' | `active` または `deleted` |
+| `status` | TEXT | NOT NULL, DEFAULT 'active' | ソースの論理状態。値は [`_schema/enums.yml`](../../_schema/enums.yml) の `source_status` を参照（`active` / `deleted`） |
 | `content_hash` | TEXT | NOT NULL | ファイル内容の SHA-256 ハッシュ |
 | `file_size` | INTEGER | NOT NULL | ファイルサイズ（バイト） |
 | `collected_at` | TEXT | NOT NULL | 初回取り込み日時（ISO 8601） |

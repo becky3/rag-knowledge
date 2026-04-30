@@ -2,6 +2,11 @@
 
 enums.yml を SSoT として、Python 側の定義と値が一致することを確認する。
 不一致時は差分を表示して exit 1 で終了する。
+
+検証内容:
+- カテゴリごとの値集合が Python 側（Literal / Enum）と一致すること
+- 値の重複がないこと
+- attributes が宣言されている場合、各 value にその属性が宣言された型で含まれていること
 """
 
 from __future__ import annotations
@@ -12,6 +17,12 @@ from pathlib import Path
 from typing import Any, get_args
 
 import yaml
+
+_ATTR_TYPE_MAP: dict[str, type] = {
+    "bool": bool,
+    "str": str,
+    "int": int,
+}
 
 
 def _load_enums_yml(path: Path) -> dict[str, Any]:
@@ -29,7 +40,10 @@ def _load_enums_yml(path: Path) -> dict[str, Any]:
 
 
 def _extract_yml_values(data: dict[str, Any], key: str) -> set[str]:
-    """enums.yml の指定キーから値の集合を取得する."""
+    """enums.yml の指定キーから値の集合を取得する.
+
+    `attributes` が宣言されている場合、各 value がその属性を宣言された型で持つかも検証する。
+    """
     entry = data.get(key)
     if entry is None:
         print(f"ERROR: enums.yml に '{key}' が定義されていません")
@@ -41,6 +55,7 @@ def _extract_yml_values(data: dict[str, Any], key: str) -> set[str]:
     if not isinstance(values, list) or not values:
         print(f"ERROR: enums.yml の '{key}.values' が空、または list ではありません: {values}")
         sys.exit(1)
+    attr_specs = _parse_attributes(entry.get("attributes"), key)
     result: set[str] = set()
     duplicates: set[str] = set()
     for i, item in enumerate(values):
@@ -57,9 +72,59 @@ def _extract_yml_values(data: dict[str, Any], key: str) -> set[str]:
         if value in result:
             duplicates.add(value)
         result.add(value)
+        for attr_name, attr_type in attr_specs.items():
+            if attr_name not in item:
+                print(
+                    f"ERROR: enums.yml の '{key}.values[{i}]' に属性 '{attr_name}' が "
+                    f"ありません: {item}"
+                )
+                sys.exit(1)
+            attr_value = item[attr_name]
+            if not isinstance(attr_value, attr_type):
+                print(
+                    f"ERROR: enums.yml の '{key}.values[{i}].{attr_name}' は "
+                    f"{attr_type.__name__} ではありません: "
+                    f"{attr_value!r} ({type(attr_value).__name__})"
+                )
+                sys.exit(1)
     if duplicates:
         print(f"ERROR: enums.yml の '{key}.values' に重複値があります: {sorted(duplicates)}")
         sys.exit(1)
+    return result
+
+
+def _parse_attributes(attrs: Any, key: str) -> dict[str, type]:
+    """attributes 宣言をパースして属性名 → Python 型の dict を返す.
+
+    attributes が未定義の場合は空 dict を返す。
+    """
+    if attrs is None:
+        return {}
+    if not isinstance(attrs, dict):
+        print(f"ERROR: enums.yml の '{key}.attributes' は dict ではありません: {type(attrs)}")
+        sys.exit(1)
+    result: dict[str, type] = {}
+    for attr_name, spec in attrs.items():
+        if not isinstance(spec, dict) or "type" not in spec:
+            print(
+                f"ERROR: enums.yml の '{key}.attributes.{attr_name}' に 'type' キーが "
+                f"ありません: {spec}"
+            )
+            sys.exit(1)
+        type_name = spec["type"]
+        if not isinstance(type_name, str):
+            print(
+                f"ERROR: enums.yml の '{key}.attributes.{attr_name}.type' は str で "
+                f"指定してください: {type_name!r} ({type(type_name).__name__})"
+            )
+            sys.exit(1)
+        if type_name not in _ATTR_TYPE_MAP:
+            print(
+                f"ERROR: enums.yml の '{key}.attributes.{attr_name}.type' が未対応です: "
+                f"{type_name!r} (対応: {sorted(_ATTR_TYPE_MAP)})"
+            )
+            sys.exit(1)
+        result[attr_name] = _ATTR_TYPE_MAP[type_name]
     return result
 
 
@@ -102,8 +167,14 @@ def main() -> None:
 
     # Python 定義をインポート
     from rag.errors import CliErrorCode  # type: ignore[import-untyped]
+    from rag.pipeline.ingesters._common import (  # type: ignore[import-untyped]
+        IngestErrorCategory,
+    )
     from rag.pipeline.models import PipelineMode  # type: ignore[import-untyped]
-    from rag.store.models import SourceType  # type: ignore[import-untyped]
+    from rag.store.models import (  # type: ignore[import-untyped]
+        SourceStatus,
+        SourceType,
+    )
 
     ok = True
 
@@ -111,6 +182,12 @@ def main() -> None:
     yml_source_types = _extract_yml_values(data, "source_type")
     python_source_types = _extract_literal_values(SourceType)
     if not _check_match("source_type (SourceType)", yml_source_types, python_source_types):
+        ok = False
+
+    # source_status: Enum クラス
+    yml_source_status = _extract_yml_values(data, "source_status")
+    python_source_status = _extract_enum_values(SourceStatus)
+    if not _check_match("source_status (SourceStatus)", yml_source_status, python_source_status):
         ok = False
 
     # pipeline_mode: Enum クラス
@@ -123,6 +200,16 @@ def main() -> None:
     yml_error_codes = _extract_yml_values(data, "cli_error_code")
     python_error_codes = _extract_enum_values(CliErrorCode)
     if not _check_match("cli_error_code (CliErrorCode)", yml_error_codes, python_error_codes):
+        ok = False
+
+    # ingest_error_category: Enum クラス
+    yml_ingest_error_categories = _extract_yml_values(data, "ingest_error_category")
+    python_ingest_error_categories = _extract_enum_values(IngestErrorCategory)
+    if not _check_match(
+        "ingest_error_category (IngestErrorCategory)",
+        yml_ingest_error_categories,
+        python_ingest_error_categories,
+    ):
         ok = False
 
     if not ok:

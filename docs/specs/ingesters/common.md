@@ -156,13 +156,13 @@ ConstrainedClient はサーキットブレーカーの責務（HTTP レスポン
 
 | フィールド | 必須 | 内容 |
 |---|:-:|---|
-| `category` | 必須 | 失敗種別（下記 4 種のいずれか） |
+| `category` | 必須 | 失敗種別。値は [`_schema/enums.yml`](../../../_schema/enums.yml) の `ingest_error_category` カテゴリを参照（`IngestErrorCategory` Enum の `value`） |
 | `target` | 必須 | 失敗対象の識別子（`rel_path` / `source_id` / `slug` / `book_id` 等） |
 | `status` | 任意 | HTTP ステータスコード（HTTP 系失敗のみ） |
 | `url` | 任意 | 失敗した URL（HTTP 系失敗のみ） |
 | `message` | 任意（例外由来では推奨） | 追加説明（例外メッセージ等。例外由来の失敗では `str(exc)` を記録することを推奨） |
 
-`category` は全媒体で以下の 4 種に統一する。集計・再取り込み判定で信頼できる集合として扱えるようにするため、列挙外の値は使用しない。
+`category` は全媒体で `IngestErrorCategory` Enum の値に統一する。集計・再取り込み判定で信頼できる集合として扱えるようにするため、列挙外の値は使用しない。値定義の SSoT は [`_schema/enums.yml`](../../../_schema/enums.yml) の `ingest_error_category` カテゴリ。
 
 | 値 | 用途 |
 |---|---|

@@ -12,7 +12,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from rag.pipeline.ingesters._common import IngestResult
+from rag.pipeline.ingesters._common import IngestErrorCategory, IngestResult
 
 if TYPE_CHECKING:
     from rag.store.source_store import SourceStore
@@ -86,7 +86,7 @@ class JournalIngester:
         except ValueError as e:
             result.errors = 1
             result.error_details.append({
-                "category": "placement",
+                "category": IngestErrorCategory.PLACEMENT.value,
                 "target": entry_id or title,
                 "message": str(e),
             })
@@ -94,7 +94,7 @@ class JournalIngester:
             logger.exception("Failed to place journal entry")
             result.errors = 1
             result.error_details.append({
-                "category": "placement",
+                "category": IngestErrorCategory.PLACEMENT.value,
                 "target": entry_id or title,
                 "message": str(e),
             })
@@ -118,7 +118,7 @@ class JournalIngester:
         except ValueError as e:
             result.errors = 1
             result.error_details.append({
-                "category": "placement",
+                "category": IngestErrorCategory.PLACEMENT.value,
                 "target": dir_path,
                 "message": str(e),
             })
@@ -128,7 +128,7 @@ class JournalIngester:
         if not resolved_dir.exists():
             result.errors = 1
             result.error_details.append({
-                "category": "placement",
+                "category": IngestErrorCategory.PLACEMENT.value,
                 "target": str(resolved_dir),
                 "message": f"Directory not found: {resolved_dir}",
             })
@@ -136,7 +136,7 @@ class JournalIngester:
         if not resolved_dir.is_dir():
             result.errors = 1
             result.error_details.append({
-                "category": "placement",
+                "category": IngestErrorCategory.PLACEMENT.value,
                 "target": str(resolved_dir),
                 "message": f"Path is not a directory: {resolved_dir}",
             })
@@ -196,7 +196,7 @@ class JournalIngester:
                 logger.exception("Failed to import journal file: %s", fp)
                 result.errors += 1
                 result.error_details.append({
-                    "category": "placement",
+                    "category": IngestErrorCategory.PLACEMENT.value,
                     "target": str(fp),
                     "message": str(exc),
                 })

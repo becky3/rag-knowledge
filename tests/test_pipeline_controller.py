@@ -24,7 +24,7 @@ import yaml
 
 from rag.pipeline.controller import PipelineController
 from rag.pipeline.models import PipelineMode
-from rag.store.models import NULL_COMMIT_HASH, SourceMetadata, SourceType
+from rag.store.models import NULL_COMMIT_HASH, SourceMetadata, SourceStatus, SourceType
 from rag.store.source_store import SourceStore
 
 
@@ -371,7 +371,7 @@ class TestRunIncremental:
         # metadata.db で論理削除されている
         record = ctrl.db.get_source("local/a.txt")
         assert record is not None
-        assert record.status == "deleted"
+        assert record.status is SourceStatus.DELETED
 
     async def test_incremental_detects_renamed(
         self,
@@ -575,7 +575,7 @@ class TestDeleteAndReAdd:
         assert "local/a.txt" in indexer.deleted_ids
         record = ctrl.db.get_source("local/a.txt")
         assert record is not None
-        assert record.status == "deleted"
+        assert record.status is SourceStatus.DELETED
 
         # スタブをリセット
         indexer.added.clear()
@@ -602,7 +602,7 @@ class TestDeleteAndReAdd:
         assert "local/a.txt" in indexer.added
         record = ctrl.db.get_source("local/a.txt")
         assert record is not None
-        assert record.status == "active"
+        assert record.status is SourceStatus.ACTIVE
 
     async def test_delete_and_readd_different_content(
         self,
@@ -1598,7 +1598,7 @@ class TestRenamedLocalSourceId:
 
         old_record = ctrl.db.get_source("local/old.txt")
         assert old_record is not None
-        assert old_record.status == "active"
+        assert old_record.status is SourceStatus.ACTIVE
 
         src = workspace["source"] / "local" / "old.txt"
         src.rename(workspace["source"] / "local" / "new.txt")
@@ -1608,12 +1608,12 @@ class TestRenamedLocalSourceId:
         # 旧レコードは論理削除
         old_record = ctrl.db.get_source("local/old.txt")
         assert old_record is not None
-        assert old_record.status == "deleted"
+        assert old_record.status is SourceStatus.DELETED
 
         # 新レコードが作成されている
         new_record = ctrl.db.get_source("local/new.txt")
         assert new_record is not None
-        assert new_record.status == "active"
+        assert new_record.status is SourceStatus.ACTIVE
 
         # インデクサー: 旧削除 + 新追加
         assert "local/old.txt" in indexer.deleted_ids

@@ -42,6 +42,7 @@ from rag.store.models import (
     NULL_COMMIT_HASH,
     SourceMetadata,
     SourceRecord,
+    SourceStatus,
     SourceType,
 )
 from rag.store.resolve import resolve_published_at, resolve_title
@@ -273,7 +274,7 @@ class PipelineController:
         # is_source_file=False のファイルは DB に登録されない）
         records = list(self.db.search_sources(
             source_type=source_type,
-            status="active",
+            status=SourceStatus.ACTIVE,
             path_prefix=path,
         ))
 
@@ -484,7 +485,7 @@ class PipelineController:
         # 登録されないため、DB 側フィルタは不要）
         records = list(self.db.search_sources(
             source_type=source_type,
-            status="active",
+            status=SourceStatus.ACTIVE,
             path_prefix=path,
         ))
 
@@ -559,7 +560,7 @@ class PipelineController:
         # されないため、フィルタは不要）
         records = list(self.db.search_sources(
             source_type=source_type,
-            status="active",
+            status=SourceStatus.ACTIVE,
             path_prefix=path,
         ))
 
@@ -943,7 +944,7 @@ class PipelineController:
         # （DB=active / インデックス未登録の不整合を防止）
         source_id = self._resolve_source_id(entry.file_path)
         existing = self.db.get_source(source_id)
-        if existing is not None and existing.status == "deleted":
+        if existing is not None and existing.status is SourceStatus.DELETED:
             return
 
         self._register_in_db(entry.file_path)
@@ -975,7 +976,7 @@ class PipelineController:
         self._converter.delete(entry.file_path, self._converted_store_dir)
         await self._indexer.delete(source_id)
         try:
-            self.db.set_status(source_id, "deleted")
+            self.db.set_status(source_id, SourceStatus.DELETED)
         except KeyError:
             logger.warning(
                 "削除対象が metadata.db に存在しません: %s", source_id,
@@ -1005,7 +1006,7 @@ class PipelineController:
         # metadata.db 更新: source_id = file_path なのでリネーム = source_id 変更
         # 全 source_type で DELETE old + INSERT new に統一
         try:
-            self.db.set_status(old_source_id, "deleted")
+            self.db.set_status(old_source_id, SourceStatus.DELETED)
         except KeyError:
             pass
         self._register_in_db(entry.file_path)
