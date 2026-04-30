@@ -23,7 +23,7 @@ import re
 
 import pytest
 
-from ._mcp_helpers import call_mcp_tool
+from ._mcp_helpers import McpServerHandle, call_mcp_tool
 
 
 pytestmark = pytest.mark.e2e
@@ -66,7 +66,7 @@ class TestMcpBlueskyIngest:
 
     async def test_crawl_then_search_returns_chunk(
         self,
-        e2e_mcp_server: str,
+        e2e_mcp_server: McpServerHandle,
     ) -> None:
         """rag_crawl_bluesky で取り込んだ投稿が rag_search 経路で索引化される.
 
@@ -99,7 +99,7 @@ class TestMcpBlueskyIngest:
 
     async def test_repost_filter_excludes_reposts(
         self,
-        e2e_mcp_server: str,
+        e2e_mcp_server: McpServerHandle,
     ) -> None:
         """include_reposts=False がリポスト 1 件を除外し件数に反映する.
 
@@ -155,7 +155,7 @@ class TestMcpBlueskyIngest:
 
     async def test_response_contains_fake_mode_label(
         self,
-        e2e_mcp_server: str,
+        e2e_mcp_server: McpServerHandle,
     ) -> None:
         """fake モード時、bluesky 取り込み MCP 応答に [FAKE MODE: bluesky] ラベルが付与される.
 

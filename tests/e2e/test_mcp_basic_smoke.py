@@ -12,7 +12,7 @@ from __future__ import annotations
 
 import pytest
 
-from ._mcp_helpers import call_mcp_tool
+from ._mcp_helpers import McpServerHandle, call_mcp_tool
 
 
 pytestmark = pytest.mark.e2e
@@ -20,7 +20,7 @@ pytestmark = pytest.mark.e2e
 
 class TestMcpBasicSmoke:
     async def test_rag_stats_returns_response(
-        self, e2e_mcp_server: str,
+        self, e2e_mcp_server: McpServerHandle,
     ) -> None:
         """rag_stats（外部アクセスゼロ・read-only）が応答を返す."""
         response = await call_mcp_tool(e2e_mcp_server, "rag_stats", {})

@@ -1,38 +1,98 @@
 """e2e テスト共通の MCP ツール呼び出しヘルパー.
 
 仕様: docs/specs/workflows/qa-strategy.md
-
-L2 Mock E2E テスト（``test_ingest_mcp_*.py`` / ``test_mcp_basic_smoke.py``）から
-共通利用される。MCP server を HTTP モードで起動し、Streamable HTTP クライアントで
-ツールを呼び出してテキスト応答を返す。
-
-各テストファイルでヘルパーを再定義していた DRY 違反を解消するため、
-本モジュールに集約する（PR #704 のレビュー指摘 R-C4 対応）。
 """
 
 from __future__ import annotations
 
-from typing import Any
+import re
+from typing import Any, NamedTuple
 
 from mcp import ClientSession
 from mcp.client.streamable_http import streamablehttp_client
 
 
+# Unicode REPLACEMENT CHARACTER。文字化け検出のマーカーとして使う。
+_MOJIBAKE_MARKER = "�"
+
+# 子プロセス stderr 監視の対象ログレベル正規表現。
+# logging.basicConfig フォーマット `LEVEL - message` および
+# 単独行 `WARNING:` / `ERROR:` の双方を拾う。
+_STDERR_VIOLATION_RE = re.compile(r"\b(WARNING|ERROR|CRITICAL)\b")
+
+# allowlist: 仕様上 WARNING レベルで出力されるが silent regression ではないログ。
+# FAKE MODE 起動通知は fake-mode.md 仕様で WARNING 出力が必須なため除外する。
+_STDERR_ALLOWLIST = (
+    "[FAKE MODE:",
+)
+
+
+class McpServerHandle(NamedTuple):
+    """MCP server fixture が yield するハンドル.
+
+    Attributes:
+        base_url: MCP server のベース URL（例: http://127.0.0.1:8081）
+        stderr_lines: 子プロセス stderr の蓄積バッファ。drain thread によって
+            常時追記される。テストは len(stderr_lines) でスナップショットを
+            取り、ツール呼び出し前後の差分を assertion 対象にする
+    """
+
+    base_url: str
+    stderr_lines: list[str]
+
+
+def assert_no_mojibake(text: str, *, context: str = "response") -> None:
+    """応答テキストに文字化けマーカー（U+FFFD）が含まれないこと.
+
+    PYTHONUTF8=1 環境では本来発生しないため、検出時は subprocess 越境で
+    encoding 違反が silent に発生していることを示す。
+    """
+    if _MOJIBAKE_MARKER in text:
+        raise AssertionError(
+            f"mojibake detected in {context} (U+FFFD found): {text[:500]}"
+        )
+
+
+def assert_no_stderr_warnings(
+    new_lines: list[str], *, context: str = "tool call"
+) -> None:
+    """指定行範囲に WARNING / ERROR / CRITICAL ログが含まれないこと.
+
+    fail-fast 環境下で想定外のログレベルが混入した場合は silent regression の
+    兆候のため、テスト失敗で検出する。allowlist のパターンを含む行は除外する。
+    """
+    violations = [
+        line
+        for line in new_lines
+        if _STDERR_VIOLATION_RE.search(line)
+        and not any(allowed in line for allowed in _STDERR_ALLOWLIST)
+    ]
+    if violations:
+        joined = "".join(violations)
+        raise AssertionError(
+            f"unexpected WARNING/ERROR in subprocess stderr during {context}:\n"
+            f"{joined}"
+        )
+
+
 async def call_mcp_tool(
-    base_url: str,
+    server: McpServerHandle | str,
     tool_name: str,
     arguments: dict[str, Any],
 ) -> str:
     """MCP server (HTTP モード) で指定ツールを呼び出し、テキスト応答を返す.
 
-    Args:
-        base_url: MCP server のベース URL（``e2e_mcp_server`` fixture から渡される）
-        tool_name: 呼び出す MCP ツール名
-        arguments: ツール引数
-
-    Returns:
-        応答テキスト（複数 content block がある場合は改行連結）
+    server に McpServerHandle が渡された場合は、応答テキストの mojibake 検出 +
+    呼び出し中の子プロセス stderr WARNING/ERROR 監視を自動適用する。
+    str を渡すとレガシー互換モード（自動 assertion なし）。
     """
+    handle = server if isinstance(server, McpServerHandle) else None
+    base_url = handle.base_url if handle is not None else server
+
+    stderr_snapshot = (
+        len(handle.stderr_lines) if handle is not None else 0
+    )
+
     mcp_url = f"{base_url}/mcp"
     async with streamablehttp_client(mcp_url) as (read, write, _):
         async with ClientSession(read, write) as session:
@@ -42,4 +102,11 @@ async def call_mcp_tool(
             for block in result.content:
                 if hasattr(block, "text"):
                     texts.append(block.text)
-            return "\n".join(texts)
+            response = "\n".join(texts)
+
+    if handle is not None:
+        assert_no_mojibake(response, context=f"{tool_name} response")
+        new_lines = handle.stderr_lines[stderr_snapshot:]
+        assert_no_stderr_warnings(new_lines, context=f"{tool_name} call")
+
+    return response
