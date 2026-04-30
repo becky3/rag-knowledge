@@ -111,13 +111,13 @@ export PYTHONIOENCODING=utf-8
 
 #### 違反時の挙動
 
-未設定または不一致のまま起動すると、エントリポイント（`python -m rag.server` / `python -m rag.cli` / `pytest`）が起動直後に以下のメッセージで終了する:
+未設定または不一致のまま起動すると、エントリポイント（`python -m rag.server` / `python -m rag.cli` / `pytest`）が起動直後に以下のメッセージで終了する（メッセージは ASCII-only：stderr が cp932 等の場合でも mojibake せず確実に表示するため）:
 
 ```
-ERROR: UTF-8 強制環境変数が未設定または不正です。
-  PYTHONUTF8=<現在値>     (期待値: 1)
-  PYTHONIOENCODING=<現在値> (期待値: utf-8)
-OS env で UTF-8 を強制してください。
+ERROR: UTF-8 environment is not enforced.
+  PYTHONUTF8='<current>'   (expected: '1')
+  PYTHONIOENCODING='<current>' (expected: 'utf-8')
+Set OS env to enforce UTF-8:
   Windows: setx PYTHONUTF8 1 / setx PYTHONIOENCODING utf-8
   Unix:    export PYTHONUTF8=1 / export PYTHONIOENCODING=utf-8
 ```

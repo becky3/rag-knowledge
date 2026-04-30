@@ -20,6 +20,7 @@ from __future__ import annotations
 
 import functools
 import io
+import os
 import sys
 import tomllib
 from pathlib import Path
@@ -411,6 +412,78 @@ def log_fake_mode_status(settings: RAGSettings) -> None:
         logger.info(
             "Embedding は REAL モードで起動中。実 Embedding API アクセスが発生します"
         )
+
+
+def _normalize_encoding(value: str) -> str:
+    """エンコーディング名を比較可能な正規形式に変換する.
+
+    "utf-8" / "UTF-8" / "utf8" / "UTF8" 等の表記揺れを "utf8" に正規化する。
+    """
+    return value.lower().replace("-", "").replace("_", "")
+
+
+def check_utf8_environment(
+    env: dict[str, str], stdout_encoding: str
+) -> list[str]:
+    """UTF-8 強制環境変数の違反項目を返す純粋関数（テスト容易性のため分離）.
+
+    Args:
+        env: 検証対象の環境変数マッピング
+        stdout_encoding: 検証対象の sys.stdout.encoding 値
+
+    Returns:
+        違反項目を表すメッセージのリスト。違反なしなら空リスト。
+    """
+    errors: list[str] = []
+
+    pyutf8 = env.get("PYTHONUTF8", "")
+    if pyutf8 != "1":
+        errors.append(f"  PYTHONUTF8={pyutf8!r}     (expected: '1')")
+
+    pyio = env.get("PYTHONIOENCODING", "")
+    if _normalize_encoding(pyio) != "utf8":
+        errors.append(f"  PYTHONIOENCODING={pyio!r} (expected: 'utf-8')")
+
+    if _normalize_encoding(stdout_encoding) != "utf8":
+        errors.append(
+            f"  sys.stdout.encoding={stdout_encoding!r} (expected: 'utf-8')"
+        )
+
+    return errors
+
+
+def validate_utf8_environment() -> None:
+    """起動時に UTF-8 強制環境変数を検証し、違反時 fail-fast で終了する.
+
+    検証項目:
+    - PYTHONUTF8 == "1"
+    - PYTHONIOENCODING の正規化値が "utf8"
+    - sys.stdout.encoding の正規化値が "utf8"
+
+    違反時はエラーメッセージを stderr に出力し ``sys.exit(1)`` で終了する。
+    silent な mojibake / UnicodeEncodeError 握り潰しの構造的予防が目的。
+
+    エントリポイント（``rag.server`` / ``rag.cli`` / ``tests.conftest``）の
+    起動直後に呼び出す。
+    """
+    stdout_encoding = getattr(sys.stdout, "encoding", "") or ""
+    errors = check_utf8_environment(dict(os.environ), stdout_encoding)
+    if not errors:
+        return
+
+    # ASCII-only message: stderr が cp932 等の場合に Japanese 出力が
+    # UnicodeEncodeError を引き起こして exit code が紛れることを避ける
+    msg_lines = [
+        "ERROR: UTF-8 environment is not enforced.",
+        *errors,
+        "Set OS env to enforce UTF-8:",
+        "  Windows: setx PYTHONUTF8 1 / setx PYTHONIOENCODING utf-8",
+        "  Unix:    export PYTHONUTF8=1 / export PYTHONIOENCODING=utf-8",
+        "See README 'UTF-8 strict environment variables' section for details.",
+    ]
+    for line in msg_lines:
+        print(line, file=sys.stderr)
+    sys.exit(1)
 
 
 def ensure_utf8_streams(*, include_stdout: bool = False) -> None:

@@ -43,7 +43,7 @@ os.environ.setdefault("ANONYMIZED_TELEMETRY", "False")
 
 # bm25s が "resource module not available on Windows" を stdout に print する
 # 問題への対策として、import 時に stdout を抑制する。
-from .config import RAGSettings, ensure_utf8_streams
+from .config import RAGSettings, ensure_utf8_streams, validate_utf8_environment
 from py_common_lib.logging import SessionRotatingFileHandler
 from .rag_knowledge import format_file_size
 
@@ -72,8 +72,13 @@ MCPContext = Context[Any, Any, Any]
 
 LOG_FILE_PREFIX = "rag-server-"
 
+# 起動時 env fail-fast チェック（PYTHONUTF8 / PYTHONIOENCODING / stdout encoding）
+# 違反時は sys.exit(1) で即時終了する。仕様: README「前提: UTF-8 強制環境変数の設定」
+validate_utf8_environment()
+
 # Windows 環境で stderr が cp932 等の場合に UTF-8 へ再構成する
 # stdout は MCP stdio プロトコルが使うため変更しない
+# (validate_utf8_environment 通過後は no-op だが、Phase C で削除予定)
 ensure_utf8_streams()
 
 logger = logging.getLogger("rag.server")

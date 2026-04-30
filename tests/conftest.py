@@ -26,7 +26,11 @@ sys.path.insert(0, str(Path(__file__).parent))
 
 
 def pytest_configure(config: pytest.Config) -> None:
-    """package layout の整合性を起動時に検証する.
+    """起動時 env チェック + package layout 整合性検証.
+
+    1. UTF-8 強制環境変数（PYTHONUTF8 / PYTHONIOENCODING / stdout encoding）の検証.
+       違反時は ``sys.exit(1)`` で即時終了する。
+    2. package layout の整合性検証（後段、本 docstring の元の記述）。
 
     flat module（``foo.py``）と同名 package（``foo/__init__.py``）が共存すると
     Python の import 解決順序が implementation-defined になり、テストで pass
@@ -45,6 +49,12 @@ def pytest_configure(config: pytest.Config) -> None:
 
     関連: Issue #709（fail-fast 化の体系的整備）で CI 段階の同種チェック予定。
     """
+    # 1. UTF-8 強制環境変数の fail-fast 検証
+    from rag.config import validate_utf8_environment
+
+    validate_utf8_environment()
+
+    # 2. package layout の整合性検証
     src_root = Path(__file__).parent.parent / "src"
     if not src_root.is_dir():
         return
