@@ -24,6 +24,7 @@ from urllib.parse import urldefrag
 from .errors import CliErrorCode
 from .filter_parser import parse_filters
 from .pipeline.models import PipelinePhase, format_pipeline_error as _format_pipeline_error
+from .store.models import SourceStatus
 from .evaluation import (
     EvaluationReport,
     FailureTag,
@@ -1821,8 +1822,8 @@ def run_stats(args: argparse.Namespace) -> None:
                 db.initialize()
                 history = db.get_pipeline_history()
                 last_commit_id = db.get_last_commit_id()
-                deleted_count = db.source_count(status="deleted")
-                active_count = db.source_count(status="active")
+                deleted_count = db.source_count(status=SourceStatus.DELETED)
+                active_count = db.source_count(status=SourceStatus.ACTIVE)
                 index_data["source_count"] = active_count
                 pipeline_data["last_processed_at"] = (
                     history[-1].processed_at if history else None

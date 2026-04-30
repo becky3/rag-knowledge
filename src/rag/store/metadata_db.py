@@ -29,18 +29,22 @@ logger = logging.getLogger(__name__)
 # json_extract の JSON パスに埋め込むキー名の許容パターン
 _VALID_FILTER_KEY_RE = re.compile(r"^[a-zA-Z_][a-zA-Z0-9_]*$")
 
-_SCHEMA_SQL = """\
+# SQL 内の status リテラルは SourceStatus Enum の value から導出する。
+# 値定義の SSoT は _schema/enums.yml の source_status カテゴリ。
+_STATUS_ACTIVE = SourceStatus.ACTIVE.value
+
+_SCHEMA_SQL = f"""\
 CREATE TABLE IF NOT EXISTS sources (
     source_id    TEXT PRIMARY KEY,
     source_type  TEXT NOT NULL,
     title        TEXT NOT NULL,
-    status       TEXT NOT NULL DEFAULT 'active',
+    status       TEXT NOT NULL DEFAULT '{_STATUS_ACTIVE}',
     content_hash TEXT NOT NULL,
     file_size    INTEGER NOT NULL,
     collected_at TEXT NOT NULL,
     updated_at   TEXT NOT NULL,
     published_at TEXT NOT NULL DEFAULT '',
-    meta         TEXT NOT NULL DEFAULT '{}'
+    meta         TEXT NOT NULL DEFAULT '{{}}'
 );
 
 CREATE TABLE IF NOT EXISTS pipeline_history (
@@ -159,13 +163,13 @@ class MetadataDB:
         # source_id = file_path 統合: file_path カラムが残っている旧スキーマを移行
         if "file_path" in src_columns:
             # file_path を新 source_id として直接 INSERT（UPDATE での PK 衝突を回避）
-            self._connection.executescript("""\
+            self._connection.executescript(f"""\
                 DROP TABLE IF EXISTS sources_new;
                 CREATE TABLE sources_new (
                     source_id    TEXT PRIMARY KEY,
                     source_type  TEXT NOT NULL,
                     title        TEXT NOT NULL,
-                    status       TEXT NOT NULL DEFAULT 'active',
+                    status       TEXT NOT NULL DEFAULT '{_STATUS_ACTIVE}',
                     content_hash TEXT NOT NULL,
                     file_size    INTEGER NOT NULL,
                     collected_at TEXT NOT NULL,
@@ -304,11 +308,11 @@ class MetadataDB:
                 (source_id, source_type, title, status,
                  content_hash, file_size, collected_at, updated_at,
                  published_at, meta)
-            VALUES (?, ?, ?, 'active', ?, ?, ?, ?, ?, ?)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT(source_id) DO UPDATE SET
                 source_type = excluded.source_type,
                 title = excluded.title,
-                status = 'active',
+                status = excluded.status,
                 content_hash = excluded.content_hash,
                 file_size = excluded.file_size,
                 updated_at = excluded.updated_at,
@@ -318,6 +322,7 @@ class MetadataDB:
                 source_id,
                 source_type,
                 title,
+                _STATUS_ACTIVE,
                 content_hash,
                 file_size,
                 collected_at,
@@ -406,7 +411,7 @@ class MetadataDB:
             params.append(source_type)
         if status is not None:
             conditions.append("status = ?")
-            params.append(status)
+            params.append(status.value)
         if path_prefix is not None:
             normalized = normalize_path_prefix(path_prefix)
             escaped = escape_like(normalized)
@@ -428,7 +433,7 @@ class MetadataDB:
         """
         cursor = self._connection.execute(
             "UPDATE sources SET status = ? WHERE source_id = ?",
-            (status, source_id),
+            (status.value, source_id),
         )
         if cursor.rowcount == 0:
             msg = f"source_id が見つかりません: {source_id}"
@@ -574,7 +579,7 @@ class MetadataDB:
         if status is not None:
             row = self._connection.execute(
                 "SELECT COUNT(*) as cnt FROM sources WHERE status = ?",
-                (status,),
+                (status.value,),
             ).fetchone()
         else:
             row = self._connection.execute(
@@ -627,8 +632,8 @@ class MetadataDB:
             ValueError: filters のキー名に不正な文字が含まれる場合
         """
         direction = "ASC" if ascending else "DESC"
-        conditions = ["source_type = ?", "status = 'active'"]
-        params: list[Any] = [source_type]
+        conditions = ["source_type = ?", "status = ?"]
+        params: list[Any] = [source_type, _STATUS_ACTIVE]
 
         if filters:
             self._build_meta_filter_conditions(filters, conditions, params)
@@ -660,8 +665,8 @@ class MetadataDB:
         Raises:
             ValueError: filters のキー名に不正な文字が含まれる場合
         """
-        conditions = ["source_type = ?", "status = 'active'"]
-        params: list[Any] = [source_type]
+        conditions = ["source_type = ?", "status = ?"]
+        params: list[Any] = [source_type, _STATUS_ACTIVE]
 
         if filters:
             self._build_meta_filter_conditions(filters, conditions, params)
@@ -680,7 +685,7 @@ def _row_to_source_record(row: sqlite3.Row) -> SourceRecord:
         source_id=row["source_id"],
         source_type=row["source_type"],
         title=row["title"],
-        status=row["status"],
+        status=SourceStatus(row["status"]),
         content_hash=row["content_hash"],
         file_size=row["file_size"],
         collected_at=row["collected_at"],

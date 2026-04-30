@@ -5,21 +5,52 @@
 
 source_type:
   description: データソースの種別
+  attributes:
+    has_meta:
+      type: bool
+      description: source_store に .meta サイドカーを持つか（false の場合は source_store 自体が SSoT）
   values:
     - value: web
       description: 外部 Web ページ
+      has_meta: true
     - value: zenn
       description: Zenn 記事・スクラップ
+      has_meta: true
     - value: bluesky
       description: BlueSky 投稿
+      has_meta: true
     - value: youtube
       description: YouTube 動画（字幕・音声文字起こし）
+      has_meta: true
     - value: aozora
       description: 青空文庫の作品
+      has_meta: true
     - value: local
       description: ローカルドキュメント（Markdown、テキスト、PDF、AsciiDoc）
+      has_meta: false
     - value: journal
       description: 開発ジャーナル（セッション作業記録）
+      has_meta: true
+
+source_status:
+  description: ソースの論理的な状態
+  values:
+    - value: active
+      description: 有効（検索・取得対象）
+    - value: deleted
+      description: 論理削除（検索対象外、source_store からは削除されるが metadata.db に履歴を保持）
+
+ingest_error_category:
+  description: インジェスト失敗の種別。IngestResult.error_details / partial_failure_details の category フィールドに記録される
+  values:
+    - value: metadata_fetch
+      description: メタデータ取得失敗（一覧 API / 詳細 API のレスポンス不正・タイムアウト等）
+    - value: media_download
+      description: メディアダウンロード失敗（HLS / 音声 / 動画 / 添付ファイル等）
+    - value: placement
+      description: source_store への配置失敗（書き込みエラー・パス変換失敗等）
+    - value: delegation
+      description: 別インジェスター・別ランナーへの委譲失敗（YouTube 委譲・site-ingest 委譲等）
 
 pipeline_mode:
   description: パイプライン実行モード

@@ -15,7 +15,7 @@ from pathlib import Path, PurePosixPath
 from typing import TYPE_CHECKING
 from urllib.parse import urlparse
 
-from rag.pipeline.ingesters._common import IngestResult
+from rag.pipeline.ingesters._common import IngestErrorCategory, IngestResult
 from rag.store.path_converter import url_to_path
 
 # .html 付与をスキップする拡張子
@@ -208,7 +208,7 @@ def _process_record(
         )
         result.ingest.errors += 1
         result.ingest.error_details.append({
-            "category": "placement",
+            "category": IngestErrorCategory.PLACEMENT.value,
             "target": record.url,
             "message": "HTML not found",
         })
@@ -223,7 +223,7 @@ def _process_record(
         )
         result.ingest.errors += 1
         result.ingest.error_details.append({
-            "category": "placement",
+            "category": IngestErrorCategory.PLACEMENT.value,
             "target": record.url,
             "message": f"Read error: {exc}",
         })
@@ -259,7 +259,7 @@ def _process_record(
         )
         result.ingest.errors += 1
         result.ingest.error_details.append({
-            "category": "placement",
+            "category": IngestErrorCategory.PLACEMENT.value,
             "target": record.url,
             "message": str(exc),
         })

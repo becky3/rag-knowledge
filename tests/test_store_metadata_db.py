@@ -11,7 +11,7 @@ from pathlib import Path
 import pytest
 
 from rag.store.metadata_db import MetadataDB
-from rag.store.models import NULL_COMMIT_HASH
+from rag.store.models import NULL_COMMIT_HASH, SourceStatus
 
 
 @pytest.fixture()
@@ -41,7 +41,7 @@ class TestSourcesCRUD:
         assert record.source_id == "web/https/example.com/page.html"
         assert record.source_type == "web"
         assert record.title == "Test Page"
-        assert record.status == "active"
+        assert record.status is SourceStatus.ACTIVE
         assert record.file_size == 1024
 
     def test_register_upsert(self, db: MetadataDB) -> None:
@@ -69,7 +69,7 @@ class TestSourcesCRUD:
         assert record is not None
         assert record.title == "New Title"
         assert record.content_hash == "new"
-        assert record.status == "active"
+        assert record.status is SourceStatus.ACTIVE
 
     def test_register_restores_deleted(self, db: MetadataDB) -> None:
         """deleted 状態のソースへの再登録で active に復帰する."""
@@ -82,7 +82,7 @@ class TestSourcesCRUD:
             collected_at="2026-01-01T00:00:00Z",
             updated_at="2026-01-01T00:00:00Z",
         )
-        db.set_status("local/test.md", "deleted")
+        db.set_status("local/test.md", SourceStatus.DELETED)
 
         db.register_source(
             source_id="local/test.md",
@@ -96,7 +96,7 @@ class TestSourcesCRUD:
 
         record = db.get_source("local/test.md")
         assert record is not None
-        assert record.status == "active"
+        assert record.status is SourceStatus.ACTIVE
         assert record.title == "Test Updated"
 
     def test_get_nonexistent(self, db: MetadataDB) -> None:
@@ -254,9 +254,9 @@ class TestSourcesCRUD:
             collected_at="2026-01-02T00:00:00Z",
             updated_at="2026-01-02T00:00:00Z",
         )
-        db.set_status("local/deleted.md", "deleted")
+        db.set_status("local/deleted.md", SourceStatus.DELETED)
 
-        active = db.search_sources(status="active")
+        active = db.search_sources(status=SourceStatus.ACTIVE)
         assert len(active) == 1
         assert active[0].source_id == "local/active.md"
 
@@ -271,19 +271,19 @@ class TestSourcesCRUD:
             updated_at="2026-01-01T00:00:00Z",
         )
 
-        db.set_status("local/test.md", "deleted")
+        db.set_status("local/test.md", SourceStatus.DELETED)
         record = db.get_source("local/test.md")
         assert record is not None
-        assert record.status == "deleted"
+        assert record.status is SourceStatus.DELETED
 
-        db.set_status("local/test.md", "active")
+        db.set_status("local/test.md", SourceStatus.ACTIVE)
         record = db.get_source("local/test.md")
         assert record is not None
-        assert record.status == "active"
+        assert record.status is SourceStatus.ACTIVE
 
     def test_set_status_nonexistent(self, db: MetadataDB) -> None:
         with pytest.raises(KeyError):
-            db.set_status("nonexistent", "deleted")
+            db.set_status("nonexistent", SourceStatus.DELETED)
 
     def test_source_count(self, db: MetadataDB) -> None:
         assert db.source_count() == 0
@@ -306,11 +306,11 @@ class TestSourcesCRUD:
             collected_at="2026-01-01T00:00:00Z",
             updated_at="2026-01-01T00:00:00Z",
         )
-        db.set_status("local/s2.md", "deleted")
+        db.set_status("local/s2.md", SourceStatus.DELETED)
 
         assert db.source_count() == 2
-        assert db.source_count(status="active") == 1
-        assert db.source_count(status="deleted") == 1
+        assert db.source_count(status=SourceStatus.ACTIVE) == 1
+        assert db.source_count(status=SourceStatus.DELETED) == 1
 
 
 class TestMetaColumn:

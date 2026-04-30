@@ -6,10 +6,21 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from enum import Enum
 from typing import Any, Literal
 
 SourceType = Literal["web", "bluesky", "zenn", "youtube", "aozora", "local", "journal"]
-SourceStatus = Literal["active", "deleted"]
+
+
+class SourceStatus(Enum):
+    """ソースの論理状態.
+
+    値定義の SSoT は `_schema/enums.yml` の `source_status` カテゴリ。
+    """
+
+    ACTIVE = "active"
+    DELETED = "deleted"
+
 
 # git null commit hash（初回パイプライン実行時の from_commit_id）
 NULL_COMMIT_HASH = "0" * 40

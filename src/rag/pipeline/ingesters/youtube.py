@@ -20,7 +20,12 @@ import re
 from typing import TYPE_CHECKING, Any, Literal
 from urllib.parse import parse_qs, urlparse
 
-from rag.pipeline.ingesters._common import IngestResult, ProgressCallback, now_iso
+from rag.pipeline.ingesters._common import (
+    IngestErrorCategory,
+    IngestResult,
+    ProgressCallback,
+    now_iso,
+)
 
 if TYPE_CHECKING:
     from rag.pipeline.ingesters.youtube_fetcher import YoutubeFetcher
@@ -222,7 +227,7 @@ class YoutubeIngester:
             logger.error("メタデータ取得失敗 (video_id=%s): %s", video_id, e)
             result.errors += 1
             result.error_details.append({
-                "category": "metadata_fetch",
+                "category": IngestErrorCategory.METADATA_FETCH.value,
                 "target": video_id,
                 "message": f"メタデータ取得失敗: {e}",
             })
@@ -253,7 +258,7 @@ class YoutubeIngester:
             logger.error("channel_id が取得できません (video_id=%s)", video_id)
             result.errors += 1
             result.error_details.append({
-                "category": "metadata_fetch",
+                "category": IngestErrorCategory.METADATA_FETCH.value,
                 "target": video_id,
                 "message": "channel_id missing",
             })
@@ -273,7 +278,7 @@ class YoutubeIngester:
             logger.error("字幕/文字起こし失敗 (video_id=%s): %s", video_id, e)
             result.errors += 1
             result.error_details.append({
-                "category": "metadata_fetch",
+                "category": IngestErrorCategory.METADATA_FETCH.value,
                 "target": video_id,
                 "message": f"字幕/文字起こし失敗: {e}",
             })
@@ -330,7 +335,7 @@ class YoutubeIngester:
             logger.exception("動画の配置に失敗しました: %s", rel_path)
             result.errors += 1
             result.error_details.append({
-                "category": "placement",
+                "category": IngestErrorCategory.PLACEMENT.value,
                 "target": rel_path,
                 "message": str(exc),
             })
@@ -386,7 +391,7 @@ class YoutubeIngester:
             logger.error("プレイリスト展開失敗: %s", e)
             result.errors += 1
             result.error_details.append({
-                "category": "metadata_fetch",
+                "category": IngestErrorCategory.METADATA_FETCH.value,
                 "target": playlist_id,
                 "message": f"プレイリスト展開失敗: {e}",
             })
@@ -408,7 +413,7 @@ class YoutubeIngester:
             if not video_id:
                 result.errors += 1
                 result.error_details.append({
-                    "category": "metadata_fetch",
+                    "category": IngestErrorCategory.METADATA_FETCH.value,
                     "target": f"entry_{i}",
                     "message": "video_id missing",
                 })
@@ -444,7 +449,7 @@ class YoutubeIngester:
                 logger.error("動画処理失敗 (video_id=%s): %s", video_id, e)
                 result.errors += 1
                 result.error_details.append({
-                    "category": "metadata_fetch",
+                    "category": IngestErrorCategory.METADATA_FETCH.value,
                     "target": video_id,
                     "message": f"動画処理失敗: {e}",
                 })

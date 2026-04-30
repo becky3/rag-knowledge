@@ -20,6 +20,7 @@ from urllib.parse import urlencode, urljoin, urlparse
 import httpx
 
 from rag.pipeline.ingesters._common import (
+    IngestErrorCategory,
     IngestResult,
     ProgressCallback,
     extract_http_status,
@@ -567,7 +568,7 @@ class BlueskyIngester:
             result.errors += 1
             result.error_details.append(
                 {
-                    "category": "placement",
+                    "category": IngestErrorCategory.PLACEMENT.value,
                     "target": rel_path,
                     "message": str(exc),
                 },
@@ -627,7 +628,7 @@ class BlueskyIngester:
                 result.errors += 1
                 result.error_details.append(
                     {
-                        "category": "metadata_fetch",
+                        "category": IngestErrorCategory.METADATA_FETCH.value,
                         "target": url,
                         "message": "Invalid BlueSky URL format",
                     },
@@ -665,7 +666,7 @@ class BlueskyIngester:
                 result.errors += 1
                 result.error_details.append(
                     {
-                        "category": "metadata_fetch",
+                        "category": IngestErrorCategory.METADATA_FETCH.value,
                         "target": f"https://bsky.app/profile/{handle}/post/{rkey}",
                         "message": f"Failed to resolve DID for handle: {handle}",
                     },
@@ -687,7 +688,7 @@ class BlueskyIngester:
                 result.errors += 1
                 result.error_details.append(
                     {
-                        "category": "metadata_fetch",
+                        "category": IngestErrorCategory.METADATA_FETCH.value,
                         "target": f"https://bsky.app/profile/{handle}/post/{rkey}",
                         "message": str(exc),
                     },
@@ -699,7 +700,7 @@ class BlueskyIngester:
                 result.errors += 1
                 result.error_details.append(
                     {
-                        "category": "metadata_fetch",
+                        "category": IngestErrorCategory.METADATA_FETCH.value,
                         "target": f"https://bsky.app/profile/{handle}/post/{rkey}",
                         "message": "Post not found (may be deleted)",
                     },
@@ -769,7 +770,7 @@ class BlueskyIngester:
                 logger.exception("画像の DL に失敗しました: %s", img_url)
                 result.partial_failures += 1
                 detail: dict[str, Any] = {
-                    "category": "media_download",
+                    "category": IngestErrorCategory.MEDIA_DOWNLOAD.value,
                     "target": rel_path,
                     "url": img_url,
                     "message": str(exc),
@@ -793,7 +794,7 @@ class BlueskyIngester:
                 logger.exception("動画の DL に失敗しました: %s", playlist_url)
                 result.partial_failures += 1
                 detail_video: dict[str, Any] = {
-                    "category": "media_download",
+                    "category": IngestErrorCategory.MEDIA_DOWNLOAD.value,
                     "target": rel_path,
                     "url": playlist_url,
                     "message": str(exc),
@@ -840,7 +841,7 @@ class BlueskyIngester:
                 result.partial_failures += 1
                 result.partial_failure_details.append(
                     {
-                        "category": "media_download",
+                        "category": IngestErrorCategory.MEDIA_DOWNLOAD.value,
                         "target": rel_path,
                         "url": playlist_url,
                         "message": "HLS variant not selectable",
@@ -868,7 +869,7 @@ class BlueskyIngester:
             result.partial_failures += 1
             result.partial_failure_details.append(
                 {
-                    "category": "media_download",
+                    "category": IngestErrorCategory.MEDIA_DOWNLOAD.value,
                     "target": rel_path,
                     "url": playlist_url,
                     "message": "HLS playlist has no ts segments",
@@ -1131,7 +1132,7 @@ class BlueskyIngester:
                             result.errors += 1
                             result.error_details.append(
                                 {
-                                    "category": "delegation",
+                                    "category": IngestErrorCategory.DELEGATION.value,
                                     "target": url,
                                     "url": url,
                                     "message": "invalid youtube url",
@@ -1192,7 +1193,7 @@ class BlueskyIngester:
                             result.errors += 1
                             result.error_details.append(
                                 {
-                                    "category": "delegation",
+                                    "category": IngestErrorCategory.DELEGATION.value,
                                     "target": url,
                                     "url": url,
                                     "message": f"youtube delegation failed: {exc}",
@@ -1256,7 +1257,7 @@ class BlueskyIngester:
                 logger.warning("Web URL バリデーション失敗: %s (%s)", url, exc)
                 validation_errors.append(
                     {
-                        "category": "delegation",
+                        "category": IngestErrorCategory.DELEGATION.value,
                         "target": url,
                         "url": url,
                         "message": f"url validation failed: {exc}",
@@ -1278,7 +1279,7 @@ class BlueskyIngester:
             logger.exception("site-ingest 実行に失敗: %d 件", len(validated_urls))
             execute_errors = [
                 {
-                    "category": "delegation",
+                    "category": IngestErrorCategory.DELEGATION.value,
                     "target": url,
                     "url": url,
                     "message": f"site-ingest failed: {exc}",
@@ -1297,7 +1298,7 @@ class BlueskyIngester:
         if bridge.parse_errors > 0:
             error_details.append(
                 {
-                    "category": "delegation",
+                    "category": IngestErrorCategory.DELEGATION.value,
                     "target": "site-ingest:jsonl",
                     "message": (
                         f"JSONL のパースに失敗した行が {bridge.parse_errors} 件"

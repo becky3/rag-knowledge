@@ -16,6 +16,7 @@ from pathlib import Path
 import pytest
 
 from rag.store.metadata_db import MetadataDB
+from rag.store.models import SourceStatus
 
 
 @pytest.fixture()
@@ -50,7 +51,7 @@ def _register(
         meta=meta,
     )
     if status == "deleted":
-        db.set_status(source_id, "deleted")
+        db.set_status(source_id, SourceStatus.DELETED)
 
 
 class TestListSources:
