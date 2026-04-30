@@ -104,7 +104,7 @@ class TestFormatRebuildSummary:
             total_files=10,
             processed=8,
             errors=[{"path": "bad.txt", "size_bytes": 50, "message": "boom", "phase": "convert"}],
-            warnings=["warn.txt: skipped"],
+            warnings=[{"path": "warn.txt", "message": "skipped", "phase": "convert"}],
         )
         index = PipelineSummary(
             mode=PipelineMode.INDEX_ONLY,

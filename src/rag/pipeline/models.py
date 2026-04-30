@@ -80,6 +80,29 @@ class PipelineErrorEntry(TypedDict):
     phase: str
 
 
+class PipelineWarningEntry(TypedDict):
+    """PipelineSummary.warnings の各エントリのスキーマ.
+
+    ConversionSkippedError 等の non-fatal な失敗を構造化して保持する。
+    consumer が path 文字列のみで集計する場合は `warned_paths()` を使う。
+    """
+
+    path: str
+    message: str
+    phase: str
+
+
+def format_pipeline_warning(entry: PipelineWarningEntry) -> str:
+    """PipelineWarningEntry を表示用文字列に整形する.
+
+    MCP レスポンス・CLI テキスト出力の両方で使用する共通フォーマッタ。
+    `{path [phase]: message}` のフォーマットで返す。
+    phase が空文字の場合は phase 表示を省略する。
+    """
+    phase_part = f" [{entry['phase']}]" if entry.get("phase") else ""
+    return f"{entry['path']}{phase_part}: {entry['message']}"
+
+
 def format_pipeline_error(entry: PipelineErrorEntry) -> str:
     """PipelineErrorEntry を表示用文字列に整形する.
 
@@ -111,7 +134,7 @@ class PipelineSummary:
     total_files: int
     processed: int
     errors: list[PipelineErrorEntry] = field(default_factory=list)
-    warnings: list[str] = field(default_factory=list)
+    warnings: list[PipelineWarningEntry] = field(default_factory=list)
     from_commit_id: str = ""
     to_commit_id: str = ""
 
@@ -122,6 +145,14 @@ class PipelineSummary:
         dict 構造を意識しないようにするため。
         """
         return {e["path"] for e in self.errors}
+
+    def warned_paths(self) -> set[str]:
+        """warnings の各 dict から path を抽出した set を返すアクセサ.
+
+        集合演算（convert 警告分の index 除外等）で使う consumer 側が
+        dict 構造を意識しないようにするため。
+        """
+        return {w["path"] for w in self.warnings}
 
 
 @dataclass

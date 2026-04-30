@@ -56,7 +56,12 @@ with contextlib.redirect_stdout(io.StringIO()):
     from .upload import sanitize_filename as sanitize_upload_filename
     from .pipeline.ingesters.local import _UPLOAD_DIR as _LOCAL_UPLOAD_DIR
 
-    from .pipeline.models import PipelineMode, PipelineSummary, format_pipeline_error as _format_pipeline_error
+    from .pipeline.models import (
+        PipelineMode,
+        PipelineSummary,
+        format_pipeline_error as _format_pipeline_error,
+        format_pipeline_warning as _format_pipeline_warning,
+    )
 from .safe_browsing import (
     SafeBrowsingClient,
     SafeBrowsingConfigError,
@@ -124,7 +129,9 @@ def _format_ingest_response(
     if pipeline_summary is not None:
         parts.append(f"パイプライン: {pipeline_summary.processed}件処理")
         if pipeline_summary.warnings:
-            details = "; ".join(pipeline_summary.warnings[:5])
+            details = "; ".join(
+                _format_pipeline_warning(w) for w in pipeline_summary.warnings[:5]
+            )
             parts.append(f"パイプライン警告: {len(pipeline_summary.warnings)}件 ({details})")
         if pipeline_summary.errors:
             details = "; ".join(
@@ -894,7 +901,7 @@ def _format_phase_summary(phase: str, summary: PipelineSummary) -> list[str]:
     if summary.warnings:
         parts.append("    警告詳細:")
         for warn in summary.warnings[:10]:
-            parts.append(f"      - {warn}")
+            parts.append(f"      - {_format_pipeline_warning(warn)}")
         if len(summary.warnings) > 10:
             parts.append(f"      ... 他 {len(summary.warnings) - 10} 件")
     if summary.errors:
@@ -925,7 +932,7 @@ def _format_rebuild_summary(summary: PipelineSummary, elapsed: float) -> str:
     if summary.warnings:
         parts.append("  警告詳細:")
         for warn in summary.warnings[:10]:
-            parts.append(f"    - {warn}")
+            parts.append(f"    - {_format_pipeline_warning(warn)}")
         if len(summary.warnings) > 10:
             parts.append(f"    ... 他 {len(summary.warnings) - 10} 件")
     if summary.errors:
