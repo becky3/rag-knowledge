@@ -40,6 +40,11 @@ logger = logging.getLogger(__name__)
 # enums.yml の `source_type.has_meta=false` から導出する。
 NO_META_TYPES: frozenset[SourceType] = source_types_without_meta()  # type: ignore[assignment]
 
+# source_type 値の集合: SourceType Literal から導出する
+# （SourceType Literal 自体は CI で _schema/enums.yml と同期検証されるため二重管理にならない）
+# detect_source_type / is_source_file の判定で使い回すモジュール定数。
+_SOURCE_TYPE_VALUES: frozenset[SourceType] = frozenset(get_args(SourceType))
+
 # --- ソース判定 ---
 #
 # is_source_file / resolve_attachment_parent / find_existing_parent /
@@ -92,7 +97,7 @@ def detect_source_type(rel_path: str) -> SourceType:
     """
     normalized = rel_path.replace("\\", "/")
     first = normalized.split("/", 1)[0]
-    if first in get_args(SourceType):
+    if first in _SOURCE_TYPE_VALUES:
         # Literal への narrowing
         return first  # type: ignore[return-value]
     msg = f"未知の source_type プレフィックス: {rel_path!r}"
@@ -170,7 +175,7 @@ def is_source_file(rel_path: str) -> bool:
         return False
     # invariant 担保: detect_source_type が ValueError を送出するパスを False にする
     first = normalized.split("/", 1)[0]
-    if first not in get_args(SourceType):
+    if first not in _SOURCE_TYPE_VALUES:
         return False
     return True
 

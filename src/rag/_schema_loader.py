@@ -23,7 +23,20 @@ _ENUMS_PATH = _REPO_ROOT / "_schema" / "enums.yml"
 
 @lru_cache(maxsize=1)
 def _load_enums() -> dict[str, Any]:
-    """`_schema/enums.yml` を読み込みパース済み dict を返す（キャッシュ）."""
+    """`_schema/enums.yml` を読み込みパース済み dict を返す（キャッシュ）.
+
+    rag-knowledge は editable install（uv sync）でリポジトリルートから運用する前提のため、
+    通常はリポジトリ内に enums.yml が存在する。万一見つからない場合は、運用形態の誤りや
+    パス解決の異常を示す可能性が高いため、対処の手がかりを含めた明示的エラーを送出する。
+    """
+    if not _ENUMS_PATH.exists():
+        msg = (
+            f"enums.yml が見つかりません: {_ENUMS_PATH}\n"
+            f"rag-knowledge は editable install で運用してください "
+            f"（uv sync 後、リポジトリルートで実行）。"
+            f"詳細は docs/specs/architecture.md を参照。"
+        )
+        raise FileNotFoundError(msg)
     with _ENUMS_PATH.open(encoding="utf-8") as f:
         data = yaml.safe_load(f)
     if not isinstance(data, dict):

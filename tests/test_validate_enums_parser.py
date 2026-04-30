@@ -102,3 +102,12 @@ class TestWithAttributes:
         )
         with pytest.raises(SystemExit):
             extract_values(data, "test_cat")
+
+    def test_type_field_must_be_str(self, extract_values: Callable[..., set[str]]) -> None:
+        """attributes.type に str 以外（list/dict 等）を指定した場合は SystemExit."""
+        data = _make_data(
+            values=[{"value": "a"}],
+            attributes={"x": {"type": ["bool"], "description": "..."}},
+        )
+        with pytest.raises(SystemExit):
+            extract_values(data, "test_cat")

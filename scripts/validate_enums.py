@@ -112,6 +112,12 @@ def _parse_attributes(attrs: Any, key: str) -> dict[str, type]:
             )
             sys.exit(1)
         type_name = spec["type"]
+        if not isinstance(type_name, str):
+            print(
+                f"ERROR: enums.yml の '{key}.attributes.{attr_name}.type' は str で "
+                f"指定してください: {type_name!r} ({type(type_name).__name__})"
+            )
+            sys.exit(1)
         if type_name not in _ATTR_TYPE_MAP:
             print(
                 f"ERROR: enums.yml の '{key}.attributes.{attr_name}.type' が未対応です: "
