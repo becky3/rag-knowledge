@@ -1,0 +1,19 @@
+{
+  "posts": [
+    {
+      "uri": "at://did:plc:test01234567/app.bsky.feed.post/testrkey00001",
+      "cid": "bafyreitestcid000000000000000000000000000000000000000000000",
+      "author": {
+        "did": "did:plc:test01234567",
+        "handle": "test.bsky.social",
+        "displayName": "Test User"
+      },
+      "record": {
+        "$type": "app.bsky.feed.post",
+        "text": "Sample synthetic post for fake fixture.",
+        "createdAt": "2026-04-30T09:00:00.000Z"
+      },
+      "indexedAt": "2026-04-30T09:00:01.000Z"
+    }
+  ]
+}

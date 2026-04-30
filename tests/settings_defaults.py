@@ -68,6 +68,9 @@ TEST_SETTINGS_DEFAULTS: dict[str, object] = {
     # YouTube Fake モード（テストでは fake デフォルト）
     "rag_youtube_fake_mode": True,
     "rag_youtube_fake_fixture_dir": "src/rag/pipeline/ingesters/_fake/youtube/data",
+    # BlueSky Fake モード（テストでは fake デフォルト）
+    "rag_bluesky_fake_mode": True,
+    "rag_bluesky_fake_fixture_dir": "src/rag/pipeline/ingesters/_fake/bluesky/data",
     # Embedding Fake モード（テストでは fake デフォルト）
     "rag_embedding_fake_mode": True,
     "rag_embedding_fake_dimensions": 768,

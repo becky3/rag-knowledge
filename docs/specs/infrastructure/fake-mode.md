@@ -119,7 +119,9 @@ Fake Fetcher が返すデータ内の識別子は実在の ID と衝突しない
 | YouTube | video_id | 11 文字、`Test` プレフィックス | `TestVideo01` |
 | YouTube | playlist_id | `PLtest` プレフィックス | `PLtest12345` |
 | YouTube | channel_id | `UCtest` プレフィックス | `UCtest123456789012345` |
-| BlueSky（将来）| DID | `did:plc:test` プレフィックス | `did:plc:test01234567` |
+| BlueSky | DID | `did:plc:test` プレフィックス | `did:plc:test01234567` |
+| BlueSky | handle | `*.bsky.social` の `test` プレフィックス | `test.bsky.social` |
+| BlueSky | rkey | `testrkey` プレフィックス | `testrkey00000` |
 | Zenn（将来）| slug | `test-` プレフィックス | `test-article-001` |
 
 新たな source_type を追加する際は、本テーブルに synthetic ID 規約を追記すること。
@@ -288,8 +290,9 @@ flowchart TB
 ## 関連ドキュメント
 
 - [YouTube Fake Adapter](fake-adapters/youtube.md) — 最初の対象 source_type 個別仕様
+- [BlueSky Fake Adapter](fake-adapters/bluesky.md) — 2 番目の対象 source_type 個別仕様（Issue #704、U2 で実装）
 - [YouTube インジェスター](../ingesters/youtube.md) — Fetcher 抽象化対象のインジェスター仕様
-- [BlueSky インジェスター](../ingesters/bluesky.md) — 将来の水平展開対象
+- [BlueSky インジェスター](../ingesters/bluesky.md) — Fetcher 抽象化対象のインジェスター仕様（Issue #704）
 - [Zenn インジェスター](../ingesters/zenn.md) — 将来の水平展開対象
 - [RAG ナレッジ](../rag-knowledge.md) — Embedding 層の Real 実装（LM Studio / OpenAI）の SSoT
 - [Issue #692（MCP 取り込み系ツールの E2E mock 基盤）](https://github.com/becky3/rag-knowledge/issues/692) — 本仕様の Fake Adapter を subprocess 越境環境で再利用する E2E 基盤

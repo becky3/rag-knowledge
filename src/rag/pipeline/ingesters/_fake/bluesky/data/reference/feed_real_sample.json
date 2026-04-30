@@ -1,0 +1,33 @@
+{
+  "_comment": "実 AT Protocol AppView レスポンスの構造的サンプル。実 ID は synthetic ID に置換済み。契約検証テストでは「キーの存在と型」のみを比較する（値の実態は検証対象外）。",
+  "feed": [
+    {
+      "post": {
+        "uri": "at://did:plc:test01234567/app.bsky.feed.post/testrkey00001",
+        "cid": "bafyreitestcid000000000000000000000000000000000000000000000",
+        "author": {
+          "did": "did:plc:test01234567",
+          "handle": "test.bsky.social",
+          "displayName": "Test User",
+          "avatar": "https://cdn.bsky.app/img/avatar/plain/did:plc:test01234567/test01@jpeg",
+          "labels": [],
+          "createdAt": "2024-01-01T00:00:00.000Z"
+        },
+        "record": {
+          "$type": "app.bsky.feed.post",
+          "createdAt": "2026-04-30T09:00:00.000Z",
+          "langs": ["ja"],
+          "text": "Reference sample text"
+        },
+        "replyCount": 0,
+        "repostCount": 0,
+        "likeCount": 0,
+        "quoteCount": 0,
+        "indexedAt": "2026-04-30T09:00:01.000Z",
+        "viewer": {"threadMuted": false, "embeddingDisabled": false},
+        "labels": []
+      }
+    }
+  ],
+  "cursor": "2026-04-30T09:00:00.000Z::bafyreitestcid000000000000000000000000000000000000000000000"
+}

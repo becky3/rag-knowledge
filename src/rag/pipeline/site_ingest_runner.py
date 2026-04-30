@@ -11,7 +11,7 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Protocol
 from urllib.parse import urlparse
 
 from ..scrapy.bridge import BridgeResult, import_to_source_store
@@ -22,6 +22,44 @@ if TYPE_CHECKING:
     from ..store.source_store import SourceStore
 
 logger = logging.getLogger(__name__)
+
+
+class SiteIngestRunner(Protocol):
+    """site-ingest 実行を抽象化する Port.
+
+    仕様: docs/specs/architecture.md
+    仕様: docs/specs/site-ingest.md
+
+    bluesky 等の他インジェスターから site-ingest を越境直 import せず、
+    Protocol 経由で利用するための抽象。Real 実装（``RealSiteIngestRunner``、
+    U2 で追加）は本ファイルの ``execute_site_ingest`` 関数をラップする。
+    """
+
+    async def run_for_urls(
+        self,
+        urls: list[str],
+        *,
+        source_store: SourceStore,
+        settings: RAGSettings,
+    ) -> SiteIngestExecution:
+        """指定 URL 群に対して site-ingest を実行する.
+
+        URL 値のバリデーション（スキーム、SSRF 等）は呼び出し元で実施済み
+        である前提。Real 実装は ``execute_site_ingest`` 関数をそのまま呼び
+        出す形になる。
+
+        Args:
+            urls: 取得対象 URL のリスト（1 件以上必須）
+            source_store: 配置先の SourceStore
+            settings: 設定
+
+        Returns:
+            実行結果（``SiteIngestExecution``）
+
+        Raises:
+            ValueError: ``urls`` が空リストの場合
+        """
+        ...
 
 
 @dataclass
@@ -127,3 +165,32 @@ async def execute_site_ingest(
     )
 
     return execution
+
+
+class RealSiteIngestRunner:
+    """既存 ``execute_site_ingest`` 関数をラップする実 Runner 実装.
+
+    bluesky 等の他インジェスターから site_ingest_runner モジュールを越境
+    直 import せずに site-ingest を起動するための薄いブリッジ。
+    """
+
+    async def run_for_urls(
+        self,
+        urls: list[str],
+        *,
+        source_store: SourceStore,
+        settings: RAGSettings,
+    ) -> SiteIngestExecution:
+        return await execute_site_ingest(
+            urls=urls,
+            source_store=source_store,
+            settings=settings,
+        )
+
+
+def create_site_ingest_runner() -> SiteIngestRunner:
+    """``SiteIngestRunner`` のファクトリ.
+
+    現時点では Real 実装のみ（site-ingest の Fake 化は #705 のスコープ）。
+    """
+    return RealSiteIngestRunner()

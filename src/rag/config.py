@@ -90,6 +90,11 @@ class _EnvLoader(BaseSettings):
     # Fake Fetcher が読み込む fixture ディレクトリ。プロジェクトルートからの相対パス
     rag_youtube_fake_fixture_dir: str = "src/rag/pipeline/ingesters/_fake/youtube/data"
 
+    # BlueSky Fake モード — テスト・QA で実 BlueSky AT Protocol アクセスを排除する。デフォルトは安全側（fake 有効）
+    rag_bluesky_fake_mode: bool = True
+    # Fake Fetcher が読み込む fixture ディレクトリ。プロジェクトルートからの相対パス
+    rag_bluesky_fake_fixture_dir: str = "src/rag/pipeline/ingesters/_fake/bluesky/data"
+
     # Embedding Fake モード — テスト・CI で LM Studio / OpenAI への実 Embedding アクセスを排除する。デフォルトは安全側（fake 有効）
     rag_embedding_fake_mode: bool = True
     # Fake Embedding が生成するベクトルの次元数。Real モデルの次元に合わせる
@@ -143,6 +148,10 @@ class RAGSettings(BaseModel):
     rag_youtube_fake_mode: bool
     # Fake Fetcher が読み込む fixture ディレクトリ
     rag_youtube_fake_fixture_dir: str
+    # BlueSky Fake モード切替。デフォルト fake（安全側）、本番運用時のみ false を .env で明示
+    rag_bluesky_fake_mode: bool
+    # Fake Fetcher が読み込む fixture ディレクトリ
+    rag_bluesky_fake_fixture_dir: str
     # Embedding Fake モード切替。デフォルト fake（安全側）、本番運用時のみ false を .env で明示
     rag_embedding_fake_mode: bool
     # Fake Embedding が生成するベクトルの次元数
@@ -377,6 +386,18 @@ def log_fake_mode_status(settings: RAGSettings) -> None:
     else:
         logger.info(
             "YouTube は REAL モードで起動中。実 YouTube アクセスが発生します"
+        )
+
+    if settings.rag_bluesky_fake_mode:
+        logger.warning(
+            "[FAKE MODE: bluesky] BlueSky は FAKE モードで起動中（fixture: %s）。"
+            "実 BlueSky AT Protocol アクセスは発生しません。"
+            "本番運用時は RAG_BLUESKY_FAKE_MODE=false を .env に設定してください",
+            settings.rag_bluesky_fake_fixture_dir,
+        )
+    else:
+        logger.info(
+            "BlueSky は REAL モードで起動中。実 BlueSky AT Protocol アクセスが発生します"
         )
 
     if settings.rag_embedding_fake_mode:
