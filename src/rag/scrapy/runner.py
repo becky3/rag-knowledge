@@ -261,7 +261,10 @@ class ScrapyRunner:
             stderr_file.close()
 
         # stderr ファイルから末尾20行を読み取り
-        stderr_text = stderr_path.read_text(encoding="utf-8")
+        # Twisted / 外部プロセスが FD に直接書く非 UTF-8 バイトで decode 失敗すると
+        # 本来の stderr_tail が取れず原因調査が困難になるため、bytes で読んで replace。
+        # server.py の _run_cli_subprocess と同じ「stderr 側は decode 失敗で落とさない」方針。
+        stderr_text = stderr_path.read_bytes().decode("utf-8", errors="replace")
         stderr_lines = stderr_text.rstrip().splitlines()
         stderr_tail = "\n".join(stderr_lines[-20:])
 
