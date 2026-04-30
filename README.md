@@ -111,7 +111,7 @@ export PYTHONIOENCODING=utf-8
 
 #### 違反時の挙動
 
-未設定または不一致のまま起動すると、エントリポイント（`python -m rag.server` / `python -m rag.cli` / `pytest`）が起動直後に以下のメッセージで終了する（メッセージは ASCII-only：stderr が cp932 等の場合でも mojibake せず確実に表示するため）。違反した env のみが該当行として出力される:
+未設定または不一致のまま起動すると、エントリポイント（`python -m rag.server` / `python -m rag.cli` / `pytest`）が起動直後に以下のメッセージで終了する（メッセージは ASCII-only：stderr が cp932 等の場合でも mojibake せず確実に表示するため）。違反した検証項目のみが該当行として出力される:
 
 ```
 ERROR: UTF-8 environment is not enforced.

@@ -1233,6 +1233,8 @@ async def _run_cli_subprocess(
     assert process.returncode is not None  # noqa: S101
     exit_code = process.returncode
 
+    # stderr 側は decode 失敗で本来のエラー行が落ちないよう replace を許容する。
+    # encoding 違反自体は U+FFFD として stdout 応答に残り e2e の assert_no_mojibake で検出する。
     stderr_text = stderr_bytes.decode("utf-8", errors="replace") if stderr_bytes else ""
     stderr_lines = stderr_text.rstrip().splitlines()
     stderr_tail = "\n".join(stderr_lines[-10:])
