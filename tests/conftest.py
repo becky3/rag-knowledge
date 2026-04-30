@@ -25,6 +25,60 @@ import pytest
 sys.path.insert(0, str(Path(__file__).parent))
 
 
+def pytest_configure(config: pytest.Config) -> None:
+    """package layout の整合性を起動時に検証する.
+
+    flat module（``foo.py``）と同名 package（``foo/__init__.py``）が共存すると
+    Python の import 解決順序が implementation-defined になり、テストで pass
+    しても本番で予期せぬ挙動を引き起こすリスクがある（過去にバグとして発生）。
+
+    Issue #704 の bluesky.py / bluesky/ 解体作業で誤って flat module が復活した
+    インシデントを構造的に防ぐため、pytest 起動時に同名衝突を検出して fail-fast
+    する。本チェックは src/ 配下のみを対象とし、test 側の同名衝突は対象外。
+
+    **fixture 配置の運用ルール**: `_fake/<source>/data/` 等の fixture 格納
+    ディレクトリには `.py` ファイルを置かないこと。本実装は ``src/`` 配下の
+    全 ``.py`` を rglob で走査するため、fixture ディレクトリに同名 stem の
+    ``.py`` が混入すると意図しない衝突として検出される可能性がある（ただし
+    衝突相手が無ければ誤発火はしない）。fixture は ``.json`` 等の data 形式
+    で配置する。
+
+    関連: Issue #709（fail-fast 化の体系的整備）で CI 段階の同種チェック予定。
+    """
+    src_root = Path(__file__).parent.parent / "src"
+    if not src_root.is_dir():
+        return
+
+    seen: dict[str, Path] = {}
+    conflicts: list[tuple[str, Path, Path]] = []
+
+    for py_file in src_root.rglob("*.py"):
+        if py_file.name == "__init__.py":
+            module_path = str(py_file.parent.relative_to(src_root)).replace(
+                os.sep, ".",
+            )
+        else:
+            module_path = str(py_file.relative_to(src_root)).removesuffix(
+                ".py",
+            ).replace(os.sep, ".")
+        if module_path in seen:
+            conflicts.append((module_path, seen[module_path], py_file))
+        else:
+            seen[module_path] = py_file
+
+    if conflicts:
+        msg_lines = [
+            "package layout conflict detected (flat module + package coexist):",
+        ]
+        for mod, first, second in conflicts:
+            msg_lines.append(f"  - {mod!r}: {first} <-> {second}")
+        msg_lines.append(
+            "Either delete the flat module or rename the package to avoid "
+            "implementation-defined import resolution.",
+        )
+        raise pytest.UsageError("\n".join(msg_lines))
+
+
 class _RaiseOnUse:
     """YouTube 関連外部ライブラリの呼び出しを RuntimeError でブロックするセンチネル.
 

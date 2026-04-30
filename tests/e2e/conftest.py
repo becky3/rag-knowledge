@@ -170,6 +170,8 @@ def e2e_subprocess_env(
         # Fake Adapter 一括有効化
         "RAG_YOUTUBE_FAKE_MODE": "true",
         "RAG_YOUTUBE_FAKE_FIXTURE_DIR": "src/rag/pipeline/ingesters/_fake/youtube/data",
+        "RAG_BLUESKY_FAKE_MODE": "true",
+        "RAG_BLUESKY_FAKE_FIXTURE_DIR": "src/rag/pipeline/ingesters/_fake/bluesky/data",
         "RAG_EMBEDDING_FAKE_MODE": "true",
         "RAG_EMBEDDING_FAKE_DIMENSIONS": "768",
         # Scrapy 一時ディレクトリ

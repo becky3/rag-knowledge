@@ -687,7 +687,14 @@ def main() -> None:
     bs_parser = subparsers.add_parser("crawl-bluesky", help="BlueSky 投稿を一括取り込み")
     bs_parser.add_argument("handle", help="BlueSky ハンドル（例: user.bsky.social）")
     bs_parser.add_argument("--max-posts", type=int, default=None, help="取得する最大投稿数")
-    bs_parser.add_argument("--include-reposts", action="store_true", default=None, help="リポストを含める")
+    # BooleanOptionalAction で --include-reposts / --no-include-reposts の双方を受け付ける。
+    # default=None は「指定なし → 設定値 (rag_bluesky_include_reposts) を使用」のセマンティクス。
+    bs_parser.add_argument(
+        "--include-reposts",
+        action=argparse.BooleanOptionalAction,
+        default=None,
+        help="リポストを含めるか（--no-include-reposts で除外）",
+    )
     bs_parser.add_argument("--force", action="store_true", default=False, help="上書き再取得モード（既存ファイルを上書き + メディア再DL）")
     _add_output_option(bs_parser)
 

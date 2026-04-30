@@ -19,12 +19,10 @@ DI ファクトリ経由で注入する。Test Double 注入経路は `.env` + �
 from __future__ import annotations
 
 import subprocess
-from typing import Any
 
 import pytest
-from mcp import ClientSession
-from mcp.client.streamable_http import streamablehttp_client
 
+from ._mcp_helpers import call_mcp_tool
 from .conftest import run_cli
 
 
@@ -38,28 +36,6 @@ _FAKE_VIDEO_URL = f"https://www.youtube.com/watch?v={_FAKE_VIDEO_ID}"
 # overwritten 検証専用の独立 video_id（他テストとの順序依存を排除する）
 _OVERWRITE_TEST_VIDEO_ID = "TestVideo02"
 _OVERWRITE_TEST_VIDEO_URL = f"https://www.youtube.com/watch?v={_OVERWRITE_TEST_VIDEO_ID}"
-
-
-async def _call_mcp_tool(
-    base_url: str,
-    tool_name: str,
-    arguments: dict[str, Any],
-) -> str:
-    """MCP server の HTTP モードで指定ツールを呼び出し、テキスト応答を返す.
-
-    MCP の応答は content blocks のリストだが、本プロジェクトは TextContent のみを
-    使うため、全ブロックのテキストを連結して返す。
-    """
-    mcp_url = f"{base_url}/mcp"
-    async with streamablehttp_client(mcp_url) as (read, write, _):
-        async with ClientSession(read, write) as session:
-            await session.initialize()
-            result = await session.call_tool(tool_name, arguments=arguments)
-            texts: list[str] = []
-            for block in result.content:
-                if hasattr(block, "text"):
-                    texts.append(block.text)
-            return "\n".join(texts)
 
 
 class TestMcpYoutubeIngest:
@@ -76,7 +52,7 @@ class TestMcpYoutubeIngest:
         本テストでは「インジェスト成功 → search が動作（空でない応答）」までを
         end-to-end で検証する。検索精度の意味的検証は L3 で扱う。
         """
-        ingest_response = await _call_mcp_tool(
+        ingest_response = await call_mcp_tool(
             e2e_mcp_server,
             "rag_add_youtube",
             {"video_url": _FAKE_VIDEO_URL},
@@ -85,7 +61,7 @@ class TestMcpYoutubeIngest:
             f"取り込み完了を示すテキストが応答に含まれていない: {ingest_response}"
         )
 
-        search_response = await _call_mcp_tool(
+        search_response = await call_mcp_tool(
             e2e_mcp_server,
             "rag_search",
             {"query": "sample"},
@@ -106,7 +82,7 @@ class TestMcpYoutubeIngest:
 
         仕様: docs/specs/infrastructure/fake-mode.md の MCP 応答ラベル制約
         """
-        response = await _call_mcp_tool(
+        response = await call_mcp_tool(
             e2e_mcp_server,
             "rag_add_youtube",
             {"video_url": _FAKE_VIDEO_URL},
@@ -129,7 +105,7 @@ class TestMcpYoutubeIngest:
         (`_OVERWRITE_TEST_VIDEO_ID`) を使用する。session 共有 MCP server で
         別テストが先に同 video_id を取り込んでいると 1 回目の検証が破綻する。
         """
-        first = await _call_mcp_tool(
+        first = await call_mcp_tool(
             e2e_mcp_server,
             "rag_add_youtube",
             {"video_url": _OVERWRITE_TEST_VIDEO_URL},
@@ -144,7 +120,7 @@ class TestMcpYoutubeIngest:
             f"1 回目（新規取り込み）の応答に上書き表記が含まれている: {first[:500]}"
         )
 
-        second = await _call_mcp_tool(
+        second = await call_mcp_tool(
             e2e_mcp_server,
             "rag_add_youtube",
             {"video_url": _OVERWRITE_TEST_VIDEO_URL},

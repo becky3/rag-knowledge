@@ -350,8 +350,13 @@ async def rag_crawl_bluesky(
     args: list[str] = [handle]
     if max_posts is not None:
         args.extend(["--max-posts", str(max_posts)])
+    # include_reposts=True/False の両方を CLI に伝播させる（None は設定値を使用）。
+    # CLI 側は argparse.BooleanOptionalAction で --include-reposts / --no-include-reposts
+    # の双方を受け付ける。
     if include_reposts is True:
         args.append("--include-reposts")
+    elif include_reposts is False:
+        args.append("--no-include-reposts")
     if force:
         args.append("--force")
 
