@@ -64,13 +64,66 @@
 
 以下の順序でセットアップする:
 
-1. **uv sync** — 依存パッケージのインストール
-2. **.env コピー・編集** — 環境依存値の設定
-3. **LM Studio 起動** — Embedding モデルの準備
-4. **keyring 登録** — API キーの登録
-5. **サーバー起動** — ChromaDB + MCP サーバー
+1. **UTF-8 強制環境変数の設定** — `PYTHONUTF8=1` / `PYTHONIOENCODING=utf-8` の OS env 設定（必須）
+2. **uv sync** — 依存パッケージのインストール
+3. **.env コピー・編集** — 環境依存値の設定
+4. **LM Studio 起動** — Embedding モデルの準備
+5. **keyring 登録** — API キーの登録
+6. **サーバー起動** — ChromaDB + MCP サーバー
 
-HTTP モードで運用する場合は、ステップ 5 の後に「HTTP モードセットアップ」も参照。
+HTTP モードで運用する場合は、ステップ 6 の後に「HTTP モードセットアップ」も参照。
+
+### 前提: UTF-8 強制環境変数の設定（必須）
+
+server / cli / pytest は起動時に以下の環境変数を検証し、未設定なら fail-fast で終了する。silent な mojibake・`UnicodeEncodeError` 握り潰しを構造的に防ぐための前提条件。
+
+| 環境変数 | 期待値 | 役割 |
+|---------|-------|------|
+| `PYTHONUTF8` | `1` | Python の標準 I/O・ファイル・OS API を UTF-8 で動作させる |
+| `PYTHONIOENCODING` | `utf-8` | stdin / stdout / stderr のエンコーディングを UTF-8 に固定する |
+
+#### Windows（cp932 環境では特に必須）
+
+PowerShell で OS ユーザー環境変数として永続設定する:
+
+```powershell
+setx PYTHONUTF8 1
+setx PYTHONIOENCODING utf-8
+```
+
+設定後はターミナル・IDE を再起動して反映する。確認:
+
+```powershell
+echo $env:PYTHONUTF8       # → 1
+echo $env:PYTHONIOENCODING # → utf-8
+```
+
+#### Unix（macOS / Linux）
+
+shell の rc ファイル（`~/.bashrc` / `~/.zshrc` 等）に追記:
+
+```bash
+export PYTHONUTF8=1
+export PYTHONIOENCODING=utf-8
+```
+
+設定後はシェルを再起動するか `source ~/.bashrc` で反映する。
+
+#### 違反時の挙動
+
+未設定または不一致のまま起動すると、エントリポイント（`python -m rag.server` / `python -m rag.cli` / `pytest`）が起動直後に以下のメッセージで終了する（メッセージは ASCII-only：stderr が cp932 等の場合でも mojibake せず確実に表示するため）。違反した検証項目のみが該当行として出力される:
+
+```
+ERROR: UTF-8 environment is not enforced.
+  PYTHONUTF8='<current>'     (expected: '1')
+  PYTHONIOENCODING='<current>' (expected: 'utf-8')
+  sys.stdout.encoding='<current>' (expected: 'utf-8')
+Set OS env to enforce UTF-8:
+  Windows: setx PYTHONUTF8 1 / setx PYTHONIOENCODING utf-8
+  Unix:    export PYTHONUTF8=1 / export PYTHONIOENCODING=utf-8
+```
+
+ローカルで `uv run pytest` を実行する開発者環境にも同じ env 設定が必須（`tests/conftest.py` の `pytest_configure` で同検証が走る）。
 
 ### 前提: ffmpeg（メディア解析の動画処理に必要）
 

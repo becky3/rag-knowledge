@@ -43,7 +43,8 @@ os.environ.setdefault("ANONYMIZED_TELEMETRY", "False")
 
 # bm25s が "resource module not available on Windows" を stdout に print する
 # 問題への対策として、import 時に stdout を抑制する。
-from .config import RAGSettings, ensure_utf8_streams
+from .config import RAGSettings, validate_utf8_environment
+from .errors import CliErrorCode
 from py_common_lib.logging import SessionRotatingFileHandler
 from .rag_knowledge import format_file_size
 
@@ -55,7 +56,12 @@ with contextlib.redirect_stdout(io.StringIO()):
     from .upload import sanitize_filename as sanitize_upload_filename
     from .pipeline.ingesters.local import _UPLOAD_DIR as _LOCAL_UPLOAD_DIR
 
-    from .pipeline.models import PipelineMode, PipelineSummary, format_pipeline_error as _format_pipeline_error
+    from .pipeline.models import (
+        PipelineMode,
+        PipelineSummary,
+        format_pipeline_error as _format_pipeline_error,
+        format_pipeline_warning as _format_pipeline_warning,
+    )
 from .safe_browsing import (
     SafeBrowsingClient,
     SafeBrowsingConfigError,
@@ -71,10 +77,6 @@ from starlette.responses import JSONResponse, Response
 MCPContext = Context[Any, Any, Any]
 
 LOG_FILE_PREFIX = "rag-server-"
-
-# Windows 環境で stderr が cp932 等の場合に UTF-8 へ再構成する
-# stdout は MCP stdio プロトコルが使うため変更しない
-ensure_utf8_streams()
 
 logger = logging.getLogger("rag.server")
 
@@ -127,7 +129,9 @@ def _format_ingest_response(
     if pipeline_summary is not None:
         parts.append(f"パイプライン: {pipeline_summary.processed}件処理")
         if pipeline_summary.warnings:
-            details = "; ".join(pipeline_summary.warnings[:5])
+            details = "; ".join(
+                _format_pipeline_warning(w) for w in pipeline_summary.warnings[:5]
+            )
             parts.append(f"パイプライン警告: {len(pipeline_summary.warnings)}件 ({details})")
         if pipeline_summary.errors:
             details = "; ".join(
@@ -290,9 +294,6 @@ async def rag_crawl_zenn(
         return _format_cli_ingest_result(result, context=f"ユーザー: {username}")
     except CLISubprocessError as e:
         return e.format_mcp_error(f"Zenn 記事の取り込みに失敗しました（ユーザー: {username}）")
-    except Exception:
-        logger.exception("Failed to crawl Zenn articles for user: %s", username)
-        return f"エラー: Zenn 記事の取り込みに失敗しました（ユーザー: {username}）"
 
 
 @mcp.tool()
@@ -319,9 +320,6 @@ async def rag_add_zenn(
         return _format_cli_ingest_result(result, context="Zenn ingest")
     except CLISubprocessError as e:
         return e.format_mcp_error("Zenn コンテンツの取り込みに失敗しました")
-    except Exception:
-        logger.exception("Failed to ingest Zenn contents")
-        return "エラー: Zenn コンテンツの取り込みに失敗しました"
 
 
 @mcp.tool()
@@ -366,11 +364,6 @@ async def rag_crawl_bluesky(
         return label + _format_cli_ingest_result(result, context=f"ハンドル: {handle}")
     except CLISubprocessError as e:
         return label + e.format_mcp_error(f"BlueSky 投稿の取り込みに失敗しました（ハンドル: {handle}）")
-    except Exception:
-        logger.exception(
-            "Failed to crawl BlueSky posts for handle: %s", handle
-        )
-        return label + f"エラー: BlueSky 投稿の取り込みに失敗しました（ハンドル: {handle}）"
 
 
 @mcp.tool()
@@ -398,9 +391,6 @@ async def rag_add_bluesky(
         return label + _format_cli_ingest_result(result, context="BlueSky ingest")
     except CLISubprocessError as e:
         return label + e.format_mcp_error("BlueSky 投稿の取り込みに失敗しました")
-    except Exception:
-        logger.exception("Failed to ingest BlueSky posts")
-        return label + "エラー: BlueSky 投稿の取り込みに失敗しました"
 
 
 FakeSource = Literal["youtube", "bluesky", "embedding"]
@@ -477,11 +467,6 @@ async def rag_add_youtube(
         return label + _format_cli_ingest_result(result, context=f"動画: {video_url}")
     except CLISubprocessError as e:
         return label + e.format_mcp_error(f"YouTube 動画の取り込みに失敗しました: {video_url}")
-    except Exception:
-        logger.exception(
-            "Failed to ingest YouTube video: %s", video_url
-        )
-        return f"{label}エラー: YouTube 動画の取り込みに失敗しました: {video_url}"
 
 
 @mcp.tool()
@@ -512,11 +497,6 @@ async def rag_crawl_youtube(
         return label + _format_cli_ingest_result(result, context=f"プレイリスト: {playlist_url}")
     except CLISubprocessError as e:
         return label + e.format_mcp_error(f"YouTube プレイリストの取り込みに失敗しました: {playlist_url}")
-    except Exception:
-        logger.exception(
-            "Failed to crawl YouTube playlist: %s", playlist_url
-        )
-        return f"{label}エラー: YouTube プレイリストの取り込みに失敗しました: {playlist_url}"
 
 
 _VALID_UPLOAD_MODES: frozenset[str] = frozenset({"fail", "replace"})
@@ -572,9 +552,6 @@ async def rag_add_document(
         return _format_cli_ingest_result(result, context=sanitized_filename)
     except CLISubprocessError as e:
         return e.format_mcp_error(f"ファイルの取り込みに失敗しました: {sanitized_filename}")
-    except Exception:
-        logger.exception("Failed to add document: %s", sanitized_filename)
-        return f"エラー: ファイルの取り込みに失敗しました: {sanitized_filename}"
 
 
 @mcp.tool()
@@ -623,9 +600,6 @@ async def rag_add_journal(
         )
     except CLISubprocessError as e:
         return e.format_mcp_error(f"ジャーナルエントリの登録に失敗しました: {title}")
-    except Exception:
-        logger.exception("Failed to add journal entry: %s/%s", repository, title)
-        return f"エラー: ジャーナルエントリの登録に失敗しました: {title}"
 
 
 @mcp.tool()
@@ -665,9 +639,6 @@ async def rag_crawl_documents(
         return _format_cli_ingest_result(result, context=f"ディレクトリ: {dir_path}")
     except CLISubprocessError as e:
         return e.format_mcp_error(f"ドキュメントの取り込みに失敗しました（ディレクトリ: {dir_path}）")
-    except Exception:
-        logger.exception("Failed to crawl documents: %s", dir_path)
-        return f"エラー: ドキュメントの取り込みに失敗しました（ディレクトリ: {dir_path}）"
 
 
 @mcp.tool()
@@ -767,9 +738,6 @@ async def rag_site_ingest(
         return _format_cli_ingest_result(result, context=f"サイト: {display_url}")
     except CLISubprocessError as e:
         return e.format_mcp_error(f"サイト取り込みに失敗しました（{display_url}）")
-    except Exception:
-        logger.exception("Failed to site-ingest: %s", display_url)
-        return f"エラー: サイト取り込みに失敗しました（{display_url}）"
 
 
 @mcp.tool()
@@ -790,9 +758,6 @@ async def rag_update_aozora_catalog(
         return str(result.get("message", "カタログ更新完了"))
     except CLISubprocessError as e:
         return e.format_mcp_error("青空文庫カタログの更新に失敗しました")
-    except Exception:
-        logger.exception("Failed to update Aozora catalog")
-        return "エラー: 青空文庫カタログの更新に失敗しました"
 
 
 @mcp.tool()
@@ -850,9 +815,6 @@ async def rag_add_aozora(
         return _format_cli_ingest_result(result, context=f"作品ID: {book_id}")
     except CLISubprocessError as e:
         return e.format_mcp_error(f"青空文庫作品の取り込みに失敗しました（作品ID: {book_id}）")
-    except Exception:
-        logger.exception("Failed to add Aozora work: %s", book_id)
-        return f"エラー: 青空文庫作品の取り込みに失敗しました（作品ID: {book_id}）"
 
 
 @mcp.tool()
@@ -882,11 +844,6 @@ async def rag_crawl_aozora(
         return _format_cli_ingest_result(result, context=f"人物ID: {person_id}")
     except CLISubprocessError as e:
         return e.format_mcp_error(f"青空文庫作品の取り込みに失敗しました（人物ID: {person_id}）")
-    except Exception:
-        logger.exception(
-            "Failed to crawl Aozora works for person_id: %s", person_id
-        )
-        return f"エラー: 青空文庫作品の取り込みに失敗しました（人物ID: {person_id}）"
 
 
 @mcp.tool()
@@ -921,9 +878,6 @@ async def rag_delete(source_id: str, ctx: MCPContext | None = None) -> str:
         return f"削除しました: {source_id}"
     except CLISubprocessError as e:
         return e.format_mcp_error(f"削除に失敗しました。source_id: {source_id}")
-    except Exception:
-        logger.exception("Failed to delete: %s", source_id)
-        return f"エラー: 削除に失敗しました。source_id: {source_id}"
 
 
 # --- 再構築 ---
@@ -947,7 +901,7 @@ def _format_phase_summary(phase: str, summary: PipelineSummary) -> list[str]:
     if summary.warnings:
         parts.append("    警告詳細:")
         for warn in summary.warnings[:10]:
-            parts.append(f"      - {warn}")
+            parts.append(f"      - {_format_pipeline_warning(warn)}")
         if len(summary.warnings) > 10:
             parts.append(f"      ... 他 {len(summary.warnings) - 10} 件")
     if summary.errors:
@@ -978,7 +932,7 @@ def _format_rebuild_summary(summary: PipelineSummary, elapsed: float) -> str:
     if summary.warnings:
         parts.append("  警告詳細:")
         for warn in summary.warnings[:10]:
-            parts.append(f"    - {warn}")
+            parts.append(f"    - {_format_pipeline_warning(warn)}")
         if len(summary.warnings) > 10:
             parts.append(f"    ... 他 {len(summary.warnings) - 10} 件")
     if summary.errors:
@@ -1080,19 +1034,10 @@ async def rag_rebuild(
         return "再構築完了（結果の解析に失敗）"
     except CLISubprocessError as e:
         return e.format_mcp_error("再構築中にエラーが発生しました")
-    except Exception:
-        logger.exception("再構築中にエラーが発生しました")
-        return "エラー: 再構築中にエラーが発生しました"
 
 
 class CLISubprocessError(Exception):
     """CLI サブプロセスの実行エラー."""
-
-    _LOCK_CONFLICT_MESSAGE_WRITE = "エラー: 別の取り込みが実行中のため受け付けられません"
-    _LOCK_CONFLICT_MESSAGE_REBUILD = "エラー: 再構築処理中のため受け付けられません"
-    _LOCK_CONFLICT_MESSAGE_GENERIC = (
-        "エラー: 別のプロセスがロックを保持しています"
-    )
 
     def __init__(
         self,
@@ -1113,19 +1058,21 @@ class CLISubprocessError(Exception):
     def format_mcp_error(self, context: str = "") -> str:
         """MCP ツール用のエラーメッセージを生成する.
 
-        ロック競合の場合は lock_type に応じたメッセージを返す。
+        全エラーで「エラー: <context>\\n原因: <cause>」形式に統一する。
         メッセージには再試行を促す文言を含めない（再試行タイミングは
         HTTP API では Retry-After ヘッダで伝達し、MCP ツールでは
         状態の事実のみを伝える）。
         """
         if self.lock_conflict:
             if self.lock_type == "rebuild":
-                return self._LOCK_CONFLICT_MESSAGE_REBUILD
-            if self.lock_type == "write":
-                return self._LOCK_CONFLICT_MESSAGE_WRITE
-            return self._LOCK_CONFLICT_MESSAGE_GENERIC
+                cause = "再構築処理中のためロックが取れません"
+            elif self.lock_type == "write":
+                cause = "別の取り込みが実行中のためロックが取れません"
+            else:
+                cause = "別のプロセスがロックを保持しています"
+            return f"エラー: ロック競合により処理を受け付けられません\n原因: {cause}"
         if context:
-            return f"エラー: {context} ({self})"
+            return f"エラー: {context}\n原因: {self}"
         return f"エラー: {self}"
 
 
@@ -1211,6 +1158,7 @@ async def _run_cli_subprocess(
     logger.info("CLI subprocess: %s %s", command, _sanitize_log_value(" ".join(args or [])))
 
     env = os.environ.copy()
+    env["PYTHONUTF8"] = "1"
     env["PYTHONIOENCODING"] = "utf-8"
 
     stdin_mode = asyncio.subprocess.PIPE if stdin_data is not None else asyncio.subprocess.DEVNULL
@@ -1242,7 +1190,7 @@ async def _run_cli_subprocess(
             raw = await process.stdout.readline()
             if not raw:
                 break
-            line = raw.decode("utf-8", errors="replace").strip()
+            line = raw.decode("utf-8").strip()
             if not line:
                 continue
 
@@ -1293,6 +1241,8 @@ async def _run_cli_subprocess(
     assert process.returncode is not None  # noqa: S101
     exit_code = process.returncode
 
+    # stderr 側は decode 失敗で本来のエラー行が落ちないよう replace を許容する。
+    # encoding 違反自体は U+FFFD として stdout 応答に残り e2e の assert_no_mojibake で検出する。
     stderr_text = stderr_bytes.decode("utf-8", errors="replace") if stderr_bytes else ""
     stderr_lines = stderr_text.rstrip().splitlines()
     stderr_tail = "\n".join(stderr_lines[-10:])
@@ -1940,9 +1890,8 @@ async def upload_document(request: Request) -> Response:
     except CLISubprocessError as e:
         if e.lock_conflict:
             return _upload_lock_conflict_response(e)
-        message = str(e)
-        if "同名" in message:
-            return _upload_error(409, message)
+        if e.code == CliErrorCode.FILE_EXISTS.value:
+            return _upload_error(409, str(e))
         logger.error("Upload document CLI error for %s: %s", sanitized, e)
         return _upload_error(500, "インジェスト処理中にエラーが発生しました")
     except Exception:
@@ -2033,9 +1982,8 @@ async def upload_journal(request: Request) -> Response:
     except CLISubprocessError as e:
         if e.lock_conflict:
             return _upload_lock_conflict_response(e)
-        message = str(e)
-        if "同名" in message:
-            return _upload_error(409, message)
+        if e.code == CliErrorCode.FILE_EXISTS.value:
+            return _upload_error(409, str(e))
         logger.error("Upload journal CLI error for %s/%s: %s", repository, title, e)
         return _upload_error(500, "インジェスト処理中にエラーが発生しました")
     except Exception:
@@ -2153,6 +2101,8 @@ def _attach_log_file_handler(
 
 def _configure_and_run() -> None:
     """トランスポート設定に基づいて MCP サーバーを起動する."""
+    validate_utf8_environment()
+
     # rag 名前空間ロガーの設定（uvicorn/FastMCP のルートロガーを上書きしない）
     rag_logger = logging.getLogger("rag")
     log_formatter = logging.Formatter(

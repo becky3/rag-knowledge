@@ -23,7 +23,11 @@ from urllib.parse import urldefrag
 
 from .errors import CliErrorCode
 from .filter_parser import parse_filters
-from .pipeline.models import PipelinePhase, format_pipeline_error as _format_pipeline_error
+from .pipeline.models import (
+    PipelinePhase,
+    format_pipeline_error as _format_pipeline_error,
+    format_pipeline_warning as _format_pipeline_warning,
+)
 from .store.models import SourceStatus
 from .evaluation import (
     EvaluationReport,
@@ -333,7 +337,7 @@ def _log_phase_summary(phase: str, summary: "PipelineSummary") -> None:
         len(summary.warnings),
     )
     for warn in summary.warnings:
-        logger.warning("  [%s] 警告: %s", phase, warn)
+        logger.warning("  [%s] 警告: %s", phase, _format_pipeline_warning(warn))
     for entry in summary.errors:
         logger.error("  [%s] エラー: %s", phase, _format_pipeline_error(entry))
 
@@ -1677,7 +1681,7 @@ async def run_rebuild(args: argparse.Namespace) -> None:
             )
             if summary.warnings:
                 for warn in summary.warnings:
-                    logger.warning("  警告: %s", warn)
+                    logger.warning("  警告: %s", _format_pipeline_warning(warn))
             if summary.errors:
                 has_error = True
                 for entry in summary.errors:
@@ -2170,7 +2174,7 @@ async def run_delete(args: argparse.Namespace) -> None:
         if summary.warnings:
             print(f"パイプライン警告: {len(summary.warnings)}件")
             for warn in summary.warnings:
-                print(f"  - {warn}")
+                print(f"  - {_format_pipeline_warning(warn)}")
         if summary.errors:
             print(f"パイプラインエラー: {len(summary.errors)}件")
             for entry in summary.errors:
@@ -2412,7 +2416,7 @@ def _print_ingest_result(
         if pipeline_summary.warnings:
             print(f"パイプライン警告: {len(pipeline_summary.warnings)}件")
             for warn in pipeline_summary.warnings:
-                print(f"  - {warn}")
+                print(f"  - {_format_pipeline_warning(warn)}")
         if pipeline_summary.errors:
             print(f"パイプラインエラー: {len(pipeline_summary.errors)}件")
             for entry in pipeline_summary.errors:
@@ -2949,10 +2953,10 @@ async def run_add_document(args: argparse.Namespace) -> None:
             ingest_result = local_ingester.add_document(
                 data, filename, upload_mode=args.upload_mode,
             )
-        except FileExistsError as e:
-            msg = f"同名ファイルが既に存在します: {filename} ({e})"
+        except FileExistsError:
+            msg = f"同名ファイルが既に存在します: {filename}"
             if json_out:
-                _output_error(CliErrorCode.VALIDATION_ERROR, msg)
+                _output_error(CliErrorCode.FILE_EXISTS, msg)
             print(f"エラー: {msg}", file=sys.stderr)
             raise SystemExit(1)
 
@@ -3348,9 +3352,13 @@ async def run_ingest_aozora_author(args: argparse.Namespace) -> None:
 
 
 if __name__ == "__main__":
-    from .config import ensure_utf8_streams, get_settings, log_fake_mode_status
+    from .config import (
+        get_settings,
+        log_fake_mode_status,
+        validate_utf8_environment,
+    )
 
-    ensure_utf8_streams(include_stdout=True)
+    validate_utf8_environment()
 
     logging.basicConfig(
         level=logging.INFO,

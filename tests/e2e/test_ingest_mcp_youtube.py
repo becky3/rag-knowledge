@@ -137,7 +137,7 @@ class TestCliYoutubeIngest:
     def test_cli_ingest_youtube_succeeds(
         self,
         e2e_subprocess_env: dict[str, str],
-        e2e_mcp_server: str,  # ChromaDB を auto_start させるため依存
+        e2e_mcp_server: str,  # noqa: ARG002 - ChromaDB を auto_start させるため依存
     ) -> None:
         """CLI から ingest-youtube を実行できる（subprocess 越境）.
 

@@ -33,6 +33,7 @@ from rag.pipeline.models import (
     PipelineErrorEntry,
     PipelineMode,
     PipelinePhase,
+    PipelineWarningEntry,
     PipelineSummary,
 )
 from rag.pipeline.protocols import ConverterProtocol, IndexerProtocol
@@ -330,15 +331,7 @@ class PipelineController:
         await self._indexer.clear(source_type, path=path)
 
         convert_failed = convert_summary.failed_paths()
-        convert_warned: set[str] = set()
-        for w in convert_summary.warnings:
-            source_id, sep, _reason = w.partition(": ")
-            if sep and source_id:
-                convert_warned.add(source_id)
-            else:
-                logger.warning(
-                    "Convert warning の形式が不正なため index 除外対象外: %s", w,
-                )
+        convert_warned = convert_summary.warned_paths()
         convert_excluded = convert_failed | convert_warned
         if convert_excluded:
             logger.info(
@@ -798,7 +791,7 @@ class PipelineController:
         sem = asyncio.Semaphore(concurrency)
         processed = 0
         errors: list[PipelineErrorEntry] = []
-        warnings: list[str] = []
+        warnings: list[PipelineWarningEntry] = []
         lock = asyncio.Lock()
         is_async = inspect.iscoroutinefunction(process_fn)
 
@@ -820,7 +813,11 @@ class PipelineController:
                         "%sスキップ: %s (%s)", log_prefix, file_path, e,
                     )
                     async with lock:
-                        warnings.append(f"{file_path}: {e}")
+                        warnings.append(PipelineWarningEntry(
+                            path=file_path,
+                            message=str(e),
+                            phase=phase.value,
+                        ))
                 except ConversionFailedError as e:
                     logger.error(
                         "%s変換失敗: %s (%s)", log_prefix, file_path, e,

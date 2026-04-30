@@ -203,6 +203,7 @@ class TestUploadDocumentIntegration:
             new_callable=AsyncMock,
             side_effect=CLISubprocessError(
                 "同名ファイルが既に存在します: local/.upload/2026/01/01/test.md",
+                code="FILE_EXISTS",
             ),
         ):
             resp = await client.post(

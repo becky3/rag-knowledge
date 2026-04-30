@@ -75,5 +75,7 @@ cli_error_code:
       description: 外部依存エラー（LM Studio 接続失敗、ChromaDB 未起動等）
     - value: NOT_FOUND
       description: ソース・リソース不在
+    - value: FILE_EXISTS
+      description: 同名ファイルの重複検出（upload_mode=fail 時の局面）
     - value: INTERNAL_ERROR
       description: 想定外例外（上記いずれにも該当しない）
