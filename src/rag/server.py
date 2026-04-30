@@ -44,6 +44,7 @@ os.environ.setdefault("ANONYMIZED_TELEMETRY", "False")
 # bm25s が "resource module not available on Windows" を stdout に print する
 # 問題への対策として、import 時に stdout を抑制する。
 from .config import RAGSettings, validate_utf8_environment
+from .errors import CliErrorCode
 from py_common_lib.logging import SessionRotatingFileHandler
 from .rag_knowledge import format_file_size
 
@@ -1882,9 +1883,8 @@ async def upload_document(request: Request) -> Response:
     except CLISubprocessError as e:
         if e.lock_conflict:
             return _upload_lock_conflict_response(e)
-        message = str(e)
-        if "同名" in message:
-            return _upload_error(409, message)
+        if e.code == CliErrorCode.FILE_EXISTS.value:
+            return _upload_error(409, str(e))
         logger.error("Upload document CLI error for %s: %s", sanitized, e)
         return _upload_error(500, "インジェスト処理中にエラーが発生しました")
     except Exception:
@@ -1975,9 +1975,8 @@ async def upload_journal(request: Request) -> Response:
     except CLISubprocessError as e:
         if e.lock_conflict:
             return _upload_lock_conflict_response(e)
-        message = str(e)
-        if "同名" in message:
-            return _upload_error(409, message)
+        if e.code == CliErrorCode.FILE_EXISTS.value:
+            return _upload_error(409, str(e))
         logger.error("Upload journal CLI error for %s/%s: %s", repository, title, e)
         return _upload_error(500, "インジェスト処理中にエラーが発生しました")
     except Exception:
