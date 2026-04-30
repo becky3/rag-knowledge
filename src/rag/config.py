@@ -485,6 +485,3 @@ def validate_utf8_environment() -> None:
     sys.exit(1)
 
 
-# ensure_utf8_streams は削除済み (#709 Phase C):
-# 起動時 validate_utf8_environment が PYTHONUTF8=1 / PYTHONIOENCODING=utf-8 を
-# 強制するため、stderr/stdout の再構成は不要。silent な mojibake 救済を防ぐ。

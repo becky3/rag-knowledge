@@ -473,18 +473,16 @@ class TestRebuildStructuredErrors:
         assert "エラー" in result
 
     @pytest.mark.asyncio
-    async def test_unexpected_exception_returns_error(self) -> None:
-        """予期しない例外時にエラーメッセージを返すこと."""
+    async def test_unexpected_exception_propagates(self) -> None:
+        """想定外例外は握り潰さず再 raise されること."""
         from rag.server import rag_rebuild
 
         with patch(
             "rag.server._run_cli_subprocess",
             new_callable=AsyncMock,
             side_effect=RuntimeError("unexpected"),
-        ):
-            result = await rag_rebuild(mode="full")
-
-        assert "エラー" in result
+        ), pytest.raises(RuntimeError, match="unexpected"):
+            await rag_rebuild(mode="full")
 
 
 # --- rag_stats MCP ツールテスト ---

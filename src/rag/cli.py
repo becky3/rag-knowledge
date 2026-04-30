@@ -3354,8 +3354,6 @@ if __name__ == "__main__":
         validate_utf8_environment,
     )
 
-    # 起動時 env fail-fast チェック
-    # 仕様: README「前提: UTF-8 強制環境変数の設定」
     validate_utf8_environment()
 
     logging.basicConfig(

@@ -72,8 +72,6 @@ MCPContext = Context[Any, Any, Any]
 
 LOG_FILE_PREFIX = "rag-server-"
 
-# 起動時 env fail-fast チェック（PYTHONUTF8 / PYTHONIOENCODING / stdout encoding）
-# 違反時は sys.exit(1) で即時終了する。仕様: README「前提: UTF-8 強制環境変数の設定」
 validate_utf8_environment()
 
 logger = logging.getLogger("rag.server")
@@ -290,9 +288,6 @@ async def rag_crawl_zenn(
         return _format_cli_ingest_result(result, context=f"ユーザー: {username}")
     except CLISubprocessError as e:
         return e.format_mcp_error(f"Zenn 記事の取り込みに失敗しました（ユーザー: {username}）")
-    except Exception:
-        logger.exception("Failed to crawl Zenn articles for user: %s", username)
-        return f"エラー: Zenn 記事の取り込みに失敗しました（ユーザー: {username}）"
 
 
 @mcp.tool()
@@ -319,9 +314,6 @@ async def rag_add_zenn(
         return _format_cli_ingest_result(result, context="Zenn ingest")
     except CLISubprocessError as e:
         return e.format_mcp_error("Zenn コンテンツの取り込みに失敗しました")
-    except Exception:
-        logger.exception("Failed to ingest Zenn contents")
-        return "エラー: Zenn コンテンツの取り込みに失敗しました"
 
 
 @mcp.tool()
@@ -366,11 +358,6 @@ async def rag_crawl_bluesky(
         return label + _format_cli_ingest_result(result, context=f"ハンドル: {handle}")
     except CLISubprocessError as e:
         return label + e.format_mcp_error(f"BlueSky 投稿の取り込みに失敗しました（ハンドル: {handle}）")
-    except Exception:
-        logger.exception(
-            "Failed to crawl BlueSky posts for handle: %s", handle
-        )
-        return label + f"エラー: BlueSky 投稿の取り込みに失敗しました（ハンドル: {handle}）"
 
 
 @mcp.tool()
@@ -398,9 +385,6 @@ async def rag_add_bluesky(
         return label + _format_cli_ingest_result(result, context="BlueSky ingest")
     except CLISubprocessError as e:
         return label + e.format_mcp_error("BlueSky 投稿の取り込みに失敗しました")
-    except Exception:
-        logger.exception("Failed to ingest BlueSky posts")
-        return label + "エラー: BlueSky 投稿の取り込みに失敗しました"
 
 
 FakeSource = Literal["youtube", "bluesky", "embedding"]
@@ -477,11 +461,6 @@ async def rag_add_youtube(
         return label + _format_cli_ingest_result(result, context=f"動画: {video_url}")
     except CLISubprocessError as e:
         return label + e.format_mcp_error(f"YouTube 動画の取り込みに失敗しました: {video_url}")
-    except Exception:
-        logger.exception(
-            "Failed to ingest YouTube video: %s", video_url
-        )
-        return f"{label}エラー: YouTube 動画の取り込みに失敗しました: {video_url}"
 
 
 @mcp.tool()
@@ -512,11 +491,6 @@ async def rag_crawl_youtube(
         return label + _format_cli_ingest_result(result, context=f"プレイリスト: {playlist_url}")
     except CLISubprocessError as e:
         return label + e.format_mcp_error(f"YouTube プレイリストの取り込みに失敗しました: {playlist_url}")
-    except Exception:
-        logger.exception(
-            "Failed to crawl YouTube playlist: %s", playlist_url
-        )
-        return f"{label}エラー: YouTube プレイリストの取り込みに失敗しました: {playlist_url}"
 
 
 _VALID_UPLOAD_MODES: frozenset[str] = frozenset({"fail", "replace"})
@@ -572,9 +546,6 @@ async def rag_add_document(
         return _format_cli_ingest_result(result, context=sanitized_filename)
     except CLISubprocessError as e:
         return e.format_mcp_error(f"ファイルの取り込みに失敗しました: {sanitized_filename}")
-    except Exception:
-        logger.exception("Failed to add document: %s", sanitized_filename)
-        return f"エラー: ファイルの取り込みに失敗しました: {sanitized_filename}"
 
 
 @mcp.tool()
@@ -623,9 +594,6 @@ async def rag_add_journal(
         )
     except CLISubprocessError as e:
         return e.format_mcp_error(f"ジャーナルエントリの登録に失敗しました: {title}")
-    except Exception:
-        logger.exception("Failed to add journal entry: %s/%s", repository, title)
-        return f"エラー: ジャーナルエントリの登録に失敗しました: {title}"
 
 
 @mcp.tool()
@@ -665,9 +633,6 @@ async def rag_crawl_documents(
         return _format_cli_ingest_result(result, context=f"ディレクトリ: {dir_path}")
     except CLISubprocessError as e:
         return e.format_mcp_error(f"ドキュメントの取り込みに失敗しました（ディレクトリ: {dir_path}）")
-    except Exception:
-        logger.exception("Failed to crawl documents: %s", dir_path)
-        return f"エラー: ドキュメントの取り込みに失敗しました（ディレクトリ: {dir_path}）"
 
 
 @mcp.tool()
@@ -767,9 +732,6 @@ async def rag_site_ingest(
         return _format_cli_ingest_result(result, context=f"サイト: {display_url}")
     except CLISubprocessError as e:
         return e.format_mcp_error(f"サイト取り込みに失敗しました（{display_url}）")
-    except Exception:
-        logger.exception("Failed to site-ingest: %s", display_url)
-        return f"エラー: サイト取り込みに失敗しました（{display_url}）"
 
 
 @mcp.tool()
@@ -790,9 +752,6 @@ async def rag_update_aozora_catalog(
         return str(result.get("message", "カタログ更新完了"))
     except CLISubprocessError as e:
         return e.format_mcp_error("青空文庫カタログの更新に失敗しました")
-    except Exception:
-        logger.exception("Failed to update Aozora catalog")
-        return "エラー: 青空文庫カタログの更新に失敗しました"
 
 
 @mcp.tool()
@@ -850,9 +809,6 @@ async def rag_add_aozora(
         return _format_cli_ingest_result(result, context=f"作品ID: {book_id}")
     except CLISubprocessError as e:
         return e.format_mcp_error(f"青空文庫作品の取り込みに失敗しました（作品ID: {book_id}）")
-    except Exception:
-        logger.exception("Failed to add Aozora work: %s", book_id)
-        return f"エラー: 青空文庫作品の取り込みに失敗しました（作品ID: {book_id}）"
 
 
 @mcp.tool()
@@ -882,11 +838,6 @@ async def rag_crawl_aozora(
         return _format_cli_ingest_result(result, context=f"人物ID: {person_id}")
     except CLISubprocessError as e:
         return e.format_mcp_error(f"青空文庫作品の取り込みに失敗しました（人物ID: {person_id}）")
-    except Exception:
-        logger.exception(
-            "Failed to crawl Aozora works for person_id: %s", person_id
-        )
-        return f"エラー: 青空文庫作品の取り込みに失敗しました（人物ID: {person_id}）"
 
 
 @mcp.tool()
@@ -921,9 +872,6 @@ async def rag_delete(source_id: str, ctx: MCPContext | None = None) -> str:
         return f"削除しました: {source_id}"
     except CLISubprocessError as e:
         return e.format_mcp_error(f"削除に失敗しました。source_id: {source_id}")
-    except Exception:
-        logger.exception("Failed to delete: %s", source_id)
-        return f"エラー: 削除に失敗しました。source_id: {source_id}"
 
 
 # --- 再構築 ---
@@ -1080,9 +1028,6 @@ async def rag_rebuild(
         return "再構築完了（結果の解析に失敗）"
     except CLISubprocessError as e:
         return e.format_mcp_error("再構築中にエラーが発生しました")
-    except Exception:
-        logger.exception("再構築中にエラーが発生しました")
-        return "エラー: 再構築中にエラーが発生しました"
 
 
 class CLISubprocessError(Exception):
@@ -1210,8 +1155,6 @@ async def _run_cli_subprocess(
 
     logger.info("CLI subprocess: %s %s", command, _sanitize_log_value(" ".join(args or [])))
 
-    # 子プロセスでも validate_utf8_environment が走るため、UTF-8 強制 env を
-    # 明示注入する（親 env が runtime で変更されている場合の保険）
     env = os.environ.copy()
     env["PYTHONUTF8"] = "1"
     env["PYTHONIOENCODING"] = "utf-8"
