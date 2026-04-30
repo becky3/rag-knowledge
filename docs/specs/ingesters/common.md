@@ -79,9 +79,22 @@ ConstrainedClient はサーキットブレーカーの責務（HTTP レスポン
 インジェスターが取り込んだコンテンツ内の URL を別のインジェスターに委譲して取り込むことを許容する。委譲時のルール:
 
 - **依存方向**: 委譲元 → 委譲先の一方向のみ。循環依存は禁止
+- **越境直 import の禁止**: 委譲元は委譲先のモジュールを直 import せず、Protocol 経由でのみ呼び出す（後述「Protocol 注入規約」）
 - **ConstrainedClient の共有**: 委譲元の ConstrainedClient を委譲先に渡す。バジェット（リクエスト総数上限）は委譲元と委譲先で共有される。ただし、ConstrainedClient 非対応の委譲先（YouTube インジェスター等）は対象外
 - **エラー隔離**: 委譲先の取り込み失敗が委譲元の取り込み結果に影響してはならない
 - **source_store の共有**: 委譲元と委譲先は同一の source_store インスタンスを使用する
+
+### Protocol 注入規約
+
+インジェスター本体（facade）は外部依存（外部 API クライアント / 委譲先インジェスター / 委譲先ランナー）を **Protocol 型のコンストラクタ引数** で受け取る。Real / Fake いずれも同じ Protocol を満たし、起動経路（CLI / MCP / pytest）が **factory 関数経由** で適切な実装を注入する。
+
+- **Protocol の配置**: 各 source_type の専用 Adapter モジュール（`<source_type>_fetcher.py` 等）に Protocol + Real 実装 + factory 関数を集約する。Fake 実装は `_fake/<source_type>/` に配置する
+- **コンストラクタ注入**: facade はコンストラクタで Protocol 型の依存を受け取り、HTTP クライアント (`ConstrainedClient`) は Adapter 内に内包する（facade のメソッドに `client` 引数を渡す形は禁止）
+- **factory 関数経由の生成**: `create_<source_type>_<role>(settings, ...) -> <Protocol>` のシグネチャで factory を提供し、`RAG_<SOURCE_TYPE>_FAKE_MODE` を見て Real / Fake を返す
+- **越境 import の撤去**: 委譲先モジュール（例: `youtube` / `site_ingest_runner`）の関数・クラスを直 import せず、対応する Protocol（`YoutubeClassifier` / `YoutubeDelegator` / `SiteIngestRunner` 等）経由で呼び出す
+- **Adapter 単位の独立 factory**: 1 つのインジェスターが複数の Protocol（API Fetcher と MediaDownloader 等）を必要とする場合、各 Protocol ごとに独立した factory を提供し、起動経路で組み立てる
+
+**正解パターン**: `bluesky/` パッケージ + `bluesky_fetcher.py` + `bluesky_media_downloader.py` + `_fake/bluesky/`（Issue #704）。詳細な構造判断 SSoT は [アーキテクチャ採用方針](../architecture.md) を参照。
 
 ### 失敗の観測性
 

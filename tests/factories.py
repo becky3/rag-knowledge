@@ -257,13 +257,45 @@ def make_indexer_args(**overrides: Any) -> dict[str, Any]:
 
 
 def make_bluesky_ingester(source_store: Any, **overrides: Any) -> Any:
-    """BlueskyIngester のテスト用ファクトリ."""
+    """BlueskyIngester のテスト用ファクトリ.
+
+    Fetcher / MediaDownloader / YoutubeClassifier / YoutubeDelegator /
+    SiteIngestRunner は省略可。省略時は Fake / Mock を注入する。
+    特定の振る舞い検証時は overrides で個別に Fake を渡す。
+    """
     from rag.pipeline.ingesters.bluesky import BlueskyIngester
 
+    if "fetcher" not in overrides or "media_downloader" not in overrides:
+        from pathlib import Path
+
+        from rag.pipeline.ingesters._fake.bluesky import (
+            FakeBlueskyFetcher,
+            FakeBlueskyMediaDownloader,
+        )
+
+        fixture_dir = (
+            Path(__file__).parent.parent
+            / "src" / "rag" / "pipeline" / "ingesters" / "_fake" / "bluesky" / "data"
+        )
+        overrides.setdefault("fetcher", FakeBlueskyFetcher(fixture_dir=fixture_dir))
+        overrides.setdefault("media_downloader", FakeBlueskyMediaDownloader())
+
+    if "youtube_classifier" not in overrides:
+        from rag.pipeline.ingesters.youtube_protocols import (
+            create_youtube_classifier,
+        )
+        overrides["youtube_classifier"] = create_youtube_classifier()
+
+    if "site_ingest_runner" not in overrides:
+        from rag.pipeline.site_ingest_runner import create_site_ingest_runner
+        overrides["site_ingest_runner"] = create_site_ingest_runner()
+
     defaults: dict[str, Any] = {
-        "appview_url": "https://public.api.bsky.app",
+        "youtube_delegator": None,
         "max_posts": 200,
         "include_reposts": True,
+        "force_youtube_reingest": False,
+        "youtube_request_interval": 0.0,
     }
     defaults.update(overrides)
     return BlueskyIngester(source_store, **defaults)
