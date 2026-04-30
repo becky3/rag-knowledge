@@ -64,3 +64,16 @@ jobs:
         env:
           PYTHON_KEYRING_BACKEND: keyrings.alt.file.PlaintextKeyring
         run: uv run pytest tests/e2e/ -m e2e -n0
+
+  validate-package-layout:
+    # flat module + package の同名衝突を検出する独立 step。
+    # pytest 起動より先に実行することで、テスト経路に依存しない fail-fast を担保する。
+    name: Validate Package Layout
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+        with:
+          python-version-file: ".python-version"
+      - name: Run validate_package_layout
+        run: uv run python scripts/validate_package_layout.py
