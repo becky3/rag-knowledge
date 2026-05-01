@@ -393,14 +393,19 @@ async def rag_add_bluesky(
         return label + e.format_mcp_error("BlueSky 投稿の取り込みに失敗しました")
 
 
-FakeSource = Literal["youtube", "bluesky", "embedding"]
+FakeSource = Literal["youtube", "bluesky", "embedding", "web"]
 
 # YouTube インジェスト系 MCP ツールが利用する fake source の組
 _YOUTUBE_INGEST_FAKE_SOURCES: list[FakeSource] = ["youtube", "embedding"]
 
 # BlueSky インジェスト系 MCP ツールが利用する fake source の組
-# 投稿内 URL の自動取り込みで YouTube も委譲対象になるため、両方を並列で評価する
-_BLUESKY_INGEST_FAKE_SOURCES: list[FakeSource] = ["bluesky", "youtube", "embedding"]
+# 投稿内 URL の自動取り込みで YouTube / web (site-ingest) も委譲対象になるため、すべて並列で評価する
+_BLUESKY_INGEST_FAKE_SOURCES: list[FakeSource] = [
+    "bluesky", "youtube", "web", "embedding",
+]
+
+# サイト一括取り込み（site-ingest / scrapy）系 MCP ツールが利用する fake source の組
+_SITE_INGEST_FAKE_SOURCES: list[FakeSource] = ["web", "embedding"]
 
 
 def _fake_mode_labels(active_sources: list[FakeSource]) -> str:
@@ -431,6 +436,7 @@ def _fake_mode_labels(active_sources: list[FakeSource]) -> str:
         "youtube": settings.rag_youtube_fake_mode,
         "bluesky": settings.rag_bluesky_fake_mode,
         "embedding": settings.rag_embedding_fake_mode,
+        "web": settings.rag_scrapy_fake_mode,
     }
     parts: list[str] = []
     for source in active_sources:
@@ -733,11 +739,12 @@ async def rag_site_ingest(
 
     display_url = validated_urls[0] if not multi_url_mode else f"{len(validated_urls)} URLs"
 
+    label = _fake_mode_labels(_SITE_INGEST_FAKE_SOURCES)
     try:
         result = await _run_cli_subprocess("site-ingest", cli_args, ctx=ctx)
-        return _format_cli_ingest_result(result, context=f"サイト: {display_url}")
+        return label + _format_cli_ingest_result(result, context=f"サイト: {display_url}")
     except CLISubprocessError as e:
-        return e.format_mcp_error(f"サイト取り込みに失敗しました（{display_url}）")
+        return label + e.format_mcp_error(f"サイト取り込みに失敗しました（{display_url}）")
 
 
 @mcp.tool()

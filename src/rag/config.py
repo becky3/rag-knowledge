@@ -439,6 +439,18 @@ def log_fake_mode_status(settings: RAGSettings) -> None:
             "Embedding は REAL モードで起動中。実 Embedding API アクセスが発生します"
         )
 
+    if settings.rag_scrapy_fake_mode:
+        logger.warning(
+            "[FAKE MODE: web] Web (scrapy) は FAKE モードで起動中（fixture: %s）。"
+            "subprocess による実 Web クロールは発生しません。"
+            "本番運用時は RAG_WEB_FAKE_MODE=false を .env に設定してください",
+            settings.rag_scrapy_fake_fixture_dir,
+        )
+    else:
+        logger.info(
+            "Web (scrapy) は REAL モードで起動中。実 Web クロールが発生します"
+        )
+
 
 def _normalize_encoding(value: str) -> str:
     """エンコーディング名を比較可能な正規形式に変換する.
