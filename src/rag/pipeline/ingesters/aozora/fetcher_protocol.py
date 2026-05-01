@@ -114,10 +114,7 @@ def create_aozora_fetcher(settings: RAGSettings) -> AozoraFetcher:
                 f"RAG_AOZORA_FAKE_FIXTURE_DIR を確認してください"
             )
         return FakeAozoraFetcher(fixture_dir=fixture_dir)
-    # Aozora 用 Settings には request_timeout / request_interval が無いため、
-    # 共有の rag_zenn_request_* に倣って妥当値を使用する。本 Issue では aozora 専用の
-    # Settings 追加はスコープ外として扱い、デフォルト値で初期化する。
     return RealAozoraFetcher(
-        request_timeout=30,
-        request_interval=1.0,
+        request_timeout=settings.rag_aozora_request_timeout,
+        request_interval=settings.rag_aozora_request_interval,
     )

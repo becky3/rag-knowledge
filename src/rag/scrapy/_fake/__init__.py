@@ -66,13 +66,14 @@ class FakeScrapyRunner:
         Real と同じディレクトリ構造（``<domain>/<crawl_key>/{html, metadata.jsonl}``）
         を tmp_dir に作成し、fixture の内容を展開する。
         """
-        del allowed_domains, url_pattern, force  # Fake では使わない（呼び出し契約のため受け付け）
+        del allowed_domains, force  # Fake では使わない（呼び出し契約のため受け付け）
 
         urls = list(start_urls or ([start_url] if start_url else []))
         if not urls:
             raise ValueError("start_url または start_urls は必須です")
 
         # Real と整合する一時ディレクトリ構造を生成
+        # （_crawl_key は url_pattern も key 算出に使うため、Real と同じく url_pattern を渡す）
         multi_url_mode = len(urls) >= 2
         if multi_url_mode:
             domain = "_multi_"
@@ -80,7 +81,7 @@ class FakeScrapyRunner:
         else:
             from urllib.parse import urlparse
             domain = urlparse(urls[0]).hostname or "unknown"
-            key = _crawl_key(urls[0], "")
+            key = _crawl_key(urls[0], url_pattern)
 
         crawl_dir = self._temp_dir / domain / key
         html_dir = crawl_dir / "html"

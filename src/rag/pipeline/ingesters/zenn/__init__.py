@@ -27,7 +27,6 @@ __all__ = [
     "MAX_PAGINATION_PAGES",
     "ZENN_API_BASE",
     "RealZennFetcher",
-    "ZENN_API_BASE",
     "ZennFetcher",
     "ZennIngester",
     "ZennKind",
