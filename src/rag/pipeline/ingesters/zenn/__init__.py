@@ -15,11 +15,22 @@ from rag.pipeline.ingesters.zenn._facade import (
     ZennIngester,
     parse_zenn_url,
 )
+from rag.pipeline.ingesters.zenn.fetcher_protocol import (
+    RealZennFetcher,
+    ZennFetcher,
+    ZennKind,
+    create_zenn_fetcher,
+)
 
 __all__ = [
     "MAX_ARTICLES_HARD_LIMIT",
     "MAX_PAGINATION_PAGES",
     "ZENN_API_BASE",
+    "RealZennFetcher",
+    "ZENN_API_BASE",
+    "ZennFetcher",
     "ZennIngester",
+    "ZennKind",
+    "create_zenn_fetcher",
     "parse_zenn_url",
 ]

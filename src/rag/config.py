@@ -95,6 +95,11 @@ class _EnvLoader(BaseSettings):
     # Fake Fetcher が読み込む fixture ディレクトリ。プロジェクトルートからの相対パス
     rag_bluesky_fake_fixture_dir: str = "src/rag/pipeline/ingesters/_fake/bluesky/data"
 
+    # Zenn Fake モード — テスト・QA で実 Zenn API アクセスを排除する。デフォルトは安全側（fake 有効）
+    rag_zenn_fake_mode: bool = True
+    # Fake Fetcher が読み込む fixture ディレクトリ。プロジェクトルートからの相対パス
+    rag_zenn_fake_fixture_dir: str = "src/rag/pipeline/ingesters/_fake/zenn/data"
+
     # Embedding Fake モード — テスト・CI で LM Studio / OpenAI への実 Embedding アクセスを排除する。デフォルトは安全側（fake 有効）
     rag_embedding_fake_mode: bool = True
     # Fake Embedding が生成するベクトルの次元数。Real モデルの次元に合わせる
@@ -173,6 +178,10 @@ class RAGSettings(BaseModel):
     rag_bluesky_fake_mode: bool
     # Fake Fetcher が読み込む fixture ディレクトリ
     rag_bluesky_fake_fixture_dir: str
+    # Zenn Fake モード切替。デフォルト fake（安全側）、本番運用時のみ false を .env で明示
+    rag_zenn_fake_mode: bool
+    # Fake Fetcher が読み込む fixture ディレクトリ
+    rag_zenn_fake_fixture_dir: str
     # Embedding Fake モード切替。デフォルト fake（安全側）、本番運用時のみ false を .env で明示
     rag_embedding_fake_mode: bool
     # Fake Embedding が生成するベクトルの次元数
