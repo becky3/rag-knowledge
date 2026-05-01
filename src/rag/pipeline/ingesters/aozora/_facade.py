@@ -19,6 +19,7 @@ import httpx
 
 from rag.pipeline.ingesters._common import (
     IngestErrorCategory,
+    IngestErrorDetail,
     IngestResult,
     ProgressCallback,
     now_iso,
@@ -331,7 +332,7 @@ class AozoraIngester:
             except Exception as exc:
                 logger.exception("作品の取得・配置に失敗しました: %s", book_id)
                 result.errors += 1
-                detail: dict[str, Any] = {
+                detail: IngestErrorDetail = {
                     "category": IngestErrorCategory.METADATA_FETCH.value,
                     "target": f"book_id={book_id}",
                     "message": str(exc),
@@ -381,11 +382,11 @@ class AozoraIngester:
         if not xhtml_url:
             logger.warning("XHTML URL が欠落: book_id=%s", book_id)
             result.errors += 1
-            result.error_details.append({
-                "category": IngestErrorCategory.METADATA_FETCH.value,
-                "target": f"book_id={book_id}",
-                "message": "XHTML URL missing",
-            })
+            result.error_details.append(IngestErrorDetail(
+                category=IngestErrorCategory.METADATA_FETCH.value,
+                target=f"book_id={book_id}",
+                message="XHTML URL missing",
+            ))
             return "error"
 
         # ファイルパス導出
@@ -410,13 +411,13 @@ class AozoraIngester:
                 book_id, status_code, github_url,
             )
             result.errors += 1
-            result.error_details.append({
-                "category": IngestErrorCategory.METADATA_FETCH.value,
-                "target": f"book_id={book_id}",
-                "status": status_code,
-                "url": github_url,
-                "message": f"XHTML ダウンロード失敗: {e}",
-            })
+            result.error_details.append(IngestErrorDetail(
+                category=IngestErrorCategory.METADATA_FETCH.value,
+                target=f"book_id={book_id}",
+                status=status_code,
+                url=github_url,
+                message=f"XHTML ダウンロード失敗: {e}",
+            ))
             return "error"
 
         # 元 URL の正規化（http → https）
@@ -448,11 +449,11 @@ class AozoraIngester:
         except Exception as exc:
             logger.exception("作品の配置に失敗しました: %s", rel_path)
             result.errors += 1
-            result.error_details.append({
-                "category": IngestErrorCategory.PLACEMENT.value,
-                "target": rel_path,
-                "message": str(exc),
-            })
+            result.error_details.append(IngestErrorDetail(
+                category=IngestErrorCategory.PLACEMENT.value,
+                target=rel_path,
+                message=str(exc),
+            ))
             return "error"
         result.placed += 1
         return "placed"

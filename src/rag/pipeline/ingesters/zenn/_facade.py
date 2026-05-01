@@ -15,6 +15,7 @@ from typing import TYPE_CHECKING, Any
 
 from rag.pipeline.ingesters._common import (
     IngestErrorCategory,
+    IngestErrorDetail,
     IngestResult,
     ProgressCallback,
     now_iso,
@@ -212,7 +213,7 @@ class ZennIngester:
             except Exception as exc:
                 logger.exception("記事の取得に失敗しました: %s", slug)
                 result.errors += 1
-                fetch_detail: dict[str, Any] = {
+                fetch_detail: IngestErrorDetail = {
                     "category": IngestErrorCategory.METADATA_FETCH.value,
                     "target": f"articles/{slug}",
                     "message": str(exc),
@@ -238,11 +239,11 @@ class ZennIngester:
             except Exception as exc:
                 logger.exception("記事の配置に失敗しました: %s", rel_path)
                 result.errors += 1
-                result.error_details.append({
-                    "category": IngestErrorCategory.PLACEMENT.value,
-                    "target": rel_path,
-                    "message": str(exc),
-                })
+                result.error_details.append(IngestErrorDetail(
+                    category=IngestErrorCategory.PLACEMENT.value,
+                    target=rel_path,
+                    message=str(exc),
+                ))
 
             if progress_callback is not None:
                 progress_callback(i + 1, len(slugs), f"articles/{slug}")
@@ -297,7 +298,7 @@ class ZennIngester:
             except Exception as exc:
                 logger.exception("スクラップの取得に失敗しました: %s", slug)
                 result.errors += 1
-                fetch_detail: dict[str, Any] = {
+                fetch_detail: IngestErrorDetail = {
                     "category": IngestErrorCategory.METADATA_FETCH.value,
                     "target": f"scraps/{slug}",
                     "message": str(exc),
@@ -323,11 +324,11 @@ class ZennIngester:
             except Exception as exc:
                 logger.exception("スクラップの配置に失敗しました: %s", rel_path)
                 result.errors += 1
-                result.error_details.append({
-                    "category": IngestErrorCategory.PLACEMENT.value,
-                    "target": rel_path,
-                    "message": str(exc),
-                })
+                result.error_details.append(IngestErrorDetail(
+                    category=IngestErrorCategory.PLACEMENT.value,
+                    target=rel_path,
+                    message=str(exc),
+                ))
 
             if progress_callback is not None:
                 progress_callback(i + 1, len(slugs), f"scraps/{slug}")
@@ -456,11 +457,11 @@ class ZennIngester:
             if not content_obj:
                 logger.warning("コンテンツオブジェクトが空です: %s/%s", kind, slug)
                 result.errors += 1
-                result.error_details.append({
-                    "category": IngestErrorCategory.METADATA_FETCH.value,
-                    "target": f"{kind}/{slug}",
-                    "message": "Empty content object",
-                })
+                result.error_details.append(IngestErrorDetail(
+                    category=IngestErrorCategory.METADATA_FETCH.value,
+                    target=f"{kind}/{slug}",
+                    message="Empty content object",
+                ))
                 return
 
             json_data = json.dumps(content_obj, ensure_ascii=False, indent=2)
@@ -505,7 +506,7 @@ class ZennIngester:
         except Exception as exc:
             logger.exception("コンテンツの取得に失敗しました: %s/%s", kind, slug)
             result.errors += 1
-            fetch_detail: dict[str, Any] = {
+            fetch_detail: IngestErrorDetail = {
                 "category": IngestErrorCategory.METADATA_FETCH.value,
                 "target": f"{kind}/{slug}",
                 "message": str(exc),
@@ -529,11 +530,11 @@ class ZennIngester:
         except Exception as exc:
             logger.exception("コンテンツの配置に失敗しました: %s", rel_path)
             result.errors += 1
-            result.error_details.append({
-                "category": IngestErrorCategory.PLACEMENT.value,
-                "target": rel_path,
-                "message": str(exc),
-            })
+            result.error_details.append(IngestErrorDetail(
+                category=IngestErrorCategory.PLACEMENT.value,
+                target=rel_path,
+                message=str(exc),
+            ))
 
     async def ingest_contents(
         self,
@@ -553,11 +554,11 @@ class ZennIngester:
             if parsed is None:
                 logger.warning("Zenn URL のパースに失敗しました: %s", url)
                 result.errors += 1
-                result.error_details.append({
-                    "category": IngestErrorCategory.METADATA_FETCH.value,
-                    "target": url,
-                    "message": "Invalid Zenn URL format",
-                })
+                result.error_details.append(IngestErrorDetail(
+                    category=IngestErrorCategory.METADATA_FETCH.value,
+                    target=url,
+                    message="Invalid Zenn URL format",
+                ))
                 continue
 
             username, kind, slug = parsed
@@ -572,7 +573,7 @@ class ZennIngester:
         return result
 
 
-def _populate_http_status(detail: dict[str, Any], exc: BaseException) -> None:
+def _populate_http_status(detail: IngestErrorDetail, exc: BaseException) -> None:
     """例外が httpx.HTTPStatusError なら status / url を error detail に追加する."""
     import httpx
 

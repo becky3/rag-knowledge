@@ -1,9 +1,10 @@
-"""site_ingest_runner（site-ingest コア処理）のテスト.
+"""WebIngester（site-ingest コア処理）のテスト.
 
+仕様: docs/specs/architecture.md §3.3
 仕様: docs/specs/site-ingest.md
 
 テスト方針:
-- execute_site_ingest が ScrapyRunner と Bridge を正しく呼び出すこと
+- WebIngester.crawl_urls が ScrapyRunner と Bridge を正しく呼び出すこと
 - 単一 URL（クロールモード）と複数 URL（複数 URL モード）で正しい引数が渡ること
 - JSONL 未出力時の早期 return（no_output=True）
 - 空 URL リストの拒否
@@ -11,6 +12,8 @@
 
 背景: #686 — site-ingest コア処理を Python API として切り出し、bluesky から
 subprocess を介さず直接呼び出せるようにした。
+#706 — site_ingest_runner.py を ingesters/web/ パッケージに統合し WebIngester に
+リネーム。ScrapyRunner Protocol を Fetcher 相当依存として注入する構造に整理。
 """
 
 from __future__ import annotations
@@ -19,31 +22,35 @@ from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
-
 from settings_defaults import TEST_SETTINGS_DEFAULTS
 
 from rag.config import RAGSettings
 from rag.pipeline.ingesters._common import IngestResult
-from rag.pipeline.site_ingest_runner import execute_site_ingest
+from rag.pipeline.ingesters.web import WebIngester
 from rag.scrapy.bridge import BridgeResult
 from rag.scrapy.runner import CrawlResult
 
 
 def _make_settings(**overrides: object) -> RAGSettings:
-    """site-ingest 関連設定を実 RAGSettings インスタンスとして返す.
-
-    pydantic Field の制約に追随させるため、共通の TEST_SETTINGS_DEFAULTS を
-    ベースに必要な site_ingest_* のみ上書きする。
-    """
+    """site-ingest 関連設定を実 RAGSettings インスタンスとして返す."""
     return RAGSettings(**{**TEST_SETTINGS_DEFAULTS, **overrides})
 
 
+def _make_web_ingester(crawl_result: CrawlResult) -> tuple[WebIngester, MagicMock]:
+    """テスト用 WebIngester を生成し、注入された scrapy_runner mock を返す."""
+    scrapy_runner = MagicMock()
+    scrapy_runner.run = AsyncMock(return_value=crawl_result)
+    return WebIngester(scrapy_runner=scrapy_runner), scrapy_runner
+
+
 @pytest.mark.asyncio
-class TestExecuteSiteIngest:
+class TestWebIngesterCrawlUrls:
     async def test_empty_urls_raises(self) -> None:
         """URL 0 件で ValueError を送出すること."""
+        scrapy_runner = MagicMock()
+        ingester = WebIngester(scrapy_runner=scrapy_runner)
         with pytest.raises(ValueError, match="at least one URL"):
-            await execute_site_ingest(
+            await ingester.crawl_urls(
                 urls=[],
                 source_store=MagicMock(),
                 settings=_make_settings(),
@@ -57,22 +64,18 @@ class TestExecuteSiteIngest:
             jsonl_path=Path("/tmp/out/nonexistent.jsonl"),
             success=True,
         )
-        with (
-            patch(
-                "rag.pipeline.site_ingest_runner.create_scrapy_runner",
-                return_value=MagicMock(run=AsyncMock(return_value=crawl_result)),
-            ) as mock_factory,
-        ):
-            execution = await execute_site_ingest(
-                urls=["https://example.com/page"],
-                source_store=MagicMock(),
-                settings=_make_settings(),
-                url_pattern="^https://example\\.com/",
-                max_pages=10,
-                force=True,
-            )
+        ingester, scrapy_runner = _make_web_ingester(crawl_result)
 
-        kwargs = mock_factory.return_value.run.await_args.kwargs
+        execution = await ingester.crawl_urls(
+            urls=["https://example.com/page"],
+            source_store=MagicMock(),
+            settings=_make_settings(),
+            url_pattern="^https://example\\.com/",
+            max_pages=10,
+            force=True,
+        )
+
+        kwargs = scrapy_runner.run.await_args.kwargs
         assert kwargs["start_url"] == "https://example.com/page"
         assert kwargs["allowed_domains"] == "example.com"
         assert kwargs["url_pattern"] == "^https://example\\.com/"
@@ -90,19 +93,15 @@ class TestExecuteSiteIngest:
             jsonl_path=Path("/tmp/out/nonexistent.jsonl"),
             success=True,
         )
-        runner_mock = MagicMock()
-        runner_mock.run = AsyncMock(return_value=crawl_result)
-        with patch(
-            "rag.pipeline.site_ingest_runner.create_scrapy_runner",
-            return_value=runner_mock,
-        ):
-            execution = await execute_site_ingest(
-                urls=["https://a.example.com/x", "https://b.example.com/y"],
-                source_store=MagicMock(),
-                settings=_make_settings(),
-            )
+        ingester, scrapy_runner = _make_web_ingester(crawl_result)
 
-        kwargs = runner_mock.run.await_args.kwargs
+        execution = await ingester.crawl_urls(
+            urls=["https://a.example.com/x", "https://b.example.com/y"],
+            source_store=MagicMock(),
+            settings=_make_settings(),
+        )
+
+        kwargs = scrapy_runner.run.await_args.kwargs
         assert kwargs["start_urls"] == [
             "https://a.example.com/x", "https://b.example.com/y",
         ]
@@ -131,18 +130,13 @@ class TestExecuteSiteIngest:
             parse_errors=0,
         )
         source_store = MagicMock()
+        ingester, _ = _make_web_ingester(crawl_result)
 
-        with (
-            patch(
-                "rag.pipeline.site_ingest_runner.create_scrapy_runner",
-                return_value=MagicMock(run=AsyncMock(return_value=crawl_result)),
-            ),
-            patch(
-                "rag.pipeline.site_ingest_runner.import_to_source_store",
-                return_value=bridge_result,
-            ) as mock_bridge,
-        ):
-            execution = await execute_site_ingest(
+        with patch(
+            "rag.pipeline.ingesters.web._facade.import_to_source_store",
+            return_value=bridge_result,
+        ) as mock_bridge:
+            execution = await ingester.crawl_urls(
                 urls=["https://example.com/page"],
                 source_store=source_store,
                 settings=_make_settings(),
@@ -160,7 +154,7 @@ class TestExecuteSiteIngest:
         assert execution.scrapy_success is True
 
     async def test_does_not_cleanup_internally(self, tmp_path: Path) -> None:
-        """execute_site_ingest 自体は cleanup を呼ばない（呼び出し元の責務）."""
+        """WebIngester 自体は cleanup を呼ばない（呼び出し元の責務）."""
         jsonl_path = tmp_path / "metadata.jsonl"
         jsonl_path.write_text("", encoding="utf-8")
         crawl_result = MagicMock(spec=CrawlResult)
@@ -169,17 +163,13 @@ class TestExecuteSiteIngest:
         crawl_result.jsonl_path = jsonl_path
         crawl_result.success = True
 
-        with (
-            patch(
-                "rag.pipeline.site_ingest_runner.create_scrapy_runner",
-                return_value=MagicMock(run=AsyncMock(return_value=crawl_result)),
-            ),
-            patch(
-                "rag.pipeline.site_ingest_runner.import_to_source_store",
-                return_value=BridgeResult(),
-            ),
+        ingester, _ = _make_web_ingester(crawl_result)
+
+        with patch(
+            "rag.pipeline.ingesters.web._facade.import_to_source_store",
+            return_value=BridgeResult(),
         ):
-            execution = await execute_site_ingest(
+            execution = await ingester.crawl_urls(
                 urls=["https://example.com/p"],
                 source_store=MagicMock(),
                 settings=_make_settings(),

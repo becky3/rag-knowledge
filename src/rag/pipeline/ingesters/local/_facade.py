@@ -12,6 +12,7 @@ from typing import TYPE_CHECKING, Literal
 
 from rag.pipeline.ingesters._common import (
     IngestErrorCategory,
+    IngestErrorDetail,
     IngestResult,
     ProgressCallback,
 )
@@ -78,11 +79,11 @@ class LocalIngester:
             if upload_mode == "fail" and exists:
                 msg = f"同名ファイルが既に存在します: {rel_path}"
                 result.errors = 1
-                result.error_details.append({
-                    "category": IngestErrorCategory.PLACEMENT.value,
-                    "target": rel_path,
-                    "message": msg,
-                })
+                result.error_details.append(IngestErrorDetail(
+                    category=IngestErrorCategory.PLACEMENT.value,
+                    target=rel_path,
+                    message=msg,
+                ))
                 raise FileExistsError(msg)
 
             self._store.place_file(source_type="local", data=data, rel_path=rel_path)
@@ -94,19 +95,19 @@ class LocalIngester:
             raise
         except ValueError as e:
             result.errors = 1
-            result.error_details.append({
-                "category": IngestErrorCategory.PLACEMENT.value,
-                "target": filename,
-                "message": str(e),
-            })
+            result.error_details.append(IngestErrorDetail(
+                category=IngestErrorCategory.PLACEMENT.value,
+                target=filename,
+                message=str(e),
+            ))
         except OSError as e:
             logger.exception("Failed to place file: %s", filename)
             result.errors = 1
-            result.error_details.append({
-                "category": IngestErrorCategory.PLACEMENT.value,
-                "target": filename,
-                "message": str(e),
-            })
+            result.error_details.append(IngestErrorDetail(
+                category=IngestErrorCategory.PLACEMENT.value,
+                target=filename,
+                message=str(e),
+            ))
         return result
 
     def crawl_documents(
@@ -131,11 +132,11 @@ class LocalIngester:
             files = self._collect_files(dir_path, pattern)
         except ValueError as e:
             result.errors = 1
-            result.error_details.append({
-                "category": IngestErrorCategory.PLACEMENT.value,
-                "target": dir_path,
-                "message": str(e),
-            })
+            result.error_details.append(IngestErrorDetail(
+                category=IngestErrorCategory.PLACEMENT.value,
+                target=dir_path,
+                message=str(e),
+            ))
             return result
         logger.info(
             "Document crawl: %d files found (dir=%s)",
@@ -175,11 +176,11 @@ class LocalIngester:
             except OSError as exc:
                 logger.exception("Failed to copy file: %s", fp)
                 result.errors += 1
-                result.error_details.append({
-                    "category": IngestErrorCategory.PLACEMENT.value,
-                    "target": str(fp),
-                    "message": str(exc),
-                })
+                result.error_details.append(IngestErrorDetail(
+                    category=IngestErrorCategory.PLACEMENT.value,
+                    target=str(fp),
+                    message=str(exc),
+                ))
 
             if progress_callback is not None:
                 progress_callback(file_idx + 1, len(files), str(fp))

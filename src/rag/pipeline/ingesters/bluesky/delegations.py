@@ -2,8 +2,8 @@
 
 仕様: docs/specs/ingesters/bluesky.md「投稿内 URL の自動取り込み」
 
-YouTube / site_ingest への委譲は ``YoutubeClassifier`` / ``YoutubeDelegator`` /
-``SiteIngestRunner`` Protocol 経由で実行する（越境直 import を回避）。
+YouTube / Web への委譲は ``YoutubeClassifier`` / ``YoutubeDelegator`` /
+``WebDelegator`` Protocol 経由で実行する（越境直 import を回避）。
 """
 
 from __future__ import annotations
@@ -12,7 +12,11 @@ import asyncio
 import logging
 from typing import TYPE_CHECKING, Any
 
-from rag.pipeline.ingesters._common import IngestErrorCategory, IngestResult
+from rag.pipeline.ingesters._common import (
+    IngestErrorCategory,
+    IngestErrorDetail,
+    IngestResult,
+)
 from rag.pipeline.ingesters.bluesky.url_routing import (
     classify_url,
     extract_urls_from_item,
@@ -20,11 +24,11 @@ from rag.pipeline.ingesters.bluesky.url_routing import (
 
 if TYPE_CHECKING:
     from rag.config import RAGSettings
+    from rag.pipeline.ingesters.web import WebDelegator
     from rag.pipeline.ingesters.youtube_protocols import (
         YoutubeClassifier,
         YoutubeDelegator,
     )
-    from rag.pipeline.site_ingest_runner import SiteIngestRunner
     from rag.store.source_store import SourceStore
 
 logger = logging.getLogger(__name__)
@@ -35,16 +39,16 @@ async def follow_urls(
     *,
     classifier: YoutubeClassifier,
     youtube_delegator: YoutubeDelegator | None,
-    site_ingest_runner: SiteIngestRunner,
+    web_delegator: WebDelegator,
     source_store: SourceStore,
     settings: RAGSettings,
     youtube_request_interval: float,
     force_youtube_reingest: bool = False,
     result: IngestResult | None = None,
 ) -> dict[str, int]:
-    """配置済み投稿から URL を抽出し、site_ingest/YouTube 委譲先に取り込ませる.
+    """配置済み投稿から URL を抽出し、Web/YouTube 委譲先に取り込ませる.
 
-    Web URL は ``SiteIngestRunner.run_for_urls`` でバッチ取得（subprocess 直起動を
+    Web URL は ``WebDelegator.run_for_urls`` でバッチ取得（subprocess 直起動を
     回避するため Python API 経由）。YouTube URL は ``YoutubeDelegator.ingest_video``
     で個別取り込み（URL 間にレート制限スリープ）。
 
@@ -56,9 +60,9 @@ async def follow_urls(
         placed_items: 配置済みフィードアイテムのリスト
         classifier: YoutubeClassifier Protocol 実装
         youtube_delegator: YoutubeDelegator Protocol 実装（None の場合 YouTube は スキップ計上）
-        site_ingest_runner: SiteIngestRunner Protocol 実装
-        source_store: site-ingest の配置先 SourceStore
-        settings: site-ingest のパラメータ参照用
+        web_delegator: WebDelegator Protocol 実装
+        source_store: web 取り込みの配置先 SourceStore
+        settings: web 取り込みのパラメータ参照用
         youtube_request_interval: YouTube URL 連続取り込み間のスリープ秒
         force_youtube_reingest: 抑制対象の YouTube URL を強制的に取り込むか
         result: 委譲失敗の計上先 IngestResult。指定時は errors + category="delegation"
@@ -91,7 +95,7 @@ async def follow_urls(
     if web_urls:
         web_placed, web_errors, web_error_details = await _fetch_web_urls(
             web_urls,
-            site_ingest_runner=site_ingest_runner,
+            web_delegator=web_delegator,
             source_store=source_store,
             settings=settings,
         )
@@ -129,14 +133,12 @@ async def follow_urls(
                     stats["errors"] += 1
                     if result is not None:
                         result.errors += 1
-                        result.error_details.append(
-                            {
-                                "category": IngestErrorCategory.DELEGATION.value,
-                                "target": url,
-                                "url": url,
-                                "message": f"youtube delegation failed: {exc}",
-                            },
-                        )
+                        result.error_details.append(IngestErrorDetail(
+                            category=IngestErrorCategory.DELEGATION.value,
+                            target=url,
+                            url=url,
+                            message=f"youtube delegation failed: {exc}",
+                        ))
                 if i < len(youtube_urls) - 1:
                     await asyncio.sleep(youtube_request_interval)
             else:
@@ -195,14 +197,12 @@ def _classify_placed_items(
                     stats["errors"] += 1
                     if result is not None:
                         result.errors += 1
-                        result.error_details.append(
-                            {
-                                "category": IngestErrorCategory.DELEGATION.value,
-                                "target": url,
-                                "url": url,
-                                "message": "invalid youtube url",
-                            },
-                        )
+                        result.error_details.append(IngestErrorDetail(
+                            category=IngestErrorCategory.DELEGATION.value,
+                            target=url,
+                            url=url,
+                            message="invalid youtube url",
+                        ))
                 else:
                     stats["skipped"] += 1
 
@@ -212,14 +212,14 @@ def _classify_placed_items(
 async def _fetch_web_urls(
     urls: list[str],
     *,
-    site_ingest_runner: SiteIngestRunner,
+    web_delegator: WebDelegator,
     source_store: SourceStore,
     settings: RAGSettings,
-) -> tuple[int, int, list[dict[str, Any]]]:
-    """Web URL を SiteIngestRunner（複数 URL モード）の Python API で取得する.
+) -> tuple[int, int, list[IngestErrorDetail]]:
+    """Web URL を WebDelegator（複数 URL モード）の Python API で取得する.
 
     親プロセスが既に write_lock を保持している前提で、subprocess を介さず同一
-    プロセス内で site-ingest のコア処理を呼び出す（#686）。
+    プロセス内で WebIngester のコア処理を呼び出す（#686）。
 
     URL バリデーション (validate_url) と SSRF チェック (check_ssrf) を冒頭で
     実施する。subprocess 経由から Python API 直呼出しに変更したことで、従来
@@ -239,21 +239,19 @@ async def _fetch_web_urls(
     )
 
     validated_urls: list[str] = []
-    validation_errors: list[dict[str, Any]] = []
+    validation_errors: list[IngestErrorDetail] = []
     for url in urls:
         try:
             validated = validate_url(url)
             check_ssrf(validated)
         except ValueError as exc:
             logger.warning("Web URL バリデーション失敗: %s (%s)", url, exc)
-            validation_errors.append(
-                {
-                    "category": IngestErrorCategory.DELEGATION.value,
-                    "target": url,
-                    "url": url,
-                    "message": f"url validation failed: {exc}",
-                },
-            )
+            validation_errors.append(IngestErrorDetail(
+                category=IngestErrorCategory.DELEGATION.value,
+                target=url,
+                url=url,
+                message=f"url validation failed: {exc}",
+            ))
             continue
         validated_urls.append(validated)
 
@@ -261,42 +259,40 @@ async def _fetch_web_urls(
         return 0, len(validation_errors), validation_errors
 
     try:
-        execution = await site_ingest_runner.run_for_urls(
+        execution = await web_delegator.run_for_urls(
             validated_urls,
             source_store=source_store,
             settings=settings,
         )
     except Exception as exc:
-        logger.exception("site-ingest 実行に失敗: %d 件", len(validated_urls))
-        execute_errors = [
-            {
-                "category": IngestErrorCategory.DELEGATION.value,
-                "target": url,
-                "url": url,
-                "message": f"site-ingest failed: {exc}",
-            }
+        logger.exception("web 取り込みの実行に失敗: %d 件", len(validated_urls))
+        execute_errors: list[IngestErrorDetail] = [
+            IngestErrorDetail(
+                category=IngestErrorCategory.DELEGATION.value,
+                target=url,
+                url=url,
+                message=f"web ingest failed: {exc}",
+            )
             for url in validated_urls
         ]
         all_errors = validation_errors + execute_errors
         return 0, len(all_errors), all_errors
 
     placed = execution.ingest.placed + execution.ingest.overwritten
-    error_details: list[dict[str, Any]] = list(execution.ingest.error_details)
+    error_details: list[IngestErrorDetail] = list(execution.ingest.error_details)
     if execution.parse_errors > 0:
-        error_details.append(
-            {
-                "category": IngestErrorCategory.DELEGATION.value,
-                "target": "site-ingest:jsonl",
-                "message": (
-                    f"JSONL のパースに失敗した行が {execution.parse_errors} 件"
-                    "あります（site-ingest 出力）"
-                ),
-            },
-        )
+        error_details.append(IngestErrorDetail(
+            category=IngestErrorCategory.DELEGATION.value,
+            target="web-ingest:jsonl",
+            message=(
+                f"JSONL のパースに失敗した行が {execution.parse_errors} 件"
+                "あります（WebIngester 出力）"
+            ),
+        ))
     all_error_details = validation_errors + error_details
     total_errors = len(all_error_details)
     logger.info(
-        "site-ingest 完了: 合計 %d 件配置, %d 件エラー",
+        "web 取り込み完了: 合計 %d 件配置, %d 件エラー",
         placed, total_errors,
     )
     if execution.scrapy_success and execution.crawl_result is not None:

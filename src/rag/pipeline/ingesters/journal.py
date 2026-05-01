@@ -12,7 +12,11 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from rag.pipeline.ingesters._common import IngestErrorCategory, IngestResult
+from rag.pipeline.ingesters._common import (
+    IngestErrorCategory,
+    IngestErrorDetail,
+    IngestResult,
+)
 
 if TYPE_CHECKING:
     from rag.store.source_store import SourceStore
@@ -85,19 +89,19 @@ class JournalIngester:
             self.last_entry_id = entry_id
         except ValueError as e:
             result.errors = 1
-            result.error_details.append({
-                "category": IngestErrorCategory.PLACEMENT.value,
-                "target": entry_id or title,
-                "message": str(e),
-            })
+            result.error_details.append(IngestErrorDetail(
+                category=IngestErrorCategory.PLACEMENT.value,
+                target=entry_id or title,
+                message=str(e),
+            ))
         except OSError as e:
             logger.exception("Failed to place journal entry")
             result.errors = 1
-            result.error_details.append({
-                "category": IngestErrorCategory.PLACEMENT.value,
-                "target": entry_id or title,
-                "message": str(e),
-            })
+            result.error_details.append(IngestErrorDetail(
+                category=IngestErrorCategory.PLACEMENT.value,
+                target=entry_id or title,
+                message=str(e),
+            ))
         return result
 
     def import_directory(
@@ -117,29 +121,29 @@ class JournalIngester:
             self._validate_repository(repository)
         except ValueError as e:
             result.errors = 1
-            result.error_details.append({
-                "category": IngestErrorCategory.PLACEMENT.value,
-                "target": dir_path,
-                "message": str(e),
-            })
+            result.error_details.append(IngestErrorDetail(
+                category=IngestErrorCategory.PLACEMENT.value,
+                target=dir_path,
+                message=str(e),
+            ))
             return result
 
         resolved_dir = Path(dir_path.strip()).resolve()
         if not resolved_dir.exists():
             result.errors = 1
-            result.error_details.append({
-                "category": IngestErrorCategory.PLACEMENT.value,
-                "target": str(resolved_dir),
-                "message": f"Directory not found: {resolved_dir}",
-            })
+            result.error_details.append(IngestErrorDetail(
+                category=IngestErrorCategory.PLACEMENT.value,
+                target=str(resolved_dir),
+                message=f"Directory not found: {resolved_dir}",
+            ))
             return result
         if not resolved_dir.is_dir():
             result.errors = 1
-            result.error_details.append({
-                "category": IngestErrorCategory.PLACEMENT.value,
-                "target": str(resolved_dir),
-                "message": f"Path is not a directory: {resolved_dir}",
-            })
+            result.error_details.append(IngestErrorDetail(
+                category=IngestErrorCategory.PLACEMENT.value,
+                target=str(resolved_dir),
+                message=f"Path is not a directory: {resolved_dir}",
+            ))
             return result
 
         files = sorted(resolved_dir.glob("*.md"), key=lambda p: str(p))
@@ -195,11 +199,11 @@ class JournalIngester:
             except OSError as exc:
                 logger.exception("Failed to import journal file: %s", fp)
                 result.errors += 1
-                result.error_details.append({
-                    "category": IngestErrorCategory.PLACEMENT.value,
-                    "target": str(fp),
-                    "message": str(exc),
-                })
+                result.error_details.append(IngestErrorDetail(
+                    category=IngestErrorCategory.PLACEMENT.value,
+                    target=str(fp),
+                    message=str(exc),
+                ))
 
         logger.info(
             "Journal import completed: placed=%d, overwritten=%d, skipped=%d, errors=%d",

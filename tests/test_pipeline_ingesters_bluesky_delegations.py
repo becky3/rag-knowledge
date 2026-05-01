@@ -1,4 +1,4 @@
-"""delegations.py のテスト（投稿内 URL の YouTube / site_ingest 委譲）.
+"""delegations.py のテスト（投稿内 URL の YouTube / Web 委譲）.
 
 仕様: docs/specs/ingesters/bluesky.md「投稿内 URL の自動取り込み」
 """
@@ -12,10 +12,10 @@ import pytest
 
 from rag.pipeline.ingesters._common import IngestResult
 from rag.pipeline.ingesters.bluesky.delegations import follow_urls
+from rag.pipeline.ingesters.web import SiteIngestExecution
 from rag.pipeline.ingesters.youtube_protocols import (
     RealYoutubeClassifier,
 )
-from rag.pipeline.site_ingest_runner import SiteIngestExecution
 
 
 def _item_with_urls(
@@ -43,7 +43,7 @@ def _make_execution(
     error_details: list[dict[str, Any]] | None = None,
     parse_errors: int = 0,
 ) -> SiteIngestExecution:
-    """site_ingest 結果オブジェクトを生成."""
+    """WebIngester 実行結果オブジェクトを生成."""
     ingest = IngestResult()
     ingest.placed = placed
     ingest.errors = errors
@@ -70,7 +70,7 @@ class TestFollowUrlsClassification:
             items,
             classifier=RealYoutubeClassifier(),
             youtube_delegator=None,
-            site_ingest_runner=runner,
+            web_delegator=runner,
             source_store=MagicMock(),
             settings=MagicMock(),
             youtube_request_interval=0.0,
@@ -86,7 +86,7 @@ class TestFollowUrlsClassification:
             items,
             classifier=RealYoutubeClassifier(),
             youtube_delegator=None,
-            site_ingest_runner=AsyncMock(),
+            web_delegator=AsyncMock(),
             source_store=MagicMock(),
             settings=MagicMock(),
             youtube_request_interval=0.0,
@@ -109,7 +109,7 @@ class TestFollowUrlsWebDelegation:
             items,
             classifier=RealYoutubeClassifier(),
             youtube_delegator=None,
-            site_ingest_runner=runner,
+            web_delegator=runner,
             source_store=MagicMock(),
             settings=MagicMock(),
             youtube_request_interval=0.0,
@@ -131,7 +131,7 @@ class TestFollowUrlsWebDelegation:
             items,
             classifier=RealYoutubeClassifier(),
             youtube_delegator=None,
-            site_ingest_runner=runner,
+            web_delegator=runner,
             source_store=MagicMock(),
             settings=MagicMock(),
             youtube_request_interval=0.0,
@@ -152,7 +152,7 @@ class TestFollowUrlsWebDelegation:
             items,
             classifier=RealYoutubeClassifier(),
             youtube_delegator=None,
-            site_ingest_runner=runner,
+            web_delegator=runner,
             source_store=MagicMock(),
             settings=MagicMock(),
             youtube_request_interval=0.0,
@@ -179,7 +179,7 @@ class TestFollowUrlsYoutubeDelegation:
             items,
             classifier=RealYoutubeClassifier(),
             youtube_delegator=delegator,
-            site_ingest_runner=runner,
+            web_delegator=runner,
             source_store=MagicMock(),
             settings=MagicMock(),
             youtube_request_interval=0.0,
@@ -196,7 +196,7 @@ class TestFollowUrlsYoutubeDelegation:
             items,
             classifier=RealYoutubeClassifier(),
             youtube_delegator=None,
-            site_ingest_runner=runner,
+            web_delegator=runner,
             source_store=MagicMock(),
             settings=MagicMock(),
             youtube_request_interval=0.0,
@@ -216,7 +216,7 @@ class TestFollowUrlsYoutubeDelegation:
             items,
             classifier=RealYoutubeClassifier(),
             youtube_delegator=delegator,
-            site_ingest_runner=runner,
+            web_delegator=runner,
             source_store=MagicMock(),
             settings=MagicMock(),
             youtube_request_interval=0.0,
@@ -240,7 +240,7 @@ class TestFollowUrlsYoutubeDelegation:
             items,
             classifier=RealYoutubeClassifier(),
             youtube_delegator=delegator,
-            site_ingest_runner=runner,
+            web_delegator=runner,
             source_store=MagicMock(),
             settings=MagicMock(),
             youtube_request_interval=0.0,
@@ -262,7 +262,7 @@ class TestFollowUrlsYoutubeDelegation:
             items,
             classifier=RealYoutubeClassifier(),
             youtube_delegator=delegator,
-            site_ingest_runner=runner,
+            web_delegator=runner,
             source_store=MagicMock(),
             settings=MagicMock(),
             youtube_request_interval=0.0,
@@ -293,7 +293,7 @@ class TestFollowUrlsYoutubeDelegation:
             items,
             classifier=RealYoutubeClassifier(),
             youtube_delegator=delegator,
-            site_ingest_runner=runner,
+            web_delegator=runner,
             source_store=MagicMock(),
             settings=MagicMock(),
             youtube_request_interval=0.0,
@@ -310,7 +310,7 @@ class TestFollowUrlsEmpty:
             [],
             classifier=RealYoutubeClassifier(),
             youtube_delegator=None,
-            site_ingest_runner=AsyncMock(),
+            web_delegator=AsyncMock(),
             source_store=MagicMock(),
             settings=MagicMock(),
             youtube_request_interval=0.0,
@@ -325,7 +325,7 @@ class TestFollowUrlsEmpty:
             [_item_with_urls([])],
             classifier=RealYoutubeClassifier(),
             youtube_delegator=None,
-            site_ingest_runner=AsyncMock(),
+            web_delegator=AsyncMock(),
             source_store=MagicMock(),
             settings=MagicMock(),
             youtube_request_interval=0.0,

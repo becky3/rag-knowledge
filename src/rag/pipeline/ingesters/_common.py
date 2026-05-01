@@ -9,7 +9,7 @@ from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from enum import Enum
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, NotRequired, TypedDict
 
 import httpx
 
@@ -33,11 +33,28 @@ class IngestErrorCategory(Enum):
     DELEGATION = "delegation"
 
 
+class IngestErrorDetail(TypedDict):
+    """インジェスト失敗の詳細を構造化表現する型.
+
+    仕様: docs/specs/ingesters/common.md「失敗の観測性」
+
+    `IngestResult.error_details` / `partial_failure_details` のリスト要素として
+    格納される。`category` は `IngestErrorCategory` の `value`（snake_case 文字列）。
+    """
+
+    category: str
+    target: str
+    status: NotRequired[int]
+    url: NotRequired[str]
+    message: NotRequired[str]
+
+
 @dataclass
 class IngestResult:
     """インジェスターの配置結果.
 
-    `error_details` / `partial_failure_details` の dict 構造:
+    `error_details` / `partial_failure_details` は `IngestErrorDetail` TypedDict のリスト。
+    各フィールドの意味:
 
     | フィールド | 必須 | 内容 |
     |---|:-:|---|
@@ -59,9 +76,9 @@ class IngestResult:
     skipped: int = 0
     overwritten: int = 0
     errors: int = 0
-    error_details: list[dict[str, Any]] = field(default_factory=list)
+    error_details: list[IngestErrorDetail] = field(default_factory=list)
     partial_failures: int = 0
-    partial_failure_details: list[dict[str, Any]] = field(default_factory=list)
+    partial_failure_details: list[IngestErrorDetail] = field(default_factory=list)
     aborted: bool = False
     abort_reason: str | None = None
 
@@ -102,18 +119,16 @@ class IngestResult:
         return result
 
 
-def _format_detail(detail: dict[str, Any]) -> str:
-    """error_details / partial_failure_details の dict を表示用文字列に整形する.
+def _format_detail(detail: IngestErrorDetail) -> str:
+    """IngestErrorDetail を表示用文字列に整形する.
 
     仕様: docs/specs/ingesters/common.md「失敗の観測性」
 
     フォーマットは `{target} [{category}]` 固定。`status` / `url` / `message` 等の
-    詳細は dict 本体に残し、ログ・プログラム処理から参照する。summary は運用者が
+    詳細は TypedDict 本体に残し、ログ・プログラム処理から参照する。summary は運用者が
     ざっと状況を把握するための表示であり、情報量を一定に保つ。
     """
-    category = detail.get("category", "unknown")
-    target = detail.get("target", "")
-    return f"{target} [{category}]"
+    return f"{detail['target']} [{detail['category']}]"
 
 
 def extract_http_status(exc: BaseException) -> int | None:

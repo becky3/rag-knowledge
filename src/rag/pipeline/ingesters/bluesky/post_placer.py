@@ -12,6 +12,7 @@ from typing import TYPE_CHECKING, Any
 
 from rag.pipeline.ingesters._common import (
     IngestErrorCategory,
+    IngestErrorDetail,
     IngestResult,
     extract_http_status,
     now_iso,
@@ -158,7 +159,7 @@ async def _download_media(
         except Exception as exc:
             logger.exception("画像の DL に失敗しました: %s", img_url)
             result.partial_failures += 1
-            detail: dict[str, Any] = {
+            detail: IngestErrorDetail = {
                 "category": IngestErrorCategory.MEDIA_DOWNLOAD.value,
                 "target": rel_path,
                 "url": img_url,
@@ -179,7 +180,7 @@ async def _download_media(
         except Exception as exc:
             logger.exception("動画の DL に失敗しました: %s", playlist_url)
             result.partial_failures += 1
-            detail_video: dict[str, Any] = {
+            detail_video: IngestErrorDetail = {
                 "category": IngestErrorCategory.MEDIA_DOWNLOAD.value,
                 "target": rel_path,
                 "url": playlist_url,
@@ -312,13 +313,11 @@ async def place_post(
     except Exception as exc:
         logger.exception("投稿の配置に失敗しました: %s", rel_path)
         result.errors += 1
-        result.error_details.append(
-            {
-                "category": IngestErrorCategory.PLACEMENT.value,
-                "target": rel_path,
-                "message": str(exc),
-            },
-        )
+        result.error_details.append(IngestErrorDetail(
+            category=IngestErrorCategory.PLACEMENT.value,
+            target=rel_path,
+            message=str(exc),
+        ))
         return False, is_overwrite
 
     if has_images or has_video:
