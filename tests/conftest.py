@@ -25,6 +25,32 @@ import pytest
 sys.path.insert(0, str(Path(__file__).parent))
 
 
+def _bootstrap_env_from_example() -> None:
+    """`.env` 不在時（CI 等）は `.env.example` の値を OS 環境変数に流し込む.
+
+    `_EnvLoader` は env_file が存在しない場合は OS 環境変数のみで初期化される。
+    CI 環境（`.env` を配置しない）で `get_settings()` を直接呼ぶテスト
+    （MCP ツールの `_fake_mode_labels` 経由等）が `_EnvLoader` の必須フィールド欠落で
+    失敗するのを構造的に防ぐ。
+
+    既存の OS 環境変数は上書きせず、ローカル開発者の `.env` 設定とも干渉しない
+    （`.env` がある場合は pydantic-settings が env_file から読み込むため本処理は no-op）。
+    """
+    repo_root = Path(__file__).parent.parent
+    env_file = repo_root / ".env"
+    if env_file.exists():
+        return
+    example_file = repo_root / ".env.example"
+    if not example_file.exists():
+        return
+    for raw in example_file.read_text(encoding="utf-8").splitlines():
+        line = raw.strip()
+        if not line or line.startswith("#") or "=" not in line:
+            continue
+        key, _, value = line.partition("=")
+        os.environ.setdefault(key.strip(), value.strip())
+
+
 def pytest_configure(config: pytest.Config) -> None:
     """起動時 env チェック + package layout 整合性検証.
 
@@ -36,6 +62,8 @@ def pytest_configure(config: pytest.Config) -> None:
     走査するため、同名 stem の混入があると意図しない衝突として検出される）。
     fixture は ``.json`` 等の data 形式で配置する。
     """
+    _bootstrap_env_from_example()
+
     from rag.config import validate_utf8_environment
 
     validate_utf8_environment()
