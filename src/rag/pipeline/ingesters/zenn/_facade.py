@@ -13,18 +13,16 @@ import logging
 import re
 from typing import TYPE_CHECKING, Any
 
-import httpx
-
 from rag.pipeline.ingesters._common import (
     IngestErrorCategory,
     IngestResult,
     ProgressCallback,
-    fetch_get,
     now_iso,
 )
 
 if TYPE_CHECKING:
 
+    from rag.pipeline.ingesters.zenn.fetcher_protocol import ZennFetcher, ZennKind
     from rag.store.source_store import SourceStore
 
 logger = logging.getLogger(__name__)
@@ -62,15 +60,21 @@ class ZennIngester:
 
     Zenn API から記事・スクラップを取得し、
     source_store にファイルを配置する。
+
+    外部 API への HTTP アクセスは ``ZennFetcher`` Protocol 経由で実施する。
+    Real / Fake のいずれかを ``create_zenn_fetcher(settings)`` で生成し、
+    コンストラクタに注入する。
     """
 
     def __init__(
         self,
         source_store: SourceStore,
         *,
+        fetcher: ZennFetcher,
         max_articles: int,
     ) -> None:
         self._store = source_store
+        self._fetcher = fetcher
         self._max_articles = max_articles
 
     async def crawl_zenn(
@@ -80,7 +84,6 @@ class ZennIngester:
         max_articles: int | None = None,
         content_type: str = "all",
         force: bool = False,
-        client: Any | None = None,
         progress_callback: ProgressCallback | None = None,
     ) -> IngestResult:
         """Zenn コンテンツを取得し source_store に配置する.
@@ -90,7 +93,6 @@ class ZennIngester:
             max_articles: 取得する最大コンテンツ数（None の場合はインスタンス設定を使用）
             content_type: 取得対象（``articles``, ``scraps``, ``all``）
             force: 既存ファイルを上書きするか（デフォルト: False＝スキップモード）
-            client: ConstrainedClient インスタンス
             progress_callback: 進捗コールバック (processed, total, current)
 
         Returns:
@@ -117,9 +119,6 @@ class ZennIngester:
             max_articles if max_articles is not None else self._max_articles
         )
 
-        if client is None:
-            raise ValueError("client (ConstrainedClient) が必要です")
-
         # content_type に応じて処理
         # content_type="all" 時は articles → scraps の順に処理するため、
         # 進捗の total がリセットされないようオフセットで合計管理する
@@ -138,14 +137,14 @@ class ZennIngester:
         if content_type in ("articles", "all"):
             items_before = result.placed + result.overwritten + result.skipped + result.errors
             await self._crawl_articles(
-                username, effective_max, client, result, force=force,
+                username, effective_max, result, force=force,
                 progress_callback=effective_cb,
             )
             progress_offset[0] = (result.placed + result.overwritten + result.skipped + result.errors) - items_before
 
         if content_type in ("scraps", "all"):
             await self._crawl_scraps(
-                username, effective_max, client, result, force=force,
+                username, effective_max, result, force=force,
                 progress_callback=effective_cb,
             )
 
@@ -159,25 +158,19 @@ class ZennIngester:
         self,
         username: str,
         max_articles: int,
-        client: Any,
         result: IngestResult,
         *,
         force: bool = False,
         progress_callback: ProgressCallback | None = None,
     ) -> None:
         """記事を取得して配置する."""
-        # 一覧走査
-        slugs = await self._discover_slugs(
-            username, "articles", max_articles, client
-        )
+        slugs = await self._discover_slugs(username, "articles", max_articles)
 
         for i, slug in enumerate(slugs):
             rel_path = f"zenn/{username}/articles/{slug}.json"
             dest = self._store.root_dir / rel_path
 
-            # 取得フェーズ（category="metadata_fetch"）
             try:
-                # スキップ判定: 既存ファイルがあり force でなければスキップ
                 if dest.exists() and not force:
                     logger.debug("既存ファイルのためスキップ: %s", rel_path)
                     result.skipped += 1
@@ -185,10 +178,7 @@ class ZennIngester:
                         progress_callback(i + 1, len(slugs), f"articles/{slug}")
                     continue
 
-                # 記事詳細取得
-                url = f"{ZENN_API_BASE}/articles/{slug}"
-                resp = await fetch_get(client, url)
-                data = resp.json()
+                data = await self._fetcher.fetch_content_detail("articles", slug)
                 article = data.get("article", data)
 
                 if not article:
@@ -198,14 +188,11 @@ class ZennIngester:
                         progress_callback(i + 1, len(slugs), f"articles/{slug}")
                     continue
 
-                # JSON として保存
                 json_data = json.dumps(article, ensure_ascii=False, indent=2)
                 json_bytes = json_data.encode("utf-8")
 
-                # topics の抽出
                 topics = self._extract_topics(article.get("topics", []))
 
-                # .meta 生成
                 path = article.get("path", f"/{username}/articles/{slug}")
                 metadata = {
                     "url": f"https://zenn.dev{path}",
@@ -230,15 +217,12 @@ class ZennIngester:
                     "target": f"articles/{slug}",
                     "message": str(exc),
                 }
-                if isinstance(exc, httpx.HTTPStatusError):
-                    fetch_detail["status"] = exc.response.status_code
-                    fetch_detail["url"] = str(exc.request.url)
+                _populate_http_status(fetch_detail, exc)
                 result.error_details.append(fetch_detail)
                 if progress_callback is not None:
                     progress_callback(i + 1, len(slugs), f"articles/{slug}")
                 continue
 
-            # 配置フェーズ（category="placement"）
             try:
                 is_overwrite = dest.exists()
                 self._store.place_file(
@@ -267,25 +251,19 @@ class ZennIngester:
         self,
         username: str,
         max_articles: int,
-        client: Any,
         result: IngestResult,
         *,
         force: bool = False,
         progress_callback: ProgressCallback | None = None,
     ) -> None:
         """スクラップを取得して配置する."""
-        # 一覧走査
-        slugs = await self._discover_slugs(
-            username, "scraps", max_articles, client
-        )
+        slugs = await self._discover_slugs(username, "scraps", max_articles)
 
         for i, slug in enumerate(slugs):
             rel_path = f"zenn/{username}/scraps/{slug}.json"
             dest = self._store.root_dir / rel_path
 
-            # 取得フェーズ（category="metadata_fetch"）
             try:
-                # スキップ判定: 既存ファイルがあり force でなければスキップ
                 if dest.exists() and not force:
                     logger.debug("既存ファイルのためスキップ: %s", rel_path)
                     result.skipped += 1
@@ -293,18 +271,13 @@ class ZennIngester:
                         progress_callback(i + 1, len(slugs), f"scraps/{slug}")
                     continue
 
-                # スクラップ詳細取得
-                url = f"{ZENN_API_BASE}/scraps/{slug}"
-                resp = await fetch_get(client, url)
-                data = resp.json()
+                data = await self._fetcher.fetch_content_detail("scraps", slug)
                 scrap = data.get("scrap", data)
                 json_data = json.dumps(scrap, ensure_ascii=False, indent=2)
                 json_bytes = json_data.encode("utf-8")
 
-                # topics の抽出
                 topics = self._extract_topics(scrap.get("topics", []))
 
-                # .meta 生成
                 path = scrap.get("path", f"/{username}/scraps/{slug}")
                 metadata = {
                     "url": f"https://zenn.dev{path}",
@@ -329,15 +302,12 @@ class ZennIngester:
                     "target": f"scraps/{slug}",
                     "message": str(exc),
                 }
-                if isinstance(exc, httpx.HTTPStatusError):
-                    fetch_detail["status"] = exc.response.status_code
-                    fetch_detail["url"] = str(exc.request.url)
+                _populate_http_status(fetch_detail, exc)
                 result.error_details.append(fetch_detail)
                 if progress_callback is not None:
                     progress_callback(i + 1, len(slugs), f"scraps/{slug}")
                 continue
 
-            # 配置フェーズ（category="placement"）
             try:
                 is_overwrite = dest.exists()
                 self._store.place_file(
@@ -367,7 +337,6 @@ class ZennIngester:
         username: str,
         kind: str,
         max_count: int,
-        client: Any,
     ) -> list[str]:
         """コンテンツ一覧 API を走査して slug のリストを収集する.
 
@@ -375,7 +344,6 @@ class ZennIngester:
             username: Zenn ユーザー名
             kind: "articles" または "scraps"
             max_count: 最大取得件数
-            client: ConstrainedClient
 
         Returns:
             slug のリスト
@@ -385,9 +353,11 @@ class ZennIngester:
         page = 1
 
         while page <= MAX_PAGINATION_PAGES and len(slugs) < max_count:
-            url = f"{ZENN_API_BASE}/{kind}?username={username}&order=latest&page={page}"
-            resp = await fetch_get(client, url)
-            data = resp.json()
+            data = await self._fetcher.list_contents(
+                kind,  # type: ignore[arg-type]
+                username,
+                page,
+            )
 
             items = data.get(kind, [])
             if not items:
@@ -460,7 +430,6 @@ class ZennIngester:
         username: str,
         kind: str,
         slug: str,
-        client: Any,
         result: IngestResult,
         *,
         force: bool = True,
@@ -474,9 +443,10 @@ class ZennIngester:
             return
 
         try:
-            api_url = f"{ZENN_API_BASE}/{kind}/{slug}"
-            resp = await fetch_get(client, api_url)
-            data = resp.json()
+            data = await self._fetcher.fetch_content_detail(
+                kind,  # type: ignore[arg-type]
+                slug,
+            )
 
             if kind == "articles":
                 content_obj = data.get("article", data)
@@ -540,9 +510,7 @@ class ZennIngester:
                 "target": f"{kind}/{slug}",
                 "message": str(exc),
             }
-            if isinstance(exc, httpx.HTTPStatusError):
-                fetch_detail["status"] = exc.response.status_code
-                fetch_detail["url"] = str(exc.request.url)
+            _populate_http_status(fetch_detail, exc)
             result.error_details.append(fetch_detail)
             return
 
@@ -570,8 +538,6 @@ class ZennIngester:
     async def ingest_contents(
         self,
         urls: list[str],
-        *,
-        client: Any,
     ) -> IngestResult:
         """指定 URL の Zenn コンテンツを取得して source_store に配置する.
 
@@ -596,7 +562,7 @@ class ZennIngester:
 
             username, kind, slug = parsed
             await self._fetch_and_place_single(
-                username, kind, slug, client, result, force=True,
+                username, kind, slug, result, force=True,
             )
 
         logger.info(
@@ -604,3 +570,12 @@ class ZennIngester:
             result.placed, result.overwritten, result.errors,
         )
         return result
+
+
+def _populate_http_status(detail: dict[str, Any], exc: BaseException) -> None:
+    """例外が httpx.HTTPStatusError なら status / url を error detail に追加する."""
+    import httpx
+
+    if isinstance(exc, httpx.HTTPStatusError):
+        detail["status"] = exc.response.status_code
+        detail["url"] = str(exc.request.url)

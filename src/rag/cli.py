@@ -2692,9 +2692,7 @@ async def run_crawl_bluesky(args: argparse.Namespace) -> None:
 
 async def run_crawl_zenn(args: argparse.Namespace) -> None:
     """Zenn コンテンツ取り込み."""
-    from .pipeline.ingesters.zenn import ZennIngester
-
-    from py_common_lib.httpx import ConstrainedClient  # safety:allowed
+    from .pipeline.ingesters.zenn import ZennIngester, create_zenn_fetcher
 
     json_out = _is_json_output(args)
 
@@ -2702,27 +2700,23 @@ async def run_crawl_zenn(args: argparse.Namespace) -> None:
 
     max_articles = args.max_articles if args.max_articles is not None else settings.rag_zenn_max_articles
 
-    zenn_ingester = ZennIngester(
-        controller.source_store,
-        max_articles=max_articles,
-    )
-
     progress_cb = _output_progress if json_out else None
 
     with _write_lock_or_exit(
         Path(controller.source_store.root_dir), json_out=json_out,
     ):
         try:
-            async with ConstrainedClient(
-                request_timeout=settings.rag_zenn_request_timeout,
-                request_interval=settings.rag_zenn_request_interval,
-            ) as client:
+            async with create_zenn_fetcher(settings) as fetcher:
+                zenn_ingester = ZennIngester(
+                    controller.source_store,
+                    fetcher=fetcher,
+                    max_articles=max_articles,
+                )
                 ingest_result = await zenn_ingester.crawl_zenn(
                     args.username,
                     max_articles=max_articles,
                     content_type=args.content_type,
                     force=args.force,
-                    client=client,
                     progress_callback=_wrap_progress(progress_cb, PipelinePhase.FETCH.display),
                 )
         except (ValueError, TypeError) as e:
@@ -2811,31 +2805,23 @@ async def run_ingest_bluesky(args: argparse.Namespace) -> None:
 
 async def run_ingest_zenn(args: argparse.Namespace) -> None:
     """Zenn コンテンツ取り込み（URL 指定）."""
-    from .pipeline.ingesters.zenn import ZennIngester
-
-    from py_common_lib.httpx import ConstrainedClient  # safety:allowed
+    from .pipeline.ingesters.zenn import ZennIngester, create_zenn_fetcher
 
     json_out = _is_json_output(args)
 
     controller, settings = _build_cli_pipeline_controller()
 
-    zenn_ingester = ZennIngester(
-        controller.source_store,
-        max_articles=settings.rag_zenn_max_articles,
-    )
-
     with _write_lock_or_exit(
         Path(controller.source_store.root_dir), json_out=json_out,
     ):
         try:
-            async with ConstrainedClient(
-                request_timeout=settings.rag_zenn_request_timeout,
-                request_interval=settings.rag_zenn_request_interval,
-            ) as client:
-                ingest_result = await zenn_ingester.ingest_contents(
-                    args.url,
-                    client=client,
+            async with create_zenn_fetcher(settings) as fetcher:
+                zenn_ingester = ZennIngester(
+                    controller.source_store,
+                    fetcher=fetcher,
+                    max_articles=settings.rag_zenn_max_articles,
                 )
+                ingest_result = await zenn_ingester.ingest_contents(args.url)
         except (ValueError, TypeError) as e:
             if json_out:
                 _output_error(CliErrorCode.DEPENDENCY_UNAVAILABLE, str(e))

@@ -35,7 +35,16 @@ class ZennFetcher(Protocol):
 
     Real / Fake で同じシグネチャを実装する。戻り値の dict 構造は Zenn API の
     レスポンス形式に準拠する（外部 API との境界）。
+
+    Real 実装は内部で ``ConstrainedClient`` を保持するため async context manager
+    として使用する。Fake 実装は no-op の context manager として振る舞う。
     """
+
+    async def __aenter__(self) -> "ZennFetcher":
+        ...
+
+    async def __aexit__(self, *exc_info: Any) -> None:
+        ...
 
     async def list_contents(
         self,

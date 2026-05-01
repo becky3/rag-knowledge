@@ -49,6 +49,12 @@ class FakeZennFetcher:
         self._fixture_dir = fixture_dir
         self._scenario = scenario
 
+    async def __aenter__(self) -> "FakeZennFetcher":
+        return self
+
+    async def __aexit__(self, *exc_info: Any) -> None:
+        return None
+
     async def list_contents(
         self,
         kind: ZennKind,
