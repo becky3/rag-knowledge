@@ -12,7 +12,12 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from rag.pipeline.ingesters._common import IngestErrorCategory, IngestResult
+from rag.pipeline.ingesters._common import (
+    IngestErrorCategory,
+    IngestErrorDetail,
+    IngestResult,
+)
+from rag.pipeline.ingesters.base import BaseIngester
 
 if TYPE_CHECKING:
     from rag.store.source_store import SourceStore
@@ -24,14 +29,14 @@ _ENTRY_ID_PATTERN = re.compile(r"^\d{8}-\d{6}-")
 _TOPIC_MAX_LENGTH = 50
 
 
-class JournalIngester:
+class JournalIngester(BaseIngester):
     """ジャーナルエントリ取り込み用インジェスター.
 
     仕様: docs/specs/ingesters/journal.md
     """
 
     def __init__(self, source_store: SourceStore) -> None:
-        self._store = source_store
+        super().__init__(source_store)
         self.last_entry_id: str | None = None
 
     def add_entry(
@@ -70,9 +75,9 @@ class JournalIngester:
                 "repository": repository,
             }
 
-            is_overwrite = (self._store.root_dir / rel_path).exists()
+            is_overwrite = (self._source_store.root_dir / rel_path).exists()
             data = body.encode("utf-8")
-            self._store.place_file(
+            self._source_store.place_file(
                 source_type="journal",
                 data=data,
                 rel_path=rel_path,
@@ -85,19 +90,19 @@ class JournalIngester:
             self.last_entry_id = entry_id
         except ValueError as e:
             result.errors = 1
-            result.error_details.append({
-                "category": IngestErrorCategory.PLACEMENT.value,
-                "target": entry_id or title,
-                "message": str(e),
-            })
+            result.error_details.append(IngestErrorDetail(
+                category=IngestErrorCategory.PLACEMENT.value,
+                target=entry_id or title,
+                message=str(e),
+            ))
         except OSError as e:
             logger.exception("Failed to place journal entry")
             result.errors = 1
-            result.error_details.append({
-                "category": IngestErrorCategory.PLACEMENT.value,
-                "target": entry_id or title,
-                "message": str(e),
-            })
+            result.error_details.append(IngestErrorDetail(
+                category=IngestErrorCategory.PLACEMENT.value,
+                target=entry_id or title,
+                message=str(e),
+            ))
         return result
 
     def import_directory(
@@ -117,29 +122,29 @@ class JournalIngester:
             self._validate_repository(repository)
         except ValueError as e:
             result.errors = 1
-            result.error_details.append({
-                "category": IngestErrorCategory.PLACEMENT.value,
-                "target": dir_path,
-                "message": str(e),
-            })
+            result.error_details.append(IngestErrorDetail(
+                category=IngestErrorCategory.PLACEMENT.value,
+                target=dir_path,
+                message=str(e),
+            ))
             return result
 
         resolved_dir = Path(dir_path.strip()).resolve()
         if not resolved_dir.exists():
             result.errors = 1
-            result.error_details.append({
-                "category": IngestErrorCategory.PLACEMENT.value,
-                "target": str(resolved_dir),
-                "message": f"Directory not found: {resolved_dir}",
-            })
+            result.error_details.append(IngestErrorDetail(
+                category=IngestErrorCategory.PLACEMENT.value,
+                target=str(resolved_dir),
+                message=f"Directory not found: {resolved_dir}",
+            ))
             return result
         if not resolved_dir.is_dir():
             result.errors = 1
-            result.error_details.append({
-                "category": IngestErrorCategory.PLACEMENT.value,
-                "target": str(resolved_dir),
-                "message": f"Path is not a directory: {resolved_dir}",
-            })
+            result.error_details.append(IngestErrorDetail(
+                category=IngestErrorCategory.PLACEMENT.value,
+                target=str(resolved_dir),
+                message=f"Path is not a directory: {resolved_dir}",
+            ))
             return result
 
         files = sorted(resolved_dir.glob("*.md"), key=lambda p: str(p))
@@ -181,8 +186,8 @@ class JournalIngester:
                     "repository": repository,
                 }
 
-                is_overwrite = (self._store.root_dir / rel_path).exists()
-                self._store.place_file(
+                is_overwrite = (self._source_store.root_dir / rel_path).exists()
+                self._source_store.place_file(
                     source_type="journal",
                     data=data,
                     rel_path=rel_path,
@@ -195,11 +200,11 @@ class JournalIngester:
             except OSError as exc:
                 logger.exception("Failed to import journal file: %s", fp)
                 result.errors += 1
-                result.error_details.append({
-                    "category": IngestErrorCategory.PLACEMENT.value,
-                    "target": str(fp),
-                    "message": str(exc),
-                })
+                result.error_details.append(IngestErrorDetail(
+                    category=IngestErrorCategory.PLACEMENT.value,
+                    target=str(fp),
+                    message=str(exc),
+                ))
 
         logger.info(
             "Journal import completed: placed=%d, overwritten=%d, skipped=%d, errors=%d",

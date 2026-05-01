@@ -260,9 +260,11 @@ def make_bluesky_ingester(source_store: Any, **overrides: Any) -> Any:
     """BlueskyIngester のテスト用ファクトリ.
 
     Fetcher / MediaDownloader / YoutubeClassifier / YoutubeDelegator /
-    SiteIngestRunner は省略可。省略時は Fake / Mock を注入する。
+    WebDelegator は省略可。省略時は Fake / Mock を注入する。
     特定の振る舞い検証時は overrides で個別に Fake を渡す。
     """
+    from unittest.mock import AsyncMock
+
     from rag.pipeline.ingesters.bluesky import BlueskyIngester
 
     if "fetcher" not in overrides or "media_downloader" not in overrides:
@@ -286,9 +288,8 @@ def make_bluesky_ingester(source_store: Any, **overrides: Any) -> Any:
         )
         overrides["youtube_classifier"] = create_youtube_classifier()
 
-    if "site_ingest_runner" not in overrides:
-        from rag.pipeline.site_ingest_runner import create_site_ingest_runner
-        overrides["site_ingest_runner"] = create_site_ingest_runner()
+    if "web_delegator" not in overrides:
+        overrides["web_delegator"] = AsyncMock()
 
     defaults: dict[str, Any] = {
         "youtube_delegator": None,

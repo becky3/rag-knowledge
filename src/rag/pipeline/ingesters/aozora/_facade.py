@@ -19,10 +19,12 @@ import httpx
 
 from rag.pipeline.ingesters._common import (
     IngestErrorCategory,
+    IngestErrorDetail,
     IngestResult,
     ProgressCallback,
     now_iso,
 )
+from rag.pipeline.ingesters.base import BaseIngester
 from rag.store.meta import write_meta
 
 if TYPE_CHECKING:
@@ -63,7 +65,7 @@ COL_COPYRIGHT = "作品著作権フラグ"
 COL_XHTML_URL = "XHTML/HTMLファイルURL"
 
 
-class AozoraIngester:
+class AozoraIngester(BaseIngester):
     """青空文庫インジェスター.
 
     青空文庫の作品カタログを管理し、
@@ -77,7 +79,7 @@ class AozoraIngester:
         fetcher: AozoraFetcher,
         max_works: int,
     ) -> None:
-        self._store = source_store
+        super().__init__(source_store)
         self._fetcher = fetcher
         self._max_works = max_works
 
@@ -124,7 +126,7 @@ class AozoraIngester:
         # place_file ではなく直接配置する（仕様: source-store.md 複合ソース・sidecar）。
         # metadata.db への登録も行わない。
         csv_bytes = csv_text.encode("utf-8")
-        catalog_path = self._store.root_dir / CATALOG_REL_PATH
+        catalog_path = self._source_store.root_dir / CATALOG_REL_PATH
         catalog_path.parent.mkdir(parents=True, exist_ok=True)
         catalog_path.write_bytes(csv_bytes)
         write_meta(catalog_path, {
@@ -331,7 +333,7 @@ class AozoraIngester:
             except Exception as exc:
                 logger.exception("作品の取得・配置に失敗しました: %s", book_id)
                 result.errors += 1
-                detail: dict[str, Any] = {
+                detail: IngestErrorDetail = {
                     "category": IngestErrorCategory.METADATA_FETCH.value,
                     "target": f"book_id={book_id}",
                     "message": str(exc),
@@ -381,18 +383,18 @@ class AozoraIngester:
         if not xhtml_url:
             logger.warning("XHTML URL が欠落: book_id=%s", book_id)
             result.errors += 1
-            result.error_details.append({
-                "category": IngestErrorCategory.METADATA_FETCH.value,
-                "target": f"book_id={book_id}",
-                "message": "XHTML URL missing",
-            })
+            result.error_details.append(IngestErrorDetail(
+                category=IngestErrorCategory.METADATA_FETCH.value,
+                target=f"book_id={book_id}",
+                message="XHTML URL missing",
+            ))
             return "error"
 
         # ファイルパス導出
         rel_path = f"aozora/{person_id}/{book_id}.html"
 
         # 重複チェック（スキップ方式）
-        full_path = self._store.root_dir / rel_path
+        full_path = self._source_store.root_dir / rel_path
         if full_path.exists():
             result.skipped += 1
             return "skipped"
@@ -410,13 +412,13 @@ class AozoraIngester:
                 book_id, status_code, github_url,
             )
             result.errors += 1
-            result.error_details.append({
-                "category": IngestErrorCategory.METADATA_FETCH.value,
-                "target": f"book_id={book_id}",
-                "status": status_code,
-                "url": github_url,
-                "message": f"XHTML ダウンロード失敗: {e}",
-            })
+            result.error_details.append(IngestErrorDetail(
+                category=IngestErrorCategory.METADATA_FETCH.value,
+                target=f"book_id={book_id}",
+                status=status_code,
+                url=github_url,
+                message=f"XHTML ダウンロード失敗: {e}",
+            ))
             return "error"
 
         # 元 URL の正規化（http → https）
@@ -439,7 +441,7 @@ class AozoraIngester:
 
         # source_store に配置
         try:
-            self._store.place_file(
+            self._source_store.place_file(
                 source_type="aozora",
                 data=raw_bytes,
                 rel_path=rel_path,
@@ -448,11 +450,11 @@ class AozoraIngester:
         except Exception as exc:
             logger.exception("作品の配置に失敗しました: %s", rel_path)
             result.errors += 1
-            result.error_details.append({
-                "category": IngestErrorCategory.PLACEMENT.value,
-                "target": rel_path,
-                "message": str(exc),
-            })
+            result.error_details.append(IngestErrorDetail(
+                category=IngestErrorCategory.PLACEMENT.value,
+                target=rel_path,
+                message=str(exc),
+            ))
             return "error"
         result.placed += 1
         return "placed"
@@ -463,7 +465,7 @@ class AozoraIngester:
         Returns:
             CSV レコードのリスト、またはカタログ未ダウンロードの場合 None
         """
-        catalog_path = self._store.root_dir / CATALOG_REL_PATH
+        catalog_path = self._source_store.root_dir / CATALOG_REL_PATH
         if not catalog_path.exists():
             return None
 

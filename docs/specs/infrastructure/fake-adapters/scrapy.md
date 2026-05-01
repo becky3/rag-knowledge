@@ -131,13 +131,15 @@ Fake が返却する URL は実在しない synthetic ID を使う:
 | Fake 実装 | `FakeScrapyRunner` | `src/rag/scrapy/_fake/__init__.py` |
 | ファクトリ関数 | `create_scrapy_runner(settings: RAGSettings) -> ScrapyRunner` | `src/rag/scrapy/runner.py` |
 
-### `execute_site_ingest` 内での利用
+### `WebIngester.crawl_urls` 内での利用
 
-`src/rag/pipeline/site_ingest_runner.py` の `execute_site_ingest` は `create_scrapy_runner(settings)` で Runner を生成し、`runner.run(...)` を呼び出す。fake モード判定は factory に閉じる。
+`src/rag/pipeline/ingesters/web/_facade.py` の `WebIngester` は、コンストラクタで
+`create_scrapy_runner(settings)` から生成された ScrapyRunner を受け取り、
+`crawl_urls(...)` 内で `self._scrapy_runner.run(...)` を呼び出す。fake モード判定は factory に閉じる。
 
 ### CLI / MCP からの利用
 
-CLI / MCP は `execute_site_ingest` を経由するため直接 factory を呼ぶ必要はない。Settings がそのまま渡されるため、`.env` の `RAG_WEB_FAKE_MODE` が自動的に反映される。
+CLI / MCP は `WebIngester` または `WebDelegator` 経由で利用するため直接 factory を呼ぶ必要はない。Settings がそのまま渡されるため、`.env` の `RAG_WEB_FAKE_MODE` が自動的に反映される。
 
 ## コンポーネント構成
 
@@ -148,7 +150,7 @@ flowchart TB
     end
 
     subgraph Runner["site-ingest"]
-        EXEC["execute_site_ingest"]
+        EXEC["WebIngester.crawl_urls"]
     end
 
     subgraph Protocol["ScrapyRunner Protocol"]
@@ -186,7 +188,7 @@ flowchart TB
 
 | ケース | 振る舞い |
 |---|---|
-| Fake Runner で `failure` シナリオ指定時 | `CrawlResult.success=False` / `exit_code=1` を返却。`execute_site_ingest` は Bridge を呼ばずに `no_output=False` で返却（jsonl_path が空のため `no_output=True` 相当の早期 return） |
+| Fake Runner で `failure` シナリオ指定時 | `CrawlResult.success=False` / `exit_code=1` を返却。`WebIngester.crawl_urls` は Bridge を呼ばずに `no_output=True` で早期 return（jsonl_path が空のため） |
 | Fake Runner で `empty` シナリオ指定時 | JSONL が空のため Bridge が呼ばれても 0 件処理。`SiteIngestExecution.no_output=False`（jsonl は存在する）+ `ingest.placed=0` |
 | Fake Runner で `partial` シナリオ指定時 | Bridge が JSONL の invalid 行を `parse_errors` でカウント。`SiteIngestExecution.parse_errors > 0` |
 | 入力 URL が `test.invalid`（DNS 解決不可） | `validate_url` / `check_ssrf` で拒否される（DNS 解決失敗）。Fake テストでは `example.com` 等の実在ドメインを使うこと |

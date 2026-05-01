@@ -15,10 +15,12 @@ from typing import TYPE_CHECKING, Any
 
 from rag.pipeline.ingesters._common import (
     IngestErrorCategory,
+    IngestErrorDetail,
     IngestResult,
     ProgressCallback,
     now_iso,
 )
+from rag.pipeline.ingesters.base import BaseIngester
 
 if TYPE_CHECKING:
 
@@ -55,7 +57,7 @@ def parse_zenn_url(url: str) -> tuple[str, str, str] | None:
     return m.group(1), m.group(2), m.group(3)
 
 
-class ZennIngester:
+class ZennIngester(BaseIngester):
     """Zenn インジェスター.
 
     Zenn API から記事・スクラップを取得し、
@@ -73,7 +75,7 @@ class ZennIngester:
         fetcher: ZennFetcher,
         max_articles: int,
     ) -> None:
-        self._store = source_store
+        super().__init__(source_store)
         self._fetcher = fetcher
         self._max_articles = max_articles
 
@@ -168,7 +170,7 @@ class ZennIngester:
 
         for i, slug in enumerate(slugs):
             rel_path = f"zenn/{username}/articles/{slug}.json"
-            dest = self._store.root_dir / rel_path
+            dest = self._source_store.root_dir / rel_path
 
             try:
                 if dest.exists() and not force:
@@ -212,7 +214,7 @@ class ZennIngester:
             except Exception as exc:
                 logger.exception("記事の取得に失敗しました: %s", slug)
                 result.errors += 1
-                fetch_detail: dict[str, Any] = {
+                fetch_detail: IngestErrorDetail = {
                     "category": IngestErrorCategory.METADATA_FETCH.value,
                     "target": f"articles/{slug}",
                     "message": str(exc),
@@ -225,7 +227,7 @@ class ZennIngester:
 
             try:
                 is_overwrite = dest.exists()
-                self._store.place_file(
+                self._source_store.place_file(
                     source_type="zenn",
                     data=json_bytes,
                     rel_path=rel_path,
@@ -238,11 +240,11 @@ class ZennIngester:
             except Exception as exc:
                 logger.exception("記事の配置に失敗しました: %s", rel_path)
                 result.errors += 1
-                result.error_details.append({
-                    "category": IngestErrorCategory.PLACEMENT.value,
-                    "target": rel_path,
-                    "message": str(exc),
-                })
+                result.error_details.append(IngestErrorDetail(
+                    category=IngestErrorCategory.PLACEMENT.value,
+                    target=rel_path,
+                    message=str(exc),
+                ))
 
             if progress_callback is not None:
                 progress_callback(i + 1, len(slugs), f"articles/{slug}")
@@ -261,7 +263,7 @@ class ZennIngester:
 
         for i, slug in enumerate(slugs):
             rel_path = f"zenn/{username}/scraps/{slug}.json"
-            dest = self._store.root_dir / rel_path
+            dest = self._source_store.root_dir / rel_path
 
             try:
                 if dest.exists() and not force:
@@ -297,7 +299,7 @@ class ZennIngester:
             except Exception as exc:
                 logger.exception("スクラップの取得に失敗しました: %s", slug)
                 result.errors += 1
-                fetch_detail: dict[str, Any] = {
+                fetch_detail: IngestErrorDetail = {
                     "category": IngestErrorCategory.METADATA_FETCH.value,
                     "target": f"scraps/{slug}",
                     "message": str(exc),
@@ -310,7 +312,7 @@ class ZennIngester:
 
             try:
                 is_overwrite = dest.exists()
-                self._store.place_file(
+                self._source_store.place_file(
                     source_type="zenn",
                     data=json_bytes,
                     rel_path=rel_path,
@@ -323,11 +325,11 @@ class ZennIngester:
             except Exception as exc:
                 logger.exception("スクラップの配置に失敗しました: %s", rel_path)
                 result.errors += 1
-                result.error_details.append({
-                    "category": IngestErrorCategory.PLACEMENT.value,
-                    "target": rel_path,
-                    "message": str(exc),
-                })
+                result.error_details.append(IngestErrorDetail(
+                    category=IngestErrorCategory.PLACEMENT.value,
+                    target=rel_path,
+                    message=str(exc),
+                ))
 
             if progress_callback is not None:
                 progress_callback(i + 1, len(slugs), f"scraps/{slug}")
@@ -436,7 +438,7 @@ class ZennIngester:
     ) -> None:
         """単一の記事またはスクラップを取得して配置する."""
         rel_path = f"zenn/{username}/{kind}/{slug}.json"
-        dest = self._store.root_dir / rel_path
+        dest = self._source_store.root_dir / rel_path
 
         if dest.exists() and not force:
             result.skipped += 1
@@ -456,11 +458,11 @@ class ZennIngester:
             if not content_obj:
                 logger.warning("コンテンツオブジェクトが空です: %s/%s", kind, slug)
                 result.errors += 1
-                result.error_details.append({
-                    "category": IngestErrorCategory.METADATA_FETCH.value,
-                    "target": f"{kind}/{slug}",
-                    "message": "Empty content object",
-                })
+                result.error_details.append(IngestErrorDetail(
+                    category=IngestErrorCategory.METADATA_FETCH.value,
+                    target=f"{kind}/{slug}",
+                    message="Empty content object",
+                ))
                 return
 
             json_data = json.dumps(content_obj, ensure_ascii=False, indent=2)
@@ -505,7 +507,7 @@ class ZennIngester:
         except Exception as exc:
             logger.exception("コンテンツの取得に失敗しました: %s/%s", kind, slug)
             result.errors += 1
-            fetch_detail: dict[str, Any] = {
+            fetch_detail: IngestErrorDetail = {
                 "category": IngestErrorCategory.METADATA_FETCH.value,
                 "target": f"{kind}/{slug}",
                 "message": str(exc),
@@ -516,7 +518,7 @@ class ZennIngester:
 
         try:
             is_overwrite = dest.exists()
-            self._store.place_file(
+            self._source_store.place_file(
                 source_type="zenn",
                 data=json_bytes,
                 rel_path=rel_path,
@@ -529,11 +531,11 @@ class ZennIngester:
         except Exception as exc:
             logger.exception("コンテンツの配置に失敗しました: %s", rel_path)
             result.errors += 1
-            result.error_details.append({
-                "category": IngestErrorCategory.PLACEMENT.value,
-                "target": rel_path,
-                "message": str(exc),
-            })
+            result.error_details.append(IngestErrorDetail(
+                category=IngestErrorCategory.PLACEMENT.value,
+                target=rel_path,
+                message=str(exc),
+            ))
 
     async def ingest_contents(
         self,
@@ -553,11 +555,11 @@ class ZennIngester:
             if parsed is None:
                 logger.warning("Zenn URL のパースに失敗しました: %s", url)
                 result.errors += 1
-                result.error_details.append({
-                    "category": IngestErrorCategory.METADATA_FETCH.value,
-                    "target": url,
-                    "message": "Invalid Zenn URL format",
-                })
+                result.error_details.append(IngestErrorDetail(
+                    category=IngestErrorCategory.METADATA_FETCH.value,
+                    target=url,
+                    message="Invalid Zenn URL format",
+                ))
                 continue
 
             username, kind, slug = parsed
@@ -572,7 +574,7 @@ class ZennIngester:
         return result
 
 
-def _populate_http_status(detail: dict[str, Any], exc: BaseException) -> None:
+def _populate_http_status(detail: IngestErrorDetail, exc: BaseException) -> None:
     """例外が httpx.HTTPStatusError なら status / url を error detail に追加する."""
     import httpx
 

@@ -30,11 +30,11 @@ from rag.pipeline.ingesters.bluesky_fetcher import (
     create_bluesky_fetcher,
 )
 from rag.pipeline.ingesters.bluesky_media_downloader import BlueskyMediaDownloader
+from rag.pipeline.ingesters.web import WebDelegator
 from rag.pipeline.ingesters.youtube_protocols import (
     YoutubeClassifier,
     YoutubeDelegator,
 )
-from rag.pipeline.site_ingest_runner import SiteIngestRunner
 from settings_defaults import TEST_SETTINGS_DEFAULTS
 
 
@@ -80,10 +80,10 @@ class TestProtocolDefinitions:
         }
         assert names == {"ingest_video"}
 
-    def test_site_ingest_runner_protocol_has_run_for_urls(self) -> None:
+    def test_web_delegator_protocol_has_run_for_urls(self) -> None:
         names = {
             name
-            for name, member in inspect.getmembers(SiteIngestRunner)
+            for name, member in inspect.getmembers(WebDelegator)
             if not name.startswith("_") and inspect.isfunction(member)
         }
         assert names == {"run_for_urls"}

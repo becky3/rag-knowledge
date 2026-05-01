@@ -22,10 +22,12 @@ from urllib.parse import parse_qs, urlparse
 
 from rag.pipeline.ingesters._common import (
     IngestErrorCategory,
+    IngestErrorDetail,
     IngestResult,
     ProgressCallback,
     now_iso,
 )
+from rag.pipeline.ingesters.base import BaseIngester
 
 if TYPE_CHECKING:
     from rag.pipeline.ingesters.youtube_fetcher import YoutubeFetcher
@@ -160,7 +162,7 @@ def _validate_max_videos(max_videos: object) -> int:
     return max_videos
 
 
-class YoutubeIngester:
+class YoutubeIngester(BaseIngester):
     """YouTube インジェスター.
 
     YouTube 動画の字幕/文字起こしを取得し、
@@ -180,7 +182,7 @@ class YoutubeIngester:
         transcript_languages: list[str] | None,
         max_duration: int,
     ) -> None:
-        self._store = source_store
+        super().__init__(source_store)
         self._fetcher = fetcher
         self._max_videos = _validate_max_videos(max_videos)
         self._request_interval = max(request_interval, MIN_REQUEST_INTERVAL)
@@ -226,11 +228,11 @@ class YoutubeIngester:
                 raise
             logger.error("メタデータ取得失敗 (video_id=%s): %s", video_id, e)
             result.errors += 1
-            result.error_details.append({
-                "category": IngestErrorCategory.METADATA_FETCH.value,
-                "target": video_id,
-                "message": f"メタデータ取得失敗: {e}",
-            })
+            result.error_details.append(IngestErrorDetail(
+                category=IngestErrorCategory.METADATA_FETCH.value,
+                target=video_id,
+                message=f"メタデータ取得失敗: {e}",
+            ))
             return result
 
         # 動画長チェック（duration 不明時はスキップ — 長時間音声DL防止）
@@ -257,11 +259,11 @@ class YoutubeIngester:
         if not raw_channel_id:
             logger.error("channel_id が取得できません (video_id=%s)", video_id)
             result.errors += 1
-            result.error_details.append({
-                "category": IngestErrorCategory.METADATA_FETCH.value,
-                "target": video_id,
-                "message": "channel_id missing",
-            })
+            result.error_details.append(IngestErrorDetail(
+                category=IngestErrorCategory.METADATA_FETCH.value,
+                target=video_id,
+                message="channel_id missing",
+            ))
             return result
         # パストラバーサル防止: 安全な文字のみ許可
         channel_id = re.sub(r"[^A-Za-z0-9_-]", "_", raw_channel_id)
@@ -277,11 +279,11 @@ class YoutubeIngester:
                 raise
             logger.error("字幕/文字起こし失敗 (video_id=%s): %s", video_id, e)
             result.errors += 1
-            result.error_details.append({
-                "category": IngestErrorCategory.METADATA_FETCH.value,
-                "target": video_id,
-                "message": f"字幕/文字起こし失敗: {e}",
-            })
+            result.error_details.append(IngestErrorDetail(
+                category=IngestErrorCategory.METADATA_FETCH.value,
+                target=video_id,
+                message=f"字幕/文字起こし失敗: {e}",
+            ))
             return result
 
         # JSON データ構築
@@ -306,7 +308,7 @@ class YoutubeIngester:
         data_bytes = json_str.encode("utf-8")
 
         # 重複チェック（上書き方式。placed と overwritten は排他計上。書き込み前に判定）
-        dest = self._store.root_dir / rel_path
+        dest = self._source_store.root_dir / rel_path
         is_overwrite = dest.exists()
 
         meta_dict: dict[str, Any] = {
@@ -325,7 +327,7 @@ class YoutubeIngester:
             meta_dict["playlist_id"] = playlist_id
 
         try:
-            self._store.place_file(
+            self._source_store.place_file(
                 source_type="youtube",
                 data=data_bytes,
                 rel_path=rel_path,
@@ -334,11 +336,11 @@ class YoutubeIngester:
         except Exception as exc:
             logger.exception("動画の配置に失敗しました: %s", rel_path)
             result.errors += 1
-            result.error_details.append({
-                "category": IngestErrorCategory.PLACEMENT.value,
-                "target": rel_path,
-                "message": str(exc),
-            })
+            result.error_details.append(IngestErrorDetail(
+                category=IngestErrorCategory.PLACEMENT.value,
+                target=rel_path,
+                message=str(exc),
+            ))
             return result
 
         if is_overwrite:
@@ -390,11 +392,11 @@ class YoutubeIngester:
                 raise
             logger.error("プレイリスト展開失敗: %s", e)
             result.errors += 1
-            result.error_details.append({
-                "category": IngestErrorCategory.METADATA_FETCH.value,
-                "target": playlist_id,
-                "message": f"プレイリスト展開失敗: {e}",
-            })
+            result.error_details.append(IngestErrorDetail(
+                category=IngestErrorCategory.METADATA_FETCH.value,
+                target=playlist_id,
+                message=f"プレイリスト展開失敗: {e}",
+            ))
             return result
 
         logger.info(
@@ -412,11 +414,11 @@ class YoutubeIngester:
             video_id = entry.get("id", "")
             if not video_id:
                 result.errors += 1
-                result.error_details.append({
-                    "category": IngestErrorCategory.METADATA_FETCH.value,
-                    "target": f"entry_{i}",
-                    "message": "video_id missing",
-                })
+                result.error_details.append(IngestErrorDetail(
+                    category=IngestErrorCategory.METADATA_FETCH.value,
+                    target=f"entry_{i}",
+                    message="video_id missing",
+                ))
                 consecutive_errors += 1
                 if consecutive_errors >= CIRCUIT_BREAKER_THRESHOLD:
                     logger.error(
@@ -448,11 +450,11 @@ class YoutubeIngester:
             except Exception as e:
                 logger.error("動画処理失敗 (video_id=%s): %s", video_id, e)
                 result.errors += 1
-                result.error_details.append({
-                    "category": IngestErrorCategory.METADATA_FETCH.value,
-                    "target": video_id,
-                    "message": f"動画処理失敗: {e}",
-                })
+                result.error_details.append(IngestErrorDetail(
+                    category=IngestErrorCategory.METADATA_FETCH.value,
+                    target=video_id,
+                    message=f"動画処理失敗: {e}",
+                ))
                 consecutive_errors += 1
 
             if consecutive_errors >= CIRCUIT_BREAKER_THRESHOLD:

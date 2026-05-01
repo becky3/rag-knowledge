@@ -21,9 +21,11 @@ from typing import TYPE_CHECKING, Any
 
 from rag.pipeline.ingesters._common import (
     IngestErrorCategory,
+    IngestErrorDetail,
     IngestResult,
     ProgressCallback,
 )
+from rag.pipeline.ingesters.base import BaseIngester
 from rag.pipeline.ingesters.bluesky.delegations import follow_urls as _follow_urls
 from rag.pipeline.ingesters.bluesky.feed_fetcher import (
     fetch_posts_by_uris,
@@ -34,16 +36,15 @@ from rag.pipeline.ingesters.bluesky.post_placer import place_post
 from rag.pipeline.ingesters.bluesky.url_routing import parse_bluesky_url
 
 if TYPE_CHECKING:
-    from rag.config import RAGSettings
     from rag.pipeline.ingesters.bluesky_fetcher import BlueskyFetcher
     from rag.pipeline.ingesters.bluesky_media_downloader import (
         BlueskyMediaDownloader,
     )
+    from rag.pipeline.ingesters.web import WebDelegator
     from rag.pipeline.ingesters.youtube_protocols import (
         YoutubeClassifier,
         YoutubeDelegator,
     )
-    from rag.pipeline.site_ingest_runner import SiteIngestRunner
     from rag.store.source_store import SourceStore
 
 logger = logging.getLogger(__name__)
@@ -85,12 +86,12 @@ def _validate_max_posts(max_posts: object) -> int:
     return max_posts
 
 
-class BlueskyIngester:
+class BlueskyIngester(BaseIngester):
     """BlueSky インジェスター facade.
 
     仕様: docs/specs/ingesters/bluesky.md
 
-    外部依存（AT Protocol API / メディア DL / YouTube / site-ingest）を Protocol
+    外部依存（AT Protocol API / メディア DL / YouTube / Web）を Protocol
     経由でコンストラクタ注入で受け取る。HTTP クライアント (ConstrainedClient) は
     Fetcher / MediaDownloader 内に内包されるため、本クラスのメソッドは ``client``
     を受け取らない（factory 関数経由で生成された Adapter が HTTP DI を完結させる）。
@@ -104,18 +105,18 @@ class BlueskyIngester:
         media_downloader: BlueskyMediaDownloader,
         youtube_classifier: YoutubeClassifier,
         youtube_delegator: YoutubeDelegator | None,
-        site_ingest_runner: SiteIngestRunner,
+        web_delegator: WebDelegator,
         max_posts: int,
         include_reposts: bool,
         force_youtube_reingest: bool,
         youtube_request_interval: float,
     ) -> None:
-        self._store = source_store
+        super().__init__(source_store)
         self._fetcher = fetcher
         self._media_downloader = media_downloader
         self._youtube_classifier = youtube_classifier
         self._youtube_delegator = youtube_delegator
-        self._site_ingest_runner = site_ingest_runner
+        self._web_delegator = web_delegator
         self._max_posts = max_posts
         self._include_reposts = include_reposts
         self._force_youtube_reingest = force_youtube_reingest
@@ -185,7 +186,7 @@ class BlueskyIngester:
                 item,
                 is_repost=is_repost,
                 force=force,
-                store=self._store,
+                store=self._source_store,
                 media_downloader=self._media_downloader,
                 result=result,
                 seen_paths=seen_paths,
@@ -245,13 +246,11 @@ class BlueskyIngester:
             if hr is None:
                 logger.warning("BlueSky URL のパースに失敗しました: %s", url)
                 result.errors += 1
-                result.error_details.append(
-                    {
-                        "category": IngestErrorCategory.METADATA_FETCH.value,
-                        "target": url,
-                        "message": "Invalid BlueSky URL format",
-                    },
-                )
+                result.error_details.append(IngestErrorDetail(
+                    category=IngestErrorCategory.METADATA_FETCH.value,
+                    target=url,
+                    message="Invalid BlueSky URL format",
+                ))
                 continue
             parsed.append(hr)
 
@@ -265,13 +264,11 @@ class BlueskyIngester:
             did = handle_to_did.get(handle)
             if not did:
                 result.errors += 1
-                result.error_details.append(
-                    {
-                        "category": IngestErrorCategory.METADATA_FETCH.value,
-                        "target": f"https://bsky.app/profile/{handle}/post/{rkey}",
-                        "message": f"Failed to resolve DID for handle: {handle}",
-                    },
-                )
+                result.error_details.append(IngestErrorDetail(
+                    category=IngestErrorCategory.METADATA_FETCH.value,
+                    target=f"https://bsky.app/profile/{handle}/post/{rkey}",
+                    message=f"Failed to resolve DID for handle: {handle}",
+                ))
                 continue
 
             at_uri = f"at://{did}/app.bsky.feed.post/{rkey}"
@@ -282,25 +279,21 @@ class BlueskyIngester:
                     "投稿の取得に失敗しました: %s, error=%s", at_uri, exc,
                 )
                 result.errors += 1
-                result.error_details.append(
-                    {
-                        "category": IngestErrorCategory.METADATA_FETCH.value,
-                        "target": f"https://bsky.app/profile/{handle}/post/{rkey}",
-                        "message": str(exc),
-                    },
-                )
+                result.error_details.append(IngestErrorDetail(
+                    category=IngestErrorCategory.METADATA_FETCH.value,
+                    target=f"https://bsky.app/profile/{handle}/post/{rkey}",
+                    message=str(exc),
+                ))
                 continue
 
             if not posts:
                 logger.warning("投稿が見つかりません: %s", at_uri)
                 result.errors += 1
-                result.error_details.append(
-                    {
-                        "category": IngestErrorCategory.METADATA_FETCH.value,
-                        "target": f"https://bsky.app/profile/{handle}/post/{rkey}",
-                        "message": "Post not found (may be deleted)",
-                    },
-                )
+                result.error_details.append(IngestErrorDetail(
+                    category=IngestErrorCategory.METADATA_FETCH.value,
+                    target=f"https://bsky.app/profile/{handle}/post/{rkey}",
+                    message="Post not found (may be deleted)",
+                ))
                 continue
 
             post_obj = posts[0]
@@ -310,7 +303,7 @@ class BlueskyIngester:
                 item,
                 is_repost=False,
                 force=True,
-                store=self._store,
+                store=self._source_store,
                 media_downloader=self._media_downloader,
                 result=result,
             )
@@ -329,16 +322,14 @@ class BlueskyIngester:
         self,
         placed_items: list[dict[str, Any]],
         *,
-        settings: RAGSettings,
         result: IngestResult | None = None,
     ) -> dict[str, int]:
-        """配置済み投稿から URL を抽出し、site_ingest/YouTube に委譲する.
+        """配置済み投稿から URL を抽出し、Web/YouTube に委譲する.
 
         仕様: docs/specs/ingesters/bluesky.md「投稿内 URL の自動取り込み」
 
         Args:
             placed_items: 配置済みフィードアイテムのリスト
-            settings: site-ingest のパラメータ参照用
             result: 委譲失敗の計上先 IngestResult（指定時は errors + delegation を計上）
 
         Returns:
@@ -348,9 +339,7 @@ class BlueskyIngester:
             placed_items,
             classifier=self._youtube_classifier,
             youtube_delegator=self._youtube_delegator,
-            site_ingest_runner=self._site_ingest_runner,
-            source_store=self._store,
-            settings=settings,
+            web_delegator=self._web_delegator,
             youtube_request_interval=self._youtube_request_interval,
             force_youtube_reingest=self._force_youtube_reingest,
             result=result,

@@ -49,7 +49,7 @@ if TYPE_CHECKING:
     from .bm25_index import BM25Index
     from .config import RAGSettings as Settings
     from .pipeline.controller import PipelineController
-    from .pipeline.ingesters._common import IngestResult
+    from .pipeline.ingesters._common import IngestErrorDetail, IngestResult
     from .safe_browsing import SafeBrowsingClient
     from .pipeline.ingesters.youtube import YoutubeIngester
     from .pipeline.models import PipelineSummary
@@ -257,13 +257,13 @@ class _JsonAwareArgumentParser(argparse.ArgumentParser):
         return False
 
 
-def _error_detail_message(detail: dict[str, object]) -> str:
-    """error_details の dict から表示用メッセージを抽出する."""
+def _error_detail_message(detail: IngestErrorDetail) -> str:
+    """IngestErrorDetail から表示用メッセージを抽出する."""
     message = detail.get("message")
     if message:
-        return str(message)
-    target = detail.get("target", "")
-    category = detail.get("category", "unknown")
+        return message
+    target = detail["target"]
+    category = detail["category"]
     return f"[{category}] {target}" if target else f"[{category}]"
 
 
@@ -2593,7 +2593,7 @@ def _build_bluesky_ingester(
     """CLI 用 BlueskyIngester を factory 経由で組み立てる.
 
     fetcher / media_downloader / youtube_classifier / youtube_delegator /
-    site_ingest_runner を Protocol 注入する。``client`` は fetcher / media_downloader
+    web_delegator を Protocol 注入する。``client`` は fetcher / media_downloader
     に内包されるため、Ingester 本体メソッドに渡す必要はない。
     """
     from .pipeline.ingesters.bluesky import BlueskyIngester
@@ -2601,11 +2601,11 @@ def _build_bluesky_ingester(
     from .pipeline.ingesters.bluesky_media_downloader import (
         create_bluesky_media_downloader,
     )
+    from .pipeline.ingesters.web import create_web_delegator
     from .pipeline.ingesters.youtube_protocols import (
         create_youtube_classifier,
         create_youtube_delegator,
     )
-    from .pipeline.site_ingest_runner import create_site_ingest_runner
 
     youtube_ingester = _create_youtube_ingester_cli(source_store, settings)
 
@@ -2615,7 +2615,7 @@ def _build_bluesky_ingester(
         media_downloader=create_bluesky_media_downloader(settings, client),
         youtube_classifier=create_youtube_classifier(),
         youtube_delegator=create_youtube_delegator(youtube_ingester),
-        site_ingest_runner=create_site_ingest_runner(),
+        web_delegator=create_web_delegator(settings, source_store),
         max_posts=max_posts,
         include_reposts=include_reposts,
         force_youtube_reingest=settings.rag_bluesky_force_youtube_reingest,
@@ -2667,7 +2667,6 @@ async def run_crawl_bluesky(args: argparse.Namespace) -> None:
                 if placed_items:
                     url_stats = await bluesky_ingester.follow_urls(
                         placed_items,
-                        settings=settings,
                         result=ingest_result,
                     )
         except (ValueError, TypeError) as e:
@@ -2776,7 +2775,6 @@ async def run_ingest_bluesky(args: argparse.Namespace) -> None:
                 if placed_items:
                     url_stats = await bluesky_ingester.follow_urls(
                         placed_items,
-                        settings=settings,
                         result=ingest_result,
                     )
         except (ValueError, TypeError) as e:
@@ -3026,7 +3024,8 @@ async def run_site_ingest(args: argparse.Namespace) -> None:
     import re
     import time as time_mod
 
-    from .pipeline.site_ingest_runner import execute_site_ingest
+    from .pipeline.ingesters.web import WebIngester
+    from .scrapy.runner import create_scrapy_runner
     from .utils.url import check_ssrf, validate_url
 
     json_out = _is_json_output(args)
@@ -3078,10 +3077,12 @@ async def run_site_ingest(args: argparse.Namespace) -> None:
                 logger.warning("max_pages を 1000 にクランプしました")
 
         outer_start = time_mod.monotonic()
-        execution = await execute_site_ingest(
+        web_ingester = WebIngester(
+            controller.source_store,
+            scrapy_runner=create_scrapy_runner(settings),
+        )
+        execution = await web_ingester.crawl_urls(
             urls=validated_urls,
-            source_store=controller.source_store,
-            settings=settings,
             url_pattern=args.url_pattern if not multi_url_mode else None,
             max_pages=effective_max_pages,
             force=args.force if not multi_url_mode else False,

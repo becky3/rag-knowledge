@@ -1,4 +1,4 @@
-"""delegations.py のテスト（投稿内 URL の YouTube / site_ingest 委譲）.
+"""delegations.py のテスト（投稿内 URL の YouTube / Web 委譲）.
 
 仕様: docs/specs/ingesters/bluesky.md「投稿内 URL の自動取り込み」
 """
@@ -6,16 +6,16 @@
 from __future__ import annotations
 
 from typing import Any
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import AsyncMock
 
 import pytest
 
 from rag.pipeline.ingesters._common import IngestResult
 from rag.pipeline.ingesters.bluesky.delegations import follow_urls
+from rag.pipeline.ingesters.web import SiteIngestExecution
 from rag.pipeline.ingesters.youtube_protocols import (
     RealYoutubeClassifier,
 )
-from rag.pipeline.site_ingest_runner import SiteIngestExecution
 
 
 def _item_with_urls(
@@ -43,7 +43,7 @@ def _make_execution(
     error_details: list[dict[str, Any]] | None = None,
     parse_errors: int = 0,
 ) -> SiteIngestExecution:
-    """site_ingest 結果オブジェクトを生成."""
+    """WebIngester 実行結果オブジェクトを生成."""
     ingest = IngestResult()
     ingest.placed = placed
     ingest.errors = errors
@@ -70,9 +70,7 @@ class TestFollowUrlsClassification:
             items,
             classifier=RealYoutubeClassifier(),
             youtube_delegator=None,
-            site_ingest_runner=runner,
-            source_store=MagicMock(),
-            settings=MagicMock(),
+            web_delegator=runner,
             youtube_request_interval=0.0,
         )
         assert stats["skipped"] == 1
@@ -86,9 +84,7 @@ class TestFollowUrlsClassification:
             items,
             classifier=RealYoutubeClassifier(),
             youtube_delegator=None,
-            site_ingest_runner=AsyncMock(),
-            source_store=MagicMock(),
-            settings=MagicMock(),
+            web_delegator=AsyncMock(),
             youtube_request_interval=0.0,
             result=result,
         )
@@ -109,9 +105,7 @@ class TestFollowUrlsWebDelegation:
             items,
             classifier=RealYoutubeClassifier(),
             youtube_delegator=None,
-            site_ingest_runner=runner,
-            source_store=MagicMock(),
-            settings=MagicMock(),
+            web_delegator=runner,
             youtube_request_interval=0.0,
         )
         assert stats["web_placed"] == 1
@@ -131,9 +125,7 @@ class TestFollowUrlsWebDelegation:
             items,
             classifier=RealYoutubeClassifier(),
             youtube_delegator=None,
-            site_ingest_runner=runner,
-            source_store=MagicMock(),
-            settings=MagicMock(),
+            web_delegator=runner,
             youtube_request_interval=0.0,
         )
         # run_for_urls には 1 件だけ
@@ -152,9 +144,7 @@ class TestFollowUrlsWebDelegation:
             items,
             classifier=RealYoutubeClassifier(),
             youtube_delegator=None,
-            site_ingest_runner=runner,
-            source_store=MagicMock(),
-            settings=MagicMock(),
+            web_delegator=runner,
             youtube_request_interval=0.0,
             result=result,
         )
@@ -179,9 +169,7 @@ class TestFollowUrlsYoutubeDelegation:
             items,
             classifier=RealYoutubeClassifier(),
             youtube_delegator=delegator,
-            site_ingest_runner=runner,
-            source_store=MagicMock(),
-            settings=MagicMock(),
+            web_delegator=runner,
             youtube_request_interval=0.0,
         )
         assert stats["youtube_placed"] == 1
@@ -196,9 +184,7 @@ class TestFollowUrlsYoutubeDelegation:
             items,
             classifier=RealYoutubeClassifier(),
             youtube_delegator=None,
-            site_ingest_runner=runner,
-            source_store=MagicMock(),
-            settings=MagicMock(),
+            web_delegator=runner,
             youtube_request_interval=0.0,
         )
         assert stats["skipped"] >= 1
@@ -216,9 +202,7 @@ class TestFollowUrlsYoutubeDelegation:
             items,
             classifier=RealYoutubeClassifier(),
             youtube_delegator=delegator,
-            site_ingest_runner=runner,
-            source_store=MagicMock(),
-            settings=MagicMock(),
+            web_delegator=runner,
             youtube_request_interval=0.0,
             force_youtube_reingest=False,
         )
@@ -240,9 +224,7 @@ class TestFollowUrlsYoutubeDelegation:
             items,
             classifier=RealYoutubeClassifier(),
             youtube_delegator=delegator,
-            site_ingest_runner=runner,
-            source_store=MagicMock(),
-            settings=MagicMock(),
+            web_delegator=runner,
             youtube_request_interval=0.0,
             force_youtube_reingest=True,
         )
@@ -262,9 +244,7 @@ class TestFollowUrlsYoutubeDelegation:
             items,
             classifier=RealYoutubeClassifier(),
             youtube_delegator=delegator,
-            site_ingest_runner=runner,
-            source_store=MagicMock(),
-            settings=MagicMock(),
+            web_delegator=runner,
             youtube_request_interval=0.0,
             result=result,
         )
@@ -293,9 +273,7 @@ class TestFollowUrlsYoutubeDelegation:
             items,
             classifier=RealYoutubeClassifier(),
             youtube_delegator=delegator,
-            site_ingest_runner=runner,
-            source_store=MagicMock(),
-            settings=MagicMock(),
+            web_delegator=runner,
             youtube_request_interval=0.0,
             force_youtube_reingest=False,
         )
@@ -310,9 +288,7 @@ class TestFollowUrlsEmpty:
             [],
             classifier=RealYoutubeClassifier(),
             youtube_delegator=None,
-            site_ingest_runner=AsyncMock(),
-            source_store=MagicMock(),
-            settings=MagicMock(),
+            web_delegator=AsyncMock(),
             youtube_request_interval=0.0,
         )
         assert stats == {
@@ -325,9 +301,7 @@ class TestFollowUrlsEmpty:
             [_item_with_urls([])],
             classifier=RealYoutubeClassifier(),
             youtube_delegator=None,
-            site_ingest_runner=AsyncMock(),
-            source_store=MagicMock(),
-            settings=MagicMock(),
+            web_delegator=AsyncMock(),
             youtube_request_interval=0.0,
         )
         assert stats == {
