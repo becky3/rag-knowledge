@@ -3122,11 +3122,9 @@ async def run_site_ingest(args: argparse.Namespace) -> None:
                 )
             return
 
-        bridge_result = execution.bridge
-
         # パイプライン処理
         pipeline_summary = None
-        has_changes = (bridge_result.ingest.placed + bridge_result.ingest.overwritten) > 0
+        has_changes = (execution.ingest.placed + execution.ingest.overwritten) > 0
         if has_changes and not args.download_only:
             pipeline_summary = await controller.ingest_and_index(
                 f"ingest(web): site-ingest {display_url}",
@@ -3145,7 +3143,7 @@ async def run_site_ingest(args: argparse.Namespace) -> None:
 
         if json_out:
             data: dict[str, object] = _ingest_result_to_dict(
-                bridge_result.ingest, pipeline_summary,
+                execution.ingest, pipeline_summary,
             )
             data["elapsed"] = round(elapsed, 1)
             data["download_only"] = args.download_only
@@ -3154,7 +3152,7 @@ async def run_site_ingest(args: argparse.Namespace) -> None:
             _output_result(data)
         else:
             _print_ingest_result(
-                bridge_result.ingest,
+                execution.ingest,
                 pipeline_summary,
                 context=f"サイト: {display_url}",
                 json_output=False,

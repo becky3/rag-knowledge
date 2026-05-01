@@ -155,7 +155,9 @@ class TestExecuteSiteIngest:
             source_store=source_store,
         )
         assert execution.no_output is False
-        assert execution.bridge is bridge_result
+        assert execution.ingest is bridge_result.ingest
+        assert execution.total_lines == bridge_result.total_lines
+        assert execution.parse_errors == bridge_result.parse_errors
         assert execution.scrapy_success is True
 
     async def test_does_not_cleanup_internally(self, tmp_path: Path) -> None:
