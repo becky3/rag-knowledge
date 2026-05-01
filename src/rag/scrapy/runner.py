@@ -19,7 +19,7 @@ import shutil
 import sys
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
+from typing import Any, Protocol
 from urllib.parse import urlparse
 
 logger = logging.getLogger(__name__)
@@ -78,8 +78,42 @@ class CrawlResult:
             )
 
 
-class ScrapyRunner:
-    """Scrapy プロセスの subprocess ラッパー.
+class ScrapyRunner(Protocol):
+    """Scrapy 実行の抽象 Port.
+
+    Real / Fake で同じシグネチャを実装する。Real は subprocess で Scrapy Spider を
+    起動して JSONL + HTML を生成し、Fake は fixture から相当ファイル群を tmp に
+    展開する。戻り値はいずれの実装でも ``CrawlResult`` 型に揃える。
+    """
+
+    async def run(
+        self,
+        *,
+        start_url: str = "",
+        start_urls: list[str] | None = None,
+        allowed_domains: str = "",
+        url_pattern: str = "",
+        max_pages: int | None = None,
+        force: bool = False,
+    ) -> CrawlResult:
+        """Scrapy クロールを実行する.
+
+        Args:
+            start_url: クロール開始 URL（クロールモード、start_urls と排他）
+            start_urls: 取得対象 URL のリスト（複数 URL モード、start_url と排他）
+            allowed_domains: ドメイン制約（カンマ区切り）
+            url_pattern: URL フィルタ正規表現（クロールモードのみ）
+            max_pages: ページ数上限（None の場合は実装依存のデフォルト）
+            force: True の場合、クロールディレクトリ全体を削除して最初からクロール
+
+        Returns:
+            クロール実行結果
+        """
+        ...
+
+
+class RealScrapyRunner:
+    """Scrapy プロセスの subprocess ラッパー（Real 実装）.
 
     asyncio.create_subprocess_exec で Scrapy Spider を起動し、
     プロセスの終了を待機して結果を返す。

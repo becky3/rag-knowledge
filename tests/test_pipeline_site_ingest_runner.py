@@ -59,7 +59,7 @@ class TestExecuteSiteIngest:
         )
         with (
             patch(
-                "rag.pipeline.site_ingest_runner.ScrapyRunner.run",
+                "rag.pipeline.site_ingest_runner.RealScrapyRunner.run",
                 new_callable=AsyncMock,
                 return_value=crawl_result,
             ) as mock_run,
@@ -92,7 +92,7 @@ class TestExecuteSiteIngest:
             success=True,
         )
         with patch(
-            "rag.pipeline.site_ingest_runner.ScrapyRunner.run",
+            "rag.pipeline.site_ingest_runner.RealScrapyRunner.run",
             new_callable=AsyncMock,
             return_value=crawl_result,
         ) as mock_run:
@@ -134,7 +134,7 @@ class TestExecuteSiteIngest:
 
         with (
             patch(
-                "rag.pipeline.site_ingest_runner.ScrapyRunner.run",
+                "rag.pipeline.site_ingest_runner.RealScrapyRunner.run",
                 new_callable=AsyncMock,
                 return_value=crawl_result,
             ),
@@ -172,7 +172,7 @@ class TestExecuteSiteIngest:
 
         with (
             patch(
-                "rag.pipeline.site_ingest_runner.ScrapyRunner.run",
+                "rag.pipeline.site_ingest_runner.RealScrapyRunner.run",
                 new_callable=AsyncMock,
                 return_value=crawl_result,
             ),
