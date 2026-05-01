@@ -51,14 +51,70 @@ bluesky インジェスターは youtube パターンを踏襲しつつ、規模
 
 | 観点 | bluesky の選択 | 適用判断 |
 |---|---|---|
-| facade の package 化 | `pipeline/ingesters/bluesky/` パッケージ（_facade / feed_fetcher / post_placer / url_routing / delegations 等）に分解 | 単一インジェスターが複数の責務（API / 配置 / URL 分類 / 委譲）を持ち、セクション 3 の LOC 参考値を超える場合 |
+| facade の package 化 | `pipeline/ingesters/bluesky/` パッケージ（_facade / feed_fetcher / post_placer / url_routing / delegations 等）に分解 | 単一インジェスターが複数の責務（API / 配置 / URL 分類 / 委譲）を持ち、セクション 4 の LOC 参考値を超える場合 |
 | Port の複数分離 | AT Protocol API 用 (`BlueskyFetcher`) と CDN メディア DL 用 (`BlueskyMediaDownloader`) を独立 Port として分離 | 1 インジェスターが性質の異なる複数の外部接続を持つ場合、責務単位の Port として分離する |
-| 委譲先の Port 化 | youtube / site-ingest への越境直 import を `YoutubeClassifier` / `YoutubeDelegator` / `SiteIngestRunner` Port 経由に置換 | 他インジェスター・他ランナーへの委譲が必要な場合（セクション 3 の越境直 import 系統数の参考値も参照） |
+| 委譲先の Port 化 | youtube / web への越境直 import を `YoutubeClassifier` / `YoutubeDelegator` / `WebDelegator` Port 経由に置換 | 他インジェスターへの委譲が必要な場合（セクション 4 の越境直 import 系統数の参考値も参照） |
 | factory の独立化 | `create_bluesky_fetcher` / `create_bluesky_media_downloader` をそれぞれ独立 factory として提供。ingester 全体の組み立ては起動経路（CLI / MCP）が担う | factory が「Settings → 単一 component」という単純な役割に保たれる |
 
 詳細は [BlueSky インジェスター仕様](ingesters/bluesky.md) と [BlueSky Fake Adapter](infrastructure/fake-adapters/bluesky.md) を参照。
 
-## 3. 構造判断の定量基準（参考値）
+## 3. Ingester / Runner ファミリーの境界
+
+rag-knowledge には外部データ取得経路として 2 系統がある:
+
+- **Ingester ファミリー**: in-process（同一 Python プロセス内）で `source_store.place_file()` を直接呼び出し、`IngestResult` を直接生成する取得・配置クラス
+- **Runner ファミリー**: subprocess を起動して別プロセスで取得を行い、結果を bridge 層で `IngestResult` に変換する経路
+
+両ファミリーとも、外部依存（HTTP API / 外部ライブラリ / subprocess）は Protocol 経由で注入され、Real / Fake を切り替えられる（[正解パターン: youtube インジェスター](#2-正解パターン-youtube-インジェスター)）。
+
+### 3.1 Ingester ファミリー
+
+`source_type` ごとに 1 クラスが対応する。各クラスは `BaseIngester` を実装し、共通 Port を介してパイプライン制御層から操作される。
+
+| クラス | 配置 | 対応 `source_type` |
+|---|---|---|
+| `AozoraIngester` | `pipeline/ingesters/aozora/_facade.py` | `aozora` |
+| `BlueskyIngester` | `pipeline/ingesters/bluesky/_facade.py` | `bluesky` |
+| `JournalIngester` | `pipeline/ingesters/journal.py` | `journal` |
+| `LocalIngester` | `pipeline/ingesters/local/_facade.py` | `local` |
+| `WebIngester` | `pipeline/ingesters/web/_facade.py` | `web` |
+| `YoutubeIngester` | `pipeline/ingesters/youtube.py` | `youtube` |
+| `ZennIngester` | `pipeline/ingesters/zenn/_facade.py` | `zenn` |
+
+`source_type` の SSoT は [`_schema/enums.yml`](../../_schema/enums.yml)。
+
+他 Ingester から特定媒体への委譲が必要な場合は、専用 Delegator Protocol（例: `YoutubeDelegator` / `WebDelegator`）経由で実施する。委譲先 Ingester 本体を直接 import せず、Port を介した Adapter 注入の形で構造を揃える（[正解パターン: youtube インジェスター](#2-正解パターン-youtube-インジェスター)と同型）。
+
+### 3.2 Runner ファミリー
+
+subprocess を起動し、Scrapy 等の外部プロセスで取得を行う経路。Runner Protocol 経由で Real / Fake を切り替える。
+
+| 役割 | 配置 |
+|---|---|
+| `ScrapyRunner` Protocol | `src/rag/scrapy/runner.py` |
+| `RealScrapyRunner` | `src/rag/scrapy/runner.py` |
+| `FakeScrapyRunner` | `src/rag/scrapy/_fake/__init__.py` |
+| bridge 層（クロール結果 → `IngestResult` 変換） | `src/rag/scrapy/bridge.py`（詳細は [site-ingest.md](site-ingest.md) を参照） |
+
+`ScrapyRunner` は `WebIngester` の Fetcher 相当依存として注入され、subprocess を起動・管理する。Runner ファミリーは Ingester ファミリーから注入される位置関係であり、パイプライン制御層から直接 Runner を操作することはない。
+
+### 3.3 WebIngester の構造
+
+`WebIngester` は `pipeline/ingesters/web/_facade.py` に配置され、site-ingest（Scrapy subprocess による Web ページ取り込み）を実行する。`source_type=web` のソースを生成する Ingester。
+
+- `ScrapyRunner` Protocol を Fetcher 相当依存として注入する（[正解パターン: youtube インジェスター](#2-正解パターン-youtube-インジェスター)と同型の構造）
+- bridge 層の中間処理は `WebIngester` 内部の実装詳細として隠蔽され、呼び出し元からは Ingester の戻り値 `IngestResult` のみ見える。中間型・処理フローの詳細は [site-ingest.md](site-ingest.md) を参照
+- Fake モードは `RAG_WEB_FAKE_MODE` 環境変数で切り替える（[Fake モード基盤](infrastructure/fake-mode.md) 参照）
+
+他 Ingester から web 取り込みへの委譲は `WebDelegator` Protocol 経由で行う（直接 import を禁止）。委譲経路の構造は youtube への委譲（`YoutubeDelegator`）と同型。
+
+### 3.4 BaseIngester 抽象化の対象範囲
+
+- 7 Ingester（aozora / bluesky / journal / local / web / youtube / zenn）が `BaseIngester` 継承対象
+- `BaseIngester` は Ingester ファミリーの共通 Port（Protocol / ABC）として位置付ける。§1 の Dependency Rule に従い、パイプライン制御層は具象 Ingester ではなく `BaseIngester` 経由で操作する
+- `ScrapyRunner` は `WebIngester` の Fetcher 相当依存として位置付け、`BaseIngester` 継承対象外
+
+## 4. 構造判断の定量基準（参考値）
 
 以下は構造問題のシグナルとなる定量値。**閾値超過は即座にリファクタ義務とはせず、レビュー / Issue 起票時の参考値として用いる**。
 
@@ -70,7 +126,7 @@ bluesky インジェスターは youtube パターンを踏襲しつつ、規模
 
 これらは [Issue #702 のロードマップ](https://github.com/becky3/rag-knowledge/issues/702) で検出された具体的な構造問題（bluesky.py 1319 LOC / mock 比 4.4 等）から導出した経験値である。
 
-## 4. SSoT 階層と所在
+## 5. SSoT 階層と所在
 
 設定値・列挙値・契約は SSoT 階層と所在の 2 軸で管理する（agent-commons `spec-driven.md` の SSoT 2 軸併置に従う）。
 
@@ -95,7 +151,7 @@ bluesky インジェスターは youtube パターンを踏襲しつつ、規模
 
 `dict[str, Any]` は境界（外部 API レスポンス・JSON 応答・MCP 応答テキスト等）でのみ許容し、越境後は構造化型（dataclass / Enum / TypedDict）に変換する。
 
-## 5. Fake モード基盤
+## 6. Fake モード基盤
 
 外部 API・ライブラリの実アクセスを排除する仕組み。詳細は [Fake モード基盤仕様](infrastructure/fake-mode.md) を参照。
 
@@ -108,7 +164,7 @@ bluesky インジェスターは youtube パターンを踏襲しつつ、規模
 
 新規インジェスターは原則として Fake Adapter を備える（youtube パターン）。Fake Adapter なしでの追加は QA 戦略の L2 Mock E2E テストが書けなくなるため、構造レビューの対象とする。
 
-## 6. 関連ドキュメント
+## 7. 関連ドキュメント
 
 - [全体仕様概要](overview.md) — 機能一覧と仕様書マップ
 - [QA 戦略](workflows/qa-strategy.md) — L1 / L2 / L3 の責務分離
