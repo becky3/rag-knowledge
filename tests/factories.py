@@ -402,8 +402,15 @@ def make_youtube_ingester(source_store: Any, **overrides: Any) -> Any:
 
 
 def make_local_ingester(source_store: Any, **overrides: Any) -> Any:
-    """LocalIngester のテスト用ファクトリ."""
-    from rag.pipeline.ingesters.local import LocalIngester
+    """LocalIngester のテスト用ファクトリ.
+
+    fetcher は省略可。省略時は RealLocalFetcher を注入する（既存 tmp_path テストとの
+    互換性維持のため。Fake は filesystem 抽象化のみで実 I/O テストを置き換えない）。
+    """
+    from rag.pipeline.ingesters.local import LocalIngester, RealLocalFetcher
+
+    if "fetcher" not in overrides:
+        overrides["fetcher"] = RealLocalFetcher()
 
     defaults: dict[str, Any] = {
         "supported_extensions": None,

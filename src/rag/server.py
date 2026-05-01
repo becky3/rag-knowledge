@@ -395,7 +395,9 @@ async def rag_add_bluesky(
         return label + e.format_mcp_error("BlueSky 投稿の取り込みに失敗しました")
 
 
-FakeSource = Literal["youtube", "bluesky", "embedding", "web", "zenn", "aozora"]
+FakeSource = Literal[
+    "youtube", "bluesky", "embedding", "web", "zenn", "aozora", "local",
+]
 
 # YouTube インジェスト系 MCP ツールが利用する fake source の組
 _YOUTUBE_INGEST_FAKE_SOURCES: list[FakeSource] = ["youtube", "embedding"]
@@ -414,6 +416,9 @@ _ZENN_INGEST_FAKE_SOURCES: list[FakeSource] = ["zenn", "embedding"]
 
 # Aozora インジェスト系 MCP ツールが利用する fake source の組
 _AOZORA_INGEST_FAKE_SOURCES: list[FakeSource] = ["aozora", "embedding"]
+
+# Local インジェスト系 MCP ツールが利用する fake source の組
+_LOCAL_INGEST_FAKE_SOURCES: list[FakeSource] = ["local", "embedding"]
 
 
 def _fake_mode_labels(active_sources: list[FakeSource]) -> str:
@@ -447,6 +452,7 @@ def _fake_mode_labels(active_sources: list[FakeSource]) -> str:
         "web": settings.rag_scrapy_fake_mode,
         "zenn": settings.rag_zenn_fake_mode,
         "aozora": settings.rag_aozora_fake_mode,
+        "local": settings.rag_local_fake_mode,
     }
     parts: list[str] = []
     for source in active_sources:
@@ -561,13 +567,14 @@ async def rag_add_document(
     if upload_mode != "fail":
         args.extend(["--upload-mode", upload_mode])
 
+    label = _fake_mode_labels(_LOCAL_INGEST_FAKE_SOURCES)
     try:
         result = await _run_cli_subprocess(
             "add-document", args, ctx=ctx, stdin_data=content,
         )
-        return _format_cli_ingest_result(result, context=sanitized_filename)
+        return label + _format_cli_ingest_result(result, context=sanitized_filename)
     except CLISubprocessError as e:
-        return e.format_mcp_error(f"ファイルの取り込みに失敗しました: {sanitized_filename}")
+        return label + e.format_mcp_error(f"ファイルの取り込みに失敗しました: {sanitized_filename}")
 
 
 @mcp.tool()
@@ -650,11 +657,12 @@ async def rag_crawl_documents(
     if upload_mode != "fail":
         args.extend(["--upload-mode", upload_mode])
 
+    label = _fake_mode_labels(_LOCAL_INGEST_FAKE_SOURCES)
     try:
         result = await _run_cli_subprocess("crawl-documents", args, ctx=ctx)
-        return _format_cli_ingest_result(result, context=f"ディレクトリ: {dir_path}")
+        return label + _format_cli_ingest_result(result, context=f"ディレクトリ: {dir_path}")
     except CLISubprocessError as e:
-        return e.format_mcp_error(f"ドキュメントの取り込みに失敗しました（ディレクトリ: {dir_path}）")
+        return label + e.format_mcp_error(f"ドキュメントの取り込みに失敗しました（ディレクトリ: {dir_path}）")
 
 
 @mcp.tool()

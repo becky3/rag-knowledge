@@ -191,6 +191,7 @@ class TestAddDocumentStdinExecution:
             mock_controller = MagicMock()
             mock_settings = MagicMock()
             mock_settings.rag_document_supported_extensions = ".md,.txt,.pdf,.adoc"
+            mock_settings.rag_local_fake_mode = False
             mock_ctrl.return_value = (mock_controller, mock_settings)
 
             with pytest.raises(SystemExit) as exc_info:
@@ -225,6 +226,7 @@ class TestAddDocumentStdinExecution:
             mock_controller = MagicMock()
             mock_settings = MagicMock()
             mock_settings.rag_document_supported_extensions = ".md,.txt,.pdf,.adoc"
+            mock_settings.rag_local_fake_mode = False
             mock_ctrl.return_value = (mock_controller, mock_settings)
 
             with pytest.raises(SystemExit) as exc_info:
@@ -259,6 +261,7 @@ class TestAddDocumentStdinExecution:
             mock_controller = MagicMock()
             mock_settings = MagicMock()
             mock_settings.rag_document_supported_extensions = ".md,.txt,.pdf,.adoc"
+            mock_settings.rag_local_fake_mode = False
             mock_ctrl.return_value = (mock_controller, mock_settings)
 
             with pytest.raises(SystemExit) as exc_info:
@@ -302,6 +305,7 @@ class TestAddDocumentStdinExecution:
             mock_controller.source_store.root_dir = Path("/tmp/test_store")
             mock_settings = MagicMock()
             mock_settings.rag_document_supported_extensions = ".md,.txt,.pdf,.adoc"
+            mock_settings.rag_local_fake_mode = False
             mock_ctrl.return_value = (mock_controller, mock_settings)
 
             with pytest.raises(SystemExit) as exc_info:
@@ -343,6 +347,7 @@ class TestAddDocumentStdinExecution:
             mock_controller.source_store.root_dir = Path("/tmp/test_store")
             mock_settings = MagicMock()
             mock_settings.rag_document_supported_extensions = ".md,.txt,.pdf,.adoc"
+            mock_settings.rag_local_fake_mode = False
             mock_ctrl.return_value = (mock_controller, mock_settings)
 
             with pytest.raises(SystemExit) as exc_info:
@@ -417,6 +422,7 @@ class TestAddDocumentFilenamePriority:
             mock_controller.ingest_and_index = AsyncMock(return_value=self._make_pipeline_summary_mock())
             mock_settings = MagicMock()
             mock_settings.rag_document_supported_extensions = ".md,.txt,.pdf,.adoc"
+            mock_settings.rag_local_fake_mode = False
             mock_ctrl.return_value = (mock_controller, mock_settings)
 
             import asyncio
@@ -458,6 +464,7 @@ class TestAddDocumentFilenamePriority:
             mock_controller.ingest_and_index = AsyncMock(return_value=self._make_pipeline_summary_mock())
             mock_settings = MagicMock()
             mock_settings.rag_document_supported_extensions = ".md,.txt,.pdf,.adoc"
+            mock_settings.rag_local_fake_mode = False
             mock_ctrl.return_value = (mock_controller, mock_settings)
 
             import asyncio

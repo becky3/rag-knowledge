@@ -17,6 +17,7 @@ from rag.pipeline.ingesters._common import (
 )
 
 if TYPE_CHECKING:
+    from rag.pipeline.ingesters.local.fetcher_protocol import LocalFetcher
     from rag.store.source_store import SourceStore
 
 logger = logging.getLogger(__name__)
@@ -36,8 +37,17 @@ class LocalIngester:
     仕様: docs/specs/ingesters/local.md
     """
 
-    def __init__(self, source_store: SourceStore, *, supported_extensions: list[str] | None, http_mode_enabled: bool, allowed_dirs: list[str] | None) -> None:
+    def __init__(
+        self,
+        source_store: SourceStore,
+        *,
+        fetcher: LocalFetcher,
+        supported_extensions: list[str] | None,
+        http_mode_enabled: bool,
+        allowed_dirs: list[str] | None,
+    ) -> None:
         self._store = source_store
+        self._fetcher = fetcher
         self._extensions = [ext.lower() for ext in (supported_extensions or DEFAULT_SUPPORTED_EXTENSIONS)]
         self._http_mode_enabled = http_mode_enabled
         self._allowed_dirs = [Path(d.strip()).resolve() for d in (allowed_dirs or []) if d.strip()]
@@ -138,7 +148,7 @@ class LocalIngester:
         date_prefix = self._upload_date_prefix()
         for file_idx, fp in enumerate(files):
             try:
-                if fp.stat().st_size == 0:
+                if self._fetcher.get_file_size(fp) == 0:
                     logger.warning("Skipping empty file (0 bytes): %s", fp)
                     result.skipped += 1
                     continue
@@ -156,7 +166,7 @@ class LocalIngester:
                     result.skipped += 1
                     continue
 
-                data = fp.read_bytes()
+                data = self._fetcher.read_bytes(fp)
                 self._store.place_file(source_type="local", data=data, rel_path=rel_path)
                 if exists:
                     result.overwritten += 1
@@ -239,11 +249,13 @@ class LocalIngester:
         if pattern.startswith("/") or Path(pattern).is_absolute():
             raise ValueError(f"Pattern must not be an absolute path: {pattern!r}")
         self._check_http_mode_access(resolved_dir)
-        files: list[Path] = []
-        for p in resolved_dir.glob(pattern):
-            resolved = p.resolve()
-            if not resolved.is_file():
-                continue
+        files: list[Path] = self._fetcher.discover_files(
+            str(resolved_dir), pattern, self._extensions,
+        )
+        # discover_files の戻り値を path travasal 検証で再フィルタ
+        # （Real は既に同条件、Fake は fixture 内の前提なので no-op に近い）
+        valid_files: list[Path] = []
+        for resolved in files:
             try:
                 resolved.relative_to(resolved_dir)
             except ValueError:
@@ -251,9 +263,9 @@ class LocalIngester:
                 continue
             if resolved.suffix.lower() not in self._extensions:
                 continue
-            files.append(resolved)
-        files.sort(key=lambda p: str(p))
-        if len(files) > MAX_FILES_HARD_LIMIT:
-            logger.warning("File count %d exceeds limit %d, clamping to %d", len(files), MAX_FILES_HARD_LIMIT, MAX_FILES_HARD_LIMIT)
-            files = files[:MAX_FILES_HARD_LIMIT]
-        return files
+            valid_files.append(resolved)
+        valid_files.sort(key=lambda p: str(p))
+        if len(valid_files) > MAX_FILES_HARD_LIMIT:
+            logger.warning("File count %d exceeds limit %d, clamping to %d", len(valid_files), MAX_FILES_HARD_LIMIT, MAX_FILES_HARD_LIMIT)
+            valid_files = valid_files[:MAX_FILES_HARD_LIMIT]
+        return valid_files

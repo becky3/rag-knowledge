@@ -77,6 +77,10 @@ TEST_SETTINGS_DEFAULTS: dict[str, object] = {
     # Aozora Fake モード（テストでは fake デフォルト）
     "rag_aozora_fake_mode": True,
     "rag_aozora_fake_fixture_dir": "src/rag/pipeline/ingesters/_fake/aozora/data",
+    # Local Fake モード（テストでは fake デフォルト。ただし既存 tmp_path テストは Real を使うため
+    # make_local_ingester で fetcher を切替）
+    "rag_local_fake_mode": True,
+    "rag_local_fake_fixture_dir": "src/rag/pipeline/ingesters/_fake/local/data",
     # Embedding Fake モード（テストでは fake デフォルト）
     "rag_embedding_fake_mode": True,
     "rag_embedding_fake_dimensions": 768,

@@ -148,6 +148,29 @@ def _force_bluesky_fake_mode() -> Iterator[None]:
 
 
 @pytest.fixture(autouse=True, scope="session")
+def _force_local_fake_mode() -> Iterator[None]:
+    """テスト中は Local Fake モードを環境変数で強制する.
+
+    仕様: docs/specs/infrastructure/fake-mode.md
+    仕様: docs/specs/infrastructure/fake-adapters/local.md
+
+    create_local_fetcher が pydantic Settings 経由で
+    `RAG_LOCAL_FAKE_MODE=true` を読み込むため、ここで環境変数に明示設定する。
+
+    `RAG_TESTS_ALLOW_NETWORK=1` 設定時のみ強制を解除する。
+
+    既存の tmp_path ベース単体テストは make_local_ingester のデフォルト RealLocalFetcher を
+    使うため、本 env 強制は CLI/MCP 経路（subprocess 越境）のみに影響する。
+    """
+    if os.environ.get("RAG_TESTS_ALLOW_NETWORK") == "1":
+        yield
+        return
+    with pytest.MonkeyPatch.context() as mp:
+        mp.setenv("RAG_LOCAL_FAKE_MODE", "true")
+        yield
+
+
+@pytest.fixture(autouse=True, scope="session")
 def _force_aozora_fake_mode() -> Iterator[None]:
     """テスト中は Aozora Fake モードを環境変数で強制する.
 

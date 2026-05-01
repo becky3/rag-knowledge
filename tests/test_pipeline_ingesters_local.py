@@ -32,7 +32,7 @@ def _today_prefix() -> str:
 def _freeze_date(monkeypatch: pytest.MonkeyPatch) -> None:
     """date.today() を固定して日付境界でのテストフレークを防止する."""
     monkeypatch.setattr(
-        "rag.pipeline.ingesters.local.datetime",
+        "rag.pipeline.ingesters.local._facade.datetime",
         type("FakeDatetime", (), {"date": type("FakeDate", (), {"today": staticmethod(lambda: _FIXED_DATE)})})(),
     )
 

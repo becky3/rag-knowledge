@@ -2928,8 +2928,10 @@ async def run_add_document(args: argparse.Namespace) -> None:
     with _write_lock_or_exit(
         Path(controller.source_store.root_dir), json_out=json_out,
     ):
+        from .pipeline.ingesters.local import create_local_fetcher
         local_ingester = LocalIngester(
             controller.source_store,
+            fetcher=create_local_fetcher(settings),
             supported_extensions=supported_extensions,
             http_mode_enabled=False,
             allowed_dirs=None,
@@ -2968,7 +2970,7 @@ async def run_add_document(args: argparse.Namespace) -> None:
 
 async def run_crawl_documents(args: argparse.Namespace) -> None:
     """ディレクトリ一括取り込み."""
-    from .pipeline.ingesters.local import LocalIngester
+    from .pipeline.ingesters.local import LocalIngester, create_local_fetcher
 
     json_out = _is_json_output(args)
 
@@ -2981,6 +2983,7 @@ async def run_crawl_documents(args: argparse.Namespace) -> None:
     ]
     local_ingester = LocalIngester(
         controller.source_store,
+        fetcher=create_local_fetcher(settings),
         supported_extensions=supported_extensions,
         http_mode_enabled=False,
         allowed_dirs=None,

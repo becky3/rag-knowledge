@@ -105,6 +105,12 @@ class _EnvLoader(BaseSettings):
     # Fake Fetcher が読み込む fixture ディレクトリ。プロジェクトルートからの相対パス
     rag_aozora_fake_fixture_dir: str = "src/rag/pipeline/ingesters/_fake/aozora/data"
 
+    # Local Fake モード — テスト・QA で実ユーザーファイルシステムへのアクセスを排除する。デフォルトは安全側（fake 有効）
+    # 注意: PDF/AsciiDoc 抽出は converter 層の責務であり、QA 速度向上は #713 で対応
+    rag_local_fake_mode: bool = True
+    # Fake Fetcher が読み込む fixture ディレクトリ。プロジェクトルートからの相対パス
+    rag_local_fake_fixture_dir: str = "src/rag/pipeline/ingesters/_fake/local/data"
+
     # Embedding Fake モード — テスト・CI で LM Studio / OpenAI への実 Embedding アクセスを排除する。デフォルトは安全側（fake 有効）
     rag_embedding_fake_mode: bool = True
     # Fake Embedding が生成するベクトルの次元数。Real モデルの次元に合わせる
@@ -191,6 +197,10 @@ class RAGSettings(BaseModel):
     rag_aozora_fake_mode: bool
     # Fake Fetcher が読み込む fixture ディレクトリ
     rag_aozora_fake_fixture_dir: str
+    # Local Fake モード切替。デフォルト fake（安全側）、本番運用時のみ false を .env で明示
+    rag_local_fake_mode: bool
+    # Fake Fetcher が読み込む fixture ディレクトリ
+    rag_local_fake_fixture_dir: str
     # Embedding Fake モード切替。デフォルト fake（安全側）、本番運用時のみ false を .env で明示
     rag_embedding_fake_mode: bool
     # Fake Embedding が生成するベクトルの次元数
@@ -491,6 +501,18 @@ def log_fake_mode_status(settings: RAGSettings) -> None:
     else:
         logger.info(
             "Aozora は REAL モードで起動中。実 青空文庫 / GitHub Raw アクセスが発生します"
+        )
+
+    if settings.rag_local_fake_mode:
+        logger.warning(
+            "[FAKE MODE: local] Local は FAKE モードで起動中（fixture: %s）。"
+            "ユーザー指定ディレクトリへのアクセスは fixture ディレクトリに置換されます。"
+            "本番運用時は RAG_LOCAL_FAKE_MODE=false を .env に設定してください",
+            settings.rag_local_fake_fixture_dir,
+        )
+    else:
+        logger.info(
+            "Local は REAL モードで起動中。ユーザー指定ディレクトリにアクセスします"
         )
 
 
