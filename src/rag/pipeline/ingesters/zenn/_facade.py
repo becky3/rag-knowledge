@@ -20,6 +20,7 @@ from rag.pipeline.ingesters._common import (
     ProgressCallback,
     now_iso,
 )
+from rag.pipeline.ingesters.base import BaseIngester
 
 if TYPE_CHECKING:
 
@@ -56,7 +57,7 @@ def parse_zenn_url(url: str) -> tuple[str, str, str] | None:
     return m.group(1), m.group(2), m.group(3)
 
 
-class ZennIngester:
+class ZennIngester(BaseIngester):
     """Zenn インジェスター.
 
     Zenn API から記事・スクラップを取得し、
@@ -74,6 +75,7 @@ class ZennIngester:
         fetcher: ZennFetcher,
         max_articles: int,
     ) -> None:
+        super().__init__(source_store)
         self._store = source_store
         self._fetcher = fetcher
         self._max_articles = max_articles

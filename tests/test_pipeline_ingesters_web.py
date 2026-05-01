@@ -36,11 +36,16 @@ def _make_settings(**overrides: object) -> RAGSettings:
     return RAGSettings(**{**TEST_SETTINGS_DEFAULTS, **overrides})
 
 
-def _make_web_ingester(crawl_result: CrawlResult) -> tuple[WebIngester, MagicMock]:
-    """テスト用 WebIngester を生成し、注入された scrapy_runner mock を返す."""
+def _make_web_ingester(
+    crawl_result: CrawlResult,
+    *,
+    source_store: MagicMock | None = None,
+) -> tuple[WebIngester, MagicMock, MagicMock]:
+    """テスト用 WebIngester を生成し、注入された scrapy_runner / source_store mock を返す."""
     scrapy_runner = MagicMock()
     scrapy_runner.run = AsyncMock(return_value=crawl_result)
-    return WebIngester(scrapy_runner=scrapy_runner), scrapy_runner
+    store = source_store if source_store is not None else MagicMock()
+    return WebIngester(store, scrapy_runner=scrapy_runner), scrapy_runner, store
 
 
 @pytest.mark.asyncio
@@ -48,11 +53,10 @@ class TestWebIngesterCrawlUrls:
     async def test_empty_urls_raises(self) -> None:
         """URL 0 件で ValueError を送出すること."""
         scrapy_runner = MagicMock()
-        ingester = WebIngester(scrapy_runner=scrapy_runner)
+        ingester = WebIngester(MagicMock(), scrapy_runner=scrapy_runner)
         with pytest.raises(ValueError, match="at least one URL"):
             await ingester.crawl_urls(
                 urls=[],
-                source_store=MagicMock(),
                 settings=_make_settings(),
             )
 
@@ -64,11 +68,10 @@ class TestWebIngesterCrawlUrls:
             jsonl_path=Path("/tmp/out/nonexistent.jsonl"),
             success=True,
         )
-        ingester, scrapy_runner = _make_web_ingester(crawl_result)
+        ingester, scrapy_runner, _ = _make_web_ingester(crawl_result)
 
         execution = await ingester.crawl_urls(
             urls=["https://example.com/page"],
-            source_store=MagicMock(),
             settings=_make_settings(),
             url_pattern="^https://example\\.com/",
             max_pages=10,
@@ -93,11 +96,10 @@ class TestWebIngesterCrawlUrls:
             jsonl_path=Path("/tmp/out/nonexistent.jsonl"),
             success=True,
         )
-        ingester, scrapy_runner = _make_web_ingester(crawl_result)
+        ingester, scrapy_runner, _ = _make_web_ingester(crawl_result)
 
         execution = await ingester.crawl_urls(
             urls=["https://a.example.com/x", "https://b.example.com/y"],
-            source_store=MagicMock(),
             settings=_make_settings(),
         )
 
@@ -130,7 +132,7 @@ class TestWebIngesterCrawlUrls:
             parse_errors=0,
         )
         source_store = MagicMock()
-        ingester, _ = _make_web_ingester(crawl_result)
+        ingester, _, _ = _make_web_ingester(crawl_result, source_store=source_store)
 
         with patch(
             "rag.pipeline.ingesters.web._facade.import_to_source_store",
@@ -138,7 +140,6 @@ class TestWebIngesterCrawlUrls:
         ) as mock_bridge:
             execution = await ingester.crawl_urls(
                 urls=["https://example.com/page"],
-                source_store=source_store,
                 settings=_make_settings(),
             )
 
@@ -163,7 +164,7 @@ class TestWebIngesterCrawlUrls:
         crawl_result.jsonl_path = jsonl_path
         crawl_result.success = True
 
-        ingester, _ = _make_web_ingester(crawl_result)
+        ingester, _, _ = _make_web_ingester(crawl_result)
 
         with patch(
             "rag.pipeline.ingesters.web._facade.import_to_source_store",
@@ -171,7 +172,6 @@ class TestWebIngesterCrawlUrls:
         ):
             execution = await ingester.crawl_urls(
                 urls=["https://example.com/p"],
-                source_store=MagicMock(),
                 settings=_make_settings(),
             )
 

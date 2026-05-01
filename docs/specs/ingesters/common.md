@@ -91,10 +91,19 @@ ConstrainedClient はサーキットブレーカーの責務（HTTP レスポン
 - **Protocol の配置**: 各 source_type の専用 Adapter モジュール（`<source_type>_fetcher.py` 等）に Protocol + Real 実装 + factory 関数を集約する。Fake 実装は `_fake/<source_type>/` に配置する
 - **コンストラクタ注入**: facade はコンストラクタで Protocol 型の依存を受け取り、HTTP クライアント (`ConstrainedClient`) は Adapter 内に内包する（facade のメソッドに `client` 引数を渡す形は禁止）
 - **factory 関数経由の生成**: `create_<source_type>_<role>(settings, ...) -> <Protocol>` のシグネチャで factory を提供し、`RAG_<SOURCE_TYPE>_FAKE_MODE` を見て Real / Fake を返す
-- **越境 import の撤去**: 委譲先モジュール（例: `youtube` / `site_ingest_runner`）の関数・クラスを直 import せず、対応する Protocol（`YoutubeClassifier` / `YoutubeDelegator` / `SiteIngestRunner` 等）経由で呼び出す
+- **越境 import の撤去**: 委譲先モジュール（例: `youtube` / `web`）の関数・クラスを直 import せず、対応する Delegator Protocol（`YoutubeDelegator` / `WebDelegator` 等）経由で呼び出す
 - **Adapter 単位の独立 factory**: 1 つのインジェスターが複数の Protocol（API Fetcher と MediaDownloader 等）を必要とする場合、各 Protocol ごとに独立した factory を提供し、起動経路で組み立てる
 
 **正解パターン**: `bluesky/` パッケージ + `bluesky_fetcher.py` + `bluesky_media_downloader.py` + `_fake/bluesky/`（Issue #704）。詳細な構造判断 SSoT は [アーキテクチャ採用方針](../architecture.md) を参照。
+
+### BaseIngester 共通基底
+
+7 Ingester（aozora / bluesky / journal / local / web / youtube / zenn）は `BaseIngester` 抽象基底（`pipeline/ingesters/base.py`）を継承する。
+
+- **継承の意図**: 「Ingester ファミリーの一員である」ことをコード上で明示し、上位層から `BaseIngester` 型として Ingester 一般を扱える
+- **共通契約**: コンストラクタで `source_store: SourceStore` を受け取り、`source_store` プロパティとして公開する
+- **エントリポイント**: 媒体ごとの取り込み手続きは多岐にわたるため、共通シグネチャは強制しない（抽象メソッド定義なし）。各 Ingester の `add_*` / `crawl_*` / `ingest_*` メソッドは媒体ごとに自由に定義する
+- **役割と責務境界**: BaseIngester / Ingester ファミリー全体の役割境界（取り込み機構、元データを可能な限りいじらない原則）は [architecture.md §3.1](../architecture.md) を参照
 
 ### 失敗の観測性
 
@@ -165,7 +174,7 @@ ConstrainedClient はサーキットブレーカーの責務（HTTP レスポン
 
 #### 構造化詳細
 
-`error_details` / `partial_failure_details` は以下のフィールドを持つ dict のリストとする。
+`error_details` / `partial_failure_details` は `IngestErrorDetail` TypedDict のリストとする。TypedDict 定義は `pipeline/ingesters/_common.py` が SSoT。
 
 | フィールド | 必須 | 内容 |
 |---|:-:|---|
@@ -174,6 +183,10 @@ ConstrainedClient はサーキットブレーカーの責務（HTTP レスポン
 | `status` | 任意 | HTTP ステータスコード（HTTP 系失敗のみ） |
 | `url` | 任意 | 失敗した URL（HTTP 系失敗のみ） |
 | `message` | 任意（例外由来では推奨） | 追加説明（例外メッセージ等。例外由来の失敗では `str(exc)` を記録することを推奨） |
+
+各インジェスター・bridge 層は `error_details.append(IngestErrorDetail(category=..., target=..., ...))` の形で構造化型として構築する
+（`dict[str, Any]` の literal 構築は禁止）。消費側（`_format_detail` / `cli._error_detail_message` 等）は構造化アクセス
+（`detail["target"]` / `detail["category"]`）で参照する。
 
 `category` は全媒体で `IngestErrorCategory` Enum の値に統一する。集計・再取り込み判定で信頼できる集合として扱えるようにするため、列挙外の値は使用しない。値定義の SSoT は [`_schema/enums.yml`](../../../_schema/enums.yml) の `ingest_error_category` カテゴリ。
 

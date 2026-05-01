@@ -29,7 +29,6 @@ if TYPE_CHECKING:
         YoutubeClassifier,
         YoutubeDelegator,
     )
-    from rag.store.source_store import SourceStore
 
 logger = logging.getLogger(__name__)
 
@@ -40,7 +39,6 @@ async def follow_urls(
     classifier: YoutubeClassifier,
     youtube_delegator: YoutubeDelegator | None,
     web_delegator: WebDelegator,
-    source_store: SourceStore,
     settings: RAGSettings,
     youtube_request_interval: float,
     force_youtube_reingest: bool = False,
@@ -61,7 +59,6 @@ async def follow_urls(
         classifier: YoutubeClassifier Protocol 実装
         youtube_delegator: YoutubeDelegator Protocol 実装（None の場合 YouTube は スキップ計上）
         web_delegator: WebDelegator Protocol 実装
-        source_store: web 取り込みの配置先 SourceStore
         settings: web 取り込みのパラメータ参照用
         youtube_request_interval: YouTube URL 連続取り込み間のスリープ秒
         force_youtube_reingest: 抑制対象の YouTube URL を強制的に取り込むか
@@ -96,7 +93,6 @@ async def follow_urls(
         web_placed, web_errors, web_error_details = await _fetch_web_urls(
             web_urls,
             web_delegator=web_delegator,
-            source_store=source_store,
             settings=settings,
         )
         stats["web_placed"] = web_placed
@@ -213,7 +209,6 @@ async def _fetch_web_urls(
     urls: list[str],
     *,
     web_delegator: WebDelegator,
-    source_store: SourceStore,
     settings: RAGSettings,
 ) -> tuple[int, int, list[IngestErrorDetail]]:
     """Web URL を WebDelegator（複数 URL モード）の Python API で取得する.
@@ -261,7 +256,6 @@ async def _fetch_web_urls(
     try:
         execution = await web_delegator.run_for_urls(
             validated_urls,
-            source_store=source_store,
             settings=settings,
         )
     except Exception as exc:

@@ -27,6 +27,7 @@ from rag.pipeline.ingesters._common import (
     ProgressCallback,
     now_iso,
 )
+from rag.pipeline.ingesters.base import BaseIngester
 
 if TYPE_CHECKING:
     from rag.pipeline.ingesters.youtube_fetcher import YoutubeFetcher
@@ -161,7 +162,7 @@ def _validate_max_videos(max_videos: object) -> int:
     return max_videos
 
 
-class YoutubeIngester:
+class YoutubeIngester(BaseIngester):
     """YouTube インジェスター.
 
     YouTube 動画の字幕/文字起こしを取得し、
@@ -181,6 +182,7 @@ class YoutubeIngester:
         transcript_languages: list[str] | None,
         max_duration: int,
     ) -> None:
+        super().__init__(source_store)
         self._store = source_store
         self._fetcher = fetcher
         self._max_videos = _validate_max_videos(max_videos)

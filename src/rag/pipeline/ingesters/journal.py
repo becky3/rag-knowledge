@@ -17,6 +17,7 @@ from rag.pipeline.ingesters._common import (
     IngestErrorDetail,
     IngestResult,
 )
+from rag.pipeline.ingesters.base import BaseIngester
 
 if TYPE_CHECKING:
     from rag.store.source_store import SourceStore
@@ -28,13 +29,14 @@ _ENTRY_ID_PATTERN = re.compile(r"^\d{8}-\d{6}-")
 _TOPIC_MAX_LENGTH = 50
 
 
-class JournalIngester:
+class JournalIngester(BaseIngester):
     """ジャーナルエントリ取り込み用インジェスター.
 
     仕様: docs/specs/ingesters/journal.md
     """
 
     def __init__(self, source_store: SourceStore) -> None:
+        super().__init__(source_store)
         self._store = source_store
         self.last_entry_id: str | None = None
 

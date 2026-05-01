@@ -24,17 +24,14 @@ class TestRealWebDelegator:
         web_ingester = AsyncMock(spec=WebIngester)
         web_ingester.crawl_urls = AsyncMock(return_value=expected)
         delegator = RealWebDelegator(web_ingester=web_ingester)
-        source_store = AsyncMock()
         settings = AsyncMock()
         urls = ["https://a.example", "https://b.example"]
 
-        result = await delegator.run_for_urls(
-            urls, source_store=source_store, settings=settings,
-        )
+        result = await delegator.run_for_urls(urls, settings=settings)
 
         assert result is expected
         web_ingester.crawl_urls.assert_awaited_once_with(
-            urls=urls, source_store=source_store, settings=settings,
+            urls=urls, settings=settings,
         )
 
 

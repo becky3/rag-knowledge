@@ -24,6 +24,7 @@ from rag.pipeline.ingesters._common import (
     ProgressCallback,
     now_iso,
 )
+from rag.pipeline.ingesters.base import BaseIngester
 from rag.store.meta import write_meta
 
 if TYPE_CHECKING:
@@ -64,7 +65,7 @@ COL_COPYRIGHT = "作品著作権フラグ"
 COL_XHTML_URL = "XHTML/HTMLファイルURL"
 
 
-class AozoraIngester:
+class AozoraIngester(BaseIngester):
     """青空文庫インジェスター.
 
     青空文庫の作品カタログを管理し、
@@ -78,6 +79,7 @@ class AozoraIngester:
         fetcher: AozoraFetcher,
         max_works: int,
     ) -> None:
+        super().__init__(source_store)
         self._store = source_store
         self._fetcher = fetcher
         self._max_works = max_works

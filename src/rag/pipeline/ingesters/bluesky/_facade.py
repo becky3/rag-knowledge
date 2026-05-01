@@ -25,6 +25,7 @@ from rag.pipeline.ingesters._common import (
     IngestResult,
     ProgressCallback,
 )
+from rag.pipeline.ingesters.base import BaseIngester
 from rag.pipeline.ingesters.bluesky.delegations import follow_urls as _follow_urls
 from rag.pipeline.ingesters.bluesky.feed_fetcher import (
     fetch_posts_by_uris,
@@ -86,7 +87,7 @@ def _validate_max_posts(max_posts: object) -> int:
     return max_posts
 
 
-class BlueskyIngester:
+class BlueskyIngester(BaseIngester):
     """BlueSky インジェスター facade.
 
     仕様: docs/specs/ingesters/bluesky.md
@@ -111,6 +112,7 @@ class BlueskyIngester:
         force_youtube_reingest: bool,
         youtube_request_interval: float,
     ) -> None:
+        super().__init__(source_store)
         self._store = source_store
         self._fetcher = fetcher
         self._media_downloader = media_downloader
@@ -342,7 +344,6 @@ class BlueskyIngester:
             classifier=self._youtube_classifier,
             youtube_delegator=self._youtube_delegator,
             web_delegator=self._web_delegator,
-            source_store=self._store,
             settings=settings,
             youtube_request_interval=self._youtube_request_interval,
             force_youtube_reingest=self._force_youtube_reingest,

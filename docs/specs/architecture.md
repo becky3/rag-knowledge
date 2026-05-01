@@ -85,6 +85,15 @@ rag-knowledge には外部データ取得経路として 2 系統がある:
 
 他 Ingester から特定媒体への委譲が必要な場合は、専用 Delegator Protocol（例: `YoutubeDelegator` / `WebDelegator`）経由で実施する。委譲先 Ingester 本体を直接 import せず、Port を介した Adapter 注入の形で構造を揃える（[正解パターン: youtube インジェスター](#2-正解パターン-youtube-インジェスター)と同型）。
 
+#### Ingester の役割と責務境界
+
+Ingester は **取り込み機構** であり、外部データを取得して `source_store` に **raw bytes として配置する** ことを責務とする。元データの加工は **取り込み制約上必要な最小限に留める**:
+
+- 許容される加工: 媒体 API のラッパー応答から必要な部分の抽出（例: API レスポンス JSON の `article` キー直下を保存対象とする）、ファイル名・パスの正規化、`.meta` サイドカーの生成
+- 禁止される加工: インデックス化向けのテキスト整形（`normalize_text` 等）、検索向けのフィールド合成、媒体間で共通化された日時フォーマット変換
+
+インデックス化に必要なテキスト変換・正規化は **converter の責務**（インデックス化しやすい形式への変換）。Ingester でデータを加工してしまうと、後段で `source_store` のオリジナルデータを再利用できなくなる（`rag_get_document(format="original")` で取得した結果が改変済みになる等）ため、Ingester では元データの忠実性を維持する。
+
 ### 3.2 Runner ファミリー
 
 subprocess を起動し、Scrapy 等の外部プロセスで取得を行う経路。Runner Protocol 経由で Real / Fake を切り替える。

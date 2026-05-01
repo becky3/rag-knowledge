@@ -2615,7 +2615,7 @@ def _build_bluesky_ingester(
         media_downloader=create_bluesky_media_downloader(settings, client),
         youtube_classifier=create_youtube_classifier(),
         youtube_delegator=create_youtube_delegator(youtube_ingester),
-        web_delegator=create_web_delegator(settings),
+        web_delegator=create_web_delegator(settings, source_store),
         max_posts=max_posts,
         include_reposts=include_reposts,
         force_youtube_reingest=settings.rag_bluesky_force_youtube_reingest,
@@ -3079,10 +3079,12 @@ async def run_site_ingest(args: argparse.Namespace) -> None:
                 logger.warning("max_pages を 1000 にクランプしました")
 
         outer_start = time_mod.monotonic()
-        web_ingester = WebIngester(scrapy_runner=create_scrapy_runner(settings))
+        web_ingester = WebIngester(
+            controller.source_store,
+            scrapy_runner=create_scrapy_runner(settings),
+        )
         execution = await web_ingester.crawl_urls(
             urls=validated_urls,
-            source_store=controller.source_store,
             settings=settings,
             url_pattern=args.url_pattern if not multi_url_mode else None,
             max_pages=effective_max_pages,

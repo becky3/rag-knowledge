@@ -18,6 +18,7 @@ from typing import TYPE_CHECKING
 from urllib.parse import urlparse
 
 from rag.pipeline.ingesters._common import IngestResult
+from rag.pipeline.ingesters.base import BaseIngester
 from rag.scrapy.bridge import import_to_source_store
 from rag.scrapy.runner import CrawlResult, ScrapyRunner
 
@@ -52,7 +53,7 @@ class SiteIngestExecution:
     crawl_result: CrawlResult | None = None
 
 
-class WebIngester:
+class WebIngester(BaseIngester):
     """Web ページ取り込み Ingester.
 
     仕様: docs/specs/architecture.md §3.3
@@ -63,14 +64,19 @@ class WebIngester:
     他 Ingester からの委譲は ``WebDelegator`` Protocol 経由で行う。
     """
 
-    def __init__(self, *, scrapy_runner: ScrapyRunner) -> None:
+    def __init__(
+        self,
+        source_store: SourceStore,
+        *,
+        scrapy_runner: ScrapyRunner,
+    ) -> None:
+        super().__init__(source_store)
         self._scrapy_runner = scrapy_runner
 
     async def crawl_urls(
         self,
         urls: list[str],
         *,
-        source_store: SourceStore,
         settings: RAGSettings,  # noqa: ARG002
         url_pattern: str | None = None,
         max_pages: int | None = None,
@@ -83,7 +89,6 @@ class WebIngester:
 
         Args:
             urls: 取得対象 URL のリスト。**1 件以上必須**（空リストは不可）
-            source_store: 配置先の SourceStore
             settings: 設定（互換性のため受け取るが、ScrapyRunner は注入済み）
             url_pattern: URL フィルタ正規表現（クロールモードのみ有効）
             max_pages: ページ数上限（クロールモードのみ有効）
@@ -139,7 +144,7 @@ class WebIngester:
         bridge_result = import_to_source_store(
             jsonl_path=crawl_result.jsonl_path,
             html_dir=crawl_result.output_dir,
-            source_store=source_store,
+            source_store=self._source_store,
         )
         execution.ingest = bridge_result.ingest
         execution.total_lines = bridge_result.total_lines

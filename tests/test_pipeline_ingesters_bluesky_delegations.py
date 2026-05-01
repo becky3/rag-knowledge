@@ -71,7 +71,6 @@ class TestFollowUrlsClassification:
             classifier=RealYoutubeClassifier(),
             youtube_delegator=None,
             web_delegator=runner,
-            source_store=MagicMock(),
             settings=MagicMock(),
             youtube_request_interval=0.0,
         )
@@ -87,7 +86,6 @@ class TestFollowUrlsClassification:
             classifier=RealYoutubeClassifier(),
             youtube_delegator=None,
             web_delegator=AsyncMock(),
-            source_store=MagicMock(),
             settings=MagicMock(),
             youtube_request_interval=0.0,
             result=result,
@@ -110,7 +108,6 @@ class TestFollowUrlsWebDelegation:
             classifier=RealYoutubeClassifier(),
             youtube_delegator=None,
             web_delegator=runner,
-            source_store=MagicMock(),
             settings=MagicMock(),
             youtube_request_interval=0.0,
         )
@@ -132,7 +129,6 @@ class TestFollowUrlsWebDelegation:
             classifier=RealYoutubeClassifier(),
             youtube_delegator=None,
             web_delegator=runner,
-            source_store=MagicMock(),
             settings=MagicMock(),
             youtube_request_interval=0.0,
         )
@@ -153,7 +149,6 @@ class TestFollowUrlsWebDelegation:
             classifier=RealYoutubeClassifier(),
             youtube_delegator=None,
             web_delegator=runner,
-            source_store=MagicMock(),
             settings=MagicMock(),
             youtube_request_interval=0.0,
             result=result,
@@ -180,7 +175,6 @@ class TestFollowUrlsYoutubeDelegation:
             classifier=RealYoutubeClassifier(),
             youtube_delegator=delegator,
             web_delegator=runner,
-            source_store=MagicMock(),
             settings=MagicMock(),
             youtube_request_interval=0.0,
         )
@@ -197,7 +191,6 @@ class TestFollowUrlsYoutubeDelegation:
             classifier=RealYoutubeClassifier(),
             youtube_delegator=None,
             web_delegator=runner,
-            source_store=MagicMock(),
             settings=MagicMock(),
             youtube_request_interval=0.0,
         )
@@ -217,7 +210,6 @@ class TestFollowUrlsYoutubeDelegation:
             classifier=RealYoutubeClassifier(),
             youtube_delegator=delegator,
             web_delegator=runner,
-            source_store=MagicMock(),
             settings=MagicMock(),
             youtube_request_interval=0.0,
             force_youtube_reingest=False,
@@ -241,7 +233,6 @@ class TestFollowUrlsYoutubeDelegation:
             classifier=RealYoutubeClassifier(),
             youtube_delegator=delegator,
             web_delegator=runner,
-            source_store=MagicMock(),
             settings=MagicMock(),
             youtube_request_interval=0.0,
             force_youtube_reingest=True,
@@ -263,7 +254,6 @@ class TestFollowUrlsYoutubeDelegation:
             classifier=RealYoutubeClassifier(),
             youtube_delegator=delegator,
             web_delegator=runner,
-            source_store=MagicMock(),
             settings=MagicMock(),
             youtube_request_interval=0.0,
             result=result,
@@ -294,7 +284,6 @@ class TestFollowUrlsYoutubeDelegation:
             classifier=RealYoutubeClassifier(),
             youtube_delegator=delegator,
             web_delegator=runner,
-            source_store=MagicMock(),
             settings=MagicMock(),
             youtube_request_interval=0.0,
             force_youtube_reingest=False,
@@ -311,7 +300,6 @@ class TestFollowUrlsEmpty:
             classifier=RealYoutubeClassifier(),
             youtube_delegator=None,
             web_delegator=AsyncMock(),
-            source_store=MagicMock(),
             settings=MagicMock(),
             youtube_request_interval=0.0,
         )
@@ -326,7 +314,6 @@ class TestFollowUrlsEmpty:
             classifier=RealYoutubeClassifier(),
             youtube_delegator=None,
             web_delegator=AsyncMock(),
-            source_store=MagicMock(),
             settings=MagicMock(),
             youtube_request_interval=0.0,
         )

@@ -26,13 +26,15 @@ class WebDelegator(Protocol):
 
     bluesky 等の他 Ingester からの委譲経路として用いる。Real 実装は
     ``WebIngester.crawl_urls`` をそのまま呼び出す薄いブリッジ。
+
+    ``source_store`` は実装時にバインド済み（factory 経由で WebIngester
+    に注入される）のため、呼び出しごとに渡す必要はない。
     """
 
     async def run_for_urls(
         self,
         urls: list[str],
         *,
-        source_store: SourceStore,
         settings: RAGSettings,
     ) -> SiteIngestExecution:
         """指定 URL 群に対して WebIngester による取り込みを実行する.
@@ -42,7 +44,6 @@ class WebDelegator(Protocol):
 
         Args:
             urls: 取得対象 URL のリスト（1 件以上必須）
-            source_store: 配置先の SourceStore
             settings: 設定
 
         Returns:
@@ -68,21 +69,24 @@ class RealWebDelegator:
         self,
         urls: list[str],
         *,
-        source_store: SourceStore,
         settings: RAGSettings,
     ) -> SiteIngestExecution:
         return await self._web_ingester.crawl_urls(
             urls=urls,
-            source_store=source_store,
             settings=settings,
         )
 
 
-def create_web_delegator(settings: RAGSettings) -> WebDelegator:
+def create_web_delegator(
+    settings: RAGSettings,
+    source_store: SourceStore,
+) -> WebDelegator:
     """``WebDelegator`` のファクトリ.
 
     内部で ``ScrapyRunner`` を生成し ``WebIngester`` を組み立てる。
+    ``source_store`` は WebIngester のコンストラクタにバインドされるため、
+    呼び出しごとに渡す必要はない。
     """
     scrapy_runner = create_scrapy_runner(settings)
-    web_ingester = WebIngester(scrapy_runner=scrapy_runner)
+    web_ingester = WebIngester(source_store, scrapy_runner=scrapy_runner)
     return RealWebDelegator(web_ingester=web_ingester)

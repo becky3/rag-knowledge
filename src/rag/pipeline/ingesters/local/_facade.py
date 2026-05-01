@@ -16,6 +16,7 @@ from rag.pipeline.ingesters._common import (
     IngestResult,
     ProgressCallback,
 )
+from rag.pipeline.ingesters.base import BaseIngester
 
 if TYPE_CHECKING:
     from rag.pipeline.ingesters.local.fetcher_protocol import LocalFetcher
@@ -32,7 +33,7 @@ _UPLOAD_DIR = ".upload"
 UploadMode = Literal["fail", "replace"]
 
 
-class LocalIngester:
+class LocalIngester(BaseIngester):
     """ローカルファイル取り込み用インジェスター.
 
     仕様: docs/specs/ingesters/local.md
@@ -47,6 +48,7 @@ class LocalIngester:
         http_mode_enabled: bool,
         allowed_dirs: list[str] | None,
     ) -> None:
+        super().__init__(source_store)
         self._store = source_store
         self._fetcher = fetcher
         self._extensions = [ext.lower() for ext in (supported_extensions or DEFAULT_SUPPORTED_EXTENSIONS)]
