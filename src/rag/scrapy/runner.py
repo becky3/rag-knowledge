@@ -19,8 +19,11 @@ import shutil
 import sys
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Protocol
+from typing import TYPE_CHECKING, Any, Protocol
 from urllib.parse import urlparse
+
+if TYPE_CHECKING:
+    from rag.config import RAGSettings
 
 logger = logging.getLogger(__name__)
 
@@ -399,3 +402,35 @@ process.crawl(
 )
 process.start()
 """
+
+
+def create_scrapy_runner(settings: RAGSettings) -> ScrapyRunner:
+    """Settings から Real / Fake のいずれかを選択して返すファクトリ.
+
+    .env の RAG_WEB_FAKE_MODE が true（または RAG_SCRAPY_FAKE_MODE が true）の場合
+    は FakeScrapyRunner を返し、subprocess を起動しない。
+    """
+    if settings.rag_scrapy_fake_mode:
+        from rag.scrapy._fake import FakeScrapyRunner
+
+        fixture_dir = Path(settings.rag_scrapy_fake_fixture_dir)
+        if not fixture_dir.is_absolute():
+            project_root = Path(__file__).resolve().parent.parent.parent.parent
+            fixture_dir = project_root / fixture_dir
+        if not fixture_dir.exists():
+            raise FileNotFoundError(
+                f"Scrapy fake fixture ディレクトリが見つかりません: {fixture_dir}。"
+                f"RAG_SCRAPY_FAKE_FIXTURE_DIR を確認してください"
+            )
+        return FakeScrapyRunner(
+            temp_dir=settings.site_ingest_temp_dir,
+            fixture_dir=fixture_dir,
+        )
+    return RealScrapyRunner(
+        temp_dir=settings.site_ingest_temp_dir,
+        delay_sec=settings.site_ingest_delay_sec,
+        max_pages=settings.site_ingest_max_pages,
+        download_timeout=settings.site_ingest_download_timeout,
+        timeout_sec=settings.site_ingest_timeout_sec,
+        error_count=settings.site_ingest_error_count,
+    )

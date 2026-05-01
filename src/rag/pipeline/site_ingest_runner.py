@@ -17,7 +17,7 @@ from urllib.parse import urlparse
 from rag.pipeline.ingesters._common import IngestResult
 
 from ..scrapy.bridge import import_to_source_store
-from ..scrapy.runner import CrawlResult, RealScrapyRunner, ScrapyRunner
+from ..scrapy.runner import CrawlResult, ScrapyRunner, create_scrapy_runner
 
 if TYPE_CHECKING:
     from ..config import RAGSettings
@@ -133,14 +133,7 @@ async def execute_site_ingest(
         parsed = urlparse(urls[0])
         allowed_domains = parsed.hostname or ""
 
-    runner: ScrapyRunner = RealScrapyRunner(
-        temp_dir=settings.site_ingest_temp_dir,
-        delay_sec=settings.site_ingest_delay_sec,
-        max_pages=max_pages or settings.site_ingest_max_pages,
-        download_timeout=settings.site_ingest_download_timeout,
-        timeout_sec=settings.site_ingest_timeout_sec,
-        error_count=settings.site_ingest_error_count,
-    )
+    runner: ScrapyRunner = create_scrapy_runner(settings)
 
     if multi_url_mode:
         crawl_result = await runner.run(

@@ -315,7 +315,13 @@ class TestCliSiteIngestValidation:
 
 
 def _make_cli_mock_settings() -> MagicMock:
-    """CLI テスト用のモック設定を生成する."""
+    """CLI テスト用のモック設定を生成する.
+
+    既存テストは ``patch.object(RealScrapyRunner, "run")`` で Real 実装の
+    run メソッドを差し替える前提のため、ここでは fake モードを無効化する
+    （factory が Real を返すようにする）。Fake 経路の検証は L2 E2E
+    （tests/e2e/test_ingest_mcp_scrapy.py）で行う。
+    """
     s = MagicMock()
     s.site_ingest_temp_dir = "/tmp/test"
     s.site_ingest_delay_sec = 1.0
@@ -323,6 +329,7 @@ def _make_cli_mock_settings() -> MagicMock:
     s.site_ingest_download_timeout = 30
     s.site_ingest_timeout_sec = 0
     s.site_ingest_error_count = 0
+    s.rag_scrapy_fake_mode = False
     return s
 
 
