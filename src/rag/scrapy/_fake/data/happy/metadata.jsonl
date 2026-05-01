@@ -1,0 +1,2 @@
+{"url": "https://test.invalid/page1", "title": "Sample Page 1", "status": 200, "depth": 0, "collected_at": "2026-01-01T00:00:00+00:00", "filepath": "page1.html"}
+{"url": "https://test.invalid/page2", "title": "Sample Page 2", "status": 200, "depth": 1, "collected_at": "2026-01-01T00:00:01+00:00", "filepath": "page2.html"}

@@ -59,10 +59,9 @@ class TestExecuteSiteIngest:
         )
         with (
             patch(
-                "rag.pipeline.site_ingest_runner.ScrapyRunner.run",
-                new_callable=AsyncMock,
-                return_value=crawl_result,
-            ) as mock_run,
+                "rag.pipeline.site_ingest_runner.create_scrapy_runner",
+                return_value=MagicMock(run=AsyncMock(return_value=crawl_result)),
+            ) as mock_factory,
         ):
             execution = await execute_site_ingest(
                 urls=["https://example.com/page"],
@@ -73,7 +72,7 @@ class TestExecuteSiteIngest:
                 force=True,
             )
 
-        kwargs = mock_run.await_args.kwargs
+        kwargs = mock_factory.return_value.run.await_args.kwargs
         assert kwargs["start_url"] == "https://example.com/page"
         assert kwargs["allowed_domains"] == "example.com"
         assert kwargs["url_pattern"] == "^https://example\\.com/"
@@ -91,18 +90,19 @@ class TestExecuteSiteIngest:
             jsonl_path=Path("/tmp/out/nonexistent.jsonl"),
             success=True,
         )
+        runner_mock = MagicMock()
+        runner_mock.run = AsyncMock(return_value=crawl_result)
         with patch(
-            "rag.pipeline.site_ingest_runner.ScrapyRunner.run",
-            new_callable=AsyncMock,
-            return_value=crawl_result,
-        ) as mock_run:
+            "rag.pipeline.site_ingest_runner.create_scrapy_runner",
+            return_value=runner_mock,
+        ):
             execution = await execute_site_ingest(
                 urls=["https://a.example.com/x", "https://b.example.com/y"],
                 source_store=MagicMock(),
                 settings=_make_settings(),
             )
 
-        kwargs = mock_run.await_args.kwargs
+        kwargs = runner_mock.run.await_args.kwargs
         assert kwargs["start_urls"] == [
             "https://a.example.com/x", "https://b.example.com/y",
         ]
@@ -134,9 +134,8 @@ class TestExecuteSiteIngest:
 
         with (
             patch(
-                "rag.pipeline.site_ingest_runner.ScrapyRunner.run",
-                new_callable=AsyncMock,
-                return_value=crawl_result,
+                "rag.pipeline.site_ingest_runner.create_scrapy_runner",
+                return_value=MagicMock(run=AsyncMock(return_value=crawl_result)),
             ),
             patch(
                 "rag.pipeline.site_ingest_runner.import_to_source_store",
@@ -155,7 +154,9 @@ class TestExecuteSiteIngest:
             source_store=source_store,
         )
         assert execution.no_output is False
-        assert execution.bridge is bridge_result
+        assert execution.ingest is bridge_result.ingest
+        assert execution.total_lines == bridge_result.total_lines
+        assert execution.parse_errors == bridge_result.parse_errors
         assert execution.scrapy_success is True
 
     async def test_does_not_cleanup_internally(self, tmp_path: Path) -> None:
@@ -170,9 +171,8 @@ class TestExecuteSiteIngest:
 
         with (
             patch(
-                "rag.pipeline.site_ingest_runner.ScrapyRunner.run",
-                new_callable=AsyncMock,
-                return_value=crawl_result,
+                "rag.pipeline.site_ingest_runner.create_scrapy_runner",
+                return_value=MagicMock(run=AsyncMock(return_value=crawl_result)),
             ),
             patch(
                 "rag.pipeline.site_ingest_runner.import_to_source_store",

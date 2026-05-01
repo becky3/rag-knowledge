@@ -280,16 +280,15 @@ async def _fetch_web_urls(
         all_errors = validation_errors + execute_errors
         return 0, len(all_errors), all_errors
 
-    bridge = execution.bridge
-    placed = bridge.ingest.placed + bridge.ingest.overwritten
-    error_details: list[dict[str, Any]] = list(bridge.ingest.error_details)
-    if bridge.parse_errors > 0:
+    placed = execution.ingest.placed + execution.ingest.overwritten
+    error_details: list[dict[str, Any]] = list(execution.ingest.error_details)
+    if execution.parse_errors > 0:
         error_details.append(
             {
                 "category": IngestErrorCategory.DELEGATION.value,
                 "target": "site-ingest:jsonl",
                 "message": (
-                    f"JSONL のパースに失敗した行が {bridge.parse_errors} 件"
+                    f"JSONL のパースに失敗した行が {execution.parse_errors} 件"
                     "あります（site-ingest 出力）"
                 ),
             },

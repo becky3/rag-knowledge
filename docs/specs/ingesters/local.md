@@ -1,5 +1,13 @@
 # Local インジェスター
 
+> **Fake モード対応 (Issue #705)**: 本インジェスターは package 化されている
+> （`src/rag/pipeline/ingesters/local/`）+ `LocalFetcher` Protocol 経由化済み。
+> `RAG_LOCAL_FAKE_MODE`（`.env`）で切替可能。
+>
+> **ただし PDF/AsciiDoc 抽出は converter 層の責務であり、QA イテレーション速度向上は
+> [#713](https://github.com/becky3/rag-knowledge/issues/713)（converter Fake 化）で対応する**。
+> 詳細は [Local Fake Adapter](../infrastructure/fake-adapters/local.md) を参照。
+
 ## 概要
 
 Local インジェスターは、ローカルファイルシステム上のテキストドキュメントを source_store の `local/` ディレクトリにコピーするコンポーネントである。テキスト抽出・チャンキング・インデックス構築はコンバーター・インデクサーに委譲され、本インジェスターの責務は source_store へのファイル配置のみに限定される。

@@ -289,11 +289,12 @@ async def rag_crawl_zenn(
     if force:
         args.append("--force")
 
+    label = _fake_mode_labels(_ZENN_INGEST_FAKE_SOURCES)
     try:
         result = await _run_cli_subprocess("crawl-zenn", args, ctx=ctx)
-        return _format_cli_ingest_result(result, context=f"ユーザー: {username}")
+        return label + _format_cli_ingest_result(result, context=f"ユーザー: {username}")
     except CLISubprocessError as e:
-        return e.format_mcp_error(f"Zenn 記事の取り込みに失敗しました（ユーザー: {username}）")
+        return label + e.format_mcp_error(f"Zenn 記事の取り込みに失敗しました（ユーザー: {username}）")
 
 
 @mcp.tool()
@@ -315,11 +316,12 @@ async def rag_add_zenn(
     """
     args: list[str] = list(urls)
 
+    label = _fake_mode_labels(_ZENN_INGEST_FAKE_SOURCES)
     try:
         result = await _run_cli_subprocess("ingest-zenn", args, ctx=ctx)
-        return _format_cli_ingest_result(result, context="Zenn ingest")
+        return label + _format_cli_ingest_result(result, context="Zenn ingest")
     except CLISubprocessError as e:
-        return e.format_mcp_error("Zenn コンテンツの取り込みに失敗しました")
+        return label + e.format_mcp_error("Zenn コンテンツの取り込みに失敗しました")
 
 
 @mcp.tool()
@@ -393,14 +395,35 @@ async def rag_add_bluesky(
         return label + e.format_mcp_error("BlueSky 投稿の取り込みに失敗しました")
 
 
-FakeSource = Literal["youtube", "bluesky", "embedding"]
+FakeSource = Literal[
+    "youtube", "bluesky", "embedding", "web", "zenn", "aozora", "local",
+]
 
 # YouTube インジェスト系 MCP ツールが利用する fake source の組
 _YOUTUBE_INGEST_FAKE_SOURCES: list[FakeSource] = ["youtube", "embedding"]
 
 # BlueSky インジェスト系 MCP ツールが利用する fake source の組
-# 投稿内 URL の自動取り込みで YouTube も委譲対象になるため、両方を並列で評価する
-_BLUESKY_INGEST_FAKE_SOURCES: list[FakeSource] = ["bluesky", "youtube", "embedding"]
+# 投稿内 URL の自動取り込みで YouTube / web (site-ingest) も委譲対象になるため、すべて並列で評価する
+_BLUESKY_INGEST_FAKE_SOURCES: list[FakeSource] = [
+    "bluesky", "youtube", "web", "embedding",
+]
+
+# サイト一括取り込み（site-ingest / scrapy）系 MCP ツールが利用する fake source の組
+_SITE_INGEST_FAKE_SOURCES: list[FakeSource] = ["web", "embedding"]
+
+# Zenn インジェスト系 MCP ツールが利用する fake source の組
+_ZENN_INGEST_FAKE_SOURCES: list[FakeSource] = ["zenn", "embedding"]
+
+# Aozora インジェスト系 MCP ツールが利用する fake source の組
+_AOZORA_INGEST_FAKE_SOURCES: list[FakeSource] = ["aozora", "embedding"]
+
+# Local インジェスト系 MCP ツールが利用する fake source の組
+_LOCAL_INGEST_FAKE_SOURCES: list[FakeSource] = ["local", "embedding"]
+
+# Journal インジェスト系 MCP ツールが利用する fake source の組
+# Journal はユーザーがコンテンツを直接渡すため source 固有 fake は存在しないが、
+# Embedding は fake モードで動作するため、ユーザーが実 API アクセス有無を判別できるようラベル付与する
+_JOURNAL_INGEST_FAKE_SOURCES: list[FakeSource] = ["embedding"]
 
 
 def _fake_mode_labels(active_sources: list[FakeSource]) -> str:
@@ -431,6 +454,10 @@ def _fake_mode_labels(active_sources: list[FakeSource]) -> str:
         "youtube": settings.rag_youtube_fake_mode,
         "bluesky": settings.rag_bluesky_fake_mode,
         "embedding": settings.rag_embedding_fake_mode,
+        "web": settings.rag_scrapy_fake_mode,
+        "zenn": settings.rag_zenn_fake_mode,
+        "aozora": settings.rag_aozora_fake_mode,
+        "local": settings.rag_local_fake_mode,
     }
     parts: list[str] = []
     for source in active_sources:
@@ -528,16 +555,18 @@ async def rag_add_document(
     Returns:
         取り込み結果のメッセージ
     """
+    label = _fake_mode_labels(_LOCAL_INGEST_FAKE_SOURCES)
+
     # MCP 側バリデーション（仕様: content-upload.md）
     if encoding not in ("text", "base64"):
-        return f"エラー: 無効な encoding: {encoding!r}（有効値: text, base64）"
+        return label + f"エラー: 無効な encoding: {encoding!r}（有効値: text, base64）"
     if not content:
-        return "エラー: content が空です"
+        return label + "エラー: content が空です"
 
     try:
         sanitized_filename = sanitize_upload_filename(filename)
     except ValueError as e:
-        return f"エラー: {e}"
+        return label + f"エラー: {e}"
 
     args: list[str] = ["--stdin", "--filename", sanitized_filename]
     if encoding != "text":
@@ -549,9 +578,9 @@ async def rag_add_document(
         result = await _run_cli_subprocess(
             "add-document", args, ctx=ctx, stdin_data=content,
         )
-        return _format_cli_ingest_result(result, context=sanitized_filename)
+        return label + _format_cli_ingest_result(result, context=sanitized_filename)
     except CLISubprocessError as e:
-        return e.format_mcp_error(f"ファイルの取り込みに失敗しました: {sanitized_filename}")
+        return label + e.format_mcp_error(f"ファイルの取り込みに失敗しました: {sanitized_filename}")
 
 
 @mcp.tool()
@@ -579,13 +608,15 @@ async def rag_add_journal(
     Returns:
         取り込み結果のメッセージ
     """
+    label = _fake_mode_labels(_JOURNAL_INGEST_FAKE_SOURCES)
+
     try:
         sanitized_filename = sanitize_upload_filename(filename)
     except ValueError as e:
-        return f"エラー: {e}"
+        return label + f"エラー: {e}"
 
     if not sanitized_filename.lower().endswith(".md"):
-        return f"エラー: filename の拡張子が .md ではありません: {sanitized_filename!r}"
+        return label + f"エラー: filename の拡張子が .md ではありません: {sanitized_filename!r}"
 
     args: list[str] = ["--stdin", "--title", title, "--repository", repository]
     if entry_id:
@@ -595,11 +626,11 @@ async def rag_add_journal(
         result = await _run_cli_subprocess(
             "add-journal", args, ctx=ctx, stdin_data=content,
         )
-        return _format_cli_ingest_result(
+        return label + _format_cli_ingest_result(
             result, context=f"journal: {repository}/{entry_id or title}",
         )
     except CLISubprocessError as e:
-        return e.format_mcp_error(f"ジャーナルエントリの登録に失敗しました: {title}")
+        return label + e.format_mcp_error(f"ジャーナルエントリの登録に失敗しました: {title}")
 
 
 @mcp.tool()
@@ -634,11 +665,12 @@ async def rag_crawl_documents(
     if upload_mode != "fail":
         args.extend(["--upload-mode", upload_mode])
 
+    label = _fake_mode_labels(_LOCAL_INGEST_FAKE_SOURCES)
     try:
         result = await _run_cli_subprocess("crawl-documents", args, ctx=ctx)
-        return _format_cli_ingest_result(result, context=f"ディレクトリ: {dir_path}")
+        return label + _format_cli_ingest_result(result, context=f"ディレクトリ: {dir_path}")
     except CLISubprocessError as e:
-        return e.format_mcp_error(f"ドキュメントの取り込みに失敗しました（ディレクトリ: {dir_path}）")
+        return label + e.format_mcp_error(f"ドキュメントの取り込みに失敗しました（ディレクトリ: {dir_path}）")
 
 
 @mcp.tool()
@@ -675,12 +707,14 @@ async def rag_site_ingest(
     """
     from .utils.url import check_ssrf, validate_url
 
+    label = _fake_mode_labels(_SITE_INGEST_FAKE_SOURCES)
+
     # url / urls の排他チェック
     effective_urls = urls or []
     if url and effective_urls:
-        return "エラー: url と urls は排他です。どちらか一方のみ指定してください"
+        return label + "エラー: url と urls は排他です。どちらか一方のみ指定してください"
     if not url and not effective_urls:
-        return "エラー: url または urls を指定してください"
+        return label + "エラー: url または urls を指定してください"
 
     # 単一 URL モード → リストに統一
     if url:
@@ -696,7 +730,7 @@ async def rag_site_ingest(
             check_ssrf(validated)
             validated_urls.append(validated)
         except ValueError as e:
-            return f"エラー: {e}"
+            return label + f"エラー: {e}"
 
     # Safe Browsing チェック（クロールモードのみ: 起点 URL）
     # 複数 URL モードでは数百件の URL に対する Google Safe Browsing API 呼び出しは
@@ -708,11 +742,11 @@ async def rag_site_ingest(
                 sb_result = await sb_client.check_url(validated_urls[0])
                 if not sb_result.is_safe:
                     threat_types = ", ".join(t.threat_type.value for t in sb_result.threats)
-                    return f"エラー: 起点URLが安全でないと判定されました: {threat_types} — {validated_urls[0]}"
+                    return label + f"エラー: 起点URLが安全でないと判定されました: {threat_types} — {validated_urls[0]}"
         except SafeBrowsingConfigError:
             logger.warning("Safe Browsing の設定エラーのためチェックをスキップします: %s", validated_urls[0])
         except SafetyCheckError as e:
-            return f"エラー: URL安全性チェックに失敗しました: {e}"
+            return label + f"エラー: URL安全性チェックに失敗しました: {e}"
 
     # CLI subprocess に委譲
     cli_args: list[str] = list(validated_urls)
@@ -722,7 +756,7 @@ async def rag_site_ingest(
             try:
                 re.compile(url_pattern)
             except re.error as e:
-                return f"エラー: 無効な正規表現パターン: {e}"
+                return label + f"エラー: 無効な正規表現パターン: {e}"
             cli_args.extend(["--url-pattern", url_pattern])
         if max_pages is not None:
             cli_args.extend(["--max-pages", str(max_pages)])
@@ -735,9 +769,9 @@ async def rag_site_ingest(
 
     try:
         result = await _run_cli_subprocess("site-ingest", cli_args, ctx=ctx)
-        return _format_cli_ingest_result(result, context=f"サイト: {display_url}")
+        return label + _format_cli_ingest_result(result, context=f"サイト: {display_url}")
     except CLISubprocessError as e:
-        return e.format_mcp_error(f"サイト取り込みに失敗しました（{display_url}）")
+        return label + e.format_mcp_error(f"サイト取り込みに失敗しました（{display_url}）")
 
 
 @mcp.tool()
@@ -753,11 +787,12 @@ async def rag_update_aozora_catalog(
     Returns:
         カタログ更新結果のサマリーテキスト
     """
+    label = _fake_mode_labels(_AOZORA_INGEST_FAKE_SOURCES)
     try:
         result = await _run_cli_subprocess("update-aozora-catalog", ctx=ctx)
-        return str(result.get("message", "カタログ更新完了"))
+        return label + str(result.get("message", "カタログ更新完了"))
     except CLISubprocessError as e:
-        return e.format_mcp_error("青空文庫カタログの更新に失敗しました")
+        return label + e.format_mcp_error("青空文庫カタログの更新に失敗しました")
 
 
 @mcp.tool()
@@ -810,11 +845,12 @@ async def rag_add_aozora(
     Returns:
         取り込み結果のサマリーテキスト
     """
+    label = _fake_mode_labels(_AOZORA_INGEST_FAKE_SOURCES)
     try:
         result = await _run_cli_subprocess("ingest-aozora", [book_id], ctx=ctx)
-        return _format_cli_ingest_result(result, context=f"作品ID: {book_id}")
+        return label + _format_cli_ingest_result(result, context=f"作品ID: {book_id}")
     except CLISubprocessError as e:
-        return e.format_mcp_error(f"青空文庫作品の取り込みに失敗しました（作品ID: {book_id}）")
+        return label + e.format_mcp_error(f"青空文庫作品の取り込みに失敗しました（作品ID: {book_id}）")
 
 
 @mcp.tool()
@@ -839,11 +875,12 @@ async def rag_crawl_aozora(
     if max_works is not None:
         args.extend(["--max-works", str(max_works)])
 
+    label = _fake_mode_labels(_AOZORA_INGEST_FAKE_SOURCES)
     try:
         result = await _run_cli_subprocess("ingest-aozora-author", args, ctx=ctx)
-        return _format_cli_ingest_result(result, context=f"人物ID: {person_id}")
+        return label + _format_cli_ingest_result(result, context=f"人物ID: {person_id}")
     except CLISubprocessError as e:
-        return e.format_mcp_error(f"青空文庫作品の取り込みに失敗しました（人物ID: {person_id}）")
+        return label + e.format_mcp_error(f"青空文庫作品の取り込みに失敗しました（人物ID: {person_id}）")
 
 
 @mcp.tool()

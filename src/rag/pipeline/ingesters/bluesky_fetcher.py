@@ -169,12 +169,12 @@ def create_bluesky_fetcher(
     ``client=None`` を渡す際の ``type: ignore`` を不要化する設計。
     """
     if settings.rag_bluesky_fake_mode:
+        from rag.config import PROJECT_ROOT
         from rag.pipeline.ingesters._fake.bluesky import FakeBlueskyFetcher
 
         fixture_dir = Path(settings.rag_bluesky_fake_fixture_dir)
         if not fixture_dir.is_absolute():
-            project_root = Path(__file__).parent.parent.parent.parent.parent
-            fixture_dir = project_root / fixture_dir
+            fixture_dir = PROJECT_ROOT / fixture_dir
         if not fixture_dir.exists():
             raise FileNotFoundError(
                 f"BlueSky fake fixture ディレクトリが見つかりません: {fixture_dir}。"

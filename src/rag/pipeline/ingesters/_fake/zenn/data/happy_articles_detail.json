@@ -1,0 +1,15 @@
+{
+  "article": {
+    "slug": "test-article-001",
+    "title": "Sample Test Article 1",
+    "path": "/testuser/articles/test-article-001",
+    "article_type": "tech",
+    "published_at": "2026-01-01T00:00:00.000+09:00",
+    "liked_count": 0,
+    "topics": [
+      {"display_name": "test", "name": "test"}
+    ],
+    "body_html": "<h2>Sample Test Article 1</h2><p>This is synthetic Fake fixture body content used for L2 Mock E2E verification of the Zenn ingester.</p><p>The content does not correspond to any real Zenn article.</p><pre><code>print('hello synthetic world')</code></pre>",
+    "body_markdown": "# Sample Test Article 1\n\nFake fixture body content."
+  }
+}

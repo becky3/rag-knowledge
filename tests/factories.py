@@ -301,9 +301,68 @@ def make_bluesky_ingester(source_store: Any, **overrides: Any) -> Any:
     return BlueskyIngester(source_store, **defaults)
 
 
+class StubZennFetcher:
+    """ZennFetcher Protocol のテスト用 stub 実装.
+
+    flat な応答シーケンス（dict / Exception の混在リスト）を順番に消費し、
+    list_contents / fetch_content_detail のいずれの呼び出しでも同一シーケンスを
+    使う。これは旧 ``_make_mock_client(responses)`` パターンとの互換性を持たせ、
+    テストの呼び出し順序ベースの記述を維持するため。
+    """
+
+    def __init__(self, responses: list[Any]) -> None:
+        self._responses = list(responses)
+        self._idx = 0
+
+    async def __aenter__(self) -> "StubZennFetcher":
+        return self
+
+    async def __aexit__(self, *exc_info: Any) -> None:
+        return None
+
+    def _next(self) -> Any:
+        if self._idx >= len(self._responses):
+            raise IndexError(
+                f"StubZennFetcher: 応答シーケンスを使い切りました（idx={self._idx}）",
+            )
+        item = self._responses[self._idx]
+        self._idx += 1
+        if isinstance(item, BaseException):
+            raise item
+        return item
+
+    async def list_contents(
+        self,
+        kind: str,
+        username: str,
+        page: int,
+    ) -> dict[str, Any]:
+        del kind, username, page
+        result = self._next()
+        assert isinstance(result, dict)  # noqa: S101
+        return result
+
+    async def fetch_content_detail(
+        self,
+        kind: str,
+        slug: str,
+    ) -> dict[str, Any]:
+        del kind, slug
+        result = self._next()
+        assert isinstance(result, dict)  # noqa: S101
+        return result
+
+
 def make_zenn_ingester(source_store: Any, **overrides: Any) -> Any:
-    """ZennIngester のテスト用ファクトリ."""
+    """ZennIngester のテスト用ファクトリ.
+
+    fetcher は省略可。省略時は空応答の StubZennFetcher を注入する。
+    シナリオを使うテストは overrides で `fetcher=...` を渡す。
+    """
     from rag.pipeline.ingesters.zenn import ZennIngester
+
+    if "fetcher" not in overrides:
+        overrides["fetcher"] = StubZennFetcher([])
 
     defaults: dict[str, Any] = {
         "max_articles": 50,
@@ -343,8 +402,15 @@ def make_youtube_ingester(source_store: Any, **overrides: Any) -> Any:
 
 
 def make_local_ingester(source_store: Any, **overrides: Any) -> Any:
-    """LocalIngester のテスト用ファクトリ."""
-    from rag.pipeline.ingesters.local import LocalIngester
+    """LocalIngester のテスト用ファクトリ.
+
+    fetcher は省略可。省略時は RealLocalFetcher を注入する（既存 tmp_path テストとの
+    互換性維持のため。Fake は filesystem 抽象化のみで実 I/O テストを置き換えない）。
+    """
+    from rag.pipeline.ingesters.local import LocalIngester, RealLocalFetcher
+
+    if "fetcher" not in overrides:
+        overrides["fetcher"] = RealLocalFetcher()
 
     defaults: dict[str, Any] = {
         "supported_extensions": None,
@@ -355,9 +421,68 @@ def make_local_ingester(source_store: Any, **overrides: Any) -> Any:
     return LocalIngester(source_store, **defaults)
 
 
+class StubAozoraFetcher:
+    """AozoraFetcher Protocol のテスト用 stub.
+
+    fetch_catalog_zip / fetch_xhtml に対する応答を辞書 / シーケンスで指定可能。
+    旧 ``_mock_client`` のシンプルな差し替えを互換維持する目的で導入。
+    """
+
+    def __init__(
+        self,
+        *,
+        catalog_zip: bytes | BaseException | None = None,
+        xhtml_responses: list[Any] | None = None,
+        xhtml_default: bytes | BaseException = b"<html><body>test</body></html>",
+    ) -> None:
+        self._catalog_zip = catalog_zip
+        self._xhtml_responses = list(xhtml_responses) if xhtml_responses else None
+        self._xhtml_default = xhtml_default
+        self._xhtml_idx = 0
+
+    async def __aenter__(self) -> "StubAozoraFetcher":
+        return self
+
+    async def __aexit__(self, *exc_info: Any) -> None:
+        return None
+
+    async def fetch_catalog_zip(self) -> bytes:
+        if isinstance(self._catalog_zip, BaseException):
+            raise self._catalog_zip
+        if self._catalog_zip is None:
+            raise RuntimeError("StubAozoraFetcher: catalog_zip 未設定")
+        return self._catalog_zip
+
+    async def fetch_xhtml(self, github_url: str) -> bytes:
+        del github_url
+        if self._xhtml_responses is None:
+            if isinstance(self._xhtml_default, BaseException):
+                raise self._xhtml_default
+            return self._xhtml_default
+        if self._xhtml_idx >= len(self._xhtml_responses):
+            raise IndexError(
+                f"StubAozoraFetcher: xhtml 応答シーケンスを使い切りました（idx={self._xhtml_idx}）",
+            )
+        item = self._xhtml_responses[self._xhtml_idx]
+        self._xhtml_idx += 1
+        if isinstance(item, BaseException):
+            raise item
+        if not isinstance(item, bytes):
+            raise TypeError(
+                f"StubAozoraFetcher: xhtml 応答は bytes でなければなりません（{type(item)}）",
+            )
+        return item
+
+
 def make_aozora_ingester(source_store: Any, **overrides: Any) -> Any:
-    """AozoraIngester のテスト用ファクトリ."""
+    """AozoraIngester のテスト用ファクトリ.
+
+    fetcher は省略可。省略時はデフォルトの StubAozoraFetcher を注入する。
+    """
     from rag.pipeline.ingesters.aozora import AozoraIngester
+
+    if "fetcher" not in overrides:
+        overrides["fetcher"] = StubAozoraFetcher()
 
     defaults: dict[str, Any] = {
         "max_works": 200,

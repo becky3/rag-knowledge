@@ -71,9 +71,23 @@ TEST_SETTINGS_DEFAULTS: dict[str, object] = {
     # BlueSky Fake モード（テストでは fake デフォルト）
     "rag_bluesky_fake_mode": True,
     "rag_bluesky_fake_fixture_dir": "src/rag/pipeline/ingesters/_fake/bluesky/data",
+    # Zenn Fake モード（テストでは fake デフォルト）
+    "rag_zenn_fake_mode": True,
+    "rag_zenn_fake_fixture_dir": "src/rag/pipeline/ingesters/_fake/zenn/data",
+    # Aozora Fake モード（テストでは fake デフォルト）
+    "rag_aozora_fake_mode": True,
+    "rag_aozora_fake_fixture_dir": "src/rag/pipeline/ingesters/_fake/aozora/data",
+    # Local Fake モード（テストでは fake デフォルト。ただし既存 tmp_path テストは Real を使うため
+    # make_local_ingester で fetcher を切替）
+    "rag_local_fake_mode": True,
+    "rag_local_fake_fixture_dir": "src/rag/pipeline/ingesters/_fake/local/data",
     # Embedding Fake モード（テストでは fake デフォルト）
     "rag_embedding_fake_mode": True,
     "rag_embedding_fake_dimensions": 768,
+    # Web (scrapy) Fake モード（テストでは fake デフォルト）
+    "rag_web_fake_mode": True,
+    "rag_scrapy_fake_mode": True,
+    "rag_scrapy_fake_fixture_dir": "src/rag/scrapy/_fake/data",
     "rag_youtube_max_videos": 100,
     "rag_youtube_request_interval": 30.0,
     "rag_youtube_request_timeout": 30,

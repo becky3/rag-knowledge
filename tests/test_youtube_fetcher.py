@@ -48,9 +48,31 @@ class TestCreateYoutubeFetcher:
             create_youtube_fetcher(settings)
 
 
+@pytest.fixture
+def _enable_rag_logger_propagation() -> Any:
+    """``rag`` 名前空間ロガーの propagate を強制 True にする.
+
+    server._configure_and_run が rag ロガーの propagate を False に設定する場合があり、
+    その状態が他テストから影響して caplog がレコードを捕捉できなくなる。
+    本 fixture は rag.config に対する caplog のキャプチャを保証する。
+    """
+    rag_logger = logging.getLogger("rag")
+    rag_config_logger = logging.getLogger("rag.config")
+    original_rag_propagate = rag_logger.propagate
+    original_rag_config_propagate = rag_config_logger.propagate
+    rag_logger.propagate = True
+    rag_config_logger.propagate = True
+    try:
+        yield
+    finally:
+        rag_logger.propagate = original_rag_propagate
+        rag_config_logger.propagate = original_rag_config_propagate
+
+
 class TestLogFakeModeStatus:
     def test_fake_mode_emits_warning(
-        self, caplog: pytest.LogCaptureFixture
+        self, caplog: pytest.LogCaptureFixture,
+        _enable_rag_logger_propagation: None,
     ) -> None:
         settings = _make_settings(rag_youtube_fake_mode=True)
         with caplog.at_level(logging.WARNING, logger="rag.config"):
@@ -60,11 +82,19 @@ class TestLogFakeModeStatus:
             for r in caplog.records
         )
 
-    def test_real_mode_emits_info(self, caplog: pytest.LogCaptureFixture) -> None:
+    def test_real_mode_emits_info(
+        self, caplog: pytest.LogCaptureFixture,
+        _enable_rag_logger_propagation: None,
+    ) -> None:
         settings = _make_settings(
             rag_youtube_fake_mode=False,
             rag_bluesky_fake_mode=False,
             rag_embedding_fake_mode=False,
+            rag_web_fake_mode=False,
+            rag_scrapy_fake_mode=False,
+            rag_zenn_fake_mode=False,
+            rag_aozora_fake_mode=False,
+            rag_local_fake_mode=False,
         )
         with caplog.at_level(logging.INFO, logger="rag.config"):
             log_fake_mode_status(settings)

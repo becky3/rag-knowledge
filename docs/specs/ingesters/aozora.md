@@ -58,6 +58,16 @@ source_store への配置は `place_file` API を経由せず、データファ�
 - [common.md](common.md) の外部 HTTP リクエスト制約に従う（ConstrainedClient 経由）
 - 青空文庫固有のハードリミット: 作品取得上限 500 作品（コード内定数、設定不可）
 
+### AozoraFetcher Port 化と Fake モード
+
+- 外部アクセス処理は `AozoraFetcher` Protocol として抽象化する。Real 実装（`RealAozoraFetcher`）と Fake 実装（`FakeAozoraFetcher`）を `create_aozora_fetcher(settings)` factory で切り替える
+- `RAG_AOZORA_FAKE_MODE`（`.env`）で切替。デフォルトは安全側（fake = true）
+- 詳細は [Aozora Fake Adapter](../infrastructure/fake-adapters/aozora.md) を参照
+- factory シグネチャは youtube パターン（Settings 単引数）。`ConstrainedClient` は Real Fetcher 内部で生成・保持する
+- Fetcher は raw bytes を返し、ZIP 解凍 / CSV パース / 著作権チェック / GitHub Raw URL 変換はインジェスター本体が実施する
+- `AozoraIngester` のコンストラクタは `fetcher: AozoraFetcher` を必須引数として受け取る。本体メソッドの `client` 引数は撤廃済み
+- 起動時に `[FAKE MODE: aozora]` の WARNING ログを出力。MCP `rag_update_aozora_catalog` / `rag_add_aozora` / `rag_crawl_aozora` 応答冒頭にも同ラベルを付与する
+
 ### GitHub Raw URL のレート制限
 
 作品 XHTML の取得先は GitHub Raw URL（`raw.githubusercontent.com`）である。未認証アクセスの場合、レート制限は 60 リクエスト/時間程度。リクエスト間隔のデフォルト値（1.0 秒）はこの制限を考慮した設定である。Token 認証は初期実装では対応しない。

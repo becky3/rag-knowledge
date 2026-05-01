@@ -163,7 +163,8 @@ class TestMcpSiteIngestCliDelegation:
             assert "--max-pages" in cli_args
             assert "10" in cli_args
             mock_format.assert_called_once()
-            assert result == "OK"
+            # fake モード時は応答冒頭に [FAKE MODE: web] ラベルが付与されるため endswith で検証
+            assert result.endswith("OK")
 
     @pytest.mark.asyncio
     async def test_single_url_with_pattern_and_force(self) -> None:
@@ -315,7 +316,13 @@ class TestCliSiteIngestValidation:
 
 
 def _make_cli_mock_settings() -> MagicMock:
-    """CLI テスト用のモック設定を生成する."""
+    """CLI テスト用のモック設定を生成する.
+
+    既存テストは ``patch.object(RealScrapyRunner, "run")`` で Real 実装の
+    run メソッドを差し替える前提のため、ここでは fake モードを無効化する
+    （factory が Real を返すようにする）。Fake 経路の検証は L2 E2E
+    （tests/e2e/test_ingest_mcp_scrapy.py）で行う。
+    """
     s = MagicMock()
     s.site_ingest_temp_dir = "/tmp/test"
     s.site_ingest_delay_sec = 1.0
@@ -323,6 +330,7 @@ def _make_cli_mock_settings() -> MagicMock:
     s.site_ingest_download_timeout = 30
     s.site_ingest_timeout_sec = 0
     s.site_ingest_error_count = 0
+    s.rag_scrapy_fake_mode = False
     return s
 
 
@@ -332,7 +340,7 @@ class TestCliSiteIngestMaxPagesClamp:
     @pytest.mark.asyncio
     async def test_max_pages_clamped_to_1_when_negative(self) -> None:
         """max_pages=-1 が 1 にクランプされること."""
-        from rag.scrapy.runner import CrawlResult, ScrapyRunner
+        from rag.scrapy.runner import CrawlResult, RealScrapyRunner
 
         mock_crawl_result = CrawlResult(
             exit_code=0,
@@ -344,7 +352,7 @@ class TestCliSiteIngestMaxPagesClamp:
         args = argparse.Namespace(url=["https://example.com"], url_pattern="", max_pages=-1, force=False, download_only=False)
 
         with (
-            patch.object(ScrapyRunner, "run", new_callable=AsyncMock, return_value=mock_crawl_result) as mock_run,
+            patch.object(RealScrapyRunner, "run", new_callable=AsyncMock, return_value=mock_crawl_result) as mock_run,
             patch("rag.cli._build_cli_pipeline_controller", return_value=(MagicMock(), _make_cli_mock_settings())),
         ):
             from rag.cli import run_site_ingest
@@ -356,7 +364,7 @@ class TestCliSiteIngestMaxPagesClamp:
     @pytest.mark.asyncio
     async def test_max_pages_clamped_to_1000(self) -> None:
         """max_pages=999999 が 1000 にクランプされること."""
-        from rag.scrapy.runner import CrawlResult, ScrapyRunner
+        from rag.scrapy.runner import CrawlResult, RealScrapyRunner
 
         mock_crawl_result = CrawlResult(
             exit_code=0,
@@ -368,7 +376,7 @@ class TestCliSiteIngestMaxPagesClamp:
         args = argparse.Namespace(url=["https://example.com"], url_pattern="", max_pages=999999, force=False, download_only=False)
 
         with (
-            patch.object(ScrapyRunner, "run", new_callable=AsyncMock, return_value=mock_crawl_result) as mock_run,
+            patch.object(RealScrapyRunner, "run", new_callable=AsyncMock, return_value=mock_crawl_result) as mock_run,
             patch("rag.cli._build_cli_pipeline_controller", return_value=(MagicMock(), _make_cli_mock_settings())),
         ):
             from rag.cli import run_site_ingest
@@ -380,7 +388,7 @@ class TestCliSiteIngestMaxPagesClamp:
     @pytest.mark.asyncio
     async def test_max_pages_uses_settings_default(self) -> None:
         """max_pages 未指定時に設定値が使われること."""
-        from rag.scrapy.runner import CrawlResult, ScrapyRunner
+        from rag.scrapy.runner import CrawlResult, RealScrapyRunner
 
         mock_crawl_result = CrawlResult(
             exit_code=0,
@@ -395,7 +403,7 @@ class TestCliSiteIngestMaxPagesClamp:
         args = argparse.Namespace(url=["https://example.com"], url_pattern="", max_pages=None, force=False, download_only=False)
 
         with (
-            patch.object(ScrapyRunner, "run", new_callable=AsyncMock, return_value=mock_crawl_result) as mock_run,
+            patch.object(RealScrapyRunner, "run", new_callable=AsyncMock, return_value=mock_crawl_result) as mock_run,
             patch("rag.cli._build_cli_pipeline_controller", return_value=(MagicMock(), mock_settings)),
         ):
             from rag.cli import run_site_ingest
@@ -411,7 +419,7 @@ class TestCliSiteIngestFlow:
     @pytest.mark.asyncio
     async def test_no_jsonl_returns_without_bridge(self, capsys: pytest.CaptureFixture[str]) -> None:
         """JSONL 未出力時に Bridge を呼ばず早期リターンすること."""
-        from rag.scrapy.runner import CrawlResult, ScrapyRunner
+        from rag.scrapy.runner import CrawlResult, RealScrapyRunner
 
         mock_crawl_result = CrawlResult(
             exit_code=0,
@@ -423,7 +431,7 @@ class TestCliSiteIngestFlow:
         args = argparse.Namespace(url=["https://example.com"], url_pattern="", max_pages=10, force=False, download_only=False)
 
         with (
-            patch.object(ScrapyRunner, "run", new_callable=AsyncMock, return_value=mock_crawl_result),
+            patch.object(RealScrapyRunner, "run", new_callable=AsyncMock, return_value=mock_crawl_result),
             patch("rag.cli._build_cli_pipeline_controller", return_value=(MagicMock(), _make_cli_mock_settings())),
         ):
             from rag.cli import run_site_ingest
@@ -439,7 +447,7 @@ class TestCliSiteIngestFlow:
 
         from rag.pipeline.ingesters._common import IngestResult
         from rag.scrapy.bridge import BridgeResult
-        from rag.scrapy.runner import CrawlResult, ScrapyRunner
+        from rag.scrapy.runner import CrawlResult, RealScrapyRunner
 
         jsonl_path = tmp_path / "metadata.jsonl"
         jsonl_path.write_text(
@@ -472,7 +480,7 @@ class TestCliSiteIngestFlow:
         args = argparse.Namespace(url=["https://example.com"], url_pattern="", max_pages=10, force=False, download_only=False)
 
         with (
-            patch.object(ScrapyRunner, "run", new_callable=AsyncMock, return_value=mock_crawl_result),
+            patch.object(RealScrapyRunner, "run", new_callable=AsyncMock, return_value=mock_crawl_result),
             patch("rag.cli._build_cli_pipeline_controller", return_value=(mock_controller, _make_cli_mock_settings())),
             patch("rag.pipeline.site_ingest_runner.import_to_source_store", return_value=mock_bridge_result),
         ):
@@ -504,7 +512,7 @@ class TestCliSiteIngestFlow:
 
         from rag.pipeline.ingesters._common import IngestResult
         from rag.scrapy.bridge import BridgeResult
-        from rag.scrapy.runner import CrawlResult, ScrapyRunner
+        from rag.scrapy.runner import CrawlResult, RealScrapyRunner
 
         jsonl_path = tmp_path / "metadata.jsonl"
         jsonl_path.write_text(
@@ -544,7 +552,7 @@ class TestCliSiteIngestFlow:
         args = argparse.Namespace(url=["https://example.com"], url_pattern="", max_pages=10, force=False, download_only=False)
 
         with (
-            patch.object(ScrapyRunner, "run", new_callable=AsyncMock, return_value=mock_crawl_result),
+            patch.object(RealScrapyRunner, "run", new_callable=AsyncMock, return_value=mock_crawl_result),
             patch("rag.cli._build_cli_pipeline_controller", return_value=(mock_controller, _make_cli_mock_settings())),
             patch("rag.pipeline.site_ingest_runner.import_to_source_store", return_value=mock_bridge_result),
         ):
@@ -564,7 +572,7 @@ class TestCliSiteIngestFlow:
 
         from rag.pipeline.ingesters._common import IngestResult
         from rag.scrapy.bridge import BridgeResult
-        from rag.scrapy.runner import CrawlResult, ScrapyRunner
+        from rag.scrapy.runner import CrawlResult, RealScrapyRunner
 
         crawl_dir = tmp_path / "crawl"
         crawl_dir.mkdir()
@@ -601,7 +609,7 @@ class TestCliSiteIngestFlow:
         args = argparse.Namespace(url=["https://example.com"], url_pattern="", max_pages=10, force=False, download_only=False)
 
         with (
-            patch.object(ScrapyRunner, "run", new_callable=AsyncMock, return_value=mock_crawl_result),
+            patch.object(RealScrapyRunner, "run", new_callable=AsyncMock, return_value=mock_crawl_result),
             patch("rag.cli._build_cli_pipeline_controller", return_value=(mock_controller, _make_cli_mock_settings())),
             patch("rag.pipeline.site_ingest_runner.import_to_source_store", return_value=mock_bridge_result),
         ):

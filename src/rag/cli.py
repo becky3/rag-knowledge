@@ -2692,9 +2692,7 @@ async def run_crawl_bluesky(args: argparse.Namespace) -> None:
 
 async def run_crawl_zenn(args: argparse.Namespace) -> None:
     """Zenn コンテンツ取り込み."""
-    from .pipeline.ingesters.zenn import ZennIngester
-
-    from py_common_lib.httpx import ConstrainedClient  # safety:allowed
+    from .pipeline.ingesters.zenn import ZennIngester, create_zenn_fetcher
 
     json_out = _is_json_output(args)
 
@@ -2702,27 +2700,23 @@ async def run_crawl_zenn(args: argparse.Namespace) -> None:
 
     max_articles = args.max_articles if args.max_articles is not None else settings.rag_zenn_max_articles
 
-    zenn_ingester = ZennIngester(
-        controller.source_store,
-        max_articles=max_articles,
-    )
-
     progress_cb = _output_progress if json_out else None
 
     with _write_lock_or_exit(
         Path(controller.source_store.root_dir), json_out=json_out,
     ):
         try:
-            async with ConstrainedClient(
-                request_timeout=settings.rag_zenn_request_timeout,
-                request_interval=settings.rag_zenn_request_interval,
-            ) as client:
+            async with create_zenn_fetcher(settings) as fetcher:
+                zenn_ingester = ZennIngester(
+                    controller.source_store,
+                    fetcher=fetcher,
+                    max_articles=max_articles,
+                )
                 ingest_result = await zenn_ingester.crawl_zenn(
                     args.username,
                     max_articles=max_articles,
                     content_type=args.content_type,
                     force=args.force,
-                    client=client,
                     progress_callback=_wrap_progress(progress_cb, PipelinePhase.FETCH.display),
                 )
         except (ValueError, TypeError) as e:
@@ -2811,31 +2805,23 @@ async def run_ingest_bluesky(args: argparse.Namespace) -> None:
 
 async def run_ingest_zenn(args: argparse.Namespace) -> None:
     """Zenn コンテンツ取り込み（URL 指定）."""
-    from .pipeline.ingesters.zenn import ZennIngester
-
-    from py_common_lib.httpx import ConstrainedClient  # safety:allowed
+    from .pipeline.ingesters.zenn import ZennIngester, create_zenn_fetcher
 
     json_out = _is_json_output(args)
 
     controller, settings = _build_cli_pipeline_controller()
 
-    zenn_ingester = ZennIngester(
-        controller.source_store,
-        max_articles=settings.rag_zenn_max_articles,
-    )
-
     with _write_lock_or_exit(
         Path(controller.source_store.root_dir), json_out=json_out,
     ):
         try:
-            async with ConstrainedClient(
-                request_timeout=settings.rag_zenn_request_timeout,
-                request_interval=settings.rag_zenn_request_interval,
-            ) as client:
-                ingest_result = await zenn_ingester.ingest_contents(
-                    args.url,
-                    client=client,
+            async with create_zenn_fetcher(settings) as fetcher:
+                zenn_ingester = ZennIngester(
+                    controller.source_store,
+                    fetcher=fetcher,
+                    max_articles=settings.rag_zenn_max_articles,
                 )
+                ingest_result = await zenn_ingester.ingest_contents(args.url)
         except (ValueError, TypeError) as e:
             if json_out:
                 _output_error(CliErrorCode.DEPENDENCY_UNAVAILABLE, str(e))
@@ -2942,8 +2928,10 @@ async def run_add_document(args: argparse.Namespace) -> None:
     with _write_lock_or_exit(
         Path(controller.source_store.root_dir), json_out=json_out,
     ):
+        from .pipeline.ingesters.local import create_local_fetcher
         local_ingester = LocalIngester(
             controller.source_store,
+            fetcher=create_local_fetcher(settings),
             supported_extensions=supported_extensions,
             http_mode_enabled=False,
             allowed_dirs=None,
@@ -2982,7 +2970,7 @@ async def run_add_document(args: argparse.Namespace) -> None:
 
 async def run_crawl_documents(args: argparse.Namespace) -> None:
     """ディレクトリ一括取り込み."""
-    from .pipeline.ingesters.local import LocalIngester
+    from .pipeline.ingesters.local import LocalIngester, create_local_fetcher
 
     json_out = _is_json_output(args)
 
@@ -2995,6 +2983,7 @@ async def run_crawl_documents(args: argparse.Namespace) -> None:
     ]
     local_ingester = LocalIngester(
         controller.source_store,
+        fetcher=create_local_fetcher(settings),
         supported_extensions=supported_extensions,
         http_mode_enabled=False,
         allowed_dirs=None,
@@ -3122,11 +3111,9 @@ async def run_site_ingest(args: argparse.Namespace) -> None:
                 )
             return
 
-        bridge_result = execution.bridge
-
         # パイプライン処理
         pipeline_summary = None
-        has_changes = (bridge_result.ingest.placed + bridge_result.ingest.overwritten) > 0
+        has_changes = (execution.ingest.placed + execution.ingest.overwritten) > 0
         if has_changes and not args.download_only:
             pipeline_summary = await controller.ingest_and_index(
                 f"ingest(web): site-ingest {display_url}",
@@ -3145,7 +3132,7 @@ async def run_site_ingest(args: argparse.Namespace) -> None:
 
         if json_out:
             data: dict[str, object] = _ingest_result_to_dict(
-                bridge_result.ingest, pipeline_summary,
+                execution.ingest, pipeline_summary,
             )
             data["elapsed"] = round(elapsed, 1)
             data["download_only"] = args.download_only
@@ -3154,7 +3141,7 @@ async def run_site_ingest(args: argparse.Namespace) -> None:
             _output_result(data)
         else:
             _print_ingest_result(
-                bridge_result.ingest,
+                execution.ingest,
                 pipeline_summary,
                 context=f"サイト: {display_url}",
                 json_output=False,
@@ -3170,25 +3157,20 @@ async def run_site_ingest(args: argparse.Namespace) -> None:
 
 async def run_update_aozora_catalog(args: argparse.Namespace) -> None:
     """青空文庫カタログ更新."""
-    from .pipeline.ingesters.aozora import AozoraIngester
-
-    from py_common_lib.httpx import ConstrainedClient  # safety:allowed
+    from .pipeline.ingesters.aozora import AozoraIngester, create_aozora_fetcher
 
     json_out = _is_json_output(args)
 
     controller, settings = _build_cli_pipeline_controller()
 
-    aozora_ingester = AozoraIngester(
-        controller.source_store,
-        max_works=settings.rag_aozora_max_works,
-    )
-
     try:
-        async with ConstrainedClient(
-            request_timeout=settings.rag_aozora_request_timeout,
-            request_interval=settings.rag_aozora_request_interval,
-        ) as client:
-            result_text = await aozora_ingester.update_catalog(client=client)
+        async with create_aozora_fetcher(settings) as fetcher:
+            aozora_ingester = AozoraIngester(
+                controller.source_store,
+                fetcher=fetcher,
+                max_works=settings.rag_aozora_max_works,
+            )
+            result_text = await aozora_ingester.update_catalog()
     except (ValueError, TypeError) as e:
         if json_out:
             _output_error(CliErrorCode.DEPENDENCY_UNAVAILABLE, str(e))
@@ -3206,14 +3188,18 @@ async def run_update_aozora_catalog(args: argparse.Namespace) -> None:
 
 def run_search_aozora(args: argparse.Namespace) -> None:
     """青空文庫カタログ検索."""
-    from .pipeline.ingesters.aozora import AozoraIngester
+    from .pipeline.ingesters.aozora import AozoraIngester, create_aozora_fetcher
 
     json_out = _is_json_output(args)
 
     controller, settings = _build_cli_pipeline_controller()
 
+    # search はローカルカタログ走査のみで HTTP アクセスを行わないが、
+    # AozoraIngester のコンストラクタは fetcher を必須とするため factory で生成する。
+    # async with は使わないため、Real 実装の場合 client は初期化されないが本処理では呼ばない。
     aozora_ingester = AozoraIngester(
         controller.source_store,
+        fetcher=create_aozora_fetcher(settings),
         max_works=settings.rag_aozora_max_works,
     )
 
@@ -3265,31 +3251,24 @@ def run_search_aozora(args: argparse.Namespace) -> None:
 
 async def run_ingest_aozora(args: argparse.Namespace) -> None:
     """青空文庫作品取り込み."""
-    from .pipeline.ingesters.aozora import AozoraIngester
-
-    from py_common_lib.httpx import ConstrainedClient  # safety:allowed
+    from .pipeline.ingesters.aozora import AozoraIngester, create_aozora_fetcher
 
     json_out = _is_json_output(args)
     progress_cb = _output_progress if json_out else None
 
     controller, settings = _build_cli_pipeline_controller()
 
-    aozora_ingester = AozoraIngester(
-        controller.source_store,
-        max_works=settings.rag_aozora_max_works,
-    )
-
     with _write_lock_or_exit(
         Path(controller.source_store.root_dir), json_out=json_out,
     ):
         try:
-            async with ConstrainedClient(
-                request_timeout=settings.rag_aozora_request_timeout,
-                request_interval=settings.rag_aozora_request_interval,
-            ) as client:
-                ingest_result = await aozora_ingester.add_work(
-                    args.book_id, client=client,
+            async with create_aozora_fetcher(settings) as fetcher:
+                aozora_ingester = AozoraIngester(
+                    controller.source_store,
+                    fetcher=fetcher,
+                    max_works=settings.rag_aozora_max_works,
                 )
+                ingest_result = await aozora_ingester.add_work(args.book_id)
         except (ValueError, TypeError) as e:
             if json_out:
                 _output_error(CliErrorCode.DEPENDENCY_UNAVAILABLE, str(e))
@@ -3306,9 +3285,7 @@ async def run_ingest_aozora(args: argparse.Namespace) -> None:
 
 async def run_ingest_aozora_author(args: argparse.Namespace) -> None:
     """青空文庫著者一括取り込み."""
-    from .pipeline.ingesters.aozora import AozoraIngester
-
-    from py_common_lib.httpx import ConstrainedClient  # safety:allowed
+    from .pipeline.ingesters.aozora import AozoraIngester, create_aozora_fetcher
 
     json_out = _is_json_output(args)
 
@@ -3316,25 +3293,21 @@ async def run_ingest_aozora_author(args: argparse.Namespace) -> None:
 
     max_works = args.max_works if args.max_works is not None else settings.rag_aozora_max_works
 
-    aozora_ingester = AozoraIngester(
-        controller.source_store,
-        max_works=max_works,
-    )
-
     progress_cb = _output_progress if json_out else None
 
     with _write_lock_or_exit(
         Path(controller.source_store.root_dir), json_out=json_out,
     ):
         try:
-            async with ConstrainedClient(
-                request_timeout=settings.rag_aozora_request_timeout,
-                request_interval=settings.rag_aozora_request_interval,
-            ) as client:
+            async with create_aozora_fetcher(settings) as fetcher:
+                aozora_ingester = AozoraIngester(
+                    controller.source_store,
+                    fetcher=fetcher,
+                    max_works=max_works,
+                )
                 ingest_result = await aozora_ingester.crawl_author(
                     args.person_id,
                     max_works=max_works,
-                    client=client,
                     progress_callback=_wrap_progress(progress_cb, PipelinePhase.FETCH.display),
                 )
         except (ValueError, TypeError) as e:

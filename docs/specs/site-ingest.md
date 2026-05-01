@@ -39,6 +39,18 @@ MCP ツール `rag_site_ingest` と CLI コマンド `site-ingest` の 2 つの�
 - ConstrainedClient は使用しない。Scrapy が HTTP リクエストを直接管理する
 - 現行の raw HTTP チェック（`check-raw-http` ワークフロー）は aiohttp/httpx/requests/urllib.request の直接利用のみを検出対象としており、Scrapy の利用は検出対象外のため、`# safety:allowed` コメントによる CI 例外指定は不要である
 
+### `ScrapyRunner` Port 化と Fake モード
+
+- subprocess ラッパーは `ScrapyRunner` Protocol として抽象化される。Real 実装（`RealScrapyRunner`）と Fake 実装（`FakeScrapyRunner`）を `create_scrapy_runner(settings)` factory で切り替える
+- Fake モードでは subprocess を起動せず、fixture から JSONL + HTML 相当を tmp に展開する。詳細は [Scrapy Fake Adapter](infrastructure/fake-adapters/scrapy.md) を参照
+- `RAG_WEB_FAKE_MODE`（`.env`）が web 系の上位スイッチ。内部 `rag_scrapy_fake_mode` フィールドへ pydantic Settings の `model_validator` で派生する。詳細は [Fake モード基盤](infrastructure/fake-mode.md) を参照
+- 起動時に `[FAKE MODE: web]` の WARNING ログを出力。MCP `rag_site_ingest` 応答冒頭にも同ラベルを付与する
+
+### `BridgeResult` の取り扱い（内部型）
+
+- Bridge 処理の戻り値型 `BridgeResult` は `src/rag/scrapy/bridge.py` 内部の中間型として保持し、外部に露出しない
+- `SiteIngestExecution` は `ingest: IngestResult` / `total_lines: int` / `parse_errors: int` を直接保持する形に統一されている。呼び出し元（CLI / bluesky.delegations）からは `IngestResult` 1 系統で参照可能
+
 ### ドメイン制約
 
 - **クロールモード**: Scrapy の `allowed_domains` により、クロール対象を開始 URL と同一ドメインに制限する。リンク辿りで発見された URL は同一ドメイン制約で自動的に制限される

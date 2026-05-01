@@ -14,8 +14,10 @@ from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Protocol
 from urllib.parse import urlparse
 
-from ..scrapy.bridge import BridgeResult, import_to_source_store
-from ..scrapy.runner import CrawlResult, ScrapyRunner
+from rag.pipeline.ingesters._common import IngestResult
+
+from ..scrapy.bridge import import_to_source_store
+from ..scrapy.runner import CrawlResult, ScrapyRunner, create_scrapy_runner
 
 if TYPE_CHECKING:
     from ..config import RAGSettings
@@ -71,9 +73,15 @@ class SiteIngestExecution:
     順序（クロール → Bridge → パイプライン処理 → クリーンアップ）と整合させる。
     所要時間は呼び出し元（CLI なら全体時間、bluesky なら集計対象外）が独自に
     測るため、本クラスは経過時間を保持しない。
+
+    ``ingest`` / ``total_lines`` / ``parse_errors`` は Bridge 処理結果の展開。
+    Bridge の中間型（``BridgeResult``）は ``bridge.py`` 内部に隠蔽され、
+    呼び出し元は ``IngestResult`` を直接参照する。
     """
 
-    bridge: BridgeResult = field(default_factory=BridgeResult)
+    ingest: IngestResult = field(default_factory=IngestResult)
+    total_lines: int = 0
+    parse_errors: int = 0
     scrapy_exit_code: int = 0
     scrapy_success: bool = True
     no_output: bool = False
@@ -125,14 +133,7 @@ async def execute_site_ingest(
         parsed = urlparse(urls[0])
         allowed_domains = parsed.hostname or ""
 
-    runner = ScrapyRunner(
-        temp_dir=settings.site_ingest_temp_dir,
-        delay_sec=settings.site_ingest_delay_sec,
-        max_pages=max_pages or settings.site_ingest_max_pages,
-        download_timeout=settings.site_ingest_download_timeout,
-        timeout_sec=settings.site_ingest_timeout_sec,
-        error_count=settings.site_ingest_error_count,
-    )
+    runner: ScrapyRunner = create_scrapy_runner(settings)
 
     if multi_url_mode:
         crawl_result = await runner.run(
@@ -158,11 +159,14 @@ async def execute_site_ingest(
         execution.no_output = True
         return execution
 
-    execution.bridge = import_to_source_store(
+    bridge_result = import_to_source_store(
         jsonl_path=crawl_result.jsonl_path,
         html_dir=crawl_result.output_dir,
         source_store=source_store,
     )
+    execution.ingest = bridge_result.ingest
+    execution.total_lines = bridge_result.total_lines
+    execution.parse_errors = bridge_result.parse_errors
 
     return execution
 

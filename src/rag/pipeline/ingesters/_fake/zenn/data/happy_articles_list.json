@@ -1,0 +1,15 @@
+{
+  "articles": [
+    {
+      "slug": "test-article-001",
+      "title": "Sample Test Article 1",
+      "user": {"username": "testuser"}
+    },
+    {
+      "slug": "test-article-002",
+      "title": "Sample Test Article 2",
+      "user": {"username": "testuser"}
+    }
+  ],
+  "next_page": null
+}

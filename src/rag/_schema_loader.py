@@ -12,15 +12,14 @@ rag-knowledge はソースツリーからの editable install で運用するた
 from __future__ import annotations
 
 from functools import lru_cache
-from pathlib import Path
 from typing import Any, cast, get_args
 
 import yaml
 
+from rag.config import PROJECT_ROOT
 from rag.store.models import SourceType
 
-_REPO_ROOT = Path(__file__).resolve().parents[2]
-_ENUMS_PATH = _REPO_ROOT / "_schema" / "enums.yml"
+_ENUMS_PATH = PROJECT_ROOT / "_schema" / "enums.yml"
 
 
 @lru_cache(maxsize=1)

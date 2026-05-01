@@ -19,8 +19,11 @@ import shutil
 import sys
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any, Protocol
 from urllib.parse import urlparse
+
+if TYPE_CHECKING:
+    from rag.config import RAGSettings
 
 logger = logging.getLogger(__name__)
 
@@ -78,8 +81,42 @@ class CrawlResult:
             )
 
 
-class ScrapyRunner:
-    """Scrapy プロセスの subprocess ラッパー.
+class ScrapyRunner(Protocol):
+    """Scrapy 実行の抽象 Port.
+
+    Real / Fake で同じシグネチャを実装する。Real は subprocess で Scrapy Spider を
+    起動して JSONL + HTML を生成し、Fake は fixture から相当ファイル群を tmp に
+    展開する。戻り値はいずれの実装でも ``CrawlResult`` 型に揃える。
+    """
+
+    async def run(
+        self,
+        *,
+        start_url: str = "",
+        start_urls: list[str] | None = None,
+        allowed_domains: str = "",
+        url_pattern: str = "",
+        max_pages: int | None = None,
+        force: bool = False,
+    ) -> CrawlResult:
+        """Scrapy クロールを実行する.
+
+        Args:
+            start_url: クロール開始 URL（クロールモード、start_urls と排他）
+            start_urls: 取得対象 URL のリスト（複数 URL モード、start_url と排他）
+            allowed_domains: ドメイン制約（カンマ区切り）
+            url_pattern: URL フィルタ正規表現（クロールモードのみ）
+            max_pages: ページ数上限（None の場合は実装依存のデフォルト）
+            force: True の場合、クロールディレクトリ全体を削除して最初からクロール
+
+        Returns:
+            クロール実行結果
+        """
+        ...
+
+
+class RealScrapyRunner:
+    """Scrapy プロセスの subprocess ラッパー（Real 実装）.
 
     asyncio.create_subprocess_exec で Scrapy Spider を起動し、
     プロセスの終了を待機して結果を返す。
@@ -298,11 +335,9 @@ class ScrapyRunner:
         コードインジェクション防止のため、ユーザー入力は JSON ファイル経由で渡す。
         インラインスクリプトにはファイルパス（内部生成値）と src_dir のみ埋め込む。
         """
-        # src/ ディレクトリのパスを計算
-        # runner.py は src/rag/scrapy/runner.py にあるので、3階層上が src/
-        src_dir = str(
-            Path(__file__).resolve().parent.parent.parent
-        ).replace("\\", "/")
+        # src/ ディレクトリのパスを計算（PROJECT_ROOT 経由で算出、SSoT に統合）
+        from rag.config import PROJECT_ROOT
+        src_dir = str(PROJECT_ROOT / "src").replace("\\", "/")
 
         # params_path は内部生成値のため安全
         safe_params_path = str(params_path).replace("\\", "/")
@@ -365,3 +400,35 @@ process.crawl(
 )
 process.start()
 """
+
+
+def create_scrapy_runner(settings: RAGSettings) -> ScrapyRunner:
+    """Settings から Real / Fake のいずれかを選択して返すファクトリ.
+
+    .env の RAG_WEB_FAKE_MODE が true（または RAG_SCRAPY_FAKE_MODE が true）の場合
+    は FakeScrapyRunner を返し、subprocess を起動しない。
+    """
+    if settings.rag_scrapy_fake_mode:
+        from rag.config import PROJECT_ROOT
+        from rag.scrapy._fake import FakeScrapyRunner
+
+        fixture_dir = Path(settings.rag_scrapy_fake_fixture_dir)
+        if not fixture_dir.is_absolute():
+            fixture_dir = PROJECT_ROOT / fixture_dir
+        if not fixture_dir.exists():
+            raise FileNotFoundError(
+                f"Scrapy fake fixture ディレクトリが見つかりません: {fixture_dir}。"
+                f"RAG_SCRAPY_FAKE_FIXTURE_DIR を確認してください"
+            )
+        return FakeScrapyRunner(
+            temp_dir=settings.site_ingest_temp_dir,
+            fixture_dir=fixture_dir,
+        )
+    return RealScrapyRunner(
+        temp_dir=settings.site_ingest_temp_dir,
+        delay_sec=settings.site_ingest_delay_sec,
+        max_pages=settings.site_ingest_max_pages,
+        download_timeout=settings.site_ingest_download_timeout,
+        timeout_sec=settings.site_ingest_timeout_sec,
+        error_count=settings.site_ingest_error_count,
+    )

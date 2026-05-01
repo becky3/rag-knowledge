@@ -16,7 +16,6 @@ from rag.pipeline.ingesters.youtube_protocols import (
     RealYoutubeClassifier,
 )
 from rag.pipeline.site_ingest_runner import SiteIngestExecution
-from rag.scrapy.bridge import BridgeResult
 
 
 def _item_with_urls(
@@ -45,13 +44,16 @@ def _make_execution(
     parse_errors: int = 0,
 ) -> SiteIngestExecution:
     """site_ingest 結果オブジェクトを生成."""
-    bridge = BridgeResult()
-    bridge.ingest.placed = placed
-    bridge.ingest.errors = errors
+    ingest = IngestResult()
+    ingest.placed = placed
+    ingest.errors = errors
     if error_details:
-        bridge.ingest.error_details = list(error_details)
-    bridge.parse_errors = parse_errors
-    execution = SiteIngestExecution(bridge=bridge, scrapy_success=True)
+        ingest.error_details = list(error_details)
+    execution = SiteIngestExecution(
+        ingest=ingest,
+        parse_errors=parse_errors,
+        scrapy_success=True,
+    )
     execution.crawl_result = None
     return execution
 

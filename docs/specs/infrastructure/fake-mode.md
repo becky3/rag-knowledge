@@ -122,9 +122,19 @@ Fake Fetcher が返すデータ内の識別子は実在の ID と衝突しない
 | BlueSky | DID | `did:plc:test` プレフィックス | `did:plc:test01234567` |
 | BlueSky | handle | `*.bsky.social` の `test` プレフィックス | `test.bsky.social` |
 | BlueSky | rkey | `testrkey` プレフィックス | `testrkey00000` |
-| Zenn（将来）| slug | `test-` プレフィックス | `test-article-001` |
+| Zenn | slug | `test-` プレフィックス | `test-article-001` |
+| Zenn | username | `testuser` プレフィックス | `testuser` |
+| Aozora | book_id | `999900` 番台（実在しない範囲） | `999900` / `999901` |
+| Aozora | person_id | `99999` 番台 | `99999` |
+| Local | ファイル名 | `test_` プレフィックス | `test_doc1.md` / `test_doc2.txt` |
+| Web (scrapy) | URL | `https://test.invalid/` プレフィックス（IANA 予約 TLD、RFC 6761） | `https://test.invalid/page1` |
 
 新たな source_type を追加する際は、本テーブルに synthetic ID 規約を追記すること。
+
+**テスト入力 URL の扱い**: Web (scrapy) では Fake Runner が **入力 URL を無視して fixture URL を返す** ため、
+テストの入力には IANA 予約・実在ドメイン（`example.com` / `example.org` / `example.net`）を使う。
+これらは DNS / SSRF 検証を通過し、Fake Runner では実 HTTP リクエストが発生しない。
+Fake が返却する **出力 URL** のみ `test.invalid` を使う。
 
 ### Fake データの配置
 
@@ -187,7 +197,18 @@ Embedding 層は外部の LM Studio / OpenAI API への HTTP 通信を伴うた�
 |---|---|---|---|
 | `RAG_{SOURCE_TYPE}_FAKE_MODE` | `true` / `false` | `true` | true で Fake Fetcher を注入。false で Real Fetcher を注入 |
 | `RAG_{SOURCE_TYPE}_FAKE_FIXTURE_DIR` | パス | source_type ごとに個別仕様書で定義 | Fake Fetcher が読み込む fixture ディレクトリ |
+| `RAG_WEB_FAKE_MODE` | `true` / `false` | `true` | **上位スイッチ**。site-ingest（scrapy）の fake モード切替を司る。内部の `rag_scrapy_fake_mode` の既定値として派生する（個別 env が `.env` で明示されていない場合） |
 | `RAG_TESTS_ALLOW_NETWORK` | `1` | 未設定 | autouse 安全網を解除する（pytest 専用、特殊用途） |
+
+#### 上位スイッチの派生階層
+
+`RAG_WEB_FAKE_MODE` は web 系の fake モードを統括する上位スイッチ。`.env` で公開される唯一の web 系フラグであり、内部 Settings の個別フィールドへ派生する:
+
+| 上位 env | 内部 Settings フィールド | 派生先のサブシステム |
+|---|---|---|
+| `RAG_WEB_FAKE_MODE` | `rag_scrapy_fake_mode` | site-ingest（Scrapy subprocess） |
+
+派生ロジックは `_EnvLoader` の `model_validator(mode="after")` に集約される。個別 env（例えば将来導入される `RAG_SCRAPY_FAKE_MODE`）が `.env` で明示されている場合はそちらが優先される構造を維持する（現段階では個別 env は未公開）。
 
 ### Fetcher Protocol（共通形式）
 
@@ -301,6 +322,10 @@ flowchart TB
 
 - [YouTube Fake Adapter](fake-adapters/youtube.md) — 最初の対象 source_type 個別仕様
 - [BlueSky Fake Adapter](fake-adapters/bluesky.md) — 2 番目の対象 source_type 個別仕様（Issue #704、U2 で実装）
+- [Scrapy Fake Adapter](fake-adapters/scrapy.md) — site-ingest 用 Fake Runner の個別仕様（Issue #705）
+- [Zenn Fake Adapter](fake-adapters/zenn.md) — Zenn API 用 Fake Fetcher の個別仕様（Issue #705）
+- [Aozora Fake Adapter](fake-adapters/aozora.md) — 青空文庫用 Fake Fetcher の個別仕様（Issue #705）
+- [Local Fake Adapter](fake-adapters/local.md) — Local 用 Fake Fetcher の個別仕様（Issue #705、filesystem 抽象化のみ）
 - [YouTube インジェスター](../ingesters/youtube.md) — Fetcher 抽象化対象のインジェスター仕様
 - [BlueSky インジェスター](../ingesters/bluesky.md) — Fetcher 抽象化対象のインジェスター仕様（Issue #704）
 - [Zenn インジェスター](../ingesters/zenn.md) — 将来の水平展開対象

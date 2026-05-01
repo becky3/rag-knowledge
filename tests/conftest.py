@@ -25,6 +25,32 @@ import pytest
 sys.path.insert(0, str(Path(__file__).parent))
 
 
+def _bootstrap_env_from_example() -> None:
+    """`.env` 不在時（CI 等）は `.env.example` の値を OS 環境変数に流し込む.
+
+    `_EnvLoader` は env_file が存在しない場合は OS 環境変数のみで初期化される。
+    CI 環境（`.env` を配置しない）で `get_settings()` を直接呼ぶテスト
+    （MCP ツールの `_fake_mode_labels` 経由等）が `_EnvLoader` の必須フィールド欠落で
+    失敗するのを構造的に防ぐ。
+
+    既存の OS 環境変数は上書きせず、ローカル開発者の `.env` 設定とも干渉しない
+    （`.env` がある場合は pydantic-settings が env_file から読み込むため本処理は no-op）。
+    """
+    repo_root = Path(__file__).parent.parent
+    env_file = repo_root / ".env"
+    if env_file.exists():
+        return
+    example_file = repo_root / ".env.example"
+    if not example_file.exists():
+        return
+    for raw in example_file.read_text(encoding="utf-8").splitlines():
+        line = raw.strip()
+        if not line or line.startswith("#") or "=" not in line:
+            continue
+        key, _, value = line.partition("=")
+        os.environ.setdefault(key.strip(), value.strip())
+
+
 def pytest_configure(config: pytest.Config) -> None:
     """起動時 env チェック + package layout 整合性検証.
 
@@ -36,6 +62,8 @@ def pytest_configure(config: pytest.Config) -> None:
     走査するため、同名 stem の混入があると意図しない衝突として検出される）。
     fixture は ``.json`` 等の data 形式で配置する。
     """
+    _bootstrap_env_from_example()
+
     from rag.config import validate_utf8_environment
 
     validate_utf8_environment()
@@ -144,6 +172,105 @@ def _force_bluesky_fake_mode() -> Iterator[None]:
         return
     with pytest.MonkeyPatch.context() as mp:
         mp.setenv("RAG_BLUESKY_FAKE_MODE", "true")
+        yield
+
+
+@pytest.fixture(autouse=True, scope="session")
+def _force_local_fake_mode() -> Iterator[None]:
+    """テスト中は Local Fake モードを環境変数で強制する.
+
+    仕様: docs/specs/infrastructure/fake-mode.md
+    仕様: docs/specs/infrastructure/fake-adapters/local.md
+
+    create_local_fetcher が pydantic Settings 経由で
+    `RAG_LOCAL_FAKE_MODE=true` を読み込むため、ここで環境変数に明示設定する。
+
+    `RAG_TESTS_ALLOW_NETWORK=1` 設定時のみ強制を解除する。
+
+    既存の tmp_path ベース単体テストは make_local_ingester のデフォルト RealLocalFetcher を
+    使うため、本 env 強制は CLI/MCP 経路（subprocess 越境）のみに影響する。
+    """
+    if os.environ.get("RAG_TESTS_ALLOW_NETWORK") == "1":
+        yield
+        return
+    with pytest.MonkeyPatch.context() as mp:
+        mp.setenv("RAG_LOCAL_FAKE_MODE", "true")
+        yield
+
+
+@pytest.fixture(autouse=True, scope="session")
+def _force_aozora_fake_mode() -> Iterator[None]:
+    """テスト中は Aozora Fake モードを環境変数で強制する.
+
+    仕様: docs/specs/infrastructure/fake-mode.md
+    仕様: docs/specs/infrastructure/fake-adapters/aozora.md
+
+    create_aozora_fetcher が pydantic Settings 経由で
+    `RAG_AOZORA_FAKE_MODE=true` を読み込むため、ここで環境変数に明示設定する。
+
+    `RAG_TESTS_ALLOW_NETWORK=1` 設定時のみ強制を解除する。
+
+    httpx クライアントクラス全体の `_RaiseOnUse` 差し替えは採用しない（bluesky / zenn と同方式）。
+    """
+    if os.environ.get("RAG_TESTS_ALLOW_NETWORK") == "1":
+        yield
+        return
+    with pytest.MonkeyPatch.context() as mp:
+        mp.setenv("RAG_AOZORA_FAKE_MODE", "true")
+        yield
+
+
+@pytest.fixture(autouse=True, scope="session")
+def _force_zenn_fake_mode() -> Iterator[None]:
+    """テスト中は Zenn Fake モードを環境変数で強制する.
+
+    仕様: docs/specs/infrastructure/fake-mode.md
+    仕様: docs/specs/infrastructure/fake-adapters/zenn.md
+
+    create_zenn_fetcher が pydantic Settings 経由で
+    `RAG_ZENN_FAKE_MODE=true` を読み込むため、ここで環境変数に明示設定する。
+    subprocess 越境テスト（e2e）でも同じ環境変数を引き継ぐ。
+
+    `RAG_TESTS_ALLOW_NETWORK=1` 設定時のみ強制を解除する（手動の本番回帰検証等の
+    特殊用途）。
+
+    httpx クライアントクラス全体の `_RaiseOnUse` 差し替えは採用しない。
+    zenn 以外の用途で httpx を使う多くの既存コードを誤爆させるため、`.env` +
+    DI ファクトリ経由で Fake を選択させる本機構（bluesky と同じ）に揃える。
+    """
+    if os.environ.get("RAG_TESTS_ALLOW_NETWORK") == "1":
+        yield
+        return
+    with pytest.MonkeyPatch.context() as mp:
+        mp.setenv("RAG_ZENN_FAKE_MODE", "true")
+        yield
+
+
+@pytest.fixture(autouse=True, scope="session")
+def _force_web_fake_mode() -> Iterator[None]:
+    """テスト中は Web (scrapy) Fake モードを環境変数で強制する.
+
+    仕様: docs/specs/infrastructure/fake-mode.md
+    仕様: docs/specs/infrastructure/fake-adapters/scrapy.md
+
+    create_scrapy_runner が pydantic Settings 経由で
+    `RAG_WEB_FAKE_MODE=true` を読み込むため、ここで環境変数に明示設定する。
+    subprocess 越境テスト（e2e）でも同じ環境変数を引き継ぎ、子プロセス内の
+    create_scrapy_runner も Fake を選択する。
+
+    `RAG_TESTS_ALLOW_NETWORK=1` 設定時のみ強制を解除する（手動の本番回帰検証等の
+    特殊用途）。
+
+    Scrapy / Twisted クラスを `_RaiseOnUse` に差し替える方式は採用しない。
+    Twisted reactor 周りのクラス階層が複雑で、scrapy 以外の用途で Twisted を
+    使うコード（一般には少ないが）を誤爆させるリスクがあるため、`.env` +
+    DI ファクトリ経由で Fake を選択させる本機構（bluesky と同じ）に揃える。
+    """
+    if os.environ.get("RAG_TESTS_ALLOW_NETWORK") == "1":
+        yield
+        return
+    with pytest.MonkeyPatch.context() as mp:
+        mp.setenv("RAG_WEB_FAKE_MODE", "true")
         yield
 
 

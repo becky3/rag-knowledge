@@ -21,7 +21,7 @@ from urllib.parse import urlparse
 import pytest
 
 from factories import make_scrapy_runner_args
-from rag.scrapy.runner import CrawlResult, ScrapyRunner, _crawl_key
+from rag.scrapy.runner import CrawlResult, RealScrapyRunner, _crawl_key
 
 
 async def _async_lines_iter(lines: list[bytes]):
@@ -193,7 +193,7 @@ class TestBuildSpiderScript:
 
     def test_script_contains_settings(self, tmp_path: Path) -> None:
         """スクリプトに Scrapy 設定が JSON から読み込まれる構造を含むこと."""
-        runner = ScrapyRunner(
+        runner = RealScrapyRunner(
             **make_scrapy_runner_args(
                 temp_dir=tmp_path,
                 delay_sec=0.5,
@@ -213,7 +213,7 @@ class TestBuildSpiderScript:
 
     def test_script_contains_spider_args(self, tmp_path: Path) -> None:
         """スクリプトに Spider 引数が JSON 経由で渡される構造を含むこと."""
-        runner = ScrapyRunner(**make_scrapy_runner_args(temp_dir=tmp_path))
+        runner = RealScrapyRunner(**make_scrapy_runner_args(temp_dir=tmp_path))
         params_path = _write_params(
             tmp_path,
             start_url="https://docs.example.com/guide",
@@ -229,7 +229,7 @@ class TestBuildSpiderScript:
 
     def test_script_imports(self, tmp_path: Path) -> None:
         """スクリプトに必要な import が含まれること."""
-        runner = ScrapyRunner(**make_scrapy_runner_args(temp_dir=tmp_path))
+        runner = RealScrapyRunner(**make_scrapy_runner_args(temp_dir=tmp_path))
         params_path = _write_params(tmp_path)
         script = runner._build_spider_script(params_path=params_path)
 
@@ -240,7 +240,7 @@ class TestBuildSpiderScript:
 
     def test_script_adds_src_to_path(self, tmp_path: Path) -> None:
         """スクリプトが src/ を sys.path に追加すること."""
-        runner = ScrapyRunner(**make_scrapy_runner_args(temp_dir=tmp_path))
+        runner = RealScrapyRunner(**make_scrapy_runner_args(temp_dir=tmp_path))
         params_path = _write_params(tmp_path)
         script = runner._build_spider_script(params_path=params_path)
 
@@ -248,7 +248,7 @@ class TestBuildSpiderScript:
 
     def test_script_reads_json_params(self, tmp_path: Path) -> None:
         """スクリプトが JSON ファイルからパラメータを読み込むこと."""
-        runner = ScrapyRunner(**make_scrapy_runner_args(temp_dir=tmp_path))
+        runner = RealScrapyRunner(**make_scrapy_runner_args(temp_dir=tmp_path))
         params_path = _write_params(tmp_path)
         script = runner._build_spider_script(params_path=params_path)
 
@@ -257,7 +257,7 @@ class TestBuildSpiderScript:
 
     def test_script_contains_bfs_settings(self, tmp_path: Path) -> None:
         """スクリプトに BFS 設定が含まれること."""
-        runner = ScrapyRunner(**make_scrapy_runner_args(temp_dir=tmp_path))
+        runner = RealScrapyRunner(**make_scrapy_runner_args(temp_dir=tmp_path))
         params_path = _write_params(tmp_path)
         script = runner._build_spider_script(params_path=params_path)
 
@@ -267,7 +267,7 @@ class TestBuildSpiderScript:
 
     def test_script_does_not_contain_closespider_pagecount(self, tmp_path: Path) -> None:
         """スクリプトに CLOSESPIDER_PAGECOUNT が含まれないこと."""
-        runner = ScrapyRunner(**make_scrapy_runner_args(temp_dir=tmp_path))
+        runner = RealScrapyRunner(**make_scrapy_runner_args(temp_dir=tmp_path))
         params_path = _write_params(tmp_path)
         script = runner._build_spider_script(params_path=params_path)
 
@@ -275,7 +275,7 @@ class TestBuildSpiderScript:
 
     def test_script_contains_closespider_timeout_conditional(self, tmp_path: Path) -> None:
         """スクリプトに CLOSESPIDER_TIMEOUT の条件分岐が含まれること."""
-        runner = ScrapyRunner(**make_scrapy_runner_args(temp_dir=tmp_path))
+        runner = RealScrapyRunner(**make_scrapy_runner_args(temp_dir=tmp_path))
         params_path = _write_params(tmp_path, timeout_sec=300)
         script = runner._build_spider_script(params_path=params_path)
 
@@ -284,7 +284,7 @@ class TestBuildSpiderScript:
 
     def test_script_contains_closespider_errorcount_conditional(self, tmp_path: Path) -> None:
         """スクリプトに CLOSESPIDER_ERRORCOUNT の条件分岐が含まれること."""
-        runner = ScrapyRunner(**make_scrapy_runner_args(temp_dir=tmp_path))
+        runner = RealScrapyRunner(**make_scrapy_runner_args(temp_dir=tmp_path))
         params_path = _write_params(tmp_path, error_count=10)
         script = runner._build_spider_script(params_path=params_path)
 
@@ -292,16 +292,16 @@ class TestBuildSpiderScript:
         assert "params.get('error_count')" in script
 
 
-# --- ScrapyRunner.run テスト（モック） ---
+# --- RealScrapyRunner.run テスト（モック） ---
 
 
-class TestScrapyRunnerRun:
-    """ScrapyRunner.run のモックテスト."""
+class TestRealScrapyRunnerRun:
+    """RealScrapyRunner.run のモックテスト."""
 
     @pytest.mark.asyncio()
     async def test_successful_crawl(self, tmp_path: Path) -> None:
         """正常終了のクロール."""
-        runner = ScrapyRunner(**make_scrapy_runner_args(temp_dir=tmp_path))
+        runner = RealScrapyRunner(**make_scrapy_runner_args(temp_dir=tmp_path))
 
         mock_process = AsyncMock()
         mock_process.wait.return_value = 0
@@ -319,7 +319,7 @@ class TestScrapyRunnerRun:
     @pytest.mark.asyncio()
     async def test_failed_crawl(self, tmp_path: Path) -> None:
         """異常終了のクロール."""
-        runner = ScrapyRunner(**make_scrapy_runner_args(temp_dir=tmp_path))
+        runner = RealScrapyRunner(**make_scrapy_runner_args(temp_dir=tmp_path))
 
         mock_process = AsyncMock()
         mock_process.wait.return_value = 1
@@ -340,7 +340,7 @@ class TestScrapyRunnerRun:
     @pytest.mark.asyncio()
     async def test_directory_structure_created(self, tmp_path: Path) -> None:
         """一時保存ディレクトリ構造が作成されること."""
-        runner = ScrapyRunner(**make_scrapy_runner_args(temp_dir=tmp_path))
+        runner = RealScrapyRunner(**make_scrapy_runner_args(temp_dir=tmp_path))
 
         mock_process = AsyncMock()
         mock_process.wait.return_value = 0
@@ -357,7 +357,7 @@ class TestScrapyRunnerRun:
     @pytest.mark.asyncio()
     async def test_force_deletes_crawl_dir(self, tmp_path: Path) -> None:
         """--force でクロールディレクトリが削除されること."""
-        runner = ScrapyRunner(**make_scrapy_runner_args(temp_dir=tmp_path))
+        runner = RealScrapyRunner(**make_scrapy_runner_args(temp_dir=tmp_path))
 
         crawl_dir = _expected_crawl_dir(tmp_path, "https://example.com")
 
@@ -390,7 +390,7 @@ class TestScrapyRunnerRun:
     @pytest.mark.asyncio()
     async def test_max_pages_override(self, tmp_path: Path) -> None:
         """max_pages パラメータがインスタンス設定を上書きすること."""
-        runner = ScrapyRunner(**make_scrapy_runner_args(temp_dir=tmp_path, max_pages=10000))
+        runner = RealScrapyRunner(**make_scrapy_runner_args(temp_dir=tmp_path, max_pages=10000))
 
         mock_process = AsyncMock()
         mock_process.wait.return_value = 0
@@ -407,7 +407,7 @@ class TestScrapyRunnerRun:
     @pytest.mark.asyncio()
     async def test_env_pythonioencoding(self, tmp_path: Path) -> None:
         """環境変数 PYTHONIOENCODING=utf-8 が設定されること."""
-        runner = ScrapyRunner(**make_scrapy_runner_args(temp_dir=tmp_path))
+        runner = RealScrapyRunner(**make_scrapy_runner_args(temp_dir=tmp_path))
 
         mock_process = AsyncMock()
         mock_process.wait.return_value = 0
@@ -422,7 +422,7 @@ class TestScrapyRunnerRun:
     @pytest.mark.asyncio()
     async def test_params_json_written(self, tmp_path: Path) -> None:
         """パラメータ JSON ファイルが書き出されること."""
-        runner = ScrapyRunner(
+        runner = RealScrapyRunner(
             **make_scrapy_runner_args(
                 temp_dir=tmp_path,
                 delay_sec=1.5,
@@ -455,7 +455,7 @@ class TestScrapyRunnerRun:
     @pytest.mark.asyncio()
     async def test_params_json_includes_timeout_and_error_count(self, tmp_path: Path) -> None:
         """パラメータ JSON に timeout_sec と error_count が含まれること."""
-        runner = ScrapyRunner(
+        runner = RealScrapyRunner(
             **make_scrapy_runner_args(
                 temp_dir=tmp_path,
                 timeout_sec=600,
@@ -478,7 +478,7 @@ class TestScrapyRunnerRun:
     @pytest.mark.asyncio()
     async def test_url_pattern_auto_generated_from_path(self, tmp_path: Path) -> None:
         """url_pattern 未指定時にパスプレフィックスから自動生成されること."""
-        runner = ScrapyRunner(**make_scrapy_runner_args(temp_dir=tmp_path))
+        runner = RealScrapyRunner(**make_scrapy_runner_args(temp_dir=tmp_path))
 
         mock_process = AsyncMock()
         mock_process.wait.return_value = 0
@@ -495,7 +495,7 @@ class TestScrapyRunnerRun:
     @pytest.mark.asyncio()
     async def test_url_pattern_not_generated_for_root(self, tmp_path: Path) -> None:
         """パスが / のみの場合は url_pattern が自動生成されないこと."""
-        runner = ScrapyRunner(**make_scrapy_runner_args(temp_dir=tmp_path))
+        runner = RealScrapyRunner(**make_scrapy_runner_args(temp_dir=tmp_path))
 
         mock_process = AsyncMock()
         mock_process.wait.return_value = 0
@@ -511,7 +511,7 @@ class TestScrapyRunnerRun:
     @pytest.mark.asyncio()
     async def test_url_pattern_explicit_takes_priority(self, tmp_path: Path) -> None:
         """url_pattern を明示指定した場合は自動生成より優先されること."""
-        runner = ScrapyRunner(**make_scrapy_runner_args(temp_dir=tmp_path))
+        runner = RealScrapyRunner(**make_scrapy_runner_args(temp_dir=tmp_path))
 
         mock_process = AsyncMock()
         mock_process.wait.return_value = 0
@@ -537,7 +537,7 @@ class TestJobdirIsolation:
     @pytest.mark.asyncio()
     async def test_different_start_url_different_jobdir(self, tmp_path: Path) -> None:
         """同一ドメインでも異なる start_url は異なる JOBDIR を使用する."""
-        runner = ScrapyRunner(**make_scrapy_runner_args(temp_dir=tmp_path))
+        runner = RealScrapyRunner(**make_scrapy_runner_args(temp_dir=tmp_path))
 
         mock_process = AsyncMock()
         mock_process.wait.return_value = 0
@@ -561,7 +561,7 @@ class TestJobdirIsolation:
     @pytest.mark.asyncio()
     async def test_different_url_pattern_different_jobdir(self, tmp_path: Path) -> None:
         """同じ start_url でも異なる url_pattern は異なる JOBDIR を使用する."""
-        runner = ScrapyRunner(**make_scrapy_runner_args(temp_dir=tmp_path))
+        runner = RealScrapyRunner(**make_scrapy_runner_args(temp_dir=tmp_path))
 
         mock_process = AsyncMock()
         mock_process.wait.return_value = 0
@@ -581,7 +581,7 @@ class TestJobdirIsolation:
     @pytest.mark.asyncio()
     async def test_same_params_same_directory(self, tmp_path: Path) -> None:
         """同じパラメータは同じディレクトリを使用する（レジューム可能）."""
-        runner = ScrapyRunner(**make_scrapy_runner_args(temp_dir=tmp_path))
+        runner = RealScrapyRunner(**make_scrapy_runner_args(temp_dir=tmp_path))
 
         mock_process = AsyncMock()
         mock_process.wait.return_value = 0
@@ -602,7 +602,7 @@ class TestJobdirIsolation:
     @pytest.mark.asyncio()
     async def test_force_does_not_affect_other_crawl(self, tmp_path: Path) -> None:
         """--force は対象クロールのディレクトリのみ削除し、他のクロールに影響しない."""
-        runner = ScrapyRunner(**make_scrapy_runner_args(temp_dir=tmp_path))
+        runner = RealScrapyRunner(**make_scrapy_runner_args(temp_dir=tmp_path))
 
         mock_process = AsyncMock()
         mock_process.wait.return_value = 0

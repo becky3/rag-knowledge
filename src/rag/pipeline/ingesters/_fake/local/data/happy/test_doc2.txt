@@ -1,0 +1,2 @@
+Plain text fixture for LocalFetcher.
+Synthetic content. No real-world association.
