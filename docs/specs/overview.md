@@ -39,6 +39,11 @@ RAG Knowledge は、外部 Web ページから収集した知識をベクトル 
 | 29 | YouTube Fake Adapter | YouTube インジェスター用 FakeYoutubeFetcher（シナリオ切替・JSON 返却） | [infrastructure/fake-adapters/youtube.md](infrastructure/fake-adapters/youtube.md) |
 | 30 | QA 戦略（3 レイヤー） | L1 Unit Test / L2 Mock E2E / L3 本番相当 QA の責務分離と実施頻度ポリシー | [workflows/qa-strategy.md](workflows/qa-strategy.md) |
 | 31 | アーキテクチャ採用方針 | rag-knowledge のアーキテクチャ説明・正解パターン（youtube）・構造判断 SSoT | [architecture.md](architecture.md) |
+| 32 | BlueSky Fake Adapter | BlueSky AT Protocol 用 Fake Fetcher + MediaDownloader | [infrastructure/fake-adapters/bluesky.md](infrastructure/fake-adapters/bluesky.md) |
+| 33 | Scrapy Fake Adapter | site-ingest 用 FakeScrapyRunner（subprocess 起動なし、JSONL+HTML fixture 展開） | [infrastructure/fake-adapters/scrapy.md](infrastructure/fake-adapters/scrapy.md) |
+| 34 | Zenn Fake Adapter | Zenn API 用 FakeZennFetcher | [infrastructure/fake-adapters/zenn.md](infrastructure/fake-adapters/zenn.md) |
+| 35 | Aozora Fake Adapter | 青空文庫用 FakeAozoraFetcher（カタログ ZIP / XHTML を fixture から bytes 返却） | [infrastructure/fake-adapters/aozora.md](infrastructure/fake-adapters/aozora.md) |
+| 36 | Local Fake Adapter | Local 用 FakeLocalFetcher（filesystem 抽象化のみ。PDF/AsciiDoc 抽出は converter 層） | [infrastructure/fake-adapters/local.md](infrastructure/fake-adapters/local.md) |
 
 ## 3. 技術スタック
 
