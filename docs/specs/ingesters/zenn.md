@@ -48,6 +48,15 @@ Zenn（zenn.dev）の記事およびスクラップを API 経由で取得し、
 - [common.md](common.md) の外部 HTTP リクエスト制約に従う（ConstrainedClient 経由）
 - Zenn 固有のハードリミット: ページネーション走査上限 10 ページ、記事取得上限 100 件（コード内定数、設定不可）
 
+### ZennFetcher Port 化と Fake モード
+
+- 外部アクセス処理は `ZennFetcher` Protocol として抽象化する。Real 実装（`RealZennFetcher`）と Fake 実装（`FakeZennFetcher`）を `create_zenn_fetcher(settings)` factory で切り替える
+- `RAG_ZENN_FAKE_MODE`（`.env`）で切替。デフォルトは安全側（fake = true）
+- 詳細は [Zenn Fake Adapter](../infrastructure/fake-adapters/zenn.md) を参照
+- factory シグネチャは youtube パターン（Settings 単引数）。`ConstrainedClient` は Real Fetcher 内部で生成・保持する
+- `ZennIngester` のコンストラクタは `fetcher: ZennFetcher` を必須引数として受け取る。本体メソッドの `client` 引数は撤廃済み
+- 起動時に `[FAKE MODE: zenn]` の WARNING ログを出力。MCP `rag_crawl_zenn` / `rag_add_zenn` 応答冒頭にも同ラベルを付与する
+
 ### バリデーションとクランプの使い分け
 
 - **バリデーションエラー（拒否）**: 型不正（非整数など）、0、負数。明らかな誤入力であり、クランプで救済しない

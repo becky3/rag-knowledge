@@ -316,6 +316,7 @@ flowchart TB
 - [YouTube Fake Adapter](fake-adapters/youtube.md) — 最初の対象 source_type 個別仕様
 - [BlueSky Fake Adapter](fake-adapters/bluesky.md) — 2 番目の対象 source_type 個別仕様（Issue #704、U2 で実装）
 - [Scrapy Fake Adapter](fake-adapters/scrapy.md) — site-ingest 用 Fake Runner の個別仕様（Issue #705）
+- [Zenn Fake Adapter](fake-adapters/zenn.md) — Zenn API 用 Fake Fetcher の個別仕様（Issue #705）
 - [YouTube インジェスター](../ingesters/youtube.md) — Fetcher 抽象化対象のインジェスター仕様
 - [BlueSky インジェスター](../ingesters/bluesky.md) — Fetcher 抽象化対象のインジェスター仕様（Issue #704）
 - [Zenn インジェスター](../ingesters/zenn.md) — 将来の水平展開対象
