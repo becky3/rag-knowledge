@@ -103,7 +103,9 @@ ZIP fixture は実ファイルとして git にコミットする（テキスト
 
 ### CLI / MCP からの利用
 
-CLI（`run_update_aozora_catalog` / `run_ingest_aozora` / `run_ingest_aozora_author` / `run_search_aozora`）は `async with create_aozora_fetcher(settings) as fetcher:` のコンテキストマネージャ内で `AozoraIngester(fetcher=fetcher, ...)` を構築する。
+CLI（`run_update_aozora_catalog` / `run_ingest_aozora` / `run_ingest_aozora_author` / `run_search_aozora`）は
+`async with create_aozora_fetcher(settings) as fetcher:` のコンテキストマネージャ内で
+`AozoraIngester(fetcher=fetcher, ...)` を構築する。
 
 ## エッジケース
 

@@ -36,7 +36,7 @@ site-ingest が利用する subprocess 実行処理を以下のメソッドに�
 
 | メソッド | 引数（キーワード） | 戻り値 | 振る舞い |
 |---|---|---|---|
-| `run` | `start_url: str = ""`、`start_urls: list[str] | None = None`、`allowed_domains: str = ""`、`url_pattern: str = ""`、`max_pages: int | None = None`、`force: bool = False` | `CrawlResult`（exit_code / output_dir / jsonl_path / success / crawl_dir / stderr_tail） | クロール実行 |
+| `run` | `start_url: str = ""`、`start_urls: list[str] \| None = None`、`allowed_domains: str = ""`、`url_pattern: str = ""`、`max_pages: int \| None = None`、`force: bool = False` | `CrawlResult`（exit_code / output_dir / jsonl_path / success / crawl_dir / stderr_tail） | クロール実行 |
 
 `async` メソッド。Real / Fake で同じシグネチャを実装する。
 

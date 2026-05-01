@@ -102,7 +102,9 @@ QA イテレーション速度を改善するための converter Fake 化は [Is
 
 ### `LocalIngester` のシグネチャ
 
-`LocalIngester.__init__` は `fetcher: LocalFetcher` を必須引数として受け取る。本体メソッド（`add_document` / `crawl_documents` / `_collect_files`）は filesystem 操作を `self._fetcher.discover_files / read_bytes / get_file_size` 経由で実施する。
+`LocalIngester.__init__` は `fetcher: LocalFetcher` を必須引数として受け取る。
+本体メソッド（`add_document` / `crawl_documents` / `_collect_files`）は filesystem 操作を
+`self._fetcher.discover_files / read_bytes / get_file_size` 経由で実施する。
 
 `_check_http_mode_access`（HTTP モード allowed_dirs 検証）はセキュリティ境界として本体に残す。
 

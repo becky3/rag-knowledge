@@ -131,7 +131,10 @@ Fake Fetcher が返すデータ内の識別子は実在の ID と衝突しない
 
 新たな source_type を追加する際は、本テーブルに synthetic ID 規約を追記すること。
 
-**テスト入力 URL の扱い**: Web (scrapy) では Fake Runner が **入力 URL を無視して fixture URL を返す** ため、テストの入力には IANA 予約・実在ドメイン（`example.com` / `example.org` / `example.net`）を使う。これらは DNS / SSRF 検証を通過し、Fake Runner では実 HTTP リクエストが発生しない。Fake が返却する **出力 URL** のみ `test.invalid` を使う。
+**テスト入力 URL の扱い**: Web (scrapy) では Fake Runner が **入力 URL を無視して fixture URL を返す** ため、
+テストの入力には IANA 予約・実在ドメイン（`example.com` / `example.org` / `example.net`）を使う。
+これらは DNS / SSRF 検証を通過し、Fake Runner では実 HTTP リクエストが発生しない。
+Fake が返却する **出力 URL** のみ `test.invalid` を使う。
 
 ### Fake データの配置
 
