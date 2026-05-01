@@ -1,0 +1,10 @@
+{
+  "scraps": [
+    {
+      "slug": "test-scrap-001",
+      "title": "Sample Test Scrap 1",
+      "user": {"username": "testuser"}
+    }
+  ],
+  "next_page": null
+}
