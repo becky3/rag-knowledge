@@ -122,7 +122,10 @@ Fake Fetcher が返すデータ内の識別子は実在の ID と衝突しない
 | BlueSky | DID | `did:plc:test` プレフィックス | `did:plc:test01234567` |
 | BlueSky | handle | `*.bsky.social` の `test` プレフィックス | `test.bsky.social` |
 | BlueSky | rkey | `testrkey` プレフィックス | `testrkey00000` |
-| Zenn（将来）| slug | `test-` プレフィックス | `test-article-001` |
+| Zenn | slug | `test-` プレフィックス | `test-article-001` |
+| Zenn | username | `testuser` プレフィックス | `testuser` |
+| Aozora | book_id | `999900` 番台（実在しない範囲） | `999900` / `999901` |
+| Aozora | person_id | `99999` 番台 | `99999` |
 | Web (scrapy) | URL | `https://test.invalid/` プレフィックス（IANA 予約 TLD、RFC 6761） | `https://test.invalid/page1` |
 
 新たな source_type を追加する際は、本テーブルに synthetic ID 規約を追記すること。
@@ -317,6 +320,7 @@ flowchart TB
 - [BlueSky Fake Adapter](fake-adapters/bluesky.md) — 2 番目の対象 source_type 個別仕様（Issue #704、U2 で実装）
 - [Scrapy Fake Adapter](fake-adapters/scrapy.md) — site-ingest 用 Fake Runner の個別仕様（Issue #705）
 - [Zenn Fake Adapter](fake-adapters/zenn.md) — Zenn API 用 Fake Fetcher の個別仕様（Issue #705）
+- [Aozora Fake Adapter](fake-adapters/aozora.md) — 青空文庫用 Fake Fetcher の個別仕様（Issue #705）
 - [YouTube インジェスター](../ingesters/youtube.md) — Fetcher 抽象化対象のインジェスター仕様
 - [BlueSky インジェスター](../ingesters/bluesky.md) — Fetcher 抽象化対象のインジェスター仕様（Issue #704）
 - [Zenn インジェスター](../ingesters/zenn.md) — 将来の水平展開対象
