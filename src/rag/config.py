@@ -32,10 +32,14 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 UPLOAD_API_KEY_SERVICE = "rag-knowledge"
 UPLOAD_API_KEY_NAME = "UPLOAD_API_KEY"
 
-# プロジェクトルートのパス
-_PROJECT_ROOT = Path(__file__).parent.parent.parent
-_ENV_FILE = _PROJECT_ROOT / ".env"
-_TOML_FILE = _PROJECT_ROOT / "config.toml"
+# プロジェクトルートのパス（リポジトリ・work tree のルート、editable install 前提）
+# 公開シンボル PROJECT_ROOT として他モジュールから利用される（fixture_dir / fixture file の絶対パス解決等）。
+# src/rag/config.py から見て 3 階層上が project root。本算出ロジックは本モジュール 1 箇所のみ
+# に集約し、利用側はマジックナンバー (parents[N]) を持たない。
+PROJECT_ROOT = Path(__file__).parent.parent.parent
+_PROJECT_ROOT = PROJECT_ROOT  # 後方互換のための旧 private 名
+_ENV_FILE = PROJECT_ROOT / ".env"
+_TOML_FILE = PROJECT_ROOT / "config.toml"
 
 
 class _EnvLoader(BaseSettings):

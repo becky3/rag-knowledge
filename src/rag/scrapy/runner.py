@@ -335,11 +335,9 @@ class RealScrapyRunner:
         コードインジェクション防止のため、ユーザー入力は JSON ファイル経由で渡す。
         インラインスクリプトにはファイルパス（内部生成値）と src_dir のみ埋め込む。
         """
-        # src/ ディレクトリのパスを計算
-        # runner.py は src/rag/scrapy/runner.py にあるので、3階層上が src/
-        src_dir = str(
-            Path(__file__).resolve().parent.parent.parent
-        ).replace("\\", "/")
+        # src/ ディレクトリのパスを計算（PROJECT_ROOT 経由で算出、SSoT に統合）
+        from rag.config import PROJECT_ROOT
+        src_dir = str(PROJECT_ROOT / "src").replace("\\", "/")
 
         # params_path は内部生成値のため安全
         safe_params_path = str(params_path).replace("\\", "/")
@@ -411,12 +409,12 @@ def create_scrapy_runner(settings: RAGSettings) -> ScrapyRunner:
     は FakeScrapyRunner を返し、subprocess を起動しない。
     """
     if settings.rag_scrapy_fake_mode:
+        from rag.config import PROJECT_ROOT
         from rag.scrapy._fake import FakeScrapyRunner
 
         fixture_dir = Path(settings.rag_scrapy_fake_fixture_dir)
         if not fixture_dir.is_absolute():
-            project_root = Path(__file__).resolve().parent.parent.parent.parent
-            fixture_dir = project_root / fixture_dir
+            fixture_dir = PROJECT_ROOT / fixture_dir
         if not fixture_dir.exists():
             raise FileNotFoundError(
                 f"Scrapy fake fixture ディレクトリが見つかりません: {fixture_dir}。"

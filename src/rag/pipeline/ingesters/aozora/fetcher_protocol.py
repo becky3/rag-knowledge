@@ -102,12 +102,12 @@ def create_aozora_fetcher(settings: RAGSettings) -> AozoraFetcher:
     実 青空文庫 / GitHub Raw アクセスを発生させない。
     """
     if settings.rag_aozora_fake_mode:
+        from rag.config import PROJECT_ROOT
         from rag.pipeline.ingesters._fake.aozora import FakeAozoraFetcher
 
         fixture_dir = Path(settings.rag_aozora_fake_fixture_dir)
         if not fixture_dir.is_absolute():
-            project_root = Path(__file__).resolve().parent.parent.parent.parent.parent
-            fixture_dir = project_root / fixture_dir
+            fixture_dir = PROJECT_ROOT / fixture_dir
         if not fixture_dir.exists():
             raise FileNotFoundError(
                 f"Aozora fake fixture ディレクトリが見つかりません: {fixture_dir}。"

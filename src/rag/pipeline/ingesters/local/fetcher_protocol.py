@@ -104,12 +104,12 @@ class RealLocalFetcher:
 def create_local_fetcher(settings: RAGSettings) -> LocalFetcher:
     """Settings から Real / Fake のいずれかを選択して返すファクトリ."""
     if settings.rag_local_fake_mode:
+        from rag.config import PROJECT_ROOT
         from rag.pipeline.ingesters._fake.local import FakeLocalFetcher
 
         fixture_dir = Path(settings.rag_local_fake_fixture_dir)
         if not fixture_dir.is_absolute():
-            project_root = Path(__file__).resolve().parent.parent.parent.parent.parent
-            fixture_dir = project_root / fixture_dir
+            fixture_dir = PROJECT_ROOT / fixture_dir
         if not fixture_dir.exists():
             raise FileNotFoundError(
                 f"Local fake fixture ディレクトリが見つかりません: {fixture_dir}。"

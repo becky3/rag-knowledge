@@ -152,12 +152,12 @@ def create_zenn_fetcher(settings: RAGSettings) -> ZennFetcher:
     実 Zenn API アクセスを発生させない。
     """
     if settings.rag_zenn_fake_mode:
+        from rag.config import PROJECT_ROOT
         from rag.pipeline.ingesters._fake.zenn import FakeZennFetcher
 
         fixture_dir = Path(settings.rag_zenn_fake_fixture_dir)
         if not fixture_dir.is_absolute():
-            project_root = Path(__file__).resolve().parent.parent.parent.parent.parent
-            fixture_dir = project_root / fixture_dir
+            fixture_dir = PROJECT_ROOT / fixture_dir
         if not fixture_dir.exists():
             raise FileNotFoundError(
                 f"Zenn fake fixture ディレクトリが見つかりません: {fixture_dir}。"
