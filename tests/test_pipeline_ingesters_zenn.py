@@ -16,7 +16,6 @@ from __future__ import annotations
 import json
 from pathlib import Path
 from typing import Any
-from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
@@ -26,7 +25,7 @@ from rag.pipeline.ingesters.zenn import (
 )
 from rag.store.source_store import SourceStore
 
-from factories import make_zenn_ingester
+from factories import StubZennFetcher, make_zenn_ingester
 
 
 @pytest.fixture()
@@ -126,16 +125,9 @@ def _make_scrap_detail_response(slug: str) -> dict:
     }
 
 
-def _make_mock_client(responses: list[dict]) -> AsyncMock:
-    """レスポンスリスト順で返すモック ConstrainedClient を生成する."""
-    client = AsyncMock()
-    mocks = []
-    for resp_data in responses:
-        resp = MagicMock()
-        resp.json.return_value = resp_data
-        mocks.append(resp)
-    client.get = AsyncMock(side_effect=mocks)
-    return client
+def _make_stub_fetcher(responses: list[Any]) -> StubZennFetcher:
+    """レスポンスリスト順で返す StubZennFetcher を生成する."""
+    return StubZennFetcher(responses)
 
 
 @pytest.mark.asyncio()
@@ -148,7 +140,7 @@ class TestInputValidation:
         """空の username でエラーになること."""
         ingester = make_zenn_ingester(source_store)
         with pytest.raises(ValueError, match="空"):
-            await ingester.crawl_zenn("", client=AsyncMock())
+            await ingester.crawl_zenn("")
 
     async def test_invalid_content_type_raises(
         self, source_store: SourceStore
@@ -159,16 +151,7 @@ class TestInputValidation:
             await ingester.crawl_zenn(
                 "testuser",
                 content_type="invalid",
-                client=AsyncMock(),
             )
-
-    async def test_no_client_raises(
-        self, source_store: SourceStore
-    ) -> None:
-        """client 未指定でエラーになること."""
-        ingester = make_zenn_ingester(source_store)
-        with pytest.raises(ValueError, match="client"):
-            await ingester.crawl_zenn("testuser")
 
     async def test_max_articles_zero_raises(
         self, source_store: SourceStore
@@ -179,7 +162,6 @@ class TestInputValidation:
             await ingester.crawl_zenn(
                 "testuser",
                 max_articles=0,
-                client=AsyncMock(),
             )
 
     async def test_max_articles_negative_raises(
@@ -191,7 +173,6 @@ class TestInputValidation:
             await ingester.crawl_zenn(
                 "testuser",
                 max_articles=-1,
-                client=AsyncMock(),
             )
 
     async def test_max_articles_bool_raises(
@@ -203,7 +184,6 @@ class TestInputValidation:
             await ingester.crawl_zenn(
                 "testuser",
                 max_articles=True,
-                client=AsyncMock(),
             )
 
     async def test_max_articles_clamp(
@@ -211,13 +191,12 @@ class TestInputValidation:
     ) -> None:
         """max_articles がハードリミットにクランプされること."""
         # articles=[] でリクエストなし
-        client = _make_mock_client([{"articles": [], "next_page": None}])
-        ingester = make_zenn_ingester(source_store)
+        fetcher = _make_stub_fetcher([{"articles": [], "next_page": None}])
+        ingester = make_zenn_ingester(source_store, fetcher=fetcher)
         result = await ingester.crawl_zenn(
             "testuser",
             max_articles=MAX_ARTICLES_HARD_LIMIT + 50,
             content_type="articles",
-            client=client,
         )
         # クランプされて正常終了すること
         assert result.errors == 0
@@ -229,16 +208,15 @@ class TestCrawlArticles:
 
     async def test_basic_articles(self, source_store: SourceStore) -> None:
         """記事が正常に取得・配置されること."""
-        client = _make_mock_client([
+        fetcher = _make_stub_fetcher([
             _make_article_list_response(["test-article"]),
             _make_article_detail_response("test-article"),
         ])
 
-        ingester = make_zenn_ingester(source_store, max_articles=3)
+        ingester = make_zenn_ingester(source_store, fetcher=fetcher, max_articles=3)
         result = await ingester.crawl_zenn(
             "testuser",
             content_type="articles",
-            client=client,
         )
 
         assert result.placed == 1
@@ -258,16 +236,15 @@ class TestCrawlArticles:
     ) -> None:
         """article オブジェクトが空の記事がスキップされること."""
         empty_response = {"article": {}}
-        client = _make_mock_client([
+        fetcher = _make_stub_fetcher([
             _make_article_list_response(["empty-article"]),
             empty_response,
         ])
 
-        ingester = make_zenn_ingester(source_store, max_articles=3)
+        ingester = make_zenn_ingester(source_store, fetcher=fetcher, max_articles=3)
         result = await ingester.crawl_zenn(
             "testuser",
             content_type="articles",
-            client=client,
         )
 
         assert result.placed == 0
@@ -277,16 +254,15 @@ class TestCrawlArticles:
         self, source_store: SourceStore
     ) -> None:
         """.meta のフィールドが正しいこと."""
-        client = _make_mock_client([
+        fetcher = _make_stub_fetcher([
             _make_article_list_response(["test-article"]),
             _make_article_detail_response("test-article"),
         ])
 
-        ingester = make_zenn_ingester(source_store, max_articles=3)
+        ingester = make_zenn_ingester(source_store, fetcher=fetcher, max_articles=3)
         await ingester.crawl_zenn(
             "testuser",
             content_type="articles",
-            client=client,
         )
 
         import yaml
@@ -317,16 +293,15 @@ class TestCrawlScraps:
 
     async def test_basic_scraps(self, source_store: SourceStore) -> None:
         """スクラップが正常に取得・配置されること."""
-        client = _make_mock_client([
+        fetcher = _make_stub_fetcher([
             _make_scrap_list_response(["test-scrap"]),
             _make_scrap_detail_response("test-scrap"),
         ])
 
-        ingester = make_zenn_ingester(source_store, max_articles=3)
+        ingester = make_zenn_ingester(source_store, fetcher=fetcher, max_articles=3)
         result = await ingester.crawl_zenn(
             "testuser",
             content_type="scraps",
-            client=client,
         )
 
         assert result.placed == 1
@@ -344,16 +319,15 @@ class TestCrawlScraps:
         self, source_store: SourceStore
     ) -> None:
         """.meta のフィールドが正しいこと."""
-        client = _make_mock_client([
+        fetcher = _make_stub_fetcher([
             _make_scrap_list_response(["test-scrap"]),
             _make_scrap_detail_response("test-scrap"),
         ])
 
-        ingester = make_zenn_ingester(source_store, max_articles=3)
+        ingester = make_zenn_ingester(source_store, fetcher=fetcher, max_articles=3)
         await ingester.crawl_zenn(
             "testuser",
             content_type="scraps",
-            client=client,
         )
 
         import yaml
@@ -383,7 +357,7 @@ class TestCrawlAll:
 
     async def test_all_content_type(self, source_store: SourceStore) -> None:
         """articles + scraps が両方取得されること."""
-        client = _make_mock_client([
+        fetcher = _make_stub_fetcher([
             # 記事一覧
             _make_article_list_response(["art1"]),
             # 記事詳細
@@ -394,26 +368,24 @@ class TestCrawlAll:
             _make_scrap_detail_response("scr1"),
         ])
 
-        ingester = make_zenn_ingester(source_store, max_articles=3)
+        ingester = make_zenn_ingester(source_store, fetcher=fetcher, max_articles=3)
         result = await ingester.crawl_zenn(
             "testuser",
             content_type="all",
-            client=client,
         )
 
         assert result.placed == 2  # 記事 1 + スクラップ 1
 
     async def test_empty_articles(self, source_store: SourceStore) -> None:
         """記事が 0 件でも正常終了すること."""
-        client = _make_mock_client([
+        fetcher = _make_stub_fetcher([
             {"articles": [], "next_page": None},
         ])
 
-        ingester = make_zenn_ingester(source_store, max_articles=3)
+        ingester = make_zenn_ingester(source_store, fetcher=fetcher, max_articles=3)
         result = await ingester.crawl_zenn(
             "testuser",
             content_type="articles",
-            client=client,
         )
 
         assert result.placed == 0
@@ -432,21 +404,21 @@ class TestSkipMode:
         rel_path.write_text('{"slug": "existing"}', encoding="utf-8")
 
         # 一覧 API は "existing" を返すが、詳細 API は呼ばれないはず
-        client = _make_mock_client([
+        fetcher = _make_stub_fetcher([
             _make_article_list_response(["existing"]),
         ])
 
-        ingester = make_zenn_ingester(source_store, max_articles=3)
+        ingester = make_zenn_ingester(source_store, fetcher=fetcher, max_articles=3)
         result = await ingester.crawl_zenn(
             "testuser",
             content_type="articles",
-            client=client,
         )
 
         assert result.placed == 0
         assert result.skipped == 1
         # 詳細 API は呼ばれない（一覧 API の 1 回のみ）
-        assert client.get.call_count == 1
+        # _idx == 1 なら一覧呼び出しのみ完了。詳細呼び出しがあれば 2 になる
+        assert fetcher._idx == 1
 
     async def test_skip_existing_scrap(self, source_store: SourceStore) -> None:
         """既存ファイルがあるスクラップはスキップされること."""
@@ -454,20 +426,19 @@ class TestSkipMode:
         rel_path.parent.mkdir(parents=True, exist_ok=True)
         rel_path.write_text('{"slug": "existing"}', encoding="utf-8")
 
-        client = _make_mock_client([
+        fetcher = _make_stub_fetcher([
             _make_scrap_list_response(["existing"]),
         ])
 
-        ingester = make_zenn_ingester(source_store, max_articles=3)
+        ingester = make_zenn_ingester(source_store, fetcher=fetcher, max_articles=3)
         result = await ingester.crawl_zenn(
             "testuser",
             content_type="scraps",
-            client=client,
         )
 
         assert result.placed == 0
         assert result.skipped == 1
-        assert client.get.call_count == 1
+        assert fetcher._idx == 1
 
     async def test_force_overwrites_existing(self, source_store: SourceStore) -> None:
         """force=True で既存ファイルが上書きされ overwritten に計上されること（排他計上）."""
@@ -475,17 +446,16 @@ class TestSkipMode:
         rel_path.parent.mkdir(parents=True, exist_ok=True)
         rel_path.write_text('{"slug": "old"}', encoding="utf-8")
 
-        client = _make_mock_client([
+        fetcher = _make_stub_fetcher([
             _make_article_list_response(["existing"]),
             _make_article_detail_response("existing"),
         ])
 
-        ingester = make_zenn_ingester(source_store, max_articles=3)
+        ingester = make_zenn_ingester(source_store, fetcher=fetcher, max_articles=3)
         result = await ingester.crawl_zenn(
             "testuser",
             content_type="articles",
             force=True,
-            client=client,
         )
 
         assert result.placed == 0
@@ -502,17 +472,16 @@ class TestSkipMode:
         rel_path.parent.mkdir(parents=True, exist_ok=True)
         rel_path.write_text('{"slug": "old"}', encoding="utf-8")
 
-        client = _make_mock_client([
+        fetcher = _make_stub_fetcher([
             _make_scrap_list_response(["existing"]),
             _make_scrap_detail_response("existing"),
         ])
 
-        ingester = make_zenn_ingester(source_store, max_articles=3)
+        ingester = make_zenn_ingester(source_store, fetcher=fetcher, max_articles=3)
         result = await ingester.crawl_zenn(
             "testuser",
             content_type="scraps",
             force=True,
-            client=client,
         )
 
         assert result.placed == 0
@@ -527,17 +496,16 @@ class TestSkipMode:
         existing_path.parent.mkdir(parents=True, exist_ok=True)
         existing_path.write_text('{"slug": "old"}', encoding="utf-8")
 
-        client = _make_mock_client([
+        fetcher = _make_stub_fetcher([
             _make_article_list_response(["old", "new-article"]),
             # "old" はスキップされるので詳細 API は "new-article" のみ
             _make_article_detail_response("new-article"),
         ])
 
-        ingester = make_zenn_ingester(source_store, max_articles=3)
+        ingester = make_zenn_ingester(source_store, fetcher=fetcher, max_articles=3)
         result = await ingester.crawl_zenn(
             "testuser",
             content_type="articles",
-            client=client,
         )
 
         assert result.placed == 1
@@ -555,29 +523,23 @@ class TestErrorDetailsStructured:
         import httpx
 
         # 一覧取得は成功、詳細取得で 500 エラー
-        list_resp = MagicMock()
-        list_resp.json.return_value = _make_article_list_response(["bad-slug"])
         err_req = httpx.Request(
             "GET", "https://zenn.dev/api/articles/bad-slug",
         )
         err_resp = httpx.Response(500, content=b"error", request=err_req)
+        http_err = httpx.HTTPStatusError(
+            "HTTP 500", request=err_req, response=err_resp,
+        )
 
-        client = AsyncMock()
-        call_count = [0]
+        fetcher = _make_stub_fetcher([
+            _make_article_list_response(["bad-slug"]),
+            http_err,
+        ])
 
-        async def _mock_get(url: str) -> Any:
-            call_count[0] += 1
-            if call_count[0] == 1:
-                return list_resp
-            return err_resp
-
-        client.get = AsyncMock(side_effect=_mock_get)
-
-        ingester = make_zenn_ingester(source_store, max_articles=3)
+        ingester = make_zenn_ingester(source_store, fetcher=fetcher, max_articles=3)
         result = await ingester.crawl_zenn(
             "testuser",
             content_type="articles",
-            client=client,
         )
 
         assert result.errors == 1
@@ -592,25 +554,15 @@ class TestErrorDetailsStructured:
         self, source_store: SourceStore
     ) -> None:
         """HTTPStatusError 以外の例外でも error_details に dict が積まれる（status なし）."""
-        list_resp = MagicMock()
-        list_resp.json.return_value = _make_scrap_list_response(["bad-scrap"])
+        fetcher = _make_stub_fetcher([
+            _make_scrap_list_response(["bad-scrap"]),
+            ValueError("Parse error"),
+        ])
 
-        client = AsyncMock()
-        call_count = [0]
-
-        async def _mock_get(url: str) -> Any:
-            call_count[0] += 1
-            if call_count[0] == 1:
-                return list_resp
-            raise ValueError("Parse error")
-
-        client.get = AsyncMock(side_effect=_mock_get)
-
-        ingester = make_zenn_ingester(source_store, max_articles=3)
+        ingester = make_zenn_ingester(source_store, fetcher=fetcher, max_articles=3)
         result = await ingester.crawl_zenn(
             "testuser",
             content_type="scraps",
-            client=client,
         )
 
         assert result.errors == 1
@@ -628,7 +580,7 @@ class TestErrorDetailsStructured:
     ) -> None:
         """記事の place_file 失敗時は category='placement' で記録される."""
         # 一覧 + 詳細取得は成功、place_file で OSError
-        client = _make_mock_client([
+        fetcher = _make_stub_fetcher([
             _make_article_list_response(["good-slug"]),
             _make_article_detail_response("good-slug"),
         ])
@@ -638,11 +590,10 @@ class TestErrorDetailsStructured:
 
         monkeypatch.setattr(source_store, "place_file", _raise_oserror)
 
-        ingester = make_zenn_ingester(source_store, max_articles=3)
+        ingester = make_zenn_ingester(source_store, fetcher=fetcher, max_articles=3)
         result = await ingester.crawl_zenn(
             "testuser",
             content_type="articles",
-            client=client,
         )
 
         assert result.errors == 1
@@ -728,18 +679,11 @@ class TestIngestContents:
     @pytest.mark.asyncio
     async def test_ingest_article_places_file(self, source_store: SourceStore) -> None:
         """記事 URL で新規配置されることを確認する."""
-        ingester = make_zenn_ingester(source_store)
-
-        resp = MagicMock()
-        resp.json.return_value = _make_ingest_article_response("my-post", "alice")
-        resp.is_success = True
-
-        client = AsyncMock()
-        client.get = AsyncMock(return_value=resp)
+        fetcher = _make_stub_fetcher([_make_ingest_article_response("my-post", "alice")])
+        ingester = make_zenn_ingester(source_store, fetcher=fetcher)
 
         result = await ingester.ingest_contents(
             ["https://zenn.dev/alice/articles/my-post"],
-            client=client,
         )
 
         assert result.placed == 1
@@ -749,18 +693,11 @@ class TestIngestContents:
     @pytest.mark.asyncio
     async def test_ingest_scrap_places_file(self, source_store: SourceStore) -> None:
         """スクラップ URL で新規配置されることを確認する."""
-        ingester = make_zenn_ingester(source_store)
-
-        resp = MagicMock()
-        resp.json.return_value = _make_ingest_scrap_response("abc123", "alice")
-        resp.is_success = True
-
-        client = AsyncMock()
-        client.get = AsyncMock(return_value=resp)
+        fetcher = _make_stub_fetcher([_make_ingest_scrap_response("abc123", "alice")])
+        ingester = make_zenn_ingester(source_store, fetcher=fetcher)
 
         result = await ingester.ingest_contents(
             ["https://zenn.dev/alice/scraps/abc123"],
-            client=client,
         )
 
         assert result.placed == 1
@@ -770,23 +707,16 @@ class TestIngestContents:
     @pytest.mark.asyncio
     async def test_ingest_overwrites_existing(self, source_store: SourceStore) -> None:
         """既存ファイルが上書きされることを確認する."""
-        ingester = make_zenn_ingester(source_store)
-
         rel_path = "zenn/alice/articles/my-post.json"
         dest = source_store.root_dir / rel_path
         dest.parent.mkdir(parents=True, exist_ok=True)
         dest.write_text('{"old": "data"}')
 
-        resp = MagicMock()
-        resp.json.return_value = _make_ingest_article_response("my-post", "alice")
-        resp.is_success = True
-
-        client = AsyncMock()
-        client.get = AsyncMock(return_value=resp)
+        fetcher = _make_stub_fetcher([_make_ingest_article_response("my-post", "alice")])
+        ingester = make_zenn_ingester(source_store, fetcher=fetcher)
 
         result = await ingester.ingest_contents(
             ["https://zenn.dev/alice/articles/my-post"],
-            client=client,
         )
 
         assert result.overwritten == 1
@@ -796,11 +726,8 @@ class TestIngestContents:
     async def test_ingest_invalid_url_reports_error(self, source_store: SourceStore) -> None:
         """無効な URL がエラーとして計上されることを確認する."""
         ingester = make_zenn_ingester(source_store)
-        client = AsyncMock()
-
         result = await ingester.ingest_contents(
             ["https://example.com/not-zenn"],
-            client=client,
         )
 
         assert result.errors == 1
@@ -809,21 +736,14 @@ class TestIngestContents:
     @pytest.mark.asyncio
     async def test_ingest_multiple_urls_independent(self, source_store: SourceStore) -> None:
         """複数 URL を処理し、1 件の失敗が他に影響しないことを確認する."""
-        ingester = make_zenn_ingester(source_store)
-
-        ok_resp = MagicMock()
-        ok_resp.json.return_value = _make_ingest_article_response("ok-post", "alice")
-        ok_resp.is_success = True
-
-        client = AsyncMock()
-        client.get = AsyncMock(side_effect=[ok_resp, Exception("API error")])
+        fetcher = _make_stub_fetcher([_make_ingest_article_response("ok-post", "alice"), Exception("API error")])
+        ingester = make_zenn_ingester(source_store, fetcher=fetcher)
 
         result = await ingester.ingest_contents(
             [
                 "https://zenn.dev/alice/articles/ok-post",
                 "https://zenn.dev/alice/articles/fail-post",
             ],
-            client=client,
         )
 
         assert result.placed == 1
@@ -833,9 +753,7 @@ class TestIngestContents:
     async def test_ingest_empty_urls_returns_empty_result(self, source_store: SourceStore) -> None:
         """空の URL リストで空の結果が返ることを確認する."""
         ingester = make_zenn_ingester(source_store)
-        client = AsyncMock()
-
-        result = await ingester.ingest_contents([], client=client)
+        result = await ingester.ingest_contents([])
 
         assert result.placed == 0
         assert result.errors == 0

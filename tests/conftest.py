@@ -148,6 +148,32 @@ def _force_bluesky_fake_mode() -> Iterator[None]:
 
 
 @pytest.fixture(autouse=True, scope="session")
+def _force_zenn_fake_mode() -> Iterator[None]:
+    """テスト中は Zenn Fake モードを環境変数で強制する.
+
+    仕様: docs/specs/infrastructure/fake-mode.md
+    仕様: docs/specs/infrastructure/fake-adapters/zenn.md
+
+    create_zenn_fetcher が pydantic Settings 経由で
+    `RAG_ZENN_FAKE_MODE=true` を読み込むため、ここで環境変数に明示設定する。
+    subprocess 越境テスト（e2e）でも同じ環境変数を引き継ぐ。
+
+    `RAG_TESTS_ALLOW_NETWORK=1` 設定時のみ強制を解除する（手動の本番回帰検証等の
+    特殊用途）。
+
+    httpx クライアントクラス全体の `_RaiseOnUse` 差し替えは採用しない。
+    zenn 以外の用途で httpx を使う多くの既存コードを誤爆させるため、`.env` +
+    DI ファクトリ経由で Fake を選択させる本機構（bluesky と同じ）に揃える。
+    """
+    if os.environ.get("RAG_TESTS_ALLOW_NETWORK") == "1":
+        yield
+        return
+    with pytest.MonkeyPatch.context() as mp:
+        mp.setenv("RAG_ZENN_FAKE_MODE", "true")
+        yield
+
+
+@pytest.fixture(autouse=True, scope="session")
 def _force_web_fake_mode() -> Iterator[None]:
     """テスト中は Web (scrapy) Fake モードを環境変数で強制する.
 

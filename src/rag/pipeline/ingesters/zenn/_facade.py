@@ -22,7 +22,7 @@ from rag.pipeline.ingesters._common import (
 
 if TYPE_CHECKING:
 
-    from rag.pipeline.ingesters.zenn.fetcher_protocol import ZennFetcher, ZennKind
+    from rag.pipeline.ingesters.zenn.fetcher_protocol import ZennFetcher
     from rag.store.source_store import SourceStore
 
 logger = logging.getLogger(__name__)

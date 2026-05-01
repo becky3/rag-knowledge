@@ -301,9 +301,68 @@ def make_bluesky_ingester(source_store: Any, **overrides: Any) -> Any:
     return BlueskyIngester(source_store, **defaults)
 
 
+class StubZennFetcher:
+    """ZennFetcher Protocol のテスト用 stub 実装.
+
+    flat な応答シーケンス（dict / Exception の混在リスト）を順番に消費し、
+    list_contents / fetch_content_detail のいずれの呼び出しでも同一シーケンスを
+    使う。これは旧 ``_make_mock_client(responses)`` パターンとの互換性を持たせ、
+    テストの呼び出し順序ベースの記述を維持するため。
+    """
+
+    def __init__(self, responses: list[Any]) -> None:
+        self._responses = list(responses)
+        self._idx = 0
+
+    async def __aenter__(self) -> "StubZennFetcher":
+        return self
+
+    async def __aexit__(self, *exc_info: Any) -> None:
+        return None
+
+    def _next(self) -> Any:
+        if self._idx >= len(self._responses):
+            raise IndexError(
+                f"StubZennFetcher: 応答シーケンスを使い切りました（idx={self._idx}）",
+            )
+        item = self._responses[self._idx]
+        self._idx += 1
+        if isinstance(item, BaseException):
+            raise item
+        return item
+
+    async def list_contents(
+        self,
+        kind: str,
+        username: str,
+        page: int,
+    ) -> dict[str, Any]:
+        del kind, username, page
+        result = self._next()
+        assert isinstance(result, dict)  # noqa: S101
+        return result
+
+    async def fetch_content_detail(
+        self,
+        kind: str,
+        slug: str,
+    ) -> dict[str, Any]:
+        del kind, slug
+        result = self._next()
+        assert isinstance(result, dict)  # noqa: S101
+        return result
+
+
 def make_zenn_ingester(source_store: Any, **overrides: Any) -> Any:
-    """ZennIngester のテスト用ファクトリ."""
+    """ZennIngester のテスト用ファクトリ.
+
+    fetcher は省略可。省略時は空応答の StubZennFetcher を注入する。
+    シナリオを使うテストは overrides で `fetcher=...` を渡す。
+    """
     from rag.pipeline.ingesters.zenn import ZennIngester
+
+    if "fetcher" not in overrides:
+        overrides["fetcher"] = StubZennFetcher([])
 
     defaults: dict[str, Any] = {
         "max_articles": 50,
