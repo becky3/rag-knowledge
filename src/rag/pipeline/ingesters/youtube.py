@@ -183,7 +183,6 @@ class YoutubeIngester(BaseIngester):
         max_duration: int,
     ) -> None:
         super().__init__(source_store)
-        self._store = source_store
         self._fetcher = fetcher
         self._max_videos = _validate_max_videos(max_videos)
         self._request_interval = max(request_interval, MIN_REQUEST_INTERVAL)
@@ -309,7 +308,7 @@ class YoutubeIngester(BaseIngester):
         data_bytes = json_str.encode("utf-8")
 
         # 重複チェック（上書き方式。placed と overwritten は排他計上。書き込み前に判定）
-        dest = self._store.root_dir / rel_path
+        dest = self._source_store.root_dir / rel_path
         is_overwrite = dest.exists()
 
         meta_dict: dict[str, Any] = {
@@ -328,7 +327,7 @@ class YoutubeIngester(BaseIngester):
             meta_dict["playlist_id"] = playlist_id
 
         try:
-            self._store.place_file(
+            self._source_store.place_file(
                 source_type="youtube",
                 data=data_bytes,
                 rel_path=rel_path,

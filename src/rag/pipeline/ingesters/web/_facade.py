@@ -23,7 +23,6 @@ from rag.scrapy.bridge import import_to_source_store
 from rag.scrapy.runner import CrawlResult, ScrapyRunner
 
 if TYPE_CHECKING:
-    from rag.config import RAGSettings
     from rag.store.source_store import SourceStore
 
 logger = logging.getLogger(__name__)
@@ -77,7 +76,6 @@ class WebIngester(BaseIngester):
         self,
         urls: list[str],
         *,
-        settings: RAGSettings,  # noqa: ARG002
         url_pattern: str | None = None,
         max_pages: int | None = None,
         force: bool = False,
@@ -89,7 +87,6 @@ class WebIngester(BaseIngester):
 
         Args:
             urls: 取得対象 URL のリスト。**1 件以上必須**（空リストは不可）
-            settings: 設定（互換性のため受け取るが、ScrapyRunner は注入済み）
             url_pattern: URL フィルタ正規表現（クロールモードのみ有効）
             max_pages: ページ数上限（クロールモードのみ有効）
             force: クロールディレクトリを削除して再実行する

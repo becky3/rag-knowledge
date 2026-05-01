@@ -24,6 +24,12 @@ class BaseIngester(ABC):
     強制する。エントリポイント（add_*, crawl_*, ingest_* 等）の名前と
     シグネチャは媒体ごとに異なるため、抽象メソッドとしては定義しない。
     上位層からは ``BaseIngester`` 型として Ingester 一般を扱える。
+
+    ABC 継承の意図: 現時点で ``@abstractmethod`` を持たないため厳密には
+    インスタンス化可能だが、将来的に共通エントリポイント（例: 全 Ingester
+    の起動・停止フック）を抽象メソッドとして追加する余地を ABC として
+    保持する。継承宣言（``class XxxIngester(BaseIngester):``）は
+    「Ingester ファミリーに属する」明示のマーカーとしても機能する。
     """
 
     def __init__(self, source_store: SourceStore) -> None:

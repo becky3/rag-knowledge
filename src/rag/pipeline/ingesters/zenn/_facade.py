@@ -76,7 +76,6 @@ class ZennIngester(BaseIngester):
         max_articles: int,
     ) -> None:
         super().__init__(source_store)
-        self._store = source_store
         self._fetcher = fetcher
         self._max_articles = max_articles
 
@@ -171,7 +170,7 @@ class ZennIngester(BaseIngester):
 
         for i, slug in enumerate(slugs):
             rel_path = f"zenn/{username}/articles/{slug}.json"
-            dest = self._store.root_dir / rel_path
+            dest = self._source_store.root_dir / rel_path
 
             try:
                 if dest.exists() and not force:
@@ -228,7 +227,7 @@ class ZennIngester(BaseIngester):
 
             try:
                 is_overwrite = dest.exists()
-                self._store.place_file(
+                self._source_store.place_file(
                     source_type="zenn",
                     data=json_bytes,
                     rel_path=rel_path,
@@ -264,7 +263,7 @@ class ZennIngester(BaseIngester):
 
         for i, slug in enumerate(slugs):
             rel_path = f"zenn/{username}/scraps/{slug}.json"
-            dest = self._store.root_dir / rel_path
+            dest = self._source_store.root_dir / rel_path
 
             try:
                 if dest.exists() and not force:
@@ -313,7 +312,7 @@ class ZennIngester(BaseIngester):
 
             try:
                 is_overwrite = dest.exists()
-                self._store.place_file(
+                self._source_store.place_file(
                     source_type="zenn",
                     data=json_bytes,
                     rel_path=rel_path,
@@ -439,7 +438,7 @@ class ZennIngester(BaseIngester):
     ) -> None:
         """単一の記事またはスクラップを取得して配置する."""
         rel_path = f"zenn/{username}/{kind}/{slug}.json"
-        dest = self._store.root_dir / rel_path
+        dest = self._source_store.root_dir / rel_path
 
         if dest.exists() and not force:
             result.skipped += 1
@@ -519,7 +518,7 @@ class ZennIngester(BaseIngester):
 
         try:
             is_overwrite = dest.exists()
-            self._store.place_file(
+            self._source_store.place_file(
                 source_type="zenn",
                 data=json_bytes,
                 rel_path=rel_path,

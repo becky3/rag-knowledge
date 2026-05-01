@@ -37,7 +37,6 @@ class JournalIngester(BaseIngester):
 
     def __init__(self, source_store: SourceStore) -> None:
         super().__init__(source_store)
-        self._store = source_store
         self.last_entry_id: str | None = None
 
     def add_entry(
@@ -76,9 +75,9 @@ class JournalIngester(BaseIngester):
                 "repository": repository,
             }
 
-            is_overwrite = (self._store.root_dir / rel_path).exists()
+            is_overwrite = (self._source_store.root_dir / rel_path).exists()
             data = body.encode("utf-8")
-            self._store.place_file(
+            self._source_store.place_file(
                 source_type="journal",
                 data=data,
                 rel_path=rel_path,
@@ -187,8 +186,8 @@ class JournalIngester(BaseIngester):
                     "repository": repository,
                 }
 
-                is_overwrite = (self._store.root_dir / rel_path).exists()
-                self._store.place_file(
+                is_overwrite = (self._source_store.root_dir / rel_path).exists()
+                self._source_store.place_file(
                     source_type="journal",
                     data=data,
                     rel_path=rel_path,

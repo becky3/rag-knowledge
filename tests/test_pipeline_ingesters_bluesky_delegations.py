@@ -6,7 +6,7 @@
 from __future__ import annotations
 
 from typing import Any
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import AsyncMock
 
 import pytest
 
@@ -71,7 +71,6 @@ class TestFollowUrlsClassification:
             classifier=RealYoutubeClassifier(),
             youtube_delegator=None,
             web_delegator=runner,
-            settings=MagicMock(),
             youtube_request_interval=0.0,
         )
         assert stats["skipped"] == 1
@@ -86,7 +85,6 @@ class TestFollowUrlsClassification:
             classifier=RealYoutubeClassifier(),
             youtube_delegator=None,
             web_delegator=AsyncMock(),
-            settings=MagicMock(),
             youtube_request_interval=0.0,
             result=result,
         )
@@ -108,7 +106,6 @@ class TestFollowUrlsWebDelegation:
             classifier=RealYoutubeClassifier(),
             youtube_delegator=None,
             web_delegator=runner,
-            settings=MagicMock(),
             youtube_request_interval=0.0,
         )
         assert stats["web_placed"] == 1
@@ -129,7 +126,6 @@ class TestFollowUrlsWebDelegation:
             classifier=RealYoutubeClassifier(),
             youtube_delegator=None,
             web_delegator=runner,
-            settings=MagicMock(),
             youtube_request_interval=0.0,
         )
         # run_for_urls には 1 件だけ
@@ -149,7 +145,6 @@ class TestFollowUrlsWebDelegation:
             classifier=RealYoutubeClassifier(),
             youtube_delegator=None,
             web_delegator=runner,
-            settings=MagicMock(),
             youtube_request_interval=0.0,
             result=result,
         )
@@ -175,7 +170,6 @@ class TestFollowUrlsYoutubeDelegation:
             classifier=RealYoutubeClassifier(),
             youtube_delegator=delegator,
             web_delegator=runner,
-            settings=MagicMock(),
             youtube_request_interval=0.0,
         )
         assert stats["youtube_placed"] == 1
@@ -191,7 +185,6 @@ class TestFollowUrlsYoutubeDelegation:
             classifier=RealYoutubeClassifier(),
             youtube_delegator=None,
             web_delegator=runner,
-            settings=MagicMock(),
             youtube_request_interval=0.0,
         )
         assert stats["skipped"] >= 1
@@ -210,7 +203,6 @@ class TestFollowUrlsYoutubeDelegation:
             classifier=RealYoutubeClassifier(),
             youtube_delegator=delegator,
             web_delegator=runner,
-            settings=MagicMock(),
             youtube_request_interval=0.0,
             force_youtube_reingest=False,
         )
@@ -233,7 +225,6 @@ class TestFollowUrlsYoutubeDelegation:
             classifier=RealYoutubeClassifier(),
             youtube_delegator=delegator,
             web_delegator=runner,
-            settings=MagicMock(),
             youtube_request_interval=0.0,
             force_youtube_reingest=True,
         )
@@ -254,7 +245,6 @@ class TestFollowUrlsYoutubeDelegation:
             classifier=RealYoutubeClassifier(),
             youtube_delegator=delegator,
             web_delegator=runner,
-            settings=MagicMock(),
             youtube_request_interval=0.0,
             result=result,
         )
@@ -284,7 +274,6 @@ class TestFollowUrlsYoutubeDelegation:
             classifier=RealYoutubeClassifier(),
             youtube_delegator=delegator,
             web_delegator=runner,
-            settings=MagicMock(),
             youtube_request_interval=0.0,
             force_youtube_reingest=False,
         )
@@ -300,7 +289,6 @@ class TestFollowUrlsEmpty:
             classifier=RealYoutubeClassifier(),
             youtube_delegator=None,
             web_delegator=AsyncMock(),
-            settings=MagicMock(),
             youtube_request_interval=0.0,
         )
         assert stats == {
@@ -314,7 +302,6 @@ class TestFollowUrlsEmpty:
             classifier=RealYoutubeClassifier(),
             youtube_delegator=None,
             web_delegator=AsyncMock(),
-            settings=MagicMock(),
             youtube_request_interval=0.0,
         )
         assert stats == {

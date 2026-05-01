@@ -23,7 +23,6 @@ from rag.pipeline.ingesters.bluesky.url_routing import (
 )
 
 if TYPE_CHECKING:
-    from rag.config import RAGSettings
     from rag.pipeline.ingesters.web import WebDelegator
     from rag.pipeline.ingesters.youtube_protocols import (
         YoutubeClassifier,
@@ -39,7 +38,6 @@ async def follow_urls(
     classifier: YoutubeClassifier,
     youtube_delegator: YoutubeDelegator | None,
     web_delegator: WebDelegator,
-    settings: RAGSettings,
     youtube_request_interval: float,
     force_youtube_reingest: bool = False,
     result: IngestResult | None = None,
@@ -59,7 +57,6 @@ async def follow_urls(
         classifier: YoutubeClassifier Protocol 実装
         youtube_delegator: YoutubeDelegator Protocol 実装（None の場合 YouTube は スキップ計上）
         web_delegator: WebDelegator Protocol 実装
-        settings: web 取り込みのパラメータ参照用
         youtube_request_interval: YouTube URL 連続取り込み間のスリープ秒
         force_youtube_reingest: 抑制対象の YouTube URL を強制的に取り込むか
         result: 委譲失敗の計上先 IngestResult。指定時は errors + category="delegation"
@@ -93,7 +90,6 @@ async def follow_urls(
         web_placed, web_errors, web_error_details = await _fetch_web_urls(
             web_urls,
             web_delegator=web_delegator,
-            settings=settings,
         )
         stats["web_placed"] = web_placed
         stats["errors"] += web_errors
@@ -209,7 +205,6 @@ async def _fetch_web_urls(
     urls: list[str],
     *,
     web_delegator: WebDelegator,
-    settings: RAGSettings,
 ) -> tuple[int, int, list[IngestErrorDetail]]:
     """Web URL を WebDelegator（複数 URL モード）の Python API で取得する.
 
@@ -254,10 +249,7 @@ async def _fetch_web_urls(
         return 0, len(validation_errors), validation_errors
 
     try:
-        execution = await web_delegator.run_for_urls(
-            validated_urls,
-            settings=settings,
-        )
+        execution = await web_delegator.run_for_urls(validated_urls)
     except Exception as exc:
         logger.exception("web 取り込みの実行に失敗: %d 件", len(validated_urls))
         execute_errors: list[IngestErrorDetail] = [

@@ -80,7 +80,6 @@ class AozoraIngester(BaseIngester):
         max_works: int,
     ) -> None:
         super().__init__(source_store)
-        self._store = source_store
         self._fetcher = fetcher
         self._max_works = max_works
 
@@ -127,7 +126,7 @@ class AozoraIngester(BaseIngester):
         # place_file ではなく直接配置する（仕様: source-store.md 複合ソース・sidecar）。
         # metadata.db への登録も行わない。
         csv_bytes = csv_text.encode("utf-8")
-        catalog_path = self._store.root_dir / CATALOG_REL_PATH
+        catalog_path = self._source_store.root_dir / CATALOG_REL_PATH
         catalog_path.parent.mkdir(parents=True, exist_ok=True)
         catalog_path.write_bytes(csv_bytes)
         write_meta(catalog_path, {
@@ -395,7 +394,7 @@ class AozoraIngester(BaseIngester):
         rel_path = f"aozora/{person_id}/{book_id}.html"
 
         # 重複チェック（スキップ方式）
-        full_path = self._store.root_dir / rel_path
+        full_path = self._source_store.root_dir / rel_path
         if full_path.exists():
             result.skipped += 1
             return "skipped"
@@ -442,7 +441,7 @@ class AozoraIngester(BaseIngester):
 
         # source_store に配置
         try:
-            self._store.place_file(
+            self._source_store.place_file(
                 source_type="aozora",
                 data=raw_bytes,
                 rel_path=rel_path,
@@ -466,7 +465,7 @@ class AozoraIngester(BaseIngester):
         Returns:
             CSV レコードのリスト、またはカタログ未ダウンロードの場合 None
         """
-        catalog_path = self._store.root_dir / CATALOG_REL_PATH
+        catalog_path = self._source_store.root_dir / CATALOG_REL_PATH
         if not catalog_path.exists():
             return None
 

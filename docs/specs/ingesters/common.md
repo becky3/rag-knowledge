@@ -101,7 +101,7 @@ ConstrainedClient はサーキットブレーカーの責務（HTTP レスポン
 7 Ingester（aozora / bluesky / journal / local / web / youtube / zenn）は `BaseIngester` 抽象基底（`pipeline/ingesters/base.py`）を継承する。
 
 - **継承の意図**: 「Ingester ファミリーの一員である」ことをコード上で明示し、上位層から `BaseIngester` 型として Ingester 一般を扱える
-- **共通契約**: コンストラクタで `source_store: SourceStore` を受け取り、`source_store` プロパティとして公開する
+- **共通契約**: コンストラクタで `source_store: SourceStore`（[source-store.md](../source-store.md) 参照）を受け取り、`source_store` プロパティとして公開する
 - **エントリポイント**: 媒体ごとの取り込み手続きは多岐にわたるため、共通シグネチャは強制しない（抽象メソッド定義なし）。各 Ingester の `add_*` / `crawl_*` / `ingest_*` メソッドは媒体ごとに自由に定義する
 - **役割と責務境界**: BaseIngester / Ingester ファミリー全体の役割境界（取り込み機構、元データを可能な限りいじらない原則）は [architecture.md §3.1](../architecture.md) を参照
 
@@ -184,9 +184,10 @@ ConstrainedClient はサーキットブレーカーの責務（HTTP レスポン
 | `url` | 任意 | 失敗した URL（HTTP 系失敗のみ） |
 | `message` | 任意（例外由来では推奨） | 追加説明（例外メッセージ等。例外由来の失敗では `str(exc)` を記録することを推奨） |
 
-各インジェスター・bridge 層は `error_details.append(IngestErrorDetail(category=..., target=..., ...))` の形で構造化型として構築する
-（`dict[str, Any]` の literal 構築は禁止）。消費側（`_format_detail` / `cli._error_detail_message` 等）は構造化アクセス
-（`detail["target"]` / `detail["category"]`）で参照する。
+各インジェスター・bridge 層は `IngestErrorDetail` 型として構築する。call 形式 `IngestErrorDetail(category=..., target=..., ...)` または
+TypedDict 型注釈付き dict literal `detail: IngestErrorDetail = {...}` のいずれも許容する（後者は optional フィールドを条件付きで
+追加する用途で使う）。**型注釈なしの `dict[str, Any]` literal による構築は禁止**（型チェッカーが TypedDict として検証できなくなるため）。
+消費側（`_format_detail` / `cli._error_detail_message` 等）は構造化アクセス（`detail["target"]` / `detail["category"]`）で参照する。
 
 `category` は全媒体で `IngestErrorCategory` Enum の値に統一する。集計・再取り込み判定で信頼できる集合として扱えるようにするため、列挙外の値は使用しない。値定義の SSoT は [`_schema/enums.yml`](../../../_schema/enums.yml) の `ingest_error_category` カテゴリ。
 
@@ -307,7 +308,7 @@ flowchart TB
         AING["AozoraIngester"]
         DING["LocalIngester"]
         JING["JournalIngester"]
-        SITE["SiteIngestCommand"]
+        WING["WebIngester"]
     end
 
     subgraph Safety["制約付き中間ライブラリ (py-common-lib)"]
@@ -336,7 +337,7 @@ flowchart TB
     CC --> ZENN_API
     AING --> CC
     CC --> AOZORA["aozora.gr.jp / GitHub Raw"]
-    SITE --> WEB
+    WING --> WEB
     YING --> YT_API
     DING --> FS
     JING --> JNL_INPUT

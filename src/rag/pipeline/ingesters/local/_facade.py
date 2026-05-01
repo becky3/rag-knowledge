@@ -49,7 +49,6 @@ class LocalIngester(BaseIngester):
         allowed_dirs: list[str] | None,
     ) -> None:
         super().__init__(source_store)
-        self._store = source_store
         self._fetcher = fetcher
         self._extensions = [ext.lower() for ext in (supported_extensions or DEFAULT_SUPPORTED_EXTENSIONS)]
         self._http_mode_enabled = http_mode_enabled
@@ -88,7 +87,7 @@ class LocalIngester(BaseIngester):
                 ))
                 raise FileExistsError(msg)
 
-            self._store.place_file(source_type="local", data=data, rel_path=rel_path)
+            self._source_store.place_file(source_type="local", data=data, rel_path=rel_path)
             if exists:
                 result.overwritten = 1
             else:
@@ -170,7 +169,7 @@ class LocalIngester(BaseIngester):
                     continue
 
                 data = self._fetcher.read_bytes(fp)
-                self._store.place_file(source_type="local", data=data, rel_path=rel_path)
+                self._source_store.place_file(source_type="local", data=data, rel_path=rel_path)
                 if exists:
                     result.overwritten += 1
                 else:
@@ -205,7 +204,7 @@ class LocalIngester(BaseIngester):
 
     def _file_exists(self, rel_path: str) -> bool:
         """source_store 内にファイルが存在するか確認する."""
-        return (self._store.root_dir / rel_path).exists()
+        return (self._source_store.root_dir / rel_path).exists()
 
     def _validate_single_file(self, file_path: str) -> Path:
         if not file_path or not file_path.strip():

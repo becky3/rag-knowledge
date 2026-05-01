@@ -34,8 +34,6 @@ class WebDelegator(Protocol):
     async def run_for_urls(
         self,
         urls: list[str],
-        *,
-        settings: RAGSettings,
     ) -> SiteIngestExecution:
         """指定 URL 群に対して WebIngester による取り込みを実行する.
 
@@ -44,7 +42,6 @@ class WebDelegator(Protocol):
 
         Args:
             urls: 取得対象 URL のリスト（1 件以上必須）
-            settings: 設定
 
         Returns:
             実行結果（``SiteIngestExecution``）
@@ -68,13 +65,8 @@ class RealWebDelegator:
     async def run_for_urls(
         self,
         urls: list[str],
-        *,
-        settings: RAGSettings,
     ) -> SiteIngestExecution:
-        return await self._web_ingester.crawl_urls(
-            urls=urls,
-            settings=settings,
-        )
+        return await self._web_ingester.crawl_urls(urls=urls)
 
 
 def create_web_delegator(

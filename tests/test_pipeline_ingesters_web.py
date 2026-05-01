@@ -22,18 +22,11 @@ from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
-from settings_defaults import TEST_SETTINGS_DEFAULTS
 
-from rag.config import RAGSettings
 from rag.pipeline.ingesters._common import IngestResult
 from rag.pipeline.ingesters.web import WebIngester
 from rag.scrapy.bridge import BridgeResult
 from rag.scrapy.runner import CrawlResult
-
-
-def _make_settings(**overrides: object) -> RAGSettings:
-    """site-ingest 関連設定を実 RAGSettings インスタンスとして返す."""
-    return RAGSettings(**{**TEST_SETTINGS_DEFAULTS, **overrides})
 
 
 def _make_web_ingester(
@@ -57,7 +50,6 @@ class TestWebIngesterCrawlUrls:
         with pytest.raises(ValueError, match="at least one URL"):
             await ingester.crawl_urls(
                 urls=[],
-                settings=_make_settings(),
             )
 
     async def test_single_url_dispatches_crawl_mode(self) -> None:
@@ -72,7 +64,6 @@ class TestWebIngesterCrawlUrls:
 
         execution = await ingester.crawl_urls(
             urls=["https://example.com/page"],
-            settings=_make_settings(),
             url_pattern="^https://example\\.com/",
             max_pages=10,
             force=True,
@@ -100,7 +91,6 @@ class TestWebIngesterCrawlUrls:
 
         execution = await ingester.crawl_urls(
             urls=["https://a.example.com/x", "https://b.example.com/y"],
-            settings=_make_settings(),
         )
 
         kwargs = scrapy_runner.run.await_args.kwargs
@@ -140,7 +130,6 @@ class TestWebIngesterCrawlUrls:
         ) as mock_bridge:
             execution = await ingester.crawl_urls(
                 urls=["https://example.com/page"],
-                settings=_make_settings(),
             )
 
         mock_bridge.assert_called_once_with(
@@ -172,7 +161,6 @@ class TestWebIngesterCrawlUrls:
         ):
             execution = await ingester.crawl_urls(
                 urls=["https://example.com/p"],
-                settings=_make_settings(),
             )
 
         crawl_result.cleanup.assert_not_called()

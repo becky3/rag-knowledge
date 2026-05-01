@@ -2667,7 +2667,6 @@ async def run_crawl_bluesky(args: argparse.Namespace) -> None:
                 if placed_items:
                     url_stats = await bluesky_ingester.follow_urls(
                         placed_items,
-                        settings=settings,
                         result=ingest_result,
                     )
         except (ValueError, TypeError) as e:
@@ -2776,7 +2775,6 @@ async def run_ingest_bluesky(args: argparse.Namespace) -> None:
                 if placed_items:
                     url_stats = await bluesky_ingester.follow_urls(
                         placed_items,
-                        settings=settings,
                         result=ingest_result,
                     )
         except (ValueError, TypeError) as e:
@@ -3085,7 +3083,6 @@ async def run_site_ingest(args: argparse.Namespace) -> None:
         )
         execution = await web_ingester.crawl_urls(
             urls=validated_urls,
-            settings=settings,
             url_pattern=args.url_pattern if not multi_url_mode else None,
             max_pages=effective_max_pages,
             force=args.force if not multi_url_mode else False,

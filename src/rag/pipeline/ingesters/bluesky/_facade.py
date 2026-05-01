@@ -36,7 +36,6 @@ from rag.pipeline.ingesters.bluesky.post_placer import place_post
 from rag.pipeline.ingesters.bluesky.url_routing import parse_bluesky_url
 
 if TYPE_CHECKING:
-    from rag.config import RAGSettings
     from rag.pipeline.ingesters.bluesky_fetcher import BlueskyFetcher
     from rag.pipeline.ingesters.bluesky_media_downloader import (
         BlueskyMediaDownloader,
@@ -113,7 +112,6 @@ class BlueskyIngester(BaseIngester):
         youtube_request_interval: float,
     ) -> None:
         super().__init__(source_store)
-        self._store = source_store
         self._fetcher = fetcher
         self._media_downloader = media_downloader
         self._youtube_classifier = youtube_classifier
@@ -188,7 +186,7 @@ class BlueskyIngester(BaseIngester):
                 item,
                 is_repost=is_repost,
                 force=force,
-                store=self._store,
+                store=self._source_store,
                 media_downloader=self._media_downloader,
                 result=result,
                 seen_paths=seen_paths,
@@ -305,7 +303,7 @@ class BlueskyIngester(BaseIngester):
                 item,
                 is_repost=False,
                 force=True,
-                store=self._store,
+                store=self._source_store,
                 media_downloader=self._media_downloader,
                 result=result,
             )
@@ -324,16 +322,14 @@ class BlueskyIngester(BaseIngester):
         self,
         placed_items: list[dict[str, Any]],
         *,
-        settings: RAGSettings,
         result: IngestResult | None = None,
     ) -> dict[str, int]:
-        """配置済み投稿から URL を抽出し、site_ingest/YouTube に委譲する.
+        """配置済み投稿から URL を抽出し、Web/YouTube に委譲する.
 
         仕様: docs/specs/ingesters/bluesky.md「投稿内 URL の自動取り込み」
 
         Args:
             placed_items: 配置済みフィードアイテムのリスト
-            settings: site-ingest のパラメータ参照用
             result: 委譲失敗の計上先 IngestResult（指定時は errors + delegation を計上）
 
         Returns:
@@ -344,7 +340,6 @@ class BlueskyIngester(BaseIngester):
             classifier=self._youtube_classifier,
             youtube_delegator=self._youtube_delegator,
             web_delegator=self._web_delegator,
-            settings=settings,
             youtube_request_interval=self._youtube_request_interval,
             force_youtube_reingest=self._force_youtube_reingest,
             result=result,

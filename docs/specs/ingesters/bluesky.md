@@ -191,7 +191,7 @@ flowchart TB
 | `bluesky/feed_fetcher.py` | AT Protocol API 利用層。pagination 制御 + DID 解決（`BlueskyFetcher` Protocol 経由） |
 | `bluesky/post_placer.py` | フィードアイテムの source_store 配置 + .meta 生成 + メディア DL のキック（`BlueskyMediaDownloader` Protocol 経由）|
 | `bluesky/url_routing.py` | URL 抽出 / 種別判定 / パース（純関数）。種別判定は `YoutubeClassifier` Protocol 経由 |
-| `bluesky/delegations.py` | 投稿内 URL の自動取り込み委譲（`YoutubeDelegator` / `SiteIngestRunner` Protocol 経由）|
+| `bluesky/delegations.py` | 投稿内 URL の自動取り込み委譲（`YoutubeDelegator` / `WebDelegator` Protocol 経由）|
 | `BlueskyFetcher` / Real / Fake | AT Protocol API への HTTP 通信抽象化（`bluesky_fetcher.py`、`_fake/bluesky/`）|
 | `BlueskyMediaDownloader` / Real / Fake | 画像 / HLS 動画 DL の抽象化（`bluesky_media_downloader.py`、`_fake/bluesky/`）|
 | `ConstrainedClient` (py-common-lib) | 全外部 HTTP リクエストのゲートウェイ。`Real*` Adapter のコンストラクタに注入する |
