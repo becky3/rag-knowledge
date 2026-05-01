@@ -95,7 +95,7 @@ class TestExecuteSiteIngest:
         with patch(
             "rag.pipeline.site_ingest_runner.create_scrapy_runner",
             return_value=runner_mock,
-        ) as mock_factory:
+        ):
             execution = await execute_site_ingest(
                 urls=["https://a.example.com/x", "https://b.example.com/y"],
                 source_store=MagicMock(),

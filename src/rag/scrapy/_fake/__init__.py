@@ -13,10 +13,8 @@ fixture から JSONL + HTML 相当のファイル群を tmp に展開して Craw
 from __future__ import annotations
 
 import hashlib
-import json
 import shutil
 from pathlib import Path
-from typing import Any
 
 from rag.scrapy.runner import CrawlResult
 

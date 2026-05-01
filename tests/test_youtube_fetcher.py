@@ -65,6 +65,8 @@ class TestLogFakeModeStatus:
             rag_youtube_fake_mode=False,
             rag_bluesky_fake_mode=False,
             rag_embedding_fake_mode=False,
+            rag_web_fake_mode=False,
+            rag_scrapy_fake_mode=False,
         )
         with caplog.at_level(logging.INFO, logger="rag.config"):
             log_fake_mode_status(settings)

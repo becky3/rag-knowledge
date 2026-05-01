@@ -163,7 +163,8 @@ class TestMcpSiteIngestCliDelegation:
             assert "--max-pages" in cli_args
             assert "10" in cli_args
             mock_format.assert_called_once()
-            assert result == "OK"
+            # fake モード時は応答冒頭に [FAKE MODE: web] ラベルが付与されるため endswith で検証
+            assert result.endswith("OK")
 
     @pytest.mark.asyncio
     async def test_single_url_with_pattern_and_force(self) -> None:
