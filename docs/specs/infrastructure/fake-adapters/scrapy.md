@@ -188,7 +188,7 @@ flowchart TB
 
 | ケース | 振る舞い |
 |---|---|
-| Fake Runner で `failure` シナリオ指定時 | `CrawlResult.success=False` / `exit_code=1` を返却。`WebIngester.crawl_urls` は Bridge を呼ばずに `no_output=False` で返却（jsonl_path が空のため `no_output=True` 相当の早期 return） |
+| Fake Runner で `failure` シナリオ指定時 | `CrawlResult.success=False` / `exit_code=1` を返却。`WebIngester.crawl_urls` は Bridge を呼ばずに `no_output=True` で早期 return（jsonl_path が空のため） |
 | Fake Runner で `empty` シナリオ指定時 | JSONL が空のため Bridge が呼ばれても 0 件処理。`SiteIngestExecution.no_output=False`（jsonl は存在する）+ `ingest.placed=0` |
 | Fake Runner で `partial` シナリオ指定時 | Bridge が JSONL の invalid 行を `parse_errors` でカウント。`SiteIngestExecution.parse_errors > 0` |
 | 入力 URL が `test.invalid`（DNS 解決不可） | `validate_url` / `check_ssrf` で拒否される（DNS 解決失敗）。Fake テストでは `example.com` 等の実在ドメインを使うこと |

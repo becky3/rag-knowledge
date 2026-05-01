@@ -32,11 +32,14 @@ def source_store(tmp_path: Path) -> SourceStore:
 class TestBaseIngester:
     """BaseIngester 抽象基底の構造確認."""
 
-    def test_base_ingester_cannot_be_instantiated_alone(self) -> None:
-        """BaseIngester は具象クラスを介さず直接インスタンス化できる
-        (空の ABC のため抽象メソッドはない) が、本来は派生クラスから利用する."""
-        # ABC として何も抽象メソッドを持たないため、技術的には instance 化可能。
-        # 派生クラスからの利用を強制する方針は docstring + spec で表現する。
+    def test_base_ingester_can_be_instantiated_directly(self) -> None:
+        """BaseIngester は @abstractmethod を持たないため直接インスタンス化可能.
+
+        ABC として宣言しているのは将来の共通エントリポイント追加余地のためで、
+        現時点では具象クラスを介さず instance 化できる現状を契約として固定する
+        ものではない。派生クラスからの利用を強制する方針は docstring + spec
+        （architecture.md §3.4）で表現する。
+        """
         instance = BaseIngester(MagicMock())  # type: ignore[abstract]
         assert instance.source_store is not None
 
