@@ -460,6 +460,18 @@ def log_fake_mode_status(settings: RAGSettings) -> None:
             "Web (scrapy) は REAL モードで起動中。実 Web クロールが発生します"
         )
 
+    if settings.rag_zenn_fake_mode:
+        logger.warning(
+            "[FAKE MODE: zenn] Zenn は FAKE モードで起動中（fixture: %s）。"
+            "実 Zenn API アクセスは発生しません。"
+            "本番運用時は RAG_ZENN_FAKE_MODE=false を .env に設定してください",
+            settings.rag_zenn_fake_fixture_dir,
+        )
+    else:
+        logger.info(
+            "Zenn は REAL モードで起動中。実 Zenn API アクセスが発生します"
+        )
+
 
 def _normalize_encoding(value: str) -> str:
     """エンコーディング名を比較可能な正規形式に変換する.

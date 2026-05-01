@@ -289,11 +289,12 @@ async def rag_crawl_zenn(
     if force:
         args.append("--force")
 
+    label = _fake_mode_labels(_ZENN_INGEST_FAKE_SOURCES)
     try:
         result = await _run_cli_subprocess("crawl-zenn", args, ctx=ctx)
-        return _format_cli_ingest_result(result, context=f"ユーザー: {username}")
+        return label + _format_cli_ingest_result(result, context=f"ユーザー: {username}")
     except CLISubprocessError as e:
-        return e.format_mcp_error(f"Zenn 記事の取り込みに失敗しました（ユーザー: {username}）")
+        return label + e.format_mcp_error(f"Zenn 記事の取り込みに失敗しました（ユーザー: {username}）")
 
 
 @mcp.tool()
@@ -315,11 +316,12 @@ async def rag_add_zenn(
     """
     args: list[str] = list(urls)
 
+    label = _fake_mode_labels(_ZENN_INGEST_FAKE_SOURCES)
     try:
         result = await _run_cli_subprocess("ingest-zenn", args, ctx=ctx)
-        return _format_cli_ingest_result(result, context="Zenn ingest")
+        return label + _format_cli_ingest_result(result, context="Zenn ingest")
     except CLISubprocessError as e:
-        return e.format_mcp_error("Zenn コンテンツの取り込みに失敗しました")
+        return label + e.format_mcp_error("Zenn コンテンツの取り込みに失敗しました")
 
 
 @mcp.tool()
@@ -393,7 +395,7 @@ async def rag_add_bluesky(
         return label + e.format_mcp_error("BlueSky 投稿の取り込みに失敗しました")
 
 
-FakeSource = Literal["youtube", "bluesky", "embedding", "web"]
+FakeSource = Literal["youtube", "bluesky", "embedding", "web", "zenn"]
 
 # YouTube インジェスト系 MCP ツールが利用する fake source の組
 _YOUTUBE_INGEST_FAKE_SOURCES: list[FakeSource] = ["youtube", "embedding"]
@@ -406,6 +408,9 @@ _BLUESKY_INGEST_FAKE_SOURCES: list[FakeSource] = [
 
 # サイト一括取り込み（site-ingest / scrapy）系 MCP ツールが利用する fake source の組
 _SITE_INGEST_FAKE_SOURCES: list[FakeSource] = ["web", "embedding"]
+
+# Zenn インジェスト系 MCP ツールが利用する fake source の組
+_ZENN_INGEST_FAKE_SOURCES: list[FakeSource] = ["zenn", "embedding"]
 
 
 def _fake_mode_labels(active_sources: list[FakeSource]) -> str:
@@ -437,6 +442,7 @@ def _fake_mode_labels(active_sources: list[FakeSource]) -> str:
         "bluesky": settings.rag_bluesky_fake_mode,
         "embedding": settings.rag_embedding_fake_mode,
         "web": settings.rag_scrapy_fake_mode,
+        "zenn": settings.rag_zenn_fake_mode,
     }
     parts: list[str] = []
     for source in active_sources:
