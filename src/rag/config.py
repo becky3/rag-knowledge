@@ -100,11 +100,32 @@ class _EnvLoader(BaseSettings):
     # Fake Embedding が生成するベクトルの次元数。Real モデルの次元に合わせる
     rag_embedding_fake_dimensions: int = Field(default=768, ge=1)
 
+    # Web (scrapy) Fake モード — site-ingest で実 Web アクセスを排除する上位スイッチ
+    # `.env` で公開する唯一の web 系 fake フラグ。内部の rag_scrapy_fake_mode の既定値として派生する
+    rag_web_fake_mode: bool = True
+    # 内部 Settings: ScrapyRunner Fake モード切替。
+    # `.env` で個別指定がなければ rag_web_fake_mode から派生する（model_validator で None→派生）
+    rag_scrapy_fake_mode: bool | None = None
+    # Fake ScrapyRunner が読み込む fixture ディレクトリ
+    rag_scrapy_fake_fixture_dir: str = "src/rag/scrapy/_fake/data"
+
     # サイト一括取り込み一時ディレクトリ（Scrapy クロール結果の一時保管）
     site_ingest_temp_dir: str = ".tmp/site_ingest"
 
     # Embedding プロバイダーの処理能力に応じて並列数を調整する
     rag_embedding_concurrency: int = Field(default=32, ge=1)
+
+    @model_validator(mode="after")
+    def _derive_web_fake_modes(self) -> _EnvLoader:
+        """RAG_WEB_FAKE_MODE を内部 web 系 fake フラグの既定値として派生する.
+
+        個別 env (RAG_SCRAPY_FAKE_MODE 等) が `.env` で明示されていない場合、
+        rag_web_fake_mode の値を採用する。将来 web_fetch 等を追加する場合は
+        ここに分岐を増やす。
+        """
+        if self.rag_scrapy_fake_mode is None:
+            self.rag_scrapy_fake_mode = self.rag_web_fake_mode
+        return self
 
 
 # .env 管理フィールド名の集合（重複検出に使用）
@@ -156,6 +177,12 @@ class RAGSettings(BaseModel):
     rag_embedding_fake_mode: bool
     # Fake Embedding が生成するベクトルの次元数
     rag_embedding_fake_dimensions: int = Field(ge=1)
+    # Web (scrapy) Fake モード切替の上位スイッチ。`.env` の RAG_WEB_FAKE_MODE で制御
+    rag_web_fake_mode: bool
+    # 内部: ScrapyRunner Fake モード切替（_EnvLoader で rag_web_fake_mode から派生済み）
+    rag_scrapy_fake_mode: bool
+    # Fake ScrapyRunner が読み込む fixture ディレクトリ
+    rag_scrapy_fake_fixture_dir: str
     site_ingest_temp_dir: str
     rag_embedding_concurrency: int = Field(ge=1)
 

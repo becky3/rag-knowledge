@@ -74,6 +74,10 @@ TEST_SETTINGS_DEFAULTS: dict[str, object] = {
     # Embedding Fake モード（テストでは fake デフォルト）
     "rag_embedding_fake_mode": True,
     "rag_embedding_fake_dimensions": 768,
+    # Web (scrapy) Fake モード（テストでは fake デフォルト）
+    "rag_web_fake_mode": True,
+    "rag_scrapy_fake_mode": True,
+    "rag_scrapy_fake_fixture_dir": "src/rag/scrapy/_fake/data",
     "rag_youtube_max_videos": 100,
     "rag_youtube_request_interval": 30.0,
     "rag_youtube_request_timeout": 30,
