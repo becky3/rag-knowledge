@@ -74,6 +74,9 @@ TEST_SETTINGS_DEFAULTS: dict[str, object] = {
     # Zenn Fake モード（テストでは fake デフォルト）
     "rag_zenn_fake_mode": True,
     "rag_zenn_fake_fixture_dir": "src/rag/pipeline/ingesters/_fake/zenn/data",
+    # Aozora Fake モード（テストでは fake デフォルト）
+    "rag_aozora_fake_mode": True,
+    "rag_aozora_fake_fixture_dir": "src/rag/pipeline/ingesters/_fake/aozora/data",
     # Embedding Fake モード（テストでは fake デフォルト）
     "rag_embedding_fake_mode": True,
     "rag_embedding_fake_dimensions": 768,
