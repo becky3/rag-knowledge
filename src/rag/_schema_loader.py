@@ -12,7 +12,6 @@ rag-knowledge はソースツリーからの editable install で運用するた
 from __future__ import annotations
 
 from functools import lru_cache
-from pathlib import Path
 from typing import Any, cast, get_args
 
 import yaml

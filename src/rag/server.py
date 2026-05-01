@@ -420,6 +420,11 @@ _AOZORA_INGEST_FAKE_SOURCES: list[FakeSource] = ["aozora", "embedding"]
 # Local インジェスト系 MCP ツールが利用する fake source の組
 _LOCAL_INGEST_FAKE_SOURCES: list[FakeSource] = ["local", "embedding"]
 
+# Journal インジェスト系 MCP ツールが利用する fake source の組
+# Journal はユーザーがコンテンツを直接渡すため source 固有 fake は存在しないが、
+# Embedding は fake モードで動作するため、ユーザーが実 API アクセス有無を判別できるようラベル付与する
+_JOURNAL_INGEST_FAKE_SOURCES: list[FakeSource] = ["embedding"]
+
 
 def _fake_mode_labels(active_sources: list[FakeSource]) -> str:
     """fake モード時の応答ラベル（先頭に付与する）.
@@ -614,15 +619,16 @@ async def rag_add_journal(
     if entry_id:
         args.extend(["--entry-id", entry_id])
 
+    label = _fake_mode_labels(_JOURNAL_INGEST_FAKE_SOURCES)
     try:
         result = await _run_cli_subprocess(
             "add-journal", args, ctx=ctx, stdin_data=content,
         )
-        return _format_cli_ingest_result(
+        return label + _format_cli_ingest_result(
             result, context=f"journal: {repository}/{entry_id or title}",
         )
     except CLISubprocessError as e:
-        return e.format_mcp_error(f"ジャーナルエントリの登録に失敗しました: {title}")
+        return label + e.format_mcp_error(f"ジャーナルエントリの登録に失敗しました: {title}")
 
 
 @mcp.tool()
