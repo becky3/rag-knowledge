@@ -555,16 +555,18 @@ async def rag_add_document(
     Returns:
         取り込み結果のメッセージ
     """
+    label = _fake_mode_labels(_LOCAL_INGEST_FAKE_SOURCES)
+
     # MCP 側バリデーション（仕様: content-upload.md）
     if encoding not in ("text", "base64"):
-        return f"エラー: 無効な encoding: {encoding!r}（有効値: text, base64）"
+        return label + f"エラー: 無効な encoding: {encoding!r}（有効値: text, base64）"
     if not content:
-        return "エラー: content が空です"
+        return label + "エラー: content が空です"
 
     try:
         sanitized_filename = sanitize_upload_filename(filename)
     except ValueError as e:
-        return f"エラー: {e}"
+        return label + f"エラー: {e}"
 
     args: list[str] = ["--stdin", "--filename", sanitized_filename]
     if encoding != "text":
@@ -572,7 +574,6 @@ async def rag_add_document(
     if upload_mode != "fail":
         args.extend(["--upload-mode", upload_mode])
 
-    label = _fake_mode_labels(_LOCAL_INGEST_FAKE_SOURCES)
     try:
         result = await _run_cli_subprocess(
             "add-document", args, ctx=ctx, stdin_data=content,
@@ -607,19 +608,20 @@ async def rag_add_journal(
     Returns:
         取り込み結果のメッセージ
     """
+    label = _fake_mode_labels(_JOURNAL_INGEST_FAKE_SOURCES)
+
     try:
         sanitized_filename = sanitize_upload_filename(filename)
     except ValueError as e:
-        return f"エラー: {e}"
+        return label + f"エラー: {e}"
 
     if not sanitized_filename.lower().endswith(".md"):
-        return f"エラー: filename の拡張子が .md ではありません: {sanitized_filename!r}"
+        return label + f"エラー: filename の拡張子が .md ではありません: {sanitized_filename!r}"
 
     args: list[str] = ["--stdin", "--title", title, "--repository", repository]
     if entry_id:
         args.extend(["--entry-id", entry_id])
 
-    label = _fake_mode_labels(_JOURNAL_INGEST_FAKE_SOURCES)
     try:
         result = await _run_cli_subprocess(
             "add-journal", args, ctx=ctx, stdin_data=content,
@@ -705,12 +707,14 @@ async def rag_site_ingest(
     """
     from .utils.url import check_ssrf, validate_url
 
+    label = _fake_mode_labels(_SITE_INGEST_FAKE_SOURCES)
+
     # url / urls の排他チェック
     effective_urls = urls or []
     if url and effective_urls:
-        return "エラー: url と urls は排他です。どちらか一方のみ指定してください"
+        return label + "エラー: url と urls は排他です。どちらか一方のみ指定してください"
     if not url and not effective_urls:
-        return "エラー: url または urls を指定してください"
+        return label + "エラー: url または urls を指定してください"
 
     # 単一 URL モード → リストに統一
     if url:
@@ -726,7 +730,7 @@ async def rag_site_ingest(
             check_ssrf(validated)
             validated_urls.append(validated)
         except ValueError as e:
-            return f"エラー: {e}"
+            return label + f"エラー: {e}"
 
     # Safe Browsing チェック（クロールモードのみ: 起点 URL）
     # 複数 URL モードでは数百件の URL に対する Google Safe Browsing API 呼び出しは
@@ -738,11 +742,11 @@ async def rag_site_ingest(
                 sb_result = await sb_client.check_url(validated_urls[0])
                 if not sb_result.is_safe:
                     threat_types = ", ".join(t.threat_type.value for t in sb_result.threats)
-                    return f"エラー: 起点URLが安全でないと判定されました: {threat_types} — {validated_urls[0]}"
+                    return label + f"エラー: 起点URLが安全でないと判定されました: {threat_types} — {validated_urls[0]}"
         except SafeBrowsingConfigError:
             logger.warning("Safe Browsing の設定エラーのためチェックをスキップします: %s", validated_urls[0])
         except SafetyCheckError as e:
-            return f"エラー: URL安全性チェックに失敗しました: {e}"
+            return label + f"エラー: URL安全性チェックに失敗しました: {e}"
 
     # CLI subprocess に委譲
     cli_args: list[str] = list(validated_urls)
@@ -752,7 +756,7 @@ async def rag_site_ingest(
             try:
                 re.compile(url_pattern)
             except re.error as e:
-                return f"エラー: 無効な正規表現パターン: {e}"
+                return label + f"エラー: 無効な正規表現パターン: {e}"
             cli_args.extend(["--url-pattern", url_pattern])
         if max_pages is not None:
             cli_args.extend(["--max-pages", str(max_pages)])
@@ -763,7 +767,6 @@ async def rag_site_ingest(
 
     display_url = validated_urls[0] if not multi_url_mode else f"{len(validated_urls)} URLs"
 
-    label = _fake_mode_labels(_SITE_INGEST_FAKE_SOURCES)
     try:
         result = await _run_cli_subprocess("site-ingest", cli_args, ctx=ctx)
         return label + _format_cli_ingest_result(result, context=f"サイト: {display_url}")
