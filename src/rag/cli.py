@@ -3154,25 +3154,20 @@ async def run_site_ingest(args: argparse.Namespace) -> None:
 
 async def run_update_aozora_catalog(args: argparse.Namespace) -> None:
     """青空文庫カタログ更新."""
-    from .pipeline.ingesters.aozora import AozoraIngester
-
-    from py_common_lib.httpx import ConstrainedClient  # safety:allowed
+    from .pipeline.ingesters.aozora import AozoraIngester, create_aozora_fetcher
 
     json_out = _is_json_output(args)
 
     controller, settings = _build_cli_pipeline_controller()
 
-    aozora_ingester = AozoraIngester(
-        controller.source_store,
-        max_works=settings.rag_aozora_max_works,
-    )
-
     try:
-        async with ConstrainedClient(
-            request_timeout=settings.rag_aozora_request_timeout,
-            request_interval=settings.rag_aozora_request_interval,
-        ) as client:
-            result_text = await aozora_ingester.update_catalog(client=client)
+        async with create_aozora_fetcher(settings) as fetcher:
+            aozora_ingester = AozoraIngester(
+                controller.source_store,
+                fetcher=fetcher,
+                max_works=settings.rag_aozora_max_works,
+            )
+            result_text = await aozora_ingester.update_catalog()
     except (ValueError, TypeError) as e:
         if json_out:
             _output_error(CliErrorCode.DEPENDENCY_UNAVAILABLE, str(e))
@@ -3190,14 +3185,18 @@ async def run_update_aozora_catalog(args: argparse.Namespace) -> None:
 
 def run_search_aozora(args: argparse.Namespace) -> None:
     """青空文庫カタログ検索."""
-    from .pipeline.ingesters.aozora import AozoraIngester
+    from .pipeline.ingesters.aozora import AozoraIngester, create_aozora_fetcher
 
     json_out = _is_json_output(args)
 
     controller, settings = _build_cli_pipeline_controller()
 
+    # search はローカルカタログ走査のみで HTTP アクセスを行わないが、
+    # AozoraIngester のコンストラクタは fetcher を必須とするため factory で生成する。
+    # async with は使わないため、Real 実装の場合 client は初期化されないが本処理では呼ばない。
     aozora_ingester = AozoraIngester(
         controller.source_store,
+        fetcher=create_aozora_fetcher(settings),
         max_works=settings.rag_aozora_max_works,
     )
 
@@ -3249,31 +3248,24 @@ def run_search_aozora(args: argparse.Namespace) -> None:
 
 async def run_ingest_aozora(args: argparse.Namespace) -> None:
     """青空文庫作品取り込み."""
-    from .pipeline.ingesters.aozora import AozoraIngester
-
-    from py_common_lib.httpx import ConstrainedClient  # safety:allowed
+    from .pipeline.ingesters.aozora import AozoraIngester, create_aozora_fetcher
 
     json_out = _is_json_output(args)
     progress_cb = _output_progress if json_out else None
 
     controller, settings = _build_cli_pipeline_controller()
 
-    aozora_ingester = AozoraIngester(
-        controller.source_store,
-        max_works=settings.rag_aozora_max_works,
-    )
-
     with _write_lock_or_exit(
         Path(controller.source_store.root_dir), json_out=json_out,
     ):
         try:
-            async with ConstrainedClient(
-                request_timeout=settings.rag_aozora_request_timeout,
-                request_interval=settings.rag_aozora_request_interval,
-            ) as client:
-                ingest_result = await aozora_ingester.add_work(
-                    args.book_id, client=client,
+            async with create_aozora_fetcher(settings) as fetcher:
+                aozora_ingester = AozoraIngester(
+                    controller.source_store,
+                    fetcher=fetcher,
+                    max_works=settings.rag_aozora_max_works,
                 )
+                ingest_result = await aozora_ingester.add_work(args.book_id)
         except (ValueError, TypeError) as e:
             if json_out:
                 _output_error(CliErrorCode.DEPENDENCY_UNAVAILABLE, str(e))
@@ -3290,9 +3282,7 @@ async def run_ingest_aozora(args: argparse.Namespace) -> None:
 
 async def run_ingest_aozora_author(args: argparse.Namespace) -> None:
     """青空文庫著者一括取り込み."""
-    from .pipeline.ingesters.aozora import AozoraIngester
-
-    from py_common_lib.httpx import ConstrainedClient  # safety:allowed
+    from .pipeline.ingesters.aozora import AozoraIngester, create_aozora_fetcher
 
     json_out = _is_json_output(args)
 
@@ -3300,25 +3290,21 @@ async def run_ingest_aozora_author(args: argparse.Namespace) -> None:
 
     max_works = args.max_works if args.max_works is not None else settings.rag_aozora_max_works
 
-    aozora_ingester = AozoraIngester(
-        controller.source_store,
-        max_works=max_works,
-    )
-
     progress_cb = _output_progress if json_out else None
 
     with _write_lock_or_exit(
         Path(controller.source_store.root_dir), json_out=json_out,
     ):
         try:
-            async with ConstrainedClient(
-                request_timeout=settings.rag_aozora_request_timeout,
-                request_interval=settings.rag_aozora_request_interval,
-            ) as client:
+            async with create_aozora_fetcher(settings) as fetcher:
+                aozora_ingester = AozoraIngester(
+                    controller.source_store,
+                    fetcher=fetcher,
+                    max_works=max_works,
+                )
                 ingest_result = await aozora_ingester.crawl_author(
                     args.person_id,
                     max_works=max_works,
-                    client=client,
                     progress_callback=_wrap_progress(progress_cb, PipelinePhase.FETCH.display),
                 )
         except (ValueError, TypeError) as e:

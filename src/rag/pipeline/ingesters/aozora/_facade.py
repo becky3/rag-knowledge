@@ -21,13 +21,13 @@ from rag.pipeline.ingesters._common import (
     IngestErrorCategory,
     IngestResult,
     ProgressCallback,
-    fetch_get,
     now_iso,
 )
 from rag.store.meta import write_meta
 
 if TYPE_CHECKING:
 
+    from rag.pipeline.ingesters.aozora.fetcher_protocol import AozoraFetcher
     from rag.store.source_store import SourceStore
 
 logger = logging.getLogger(__name__)
@@ -74,40 +74,31 @@ class AozoraIngester:
         self,
         source_store: SourceStore,
         *,
+        fetcher: AozoraFetcher,
         max_works: int,
     ) -> None:
         self._store = source_store
+        self._fetcher = fetcher
         self._max_works = max_works
 
     # ------------------------------------------------------------------
     # カタログ更新
     # ------------------------------------------------------------------
 
-    async def update_catalog(
-        self,
-        *,
-        client: Any | None = None,
-    ) -> str:
+    async def update_catalog(self) -> str:
         """カタログ CSV をダウンロードし source_store に配置する.
-
-        Args:
-            client: ConstrainedClient インスタンス
 
         Returns:
             更新結果のサマリーテキスト
         """
-        if client is None:
-            raise ValueError("client (ConstrainedClient) が必要です")
-
         # CSV ZIP ダウンロード
         try:
-            resp = await fetch_get(client, CATALOG_ZIP_URL)
+            zip_bytes = await self._fetcher.fetch_catalog_zip()
         except httpx.HTTPStatusError as e:
             raise ValueError(
                 "カタログ ZIP のダウンロードに失敗しました"
                 f"（url={CATALOG_ZIP_URL}, status={e.response.status_code}）"
             ) from e
-        zip_bytes = resp.content
 
         # ZIP 展開 + CSV 読み取り
         csv_text = self._extract_csv_from_zip(zip_bytes)
@@ -229,20 +220,15 @@ class AozoraIngester:
     async def add_work(
         self,
         book_id: str,
-        *,
-        client: Any | None = None,
     ) -> IngestResult:
         """指定作品を取得し source_store に配置する.
 
         Args:
             book_id: 青空文庫の作品 ID
-            client: ConstrainedClient インスタンス
 
         Returns:
             配置結果
         """
-        if client is None:
-            raise ValueError("client (ConstrainedClient) が必要です")
         if not book_id or not book_id.strip():
             raise ValueError("book_id が空です")
 
@@ -268,7 +254,7 @@ class AozoraIngester:
             )
 
         result = IngestResult()
-        await self._ingest_work(record, client, result)
+        await self._ingest_work(record, result)
         return result
 
     # ------------------------------------------------------------------
@@ -280,7 +266,6 @@ class AozoraIngester:
         person_id: str,
         *,
         max_works: int | None = None,
-        client: Any | None = None,
         progress_callback: ProgressCallback | None = None,
     ) -> IngestResult:
         """指定著者の著作権フリー作品を一括取り込みする.
@@ -288,7 +273,6 @@ class AozoraIngester:
         Args:
             person_id: 著者の人物 ID
             max_works: 最大取り込み数
-            client: ConstrainedClient インスタンス
             progress_callback: 進捗コールバック (processed, total, current)
 
         Returns:
@@ -300,8 +284,6 @@ class AozoraIngester:
             max_works if max_works is not None else self._max_works,
         )
 
-        if client is None:
-            raise ValueError("client (ConstrainedClient) が必要です")
         if not person_id or not person_id.strip():
             raise ValueError("person_id が空です")
 
@@ -341,7 +323,7 @@ class AozoraIngester:
         for work_idx, record in enumerate(targets):
             book_id = record.get(COL_BOOK_ID, "?")
             try:
-                outcome = await self._ingest_work(record, client, result)
+                outcome = await self._ingest_work(record, result)
                 if outcome == "error":
                     consecutive_failures += 1
                 else:
@@ -385,7 +367,6 @@ class AozoraIngester:
     async def _ingest_work(
         self,
         record: dict[str, str],
-        client: Any,
         result: IngestResult,
     ) -> Literal["placed", "skipped", "error"]:
         """1作品を取得し配置する.
@@ -421,7 +402,7 @@ class AozoraIngester:
 
         # ダウンロード（生データをそのまま保存、エンコーディング変換はコンバーターの責務）
         try:
-            resp = await fetch_get(client, github_url)
+            raw_bytes = await self._fetcher.fetch_xhtml(github_url)
         except httpx.HTTPStatusError as e:
             status_code = e.response.status_code
             logger.error(
@@ -437,7 +418,6 @@ class AozoraIngester:
                 "message": f"XHTML ダウンロード失敗: {e}",
             })
             return "error"
-        raw_bytes: bytes = resp.content
 
         # 元 URL の正規化（http → https）
         url = xhtml_url

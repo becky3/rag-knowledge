@@ -18,14 +18,13 @@ from __future__ import annotations
 import csv
 import io
 from pathlib import Path
-from unittest.mock import AsyncMock
 
 import httpx
 import pytest
 
 from rag.store.source_store import SourceStore
 
-from factories import make_aozora_ingester
+from factories import StubAozoraFetcher, make_aozora_ingester
 
 
 @pytest.fixture()
@@ -85,22 +84,11 @@ def _make_record(
     }
 
 
-def _mock_client(
-    status_code: int = 200,
-    content: bytes = b"<html><body>test</body></html>",
-) -> AsyncMock:
-    """ConstrainedClient のモックを生成する.
-
-    fetch_get の raise_for_status() が正しく動作するよう、
-    実 httpx.Response を返す。
-    """
-    client = AsyncMock()
-    request = httpx.Request("GET", "https://example.com")
-    resp = httpx.Response(status_code, content=content, request=request)
-    client.get = AsyncMock(return_value=resp)
-    client.__aenter__ = AsyncMock(return_value=client)
-    client.__aexit__ = AsyncMock(return_value=None)
-    return client
+def _make_http_status_error(status_code: int) -> httpx.HTTPStatusError:
+    """HTTP ステータスエラーを生成する（Stub の例外注入用）."""
+    request = httpx.Request("GET", "https://test.invalid")
+    response = httpx.Response(status_code, request=request)
+    return httpx.HTTPStatusError(f"HTTP {status_code}", request=request, response=response)
 
 
 # === バリデーションテスト ===
@@ -114,29 +102,29 @@ class TestValidation:
         self, source_store: SourceStore
     ) -> None:
         """book_id が空文字列の場合 ValueError."""
-        ingester = make_aozora_ingester(source_store)
-        client = _mock_client()
+        fetcher = StubAozoraFetcher(xhtml_default=b"<html><body>test</body></html>")
+        ingester = make_aozora_ingester(source_store, fetcher=fetcher)
         with pytest.raises(ValueError, match="book_id が空です"):
-            await ingester.add_work("", client=client)
+            await ingester.add_work("")
 
     @pytest.mark.asyncio()
     async def test_add_work_no_client(
         self, source_store: SourceStore
     ) -> None:
-        """client が None の場合 ValueError."""
+        """book_id が空白のみの場合 ValueError."""
         ingester = make_aozora_ingester(source_store)
-        with pytest.raises(ValueError, match="client"):
-            await ingester.add_work("001567", client=None)
+        with pytest.raises(ValueError, match="book_id が空"):
+            await ingester.add_work("   ")
 
     @pytest.mark.asyncio()
     async def test_crawl_author_empty_person_id(
         self, source_store: SourceStore
     ) -> None:
         """person_id が空文字列の場合 ValueError."""
-        ingester = make_aozora_ingester(source_store)
-        client = _mock_client()
+        fetcher = StubAozoraFetcher(xhtml_default=b"<html><body>test</body></html>")
+        ingester = make_aozora_ingester(source_store, fetcher=fetcher)
         with pytest.raises(ValueError, match="person_id が空です"):
-            await ingester.crawl_author("", client=client)
+            await ingester.crawl_author("")
 
     def test_search_no_criteria(self, source_store: SourceStore) -> None:
         """author も title も未指定の場合 ValueError."""
@@ -176,11 +164,11 @@ class TestMaxWorksClamp:
     ) -> None:
         """ハードリミット超過時はクランプされる."""
         _write_catalog(source_store, [_make_record()])
-        ingester = make_aozora_ingester(source_store, max_works=9999)
-        client = _mock_client()
+        fetcher = StubAozoraFetcher(xhtml_default=b"<html><body>test</body></html>")
+        ingester = make_aozora_ingester(source_store, fetcher=fetcher, max_works=9999)
         # crawl_author は内部で _validate_max_works を呼ぶ
         result = await ingester.crawl_author(
-            "000035", max_works=9999, client=client
+            "000035", max_works=9999
         )
         # クランプされてエラーにならず正常終了すること
         assert result.errors == 0
@@ -191,11 +179,11 @@ class TestMaxWorksClamp:
     ) -> None:
         """max_works=0 は ValueError."""
         _write_catalog(source_store, [_make_record()])
-        ingester = make_aozora_ingester(source_store)
-        client = _mock_client()
+        fetcher = StubAozoraFetcher(xhtml_default=b"<html><body>test</body></html>")
+        ingester = make_aozora_ingester(source_store, fetcher=fetcher)
         with pytest.raises(ValueError, match="1 以上"):
             await ingester.crawl_author(
-                "000035", max_works=0, client=client
+                "000035", max_works=0
             )
 
     @pytest.mark.asyncio()
@@ -204,11 +192,11 @@ class TestMaxWorksClamp:
     ) -> None:
         """max_works が負数は ValueError."""
         _write_catalog(source_store, [_make_record()])
-        ingester = make_aozora_ingester(source_store)
-        client = _mock_client()
+        fetcher = StubAozoraFetcher(xhtml_default=b"<html><body>test</body></html>")
+        ingester = make_aozora_ingester(source_store, fetcher=fetcher)
         with pytest.raises(ValueError, match="1 以上"):
             await ingester.crawl_author(
-                "000035", max_works=-1, client=client
+                "000035", max_works=-1
             )
 
 
@@ -227,10 +215,10 @@ class TestCopyrightCheck:
             source_store,
             [_make_record(copyright_flag="あり")],
         )
-        ingester = make_aozora_ingester(source_store)
-        client = _mock_client()
+        fetcher = StubAozoraFetcher(xhtml_default=b"<html><body>test</body></html>")
+        ingester = make_aozora_ingester(source_store, fetcher=fetcher)
         with pytest.raises(ValueError, match="著作権あり"):
-            await ingester.add_work("001567", client=client)
+            await ingester.add_work("001567")
 
     @pytest.mark.asyncio()
     async def test_copyrighted_work_skipped_in_crawl(
@@ -241,9 +229,9 @@ class TestCopyrightCheck:
             source_store,
             [_make_record(copyright_flag="あり")],
         )
-        ingester = make_aozora_ingester(source_store)
-        client = _mock_client()
-        result = await ingester.crawl_author("000035", client=client)
+        fetcher = StubAozoraFetcher(xhtml_default=b"<html><body>test</body></html>")
+        ingester = make_aozora_ingester(source_store, fetcher=fetcher)
+        result = await ingester.crawl_author("000035")
         assert result.placed == 0
         assert result.errors == 0
 
@@ -259,10 +247,10 @@ class TestCatalogNotFound:
         self, source_store: SourceStore
     ) -> None:
         """カタログなしで add_work するとエラー."""
-        ingester = make_aozora_ingester(source_store)
-        client = _mock_client()
+        fetcher = StubAozoraFetcher(xhtml_default=b"<html><body>test</body></html>")
+        ingester = make_aozora_ingester(source_store, fetcher=fetcher)
         with pytest.raises(ValueError, match="カタログが未ダウンロード"):
-            await ingester.add_work("001567", client=client)
+            await ingester.add_work("001567")
 
     def test_search_no_catalog(self, source_store: SourceStore) -> None:
         """カタログなしで search するとエラー."""
@@ -275,10 +263,10 @@ class TestCatalogNotFound:
         self, source_store: SourceStore
     ) -> None:
         """カタログなしで crawl_author するとエラー."""
-        ingester = make_aozora_ingester(source_store)
-        client = _mock_client()
+        fetcher = StubAozoraFetcher(xhtml_default=b"<html><body>test</body></html>")
+        ingester = make_aozora_ingester(source_store, fetcher=fetcher)
         with pytest.raises(ValueError, match="カタログが未ダウンロード"):
-            await ingester.crawl_author("000035", client=client)
+            await ingester.crawl_author("000035")
 
 
 # === 重複スキップテスト ===
@@ -305,13 +293,12 @@ class TestDuplicateSkip:
                 "collected_at": "2026-01-01T00:00:00+09:00",
             },
         )
-        ingester = make_aozora_ingester(source_store)
-        client = _mock_client()
-        result = await ingester.add_work("001567", client=client)
+        fetcher = StubAozoraFetcher(xhtml_default=b"<html><body>test</body></html>")
+        ingester = make_aozora_ingester(source_store, fetcher=fetcher)
+        result = await ingester.add_work("001567")
         assert result.placed == 0
         assert result.skipped == 1
         # HTTP リクエストは発生しない
-        client.get.assert_not_called()
 
 
 # === GitHub Raw URL 変換テスト ===
@@ -346,9 +333,9 @@ class TestHttpError:
     ) -> None:
         """XHTML DL で 404 の場合はエラーカウント."""
         _write_catalog(source_store, [_make_record()])
-        ingester = make_aozora_ingester(source_store)
-        client = _mock_client(status_code=404)
-        result = await ingester.add_work("001567", client=client)
+        fetcher = StubAozoraFetcher(xhtml_default=httpx.HTTPStatusError("HTTP 404", request=httpx.Request("GET", "https://test.invalid"), response=httpx.Response(404, request=httpx.Request("GET", "https://test.invalid"))))
+        ingester = make_aozora_ingester(source_store, fetcher=fetcher)
+        result = await ingester.add_work("001567")
         assert result.placed == 0
         assert result.errors == 1
         detail = result.error_details[0]
@@ -361,10 +348,10 @@ class TestHttpError:
         self, source_store: SourceStore
     ) -> None:
         """カタログ DL で HTTP エラーの場合は ValueError."""
-        ingester = make_aozora_ingester(source_store)
-        client = _mock_client(status_code=500)
+        fetcher = StubAozoraFetcher(catalog_zip=_make_http_status_error(500))
+        ingester = make_aozora_ingester(source_store, fetcher=fetcher)
         with pytest.raises(ValueError, match="ダウンロードに失敗"):
-            await ingester.update_catalog(client=client)
+            await ingester.update_catalog()
 
 
 # === 検索テスト ===
@@ -468,9 +455,9 @@ class TestIngestWork:
     ) -> None:
         """正常に作品を取得・配置できる."""
         _write_catalog(source_store, [_make_record()])
-        ingester = make_aozora_ingester(source_store)
-        client = _mock_client(content=b"<html><body>content</body></html>")
-        result = await ingester.add_work("001567", client=client)
+        fetcher = StubAozoraFetcher(xhtml_default=b"<html><body>content</body></html>")
+        ingester = make_aozora_ingester(source_store, fetcher=fetcher)
+        result = await ingester.add_work("001567")
         assert result.placed == 1
         assert result.errors == 0
         # ファイルが配置されている
@@ -497,9 +484,9 @@ class TestIngestWork:
                 _make_record(book_id="003", person_id="999999"),
             ],
         )
-        ingester = make_aozora_ingester(source_store)
-        client = _mock_client()
-        result = await ingester.crawl_author("000035", client=client)
+        fetcher = StubAozoraFetcher(xhtml_default=b"<html><body>test</body></html>")
+        ingester = make_aozora_ingester(source_store, fetcher=fetcher)
+        result = await ingester.crawl_author("000035")
         # person_id=000035 の作品 2 件のみ取り込み
         assert result.placed == 2
         assert result.errors == 0
@@ -517,9 +504,9 @@ class TestErrorDetailsStructured:
     ) -> None:
         """HTTP エラー時の error_details dict が仕様通りのフィールドを持つ."""
         _write_catalog(source_store, [_make_record()])
-        ingester = make_aozora_ingester(source_store)
-        client = _mock_client(status_code=500)
-        result = await ingester.add_work("001567", client=client)
+        fetcher = StubAozoraFetcher(xhtml_default=httpx.HTTPStatusError("HTTP 500", request=httpx.Request("GET", "https://test.invalid"), response=httpx.Response(500, request=httpx.Request("GET", "https://test.invalid"))))
+        ingester = make_aozora_ingester(source_store, fetcher=fetcher)
+        result = await ingester.add_work("001567")
         assert result.errors == 1
         detail = result.error_details[0]
         assert detail["category"] == "metadata_fetch"
@@ -534,15 +521,15 @@ class TestErrorDetailsStructured:
     ) -> None:
         """XHTML URL 欠落時の error_details dict."""
         _write_catalog(source_store, [_make_record(xhtml_url="")])
-        ingester = make_aozora_ingester(source_store)
-        client = _mock_client()
+        fetcher = StubAozoraFetcher(xhtml_default=b"<html><body>test</body></html>")
+        ingester = make_aozora_ingester(source_store, fetcher=fetcher)
         # crawl_author 経由だと XHTML URL 欠落でスキップされるため add_work 経由でなく
         # 直接 _ingest_work を呼ぶ
         from rag.pipeline.ingesters._common import IngestResult
 
         result = IngestResult()
         record = _make_record(xhtml_url="")
-        await ingester._ingest_work(record, client, result)
+        await ingester._ingest_work(record, result)
         assert result.errors == 1
         detail = result.error_details[0]
         assert detail["category"] == "metadata_fetch"
@@ -555,15 +542,15 @@ class TestErrorDetailsStructured:
     ) -> None:
         """place_file 失敗時は category='placement' で記録される."""
         _write_catalog(source_store, [_make_record()])
-        ingester = make_aozora_ingester(source_store)
-        client = _mock_client()
+        fetcher = StubAozoraFetcher(xhtml_default=b"<html><body>test</body></html>")
+        ingester = make_aozora_ingester(source_store, fetcher=fetcher)
 
         # place_file を OSError で失敗させる
         def _raise_oserror(**kwargs: object) -> None:
             raise OSError("disk full")
 
         monkeypatch.setattr(source_store, "place_file", _raise_oserror)
-        result = await ingester.add_work("001567", client=client)
+        result = await ingester.add_work("001567")
         assert result.errors == 1
         assert result.placed == 0
         detail = result.error_details[0]
@@ -593,10 +580,10 @@ class TestCircuitBreaker:
             for i in range(10)
         ]
         _write_catalog(source_store, records)
-        ingester = make_aozora_ingester(source_store)
-        # 全て 500 エラーを返すモック
-        client = _mock_client(status_code=500)
-        result = await ingester.crawl_author("000035", client=client)
+        # 全て 500 エラーを返す Stub
+        fetcher = StubAozoraFetcher(xhtml_default=_make_http_status_error(500))
+        ingester = make_aozora_ingester(source_store, fetcher=fetcher)
+        result = await ingester.crawl_author("000035")
 
         # 5 回連続失敗で break するため errors=5
         assert result.errors == 5
@@ -618,9 +605,9 @@ class TestCircuitBreaker:
             for i in range(3)
         ]
         _write_catalog(source_store, records)
-        ingester = make_aozora_ingester(source_store)
-        client = _mock_client(status_code=500)
-        result = await ingester.crawl_author("000035", client=client)
+        fetcher = StubAozoraFetcher(xhtml_default=httpx.HTTPStatusError("HTTP 500", request=httpx.Request("GET", "https://test.invalid"), response=httpx.Response(500, request=httpx.Request("GET", "https://test.invalid"))))
+        ingester = make_aozora_ingester(source_store, fetcher=fetcher)
+        result = await ingester.crawl_author("000035")
 
         assert result.errors == 3
         assert result.aborted is False

@@ -414,9 +414,68 @@ def make_local_ingester(source_store: Any, **overrides: Any) -> Any:
     return LocalIngester(source_store, **defaults)
 
 
+class StubAozoraFetcher:
+    """AozoraFetcher Protocol のテスト用 stub.
+
+    fetch_catalog_zip / fetch_xhtml に対する応答を辞書 / シーケンスで指定可能。
+    旧 ``_mock_client`` のシンプルな差し替えを互換維持する目的で導入。
+    """
+
+    def __init__(
+        self,
+        *,
+        catalog_zip: bytes | BaseException | None = None,
+        xhtml_responses: list[Any] | None = None,
+        xhtml_default: bytes | BaseException = b"<html><body>test</body></html>",
+    ) -> None:
+        self._catalog_zip = catalog_zip
+        self._xhtml_responses = list(xhtml_responses) if xhtml_responses else None
+        self._xhtml_default = xhtml_default
+        self._xhtml_idx = 0
+
+    async def __aenter__(self) -> "StubAozoraFetcher":
+        return self
+
+    async def __aexit__(self, *exc_info: Any) -> None:
+        return None
+
+    async def fetch_catalog_zip(self) -> bytes:
+        if isinstance(self._catalog_zip, BaseException):
+            raise self._catalog_zip
+        if self._catalog_zip is None:
+            raise RuntimeError("StubAozoraFetcher: catalog_zip 未設定")
+        return self._catalog_zip
+
+    async def fetch_xhtml(self, github_url: str) -> bytes:
+        del github_url
+        if self._xhtml_responses is None:
+            if isinstance(self._xhtml_default, BaseException):
+                raise self._xhtml_default
+            return self._xhtml_default
+        if self._xhtml_idx >= len(self._xhtml_responses):
+            raise IndexError(
+                f"StubAozoraFetcher: xhtml 応答シーケンスを使い切りました（idx={self._xhtml_idx}）",
+            )
+        item = self._xhtml_responses[self._xhtml_idx]
+        self._xhtml_idx += 1
+        if isinstance(item, BaseException):
+            raise item
+        if not isinstance(item, bytes):
+            raise TypeError(
+                f"StubAozoraFetcher: xhtml 応答は bytes でなければなりません（{type(item)}）",
+            )
+        return item
+
+
 def make_aozora_ingester(source_store: Any, **overrides: Any) -> Any:
-    """AozoraIngester のテスト用ファクトリ."""
+    """AozoraIngester のテスト用ファクトリ.
+
+    fetcher は省略可。省略時はデフォルトの StubAozoraFetcher を注入する。
+    """
     from rag.pipeline.ingesters.aozora import AozoraIngester
+
+    if "fetcher" not in overrides:
+        overrides["fetcher"] = StubAozoraFetcher()
 
     defaults: dict[str, Any] = {
         "max_works": 200,

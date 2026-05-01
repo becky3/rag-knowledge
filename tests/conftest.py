@@ -148,6 +148,28 @@ def _force_bluesky_fake_mode() -> Iterator[None]:
 
 
 @pytest.fixture(autouse=True, scope="session")
+def _force_aozora_fake_mode() -> Iterator[None]:
+    """テスト中は Aozora Fake モードを環境変数で強制する.
+
+    仕様: docs/specs/infrastructure/fake-mode.md
+    仕様: docs/specs/infrastructure/fake-adapters/aozora.md
+
+    create_aozora_fetcher が pydantic Settings 経由で
+    `RAG_AOZORA_FAKE_MODE=true` を読み込むため、ここで環境変数に明示設定する。
+
+    `RAG_TESTS_ALLOW_NETWORK=1` 設定時のみ強制を解除する。
+
+    httpx クライアントクラス全体の `_RaiseOnUse` 差し替えは採用しない（bluesky / zenn と同方式）。
+    """
+    if os.environ.get("RAG_TESTS_ALLOW_NETWORK") == "1":
+        yield
+        return
+    with pytest.MonkeyPatch.context() as mp:
+        mp.setenv("RAG_AOZORA_FAKE_MODE", "true")
+        yield
+
+
+@pytest.fixture(autouse=True, scope="session")
 def _force_zenn_fake_mode() -> Iterator[None]:
     """テスト中は Zenn Fake モードを環境変数で強制する.
 

@@ -481,6 +481,18 @@ def log_fake_mode_status(settings: RAGSettings) -> None:
             "Zenn は REAL モードで起動中。実 Zenn API アクセスが発生します"
         )
 
+    if settings.rag_aozora_fake_mode:
+        logger.warning(
+            "[FAKE MODE: aozora] Aozora は FAKE モードで起動中（fixture: %s）。"
+            "実 青空文庫 / GitHub Raw アクセスは発生しません。"
+            "本番運用時は RAG_AOZORA_FAKE_MODE=false を .env に設定してください",
+            settings.rag_aozora_fake_fixture_dir,
+        )
+    else:
+        logger.info(
+            "Aozora は REAL モードで起動中。実 青空文庫 / GitHub Raw アクセスが発生します"
+        )
+
 
 def _normalize_encoding(value: str) -> str:
     """エンコーディング名を比較可能な正規形式に変換する.

@@ -395,7 +395,7 @@ async def rag_add_bluesky(
         return label + e.format_mcp_error("BlueSky 投稿の取り込みに失敗しました")
 
 
-FakeSource = Literal["youtube", "bluesky", "embedding", "web", "zenn"]
+FakeSource = Literal["youtube", "bluesky", "embedding", "web", "zenn", "aozora"]
 
 # YouTube インジェスト系 MCP ツールが利用する fake source の組
 _YOUTUBE_INGEST_FAKE_SOURCES: list[FakeSource] = ["youtube", "embedding"]
@@ -411,6 +411,9 @@ _SITE_INGEST_FAKE_SOURCES: list[FakeSource] = ["web", "embedding"]
 
 # Zenn インジェスト系 MCP ツールが利用する fake source の組
 _ZENN_INGEST_FAKE_SOURCES: list[FakeSource] = ["zenn", "embedding"]
+
+# Aozora インジェスト系 MCP ツールが利用する fake source の組
+_AOZORA_INGEST_FAKE_SOURCES: list[FakeSource] = ["aozora", "embedding"]
 
 
 def _fake_mode_labels(active_sources: list[FakeSource]) -> str:
@@ -443,6 +446,7 @@ def _fake_mode_labels(active_sources: list[FakeSource]) -> str:
         "embedding": settings.rag_embedding_fake_mode,
         "web": settings.rag_scrapy_fake_mode,
         "zenn": settings.rag_zenn_fake_mode,
+        "aozora": settings.rag_aozora_fake_mode,
     }
     parts: list[str] = []
     for source in active_sources:
@@ -766,11 +770,12 @@ async def rag_update_aozora_catalog(
     Returns:
         カタログ更新結果のサマリーテキスト
     """
+    label = _fake_mode_labels(_AOZORA_INGEST_FAKE_SOURCES)
     try:
         result = await _run_cli_subprocess("update-aozora-catalog", ctx=ctx)
-        return str(result.get("message", "カタログ更新完了"))
+        return label + str(result.get("message", "カタログ更新完了"))
     except CLISubprocessError as e:
-        return e.format_mcp_error("青空文庫カタログの更新に失敗しました")
+        return label + e.format_mcp_error("青空文庫カタログの更新に失敗しました")
 
 
 @mcp.tool()
@@ -823,11 +828,12 @@ async def rag_add_aozora(
     Returns:
         取り込み結果のサマリーテキスト
     """
+    label = _fake_mode_labels(_AOZORA_INGEST_FAKE_SOURCES)
     try:
         result = await _run_cli_subprocess("ingest-aozora", [book_id], ctx=ctx)
-        return _format_cli_ingest_result(result, context=f"作品ID: {book_id}")
+        return label + _format_cli_ingest_result(result, context=f"作品ID: {book_id}")
     except CLISubprocessError as e:
-        return e.format_mcp_error(f"青空文庫作品の取り込みに失敗しました（作品ID: {book_id}）")
+        return label + e.format_mcp_error(f"青空文庫作品の取り込みに失敗しました（作品ID: {book_id}）")
 
 
 @mcp.tool()
@@ -852,11 +858,12 @@ async def rag_crawl_aozora(
     if max_works is not None:
         args.extend(["--max-works", str(max_works)])
 
+    label = _fake_mode_labels(_AOZORA_INGEST_FAKE_SOURCES)
     try:
         result = await _run_cli_subprocess("ingest-aozora-author", args, ctx=ctx)
-        return _format_cli_ingest_result(result, context=f"人物ID: {person_id}")
+        return label + _format_cli_ingest_result(result, context=f"人物ID: {person_id}")
     except CLISubprocessError as e:
-        return e.format_mcp_error(f"青空文庫作品の取り込みに失敗しました（人物ID: {person_id}）")
+        return label + e.format_mcp_error(f"青空文庫作品の取り込みに失敗しました（人物ID: {person_id}）")
 
 
 @mcp.tool()
