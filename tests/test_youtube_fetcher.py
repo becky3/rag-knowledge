@@ -104,3 +104,43 @@ class TestLogFakeModeStatus:
             for r in records
         )
         assert not any("[FAKE MODE:" in r.message for r in records)
+
+    def test_embedding_fake_mode_true_emits_warning(
+        self, caplog: pytest.LogCaptureFixture,
+        _enable_rag_logger_propagation: None,
+    ) -> None:
+        """Embedding fake モード明示有効時のみ WARNING ラベルを出力する."""
+        settings = _make_settings(rag_embedding_fake_mode=True)
+        with caplog.at_level(logging.WARNING, logger="rag.config"):
+            log_fake_mode_status(settings)
+        assert any(
+            "[FAKE MODE: embedding]" in r.message
+            and r.levelno == logging.WARNING
+            for r in caplog.records
+        )
+
+    def test_embedding_fake_mode_false_no_log(
+        self, caplog: pytest.LogCaptureFixture,
+        _enable_rag_logger_propagation: None,
+    ) -> None:
+        """Embedding fake モード未設定（デフォルト False）時はログを出さない.
+
+        他 source と異なり Embedding はテスト専用フックのため、
+        real モードでは INFO ログも出力しない。
+        """
+        settings = _make_settings(
+            rag_youtube_fake_mode=False,
+            rag_bluesky_fake_mode=False,
+            rag_embedding_fake_mode=False,
+            rag_web_fake_mode=False,
+            rag_scrapy_fake_mode=False,
+            rag_zenn_fake_mode=False,
+            rag_aozora_fake_mode=False,
+        )
+        with caplog.at_level(logging.DEBUG, logger="rag.config"):
+            log_fake_mode_status(settings)
+        embedding_records = [
+            r for r in caplog.records
+            if r.name == "rag.config" and "embedding" in r.message.lower()
+        ]
+        assert embedding_records == []

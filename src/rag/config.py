@@ -112,8 +112,8 @@ class _EnvLoader(BaseSettings):
 
     # Embedding Fake モード — テスト専用フック。本番運用では設定しないこと。
     # pytest の autouse fixture が `RAG_EMBEDDING_FAKE_MODE=true` を強制し、subprocess 越境テストでも
-    # 環境変数経由で Fake Embedding を注入する。本番ランタイムでは `False`（デフォルト）固定で
-    # 実 LM Studio / OpenAI Embedding が利用される
+    # 環境変数経由で Fake Embedding を注入する。本番運用ではデフォルトの `False` のまま使用し、
+    # 実 LM Studio / OpenAI Embedding を利用する（Field 自体は値を受け付けるため厳密な「固定」ではない）
     rag_embedding_fake_mode: bool = False
     # Fake Embedding が生成するベクトルの次元数。Real モデルの次元に合わせる
     rag_embedding_fake_dimensions: int = Field(default=768, ge=1)
