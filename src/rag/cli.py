@@ -2929,7 +2929,7 @@ async def run_add_document(args: argparse.Namespace) -> None:
         from .pipeline.ingesters.local import create_local_fetcher
         local_ingester = LocalIngester(
             controller.source_store,
-            fetcher=create_local_fetcher(settings),
+            fetcher=create_local_fetcher(),
             supported_extensions=supported_extensions,
             http_mode_enabled=False,
             allowed_dirs=None,
@@ -2981,7 +2981,7 @@ async def run_crawl_documents(args: argparse.Namespace) -> None:
     ]
     local_ingester = LocalIngester(
         controller.source_store,
-        fetcher=create_local_fetcher(settings),
+        fetcher=create_local_fetcher(),
         supported_extensions=supported_extensions,
         http_mode_enabled=False,
         allowed_dirs=None,
