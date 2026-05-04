@@ -450,11 +450,26 @@ def _load_toml_config() -> dict[str, Any]:
     return data
 
 
+def _collect_lmstudio_paths(
+    data: Any, prefix: tuple[str, ...] = (),
+) -> set[tuple[str, ...]]:
+    """lmstudio.toml の dict をリーフまで再帰し、全リーフパスを返す."""
+    paths: set[tuple[str, ...]] = set()
+    if isinstance(data, dict):
+        for key, value in data.items():
+            paths.update(_collect_lmstudio_paths(value, (*prefix, key)))
+    else:
+        paths.add(prefix)
+    return paths
+
+
 def _load_lmstudio_config() -> _LMStudioFlatData:
     """lmstudio.toml を読み込み、モデル key を辞書で返す.
 
     返り値のキーは RAGSettings の対応フィールド名（_LMSTUDIO_TOML_PATHS で定義）。
     TOML パスのいずれかが欠損している場合は ValueError を送出（fail-fast）。
+    _LMSTUDIO_TOML_PATHS に列挙されていない未知のキーが含まれている場合も
+    ValueError を送出する（config.toml の未知キー検証と同等の挙動）。
     キーが空文字列の場合は RAGSettings の Field(min_length=1) で fail-fast する。
     """
     if not _LMSTUDIO_TOML_FILE.exists():
@@ -482,6 +497,17 @@ def _load_lmstudio_config() -> _LMStudioFlatData:
             )
             raise ValueError(msg)
         result[field_name] = node
+    # 未知キー/セクションの検出（必須フィールド検証後、config.toml の未知キー検証と整合）
+    known_paths = set(_LMSTUDIO_TOML_PATHS.values())
+    actual_paths = _collect_lmstudio_paths(data)
+    unknown_paths = actual_paths - known_paths
+    if unknown_paths:
+        unknown_keys = sorted(".".join(p) for p in unknown_paths)
+        msg = (
+            f"lmstudio.toml に未知の設定が含まれています "
+            f"(path={_LMSTUDIO_TOML_FILE}): {unknown_keys}"
+        )
+        raise ValueError(msg)
     # _LMSTUDIO_TOML_PATHS の全キーを result に格納したため、TypedDict として扱える
     return cast(_LMStudioFlatData, result)
 

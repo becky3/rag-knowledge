@@ -15,6 +15,15 @@ RAG Knowledge は Embedding（ローカル）と Vision（メディア解析）�
 
 ロードパラメータ（context_length / gpu_offload 等）は LM Studio の per-model preset に委譲する。`lms load` の引数では指定しない。
 
+## ユーザーセットアップ
+
+以下の項目は [LM Studio 公式ドキュメント](https://lmstudio.ai/docs) を参照する。本プロジェクトは公式手順に独自の追加要件を持たない。
+
+- LM Studio 本体のインストール
+- 必要モデル（`lmstudio.toml` の `models.*.key` で指定）のダウンロード
+- 初回 GUI セットアップ
+- per-model preset 設定
+
 ## 運用手順（Claude 実施）
 
 ### サーバーの起動・停止
@@ -27,7 +36,8 @@ lms server stop        # 停止
 
 ### モデルのロード・unload
 
-`lmstudio.toml` の `models.embedding.key` / `models.vision.key` を参照して `lms load <key>` を実行する。引数なしのため per-model preset に従ってロードされる。
+`lmstudio.toml` の `models.embedding.key` / `models.vision.key` を参照して `lms load <key>` を実行する。
+追加のロードパラメータを指定しないため、per-model preset に従ってロードされる。
 
 ```bash
 # lmstudio.toml で指定されている key を読み出してロード

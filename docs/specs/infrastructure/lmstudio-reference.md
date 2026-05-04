@@ -30,7 +30,7 @@ LM Studio を Claude 主導で運用するための CLI リファレンス。`lm
 | `lms server status` | サーバーの起動状態を確認する | `lms server status` |
 | `lms ls` | ローカルにダウンロード済みのモデル一覧を表示する | `lms ls` |
 | `lms ps` | 現在ロード中のモデル一覧を表示する | `lms ps` |
-| `lms load` | モデルをロードする。引数なし時は per-model preset に従う | `lms load <key>` |
+| `lms load` | モデルをロードする。追加パラメータなしで `lms load <key>` を実行した場合、per-model preset に従う | `lms load <key>` |
 | `lms unload` | モデルを unload する | `lms unload <key>` または `lms unload --all` |
 | `lms get` | モデルをダウンロードする | `lms get <repo>` |
 | `lms runtime survey` | ハードウェア・利用可能ランタイムを調査する | `lms runtime survey` |

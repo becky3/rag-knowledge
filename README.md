@@ -167,7 +167,12 @@ cp .env.example .env
 
 ### 3. LM Studio
 
-`EMBEDDING_PROVIDER=local` の場合に LM Studio が必要となる。LM Studio で読み込むモデル key は `lmstudio.toml` を SSoT として管理する。
+LM Studio は以下のいずれかで必要となる。
+
+- `EMBEDDING_PROVIDER=local` のとき（Embedding 用）
+- メディア解析（画像・動画の Vision 解析）を使用するとき（`EMBEDDING_PROVIDER=online` でも常に必要）
+
+LM Studio で読み込むモデル key は `lmstudio.toml` を SSoT として管理する。
 
 - セットアップ・運用手順: [docs/specs/infrastructure/lmstudio-operation.md](docs/specs/infrastructure/lmstudio-operation.md)
 - CLI 仕様参照: [docs/specs/infrastructure/lmstudio-reference.md](docs/specs/infrastructure/lmstudio-reference.md)

@@ -239,6 +239,29 @@ class TestLMStudioConfigValidation:
             with pytest.raises(ValueError, match="必須フィールドが見つかりません"):
                 _load_lmstudio_config()
 
+    def test_unknown_key_raises_error(self, tmp_path: Path) -> None:
+        """lmstudio.toml に未知のキーが含まれている場合は ValueError."""
+        lmstudio_file = tmp_path / "lmstudio.toml"
+        lmstudio_file.write_text(
+            '[models.embedding]\nkey = "embed-x"\n'
+            '[models.vision]\nkey = "vision-x"\n'
+            '[server]\nauto_start = true\n'
+        )
+        with patch("rag.config._LMSTUDIO_TOML_FILE", lmstudio_file):
+            with pytest.raises(ValueError, match="未知の設定"):
+                _load_lmstudio_config()
+
+    def test_unknown_subkey_raises_error(self, tmp_path: Path) -> None:
+        """既知セクション内の未知のサブキーも ValueError."""
+        lmstudio_file = tmp_path / "lmstudio.toml"
+        lmstudio_file.write_text(
+            '[models.embedding]\nkey = "embed-x"\nlegacy_param = 123\n'
+            '[models.vision]\nkey = "vision-x"\n'
+        )
+        with patch("rag.config._LMSTUDIO_TOML_FILE", lmstudio_file):
+            with pytest.raises(ValueError, match="未知の設定"):
+                _load_lmstudio_config()
+
     def test_missing_embedding_key_raises_error(self, tmp_path: Path) -> None:
         """embedding key が欠損している場合は ValueError."""
         lmstudio_file = tmp_path / "lmstudio.toml"
