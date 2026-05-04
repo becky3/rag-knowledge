@@ -24,16 +24,19 @@ MCP の接続状態の変更はユーザーに `/mcp` での操作を依頼す�
 
 #### Fake モード状態の確認
 
-YouTube インジェスター等は Fake モード基盤（`docs/specs/infrastructure/fake-mode.md`）で実外部アクセス排除を制御する。MCP サーバーまたは CLI の起動ログで現在のモードを確認できる:
+外部 API 系インジェスター（YouTube・BlueSky・Zenn・Aozora・Web）は Fake モード基盤（`docs/specs/infrastructure/fake-mode.md`）で実外部アクセス排除を制御する。MCP サーバーまたは CLI の起動ログで現在のモードを確認できる:
 
 - `WARNING: [FAKE MODE: youtube] YouTube は FAKE モードで起動中（fixture: ...）` → fake モード（実 YouTube アクセス発生せず）
 - `INFO: YouTube は REAL モードで起動中` → real モード（実 YouTube API アクセスあり）
-- `WARNING: [FAKE MODE: embedding] Embedding は FAKE モードで起動中（dimensions: ...）` → Embedding fake モード（実 LM Studio / OpenAI アクセス発生せず）
-- `INFO: Embedding は REAL モードで起動中` → real モード（実 Embedding API アクセスあり）
 
-`.env` の `RAG_YOUTUBE_FAKE_MODE` / `RAG_EMBEDDING_FAKE_MODE` が未設定の場合は安全側のデフォルト（fake 有効）で起動する。
-本番運用時のみ `RAG_YOUTUBE_FAKE_MODE=false` / `RAG_EMBEDDING_FAKE_MODE=false` を `.env` に明示する必要がある。
-MCP ツール `rag_add_youtube` / `rag_crawl_youtube` の応答冒頭に `[FAKE MODE: youtube]` / `[FAKE MODE: embedding]` ラベルが付与される場合、該当 source の fake モードで動作している。
+`.env` の `RAG_YOUTUBE_FAKE_MODE` 等が未設定の場合は安全側のデフォルト（fake 有効）で起動する。
+本番運用時のみ `RAG_YOUTUBE_FAKE_MODE=false` 等を `.env` に明示する必要がある。
+MCP ツール `rag_add_youtube` / `rag_crawl_youtube` の応答冒頭に `[FAKE MODE: youtube]` ラベルが付与される場合、該当 source の fake モードで動作している。
+
+`RAG_EMBEDDING_FAKE_MODE` はテスト専用フックであり `.env.example` には掲載されていない。
+本番運用では設定しないこと。pytest が autouse fixture で `RAG_EMBEDDING_FAKE_MODE=true` を強制する。
+明示的に `true` を設定した場合のみ起動時に `WARNING: [FAKE MODE: embedding] ...` ラベル付き警告ログが出る
+（デフォルトは `false` で警告なし）。
 
 ### MCP サーバーと他プロセスの共存
 

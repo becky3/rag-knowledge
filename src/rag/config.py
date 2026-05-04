@@ -110,14 +110,11 @@ class _EnvLoader(BaseSettings):
     # Fake Fetcher が読み込む fixture ディレクトリ。プロジェクトルートからの相対パス
     rag_aozora_fake_fixture_dir: str = "src/rag/pipeline/ingesters/_fake/aozora/data"
 
-    # Local Fake モード — テスト・QA で実ユーザーファイルシステムへのアクセスを排除する。デフォルトは安全側（fake 有効）
-    # 注意: PDF/AsciiDoc 抽出は converter 層の責務であり、QA 速度向上は #713 で対応
-    rag_local_fake_mode: bool = True
-    # Fake Fetcher が読み込む fixture ディレクトリ。プロジェクトルートからの相対パス
-    rag_local_fake_fixture_dir: str = "src/rag/pipeline/ingesters/_fake/local/data"
-
-    # Embedding Fake モード — テスト・CI で LM Studio / OpenAI への実 Embedding アクセスを排除する。デフォルトは安全側（fake 有効）
-    rag_embedding_fake_mode: bool = True
+    # Embedding Fake モード — テスト専用フック。本番運用では設定しないこと。
+    # pytest の autouse fixture が `RAG_EMBEDDING_FAKE_MODE=true` を強制し、subprocess 越境テストでも
+    # 環境変数経由で Fake Embedding を注入する。本番運用ではデフォルトの `False` のまま使用し、
+    # 実 LM Studio / OpenAI Embedding を利用する（Field 自体は値を受け付けるため厳密な「固定」ではない）
+    rag_embedding_fake_mode: bool = False
     # Fake Embedding が生成するベクトルの次元数。Real モデルの次元に合わせる
     rag_embedding_fake_dimensions: int = Field(default=768, ge=1)
 
@@ -202,11 +199,8 @@ class RAGSettings(BaseModel):
     rag_aozora_fake_mode: bool
     # Fake Fetcher が読み込む fixture ディレクトリ
     rag_aozora_fake_fixture_dir: str
-    # Local Fake モード切替。デフォルト fake（安全側）、本番運用時のみ false を .env で明示
-    rag_local_fake_mode: bool
-    # Fake Fetcher が読み込む fixture ディレクトリ
-    rag_local_fake_fixture_dir: str
-    # Embedding Fake モード切替。デフォルト fake（安全側）、本番運用時のみ false を .env で明示
+    # Embedding Fake モード切替（テスト専用フック）。本番運用では false 固定。
+    # pytest autouse fixture が env 強制し、subprocess 越境テストでも引き継ぐ
     rag_embedding_fake_mode: bool
     # Fake Embedding が生成するベクトルの次元数
     rag_embedding_fake_dimensions: int = Field(ge=1)
@@ -566,14 +560,10 @@ def log_fake_mode_status(settings: RAGSettings) -> None:
     if settings.rag_embedding_fake_mode:
         logger.warning(
             "[FAKE MODE: embedding] Embedding は FAKE モードで起動中（dimensions: %d）。"
-            "実 Embedding API アクセスは発生せず、決定論的な固定ベクトルを返します。"
-            "本番運用時は RAG_EMBEDDING_FAKE_MODE=false を .env に設定してください",
+            "本フラグはテスト専用フックです。本番運用では RAG_EMBEDDING_FAKE_MODE を設定しないでください",
             settings.rag_embedding_fake_dimensions,
         )
-    else:
-        logger.info(
-            "Embedding は REAL モードで起動中。実 Embedding API アクセスが発生します"
-        )
+    # real モード（デフォルト）は通常運用のため INFO 出力なし
 
     if settings.rag_scrapy_fake_mode:
         logger.warning(
@@ -611,17 +601,6 @@ def log_fake_mode_status(settings: RAGSettings) -> None:
             "Aozora は REAL モードで起動中。実 青空文庫 / GitHub Raw アクセスが発生します"
         )
 
-    if settings.rag_local_fake_mode:
-        logger.warning(
-            "[FAKE MODE: local] Local は FAKE モードで起動中（fixture: %s）。"
-            "ユーザー指定ディレクトリへのアクセスは fixture ディレクトリに置換されます。"
-            "本番運用時は RAG_LOCAL_FAKE_MODE=false を .env に設定してください",
-            settings.rag_local_fake_fixture_dir,
-        )
-    else:
-        logger.info(
-            "Local は REAL モードで起動中。ユーザー指定ディレクトリにアクセスします"
-        )
 
 
 def _normalize_encoding(value: str) -> str:

@@ -1,14 +1,10 @@
 """Local Fetcher Protocol と Real 実装、DI ファクトリ.
 
-仕様: docs/specs/infrastructure/fake-mode.md
-仕様: docs/specs/infrastructure/fake-adapters/local.md
-
 ローカルファイルシステムへのアクセス処理を抽象化した Protocol を定義し、
-Real 実装（pathlib 直利用）と .env 経由の DI ファクトリを提供する。
+Real 実装（pathlib 直利用）と DI ファクトリを提供する。
 
 PDF テキスト抽出 / AsciiDoc → Markdown 変換は **converter 層の責務** であり、
 本 Protocol のスコープ外。LocalFetcher は filesystem 抽象化のみを担う。
-QA イテレーション速度向上（MinerU/CUDA 起動回避）は #713 で対応する。
 """
 
 from __future__ import annotations
@@ -21,10 +17,7 @@ if TYPE_CHECKING:
 
 
 class LocalFetcher(Protocol):
-    """ローカルファイルシステムアクセスの抽象 Port.
-
-    Real 実装は pathlib 直利用、Fake 実装は fixture ディレクトリベース。
-    """
+    """ローカルファイルシステムアクセスの抽象 Port."""
 
     async def __aenter__(self) -> "LocalFetcher":
         ...
@@ -102,18 +95,10 @@ class RealLocalFetcher:
 
 
 def create_local_fetcher(settings: RAGSettings) -> LocalFetcher:
-    """Settings から Real / Fake のいずれかを選択して返すファクトリ."""
-    if settings.rag_local_fake_mode:
-        from rag.config import PROJECT_ROOT
-        from rag.pipeline.ingesters._fake.local import FakeLocalFetcher
+    """LocalFetcher を生成するファクトリ.
 
-        fixture_dir = Path(settings.rag_local_fake_fixture_dir)
-        if not fixture_dir.is_absolute():
-            fixture_dir = PROJECT_ROOT / fixture_dir
-        if not fixture_dir.exists():
-            raise FileNotFoundError(
-                f"Local fake fixture ディレクトリが見つかりません: {fixture_dir}。"
-                f"RAG_LOCAL_FAKE_FIXTURE_DIR を確認してください"
-            )
-        return FakeLocalFetcher(fixture_dir=fixture_dir)
+    settings は他 source の create_*_fetcher との API 一貫性のため受け取るが、
+    Local Fake 廃止（Issue #722）以降は常に RealLocalFetcher を返すため未使用。
+    """
+    del settings
     return RealLocalFetcher()

@@ -2,12 +2,18 @@
 
 ## 概要
 
-外部 API・外部ライブラリを必要とするインジェスター（YouTube・BlueSky 等）および Embedding 層（LM Studio / OpenAI）に対し、外部アクセスを行わない代替実装（**Fake Adapter**）を注入できる仕組みを定義する。pytest テスト・QA・運用環境のいずれでも同一の Fake Adapter を使い回し、実外部アクセスをデフォルト無効化する。
+外部 API・外部ライブラリを必要とするインジェスター（YouTube・BlueSky 等）に対し、外部アクセスを行わない代替実装（**Fake Fetcher**）を注入できる仕組みを定義する。本番ランタイムでも同一の Fake Fetcher を使い回し、実外部 API アクセスをデフォルト無効化する。
 
-Fake Adapter の対象は 2 系統に分類される:
+本仕様書は **外部 API への実アクセス排除** に集約する。
+filesystem アクセス（Local）は Fake 化対象外（fixture を実 I/O で読めば十分なため抽象化の必然性なし）。
+Embedding 層は LM Studio Claude 主導運用（[LM Studio 管理基盤](lmstudio-reference.md)）が前提となり、
+本番運用での Fake 動機がないため、`FakeEmbedding` は **テスト専用フック**として扱う
+（後述「Fake Embedding（テスト専用フック）」）。
+
+Fake Adapter の対象:
 
 - **インジェスター系 Fake Fetcher**: `RAG_{SOURCE_TYPE}_FAKE_MODE` で切替（例: `RAG_YOUTUBE_FAKE_MODE`）
-- **Embedding 系 Fake Embedding**: `RAG_EMBEDDING_FAKE_MODE` で切替（LM Studio / OpenAI 共通）
+- **Embedding 系 Fake Embedding**: テスト専用。`.env.example` には記載しない
 
 スコープ:
 
@@ -78,6 +84,8 @@ CLI / MCP サーバー / pytest のいずれの起動経路でも、**起動時�
   「fake モードで起動中、実外部アクセスは発生しません」「本番運用時は `RAG_{SOURCE_TYPE}_FAKE_MODE=false` を `.env` に設定してください」のガイドを含める
 - **real モード**: INFO レベルでログ出力する。「real モードで起動中、実外部アクセスが発生します」と明示
 
+**例外**: Embedding はテスト専用フック扱いのため、real モード（デフォルト）では INFO ログを出さない（通常運用のため）。`rag_embedding_fake_mode=True` を明示設定したときのみ WARNING ログを出力する。詳細は <<### Fake Embedding（テスト専用フック）@self>>「起動時警告ログ」を参照。
+
 複数 source（インジェスター系・Embedding 系）が存在する場合、各 source ごとに独立して状態を出力する。
 
 **起動時 1 回保証**: Settings はプロセス内シングルトンとして実装し、ログ出力は Settings 初期化時に 1 回のみ発生させる。pytest 実行時も session 開始時の Settings 初期化で 1 回のみ出力される（pytest-xdist 並列実行時は各 worker で 1 回ずつ）。テストごとに繰り返し WARNING が出力されないようにする。
@@ -126,7 +134,6 @@ Fake Fetcher が返すデータ内の識別子は実在の ID と衝突しない
 | Zenn | username | `testuser` プレフィックス | `testuser` |
 | Aozora | book_id | `999900` 番台（実在しない範囲） | `999900` / `999901` |
 | Aozora | person_id | `99999` 番台 | `99999` |
-| Local | ファイル名 | `test_` プレフィックス | `test_doc1.md` / `test_doc2.txt` |
 | Web (scrapy) | URL | `https://test.invalid/` プレフィックス（IANA 予約 TLD、RFC 6761） | `https://test.invalid/page1` |
 
 新たな source_type を追加する際は、本テーブルに synthetic ID 規約を追記すること。
@@ -138,46 +145,54 @@ Fake が返却する **出力 URL** のみ `test.invalid` を使う。
 
 ### Fake データの配置
 
-- Fake Fetcher と fake データは `src/rag/pipeline/ingesters/_fake/{source_type}/` 配下に集約する
+- Fake Fetcher と fake データは `src/rag/pipeline/ingesters/_fake/{source_type}/` 配下に集約する（インジェスター系のみ）
 - `data/` サブディレクトリに JSON 形式で配置する
-- production パッケージに含まれることを許容する（運用環境での fake モード動作のため）
+- インジェスター系 `_fake/` は production パッケージに含まれることを許容する（運用環境での fake モード動作のため）
+- Embedding 系 `src/rag/embedding/_fake/` はテスト専用フックであり、production パッケージに含まれても本番運用では使われない（`rag_embedding_fake_mode` のデフォルトが `False` のため）
 - pytest テストからは `from rag.pipeline.ingesters._fake.{source_type} import Fake{SourceType}Fetcher` で参照する
 - `tests/fixtures/` 配下には fake データを配置しない（src 配下が SSoT）
 
-### Fake Embedding（Embedding 層の Fake 実装）
+### Fake Embedding（テスト専用フック）
 
-Embedding 層は外部の LM Studio / OpenAI API への HTTP 通信を伴うため、インジェスター系 Fake Fetcher と独立した Fake 実装 `FakeEmbedding` を提供する。
+Embedding 層は外部の LM Studio / OpenAI API への HTTP 通信を伴うが、本番運用では [LM Studio 管理基盤](lmstudio-reference.md) により Claude 主導でロード・運用される前提で Fake モードを使う動機がない。`FakeEmbedding` は **pytest インフラ専用のフック** として位置づけ、本番運用では使用しない。
 
 - **配置**: `src/rag/embedding/_fake/__init__.py` に `FakeEmbedding(EmbeddingProvider)` を集約する
 - **既存 ABC への準拠**: 既存の `src/rag/embedding/base.py` の `EmbeddingProvider` ABC を継承し、必須抽象メソッド（`embed` / `is_available`）を実装する。`embed_documents` / `embed_query` は ABC の default 実装（`embed` への委譲）を再利用する
 - **決定論性**: `embed` の戻り値は入力テキストに対して決定論的に決まる。同じ入力テキストには同じベクトルを返し、L2 正規化済みの float リストとする。決定論性により、テスト・CI で「特定クエリが特定文書と類似する」アサーションが安定する
-- **生成方式**: SHA-256(text) を seed として固定ベクトルを構成する。実装詳細は `src/rag/embedding/_fake/__init__.py` を SSoT とする（仕様書には方式の本質のみ記述）
-- **次元数**: pydantic Field `rag_embedding_fake_dimensions` で指定する。デフォルトは Real Embedding モデル（`text-embedding-nomic-embed-text-v2-moe`）の次元と整合させる。テスト時は柔軟に変更可能
-- **切替**: `RAG_EMBEDDING_FAKE_MODE`（pydantic Settings）で切替する。
-  `get_embedding_provider(settings, provider_setting)` の冒頭で `settings.rag_embedding_fake_mode` を確認し、true なら `FakeEmbedding` を返す。
-  `provider_setting`（`local` / `online`）の判定より優先する
-- **production パッケージへの含有**: `_fake/` ディレクトリは production パッケージに含まれることを許容する（運用環境での fake モード動作のため）
+- **生成方式**: SHA-256(text) を seed として固定ベクトルを構成する。実装詳細は `src/rag/embedding/_fake/__init__.py` を SSoT とする
+- **次元数**: pydantic Field `rag_embedding_fake_dimensions` で指定する。デフォルトは Real Embedding モデルの次元と整合させる
+- **切替**: `RAG_EMBEDDING_FAKE_MODE`（pydantic Settings）で切替する。`get_embedding_provider(settings, provider_setting)` の冒頭で `settings.rag_embedding_fake_mode` を確認し、true なら `FakeEmbedding` を返す
+- **デフォルト値**: pydantic Field のデフォルトは **`False`**（real モード）。本フラグはテスト専用フックであり本番運用では設定しない
+- **`.env.example` への非掲載**: テスト専用のため `.env.example` には載せない。pytest が autouse fixture 経由で env 強制する
 - **synthetic ID 規約**: Embedding は ID を返さないため、本仕様の synthetic ID 規約（YouTube 等の prefix 規約）への追加は不要
 
 #### Embedding Fake モードの設定項目
 
-`src/rag/config.py` の Settings に以下の項目を追加する:
+`src/rag/config.py` の Settings に以下の項目を保持する:
 
 | 項目名 | 層 | 設計意図 |
 |---|---|---|
-| `rag_embedding_fake_mode` | 環境依存値 | Embedding fake モード切替。デフォルトは安全側（fake 有効）。本番運用時のみ false を `.env` で明示する |
+| `rag_embedding_fake_mode` | 環境依存値 | Embedding fake モード切替（テスト専用フック）。デフォルトは `False`（real）。pytest autouse fixture が env 経由で `True` を強制する |
 | `rag_embedding_fake_dimensions` | 環境依存値 | Fake Embedding が生成するベクトルの次元数。Real モデルの次元数に合わせる |
 
 具体値（デフォルト・許容範囲）は pydantic Field が SSoT。
 
 #### pytest 安全網（Embedding 層）
 
-`tests/conftest.py` に session スコープの autouse fixture を追加し、テスト中は `RAG_EMBEDDING_FAKE_MODE=true` を環境変数で強制する。
+`tests/conftest.py` に session スコープの autouse fixture を配置し、テスト中は `RAG_EMBEDDING_FAKE_MODE=true` を環境変数で強制する。
 
 - **適用範囲**: pytest プロセス内および subprocess 越境テスト（e2e）。subprocess 起動時に環境変数が引き継がれることで、子プロセス内の `factory.get_embedding_provider` も Fake を選択する
 - **解除条件**: `RAG_TESTS_ALLOW_NETWORK=1` 設定時のみ強制を解除する（手動の本番回帰検証等の特殊用途）
-- **個別テストの上書き**: Real Embedding を要求する個別テストは `monkeypatch.setenv("RAG_EMBEDDING_FAKE_MODE", "false")` で上書きできる
+- **個別テストの上書き**: Real Embedding を要求する個別テストは Settings インスタンスを直接構築して `rag_embedding_fake_mode=False` を渡す
 - インジェスター系 autouse 安全網（YouTube ライブラリの `_RaiseOnUse` ブロック）とは独立して機能する
+
+#### 起動時警告ログ
+
+`RAG_EMBEDDING_FAKE_MODE=true` を明示設定した場合のみ、起動時に WARNING で `[FAKE MODE: embedding]` ラベル付きログを出力する。デフォルト（未設定 = `False`）では INFO ログも出力しない（real モードが通常運用のため）。
+
+#### MCP 応答ラベル
+
+`rag_add_document` 等のインジェスト系 MCP ツール応答冒頭の `[FAKE MODE: embedding]` ラベル付与は、`rag_embedding_fake_mode=True` のときのみ発生する。本番運用ではラベルが出ないことが期待される動作。
 
 #### pytest 安全網（BlueSky 層）
 
@@ -198,6 +213,8 @@ Embedding 層は外部の LM Studio / OpenAI API への HTTP 通信を伴うた�
 | `RAG_{SOURCE_TYPE}_FAKE_MODE` | `true` / `false` | `true` | true で Fake Fetcher を注入。false で Real Fetcher を注入 |
 | `RAG_{SOURCE_TYPE}_FAKE_FIXTURE_DIR` | パス | source_type ごとに個別仕様書で定義 | Fake Fetcher が読み込む fixture ディレクトリ |
 | `RAG_WEB_FAKE_MODE` | `true` / `false` | `true` | **上位スイッチ**。site-ingest（scrapy）の fake モード切替を司る。内部の `rag_scrapy_fake_mode` の既定値として派生する（個別 env が `.env` で明示されていない場合） |
+| `RAG_EMBEDDING_FAKE_MODE` | `true` / `false` | `false` | **テスト専用フック**。`.env.example` 非掲載・本番運用では設定しない。pytest autouse fixture が env 経由で `true` を強制する。詳細は <<### Fake Embedding（テスト専用フック）@self>> を参照 |
+| `RAG_EMBEDDING_FAKE_DIMENSIONS` | 整数 | 768 | Fake Embedding が生成するベクトル次元数（Real モデルの次元と整合）。テスト専用 |
 | `RAG_TESTS_ALLOW_NETWORK` | `1` | 未設定 | autouse 安全網を解除する（pytest 専用、特殊用途） |
 
 #### 上位スイッチの派生階層
@@ -316,19 +333,16 @@ flowchart TB
 | pytest テストで Fake Fetcher 注入を忘れた | autouse 安全網の `_RaiseOnUse` が `RuntimeError` を発生させる。エラーメッセージで Fake Fetcher の使用を促す |
 | QA スキルで実アクセスを誤選択 | 二重確認フローで「実アクセス開始しますが本当に進めますか？」を表示。ユーザー確認後にのみ実行 |
 | 複数 source_type を同時に扱うインジェスター（例: BlueSky の URL 自動取り込み）| 各 source_type ごとに `*_fake_mode` を独立して評価する。BlueSky は real、YouTube は fake のような混合モードも許容する |
-| 運用環境での fake モード動作 | `_fake/` ディレクトリは production パッケージに含まれるため、運用環境でも fake モードで動作可能 |
+| 運用環境での fake モード動作（Fetcher 系のみ）| インジェスター系 `_fake/` ディレクトリは production パッケージに含まれるため、運用環境でも fake モードで動作可能。Embedding 系はテスト専用フック |
 
 ## 関連ドキュメント
 
 - [YouTube Fake Adapter](fake-adapters/youtube.md) — 最初の対象 source_type 個別仕様
-- [BlueSky Fake Adapter](fake-adapters/bluesky.md) — 2 番目の対象 source_type 個別仕様（Issue #704、U2 で実装）
-- [Scrapy Fake Adapter](fake-adapters/scrapy.md) — site-ingest 用 Fake Runner の個別仕様（Issue #705）
-- [Zenn Fake Adapter](fake-adapters/zenn.md) — Zenn API 用 Fake Fetcher の個別仕様（Issue #705）
-- [Aozora Fake Adapter](fake-adapters/aozora.md) — 青空文庫用 Fake Fetcher の個別仕様（Issue #705）
-- [Local Fake Adapter](fake-adapters/local.md) — Local 用 Fake Fetcher の個別仕様（Issue #705、filesystem 抽象化のみ）
+- [BlueSky Fake Adapter](fake-adapters/bluesky.md) — BlueSky AT Protocol 用 Fake Fetcher の個別仕様
+- [Scrapy Fake Adapter](fake-adapters/scrapy.md) — site-ingest 用 Fake Runner の個別仕様
+- [Zenn Fake Adapter](fake-adapters/zenn.md) — Zenn API 用 Fake Fetcher の個別仕様
+- [Aozora Fake Adapter](fake-adapters/aozora.md) — 青空文庫用 Fake Fetcher の個別仕様
 - [YouTube インジェスター](../ingesters/youtube.md) — Fetcher 抽象化対象のインジェスター仕様
-- [BlueSky インジェスター](../ingesters/bluesky.md) — Fetcher 抽象化対象のインジェスター仕様（Issue #704）
+- [BlueSky インジェスター](../ingesters/bluesky.md) — Fetcher 抽象化対象のインジェスター仕様
 - [Zenn インジェスター](../ingesters/zenn.md) — 将来の水平展開対象
 - [RAG ナレッジ](../rag-knowledge.md) — Embedding 層の Real 実装（LM Studio / OpenAI）の SSoT
-- [Issue #692（MCP 取り込み系ツールの E2E mock 基盤）](https://github.com/becky3/rag-knowledge/issues/692) — 本仕様の Fake Adapter を subprocess 越境環境で再利用する E2E 基盤
-- [Issue #697（QA 頻度削減のための CI 自動 E2E 基盤整備）](https://github.com/becky3/rag-knowledge/issues/697) — Fake Embedding を本仕様に追加

@@ -396,7 +396,7 @@ async def rag_add_bluesky(
 
 
 FakeSource = Literal[
-    "youtube", "bluesky", "embedding", "web", "zenn", "aozora", "local",
+    "youtube", "bluesky", "embedding", "web", "zenn", "aozora",
 ]
 
 # YouTube インジェスト系 MCP ツールが利用する fake source の組
@@ -418,7 +418,8 @@ _ZENN_INGEST_FAKE_SOURCES: list[FakeSource] = ["zenn", "embedding"]
 _AOZORA_INGEST_FAKE_SOURCES: list[FakeSource] = ["aozora", "embedding"]
 
 # Local インジェスト系 MCP ツールが利用する fake source の組
-_LOCAL_INGEST_FAKE_SOURCES: list[FakeSource] = ["local", "embedding"]
+# Local 自体は filesystem 抽象化のみで Fake 化対象外。Embedding fake のみラベル付与する
+_LOCAL_INGEST_FAKE_SOURCES: list[FakeSource] = ["embedding"]
 
 # Journal インジェスト系 MCP ツールが利用する fake source の組
 # Journal はユーザーがコンテンツを直接渡すため source 固有 fake は存在しないが、
@@ -457,7 +458,6 @@ def _fake_mode_labels(active_sources: list[FakeSource]) -> str:
         "web": settings.rag_scrapy_fake_mode,
         "zenn": settings.rag_zenn_fake_mode,
         "aozora": settings.rag_aozora_fake_mode,
-        "local": settings.rag_local_fake_mode,
     }
     parts: list[str] = []
     for source in active_sources:

@@ -247,3 +247,23 @@ class TestCrawlHttpModeRestriction:
         ingester = make_local_ingester(source_store, http_mode_enabled=True, allowed_dirs=[str(allowed)])
         result = ingester.crawl_documents(str(sample_dir))
         assert result.errors == 1
+
+
+class TestCreateLocalFetcher:
+    """create_local_fetcher ファクトリのテスト.
+
+    Local Fake は廃止済み（Issue #722）のため、ファクトリは常に RealLocalFetcher を返す。
+    将来再び設定分岐を持つようになっても regression を検出するための固定テスト。
+    """
+
+    def test_returns_real_local_fetcher(self) -> None:
+        from rag.config import RAGSettings
+        from rag.pipeline.ingesters.local import (
+            RealLocalFetcher,
+            create_local_fetcher,
+        )
+        from settings_defaults import TEST_SETTINGS_DEFAULTS
+
+        settings = RAGSettings(**TEST_SETTINGS_DEFAULTS)
+        fetcher = create_local_fetcher(settings)
+        assert isinstance(fetcher, RealLocalFetcher)

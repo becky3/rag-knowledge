@@ -69,7 +69,10 @@ L3 の実施タイミング基準は本仕様書の「L3 実施タイミング�
 
 ### L1 Unit Test
 
-関数単位・クラス単位の論理を検証する。in-process で完結し、外部ライブラリは [Fake モード基盤](../infrastructure/fake-mode.md) の Fake Adapter および autouse 安全網（`_RaiseOnUse`）で遮断される。
+関数単位・クラス単位の論理を検証する。in-process で完結し、外部ライブラリは
+[Fake モード基盤](../infrastructure/fake-mode.md) の Fake Adapter および autouse 安全網（`_RaiseOnUse`）で遮断される。
+Embedding は `FakeEmbedding`（テスト専用フック）を pytest autouse fixture が env 強制で注入し、
+実 LM Studio / OpenAI への接続を排除する。`FakeEmbedding` は L1 / L2 の動作前提として必須のテストインフラ。
 
 実装手段:
 
@@ -109,7 +112,10 @@ MCP server / CLI / ChromaDB を実プロセスで起動し、外部 API・Embedd
 
 ### L3 本番相当 QA
 
-実 LM Studio・実 ChromaDB・実外部 API（YouTube / Zenn / BlueSky 等）に接続して、本番相当の環境で動作確認を行う。L1 / L2 では検出できない外部 API 仕様変更・本番固有設定の問題を検出する。
+実 LM Studio・実 ChromaDB・実外部 API（YouTube / Zenn / BlueSky 等）に接続して、本番相当の環境で動作確認を行う。
+L1 / L2 では検出できない外部 API 仕様変更・本番固有設定の問題を検出する。
+L3 では `FakeEmbedding` を使わず、実 LM Studio Embedding 経由で動作確認する
+（`RAG_EMBEDDING_FAKE_MODE` を `true` に設定しないこと）。
 
 実装手段:
 
@@ -160,7 +166,7 @@ L2 と L3 を統合せず別レイヤーとして保持する根拠は、上記�
 | ファイルベースロック競合の振る舞い | × | ○ | ○ |
 | Fake Adapter / インジェスター本体 / DI ファクトリの regression | × | ○ | ○ |
 | 外部 API のレスポンス構造変化 | × | × | ○ |
-| 実 LM Studio との連携 | × | ×（Fake Embedding 使用）| ○ |
+| 実 LM Studio との連携 | × | ×（FakeEmbedding 使用、テスト専用フック）| ○ |
 | 本番固有設定（HTTP モード認証・DNS rebinding 等）| 部分的 | 部分的 | ○ |
 
 ## L2 Mock E2E の構成
@@ -173,7 +179,7 @@ L2 と L3 を統合せず別レイヤーとして保持する根拠は、上記�
 | CLI | subprocess（コマンドごと短命起動）| CLI 経路の検証 |
 | ChromaDB | subprocess（テスト用ディレクトリ・テスト用ポート）| 永続化層の実体 |
 | 外部 API（YouTube 等）| Fake Adapter（in-process / subprocess 内 DI 経由）| 実アクセス排除 |
-| Embedding（LM Studio）| Fake Embedding（subprocess 内 DI 経由）| 実 LM Studio 不要化 |
+| Embedding（LM Studio）| `FakeEmbedding`（subprocess 内 DI 経由）| 実 LM Studio 不要化 |
 
 ChromaDB のテスト用ディレクトリ・ポートは pytest fixture が動的に確保し、テスト終了時にクリーンアップする。本番ストレージへの干渉を防ぐ。
 
@@ -184,7 +190,7 @@ ChromaDB のテスト用ディレクトリ・ポートは pytest fixture が動�
 | 環境変数 | 役割 |
 |---|---|
 | `RAG_{SOURCE_TYPE}_FAKE_MODE=true` | 各 source_type の Fake Fetcher を選択 |
-| `RAG_EMBEDDING_FAKE_MODE=true` | Fake Embedding を選択 |
+| `RAG_EMBEDDING_FAKE_MODE=true` | `FakeEmbedding` を選択 |
 | `RAG_TRANSPORT=http` | MCP server を HTTP モードで起動 |
 | `RAG_HTTP_PORT` | テスト用 MCP HTTP ポート（fixture が動的取得）|
 | `CHROMADB_SERVER_PORT` | テスト用 ChromaDB ポート（fixture が動的取得）|

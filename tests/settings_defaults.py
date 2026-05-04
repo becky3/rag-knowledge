@@ -79,11 +79,9 @@ TEST_SETTINGS_DEFAULTS: dict[str, object] = {
     # Aozora Fake モード（テストでは fake デフォルト）
     "rag_aozora_fake_mode": True,
     "rag_aozora_fake_fixture_dir": "src/rag/pipeline/ingesters/_fake/aozora/data",
-    # Local Fake モード（テストでは fake デフォルト。ただし既存 tmp_path テストは Real を使うため
-    # make_local_ingester で fetcher を切替）
-    "rag_local_fake_mode": True,
-    "rag_local_fake_fixture_dir": "src/rag/pipeline/ingesters/_fake/local/data",
-    # Embedding Fake モード（テストでは fake デフォルト）
+    # Embedding Fake モード — 本番 Field のデフォルトは False だがテストでは True 固定。
+    # pytest autouse fixture `_force_embedding_fake_mode` と合わせて L1/L2 の Embedding 実アクセス排除を担保するため、
+    # テスト用 Settings 直接構築ルートでも Fake を選ぶよう True を維持する（Issue #722 triage Q2=B 合意）
     "rag_embedding_fake_mode": True,
     "rag_embedding_fake_dimensions": 768,
     # Web (scrapy) Fake モード（テストでは fake デフォルト）
