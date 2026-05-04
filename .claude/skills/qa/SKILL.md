@@ -78,6 +78,8 @@ QA 検証グループ:
 - ChromaDB サーバー疎通確認: `curl http://localhost:<CHROMADB_SERVER_PORT>/api/v2/heartbeat` で応答を確認
 - LM Studio の状態確認（Embedding API が必要なグループの場合）
   - `lms server status` でサーバー起動を確認
+  - `.env` の `LMSTUDIO_BASE_URL` のホスト/ポートと `lms server status` のリッスン先が一致することを確認
+    - 不一致だと `lms load` してもアプリは別サーバーへ接続し続けるため要注意
   - `lms ps` でロード中モデルを確認、未ロードなら `lms load <key>`（key は `lmstudio.toml` の `models.embedding.key`）
   - 詳細手順: [docs/specs/infrastructure/lmstudio-operation.md](../../../docs/specs/infrastructure/lmstudio-operation.md)
 - LM Studio Vision モデルの確認（グループ A でメディア解析ステップを実行する場合）

@@ -37,15 +37,16 @@ LM Studio を Claude 主導で運用するための CLI リファレンス。`lm
 
 ### API 経由の推論パラメータと設定ファイルの対応
 
-LM Studio が公開する OpenAI 互換 API（`{LMSTUDIO_BASE_URL}/v1/...`）への呼び出し時に、本プロジェクトでは `config.toml` の値をリクエストパラメータとして渡す。
+LM Studio が公開する OpenAI 互換 API（`{LMSTUDIO_BASE_URL}/v1/...`）への呼び出し時に、
+本プロジェクトでは下表の通り `lmstudio.toml` および `config.toml` の値をリクエストパラメータとして渡す。
 
-| API パラメータ | `config.toml` のフィールド | 備考 |
+| API パラメータ | 設定値の出所 | 備考 |
 |---|---|---|
-| `model`（Embedding） | — | `lmstudio.toml` の `models.embedding.key` を使用 |
-| `model`（Vision） | — | `lmstudio.toml` の `models.vision.key` を使用 |
-| `max_tokens`（Vision） | `rag_vision_max_tokens` | Vision API レスポンスの上限トークン数 |
-| `reasoning_effort`（Vision） | `rag_vision_reasoning_effort` | 推論深度（`none` / `low` / `medium` / `high`） |
-| `timeout`（Vision クライアント側） | `rag_vision_api_timeout` | リクエストタイムアウト秒 |
+| `model`（Embedding） | `lmstudio.toml` の `models.embedding.key` | — |
+| `model`（Vision） | `lmstudio.toml` の `models.vision.key` | — |
+| `max_tokens`（Vision） | `config.toml` の `rag_vision_max_tokens` | Vision API レスポンスの上限トークン数 |
+| `reasoning_effort`（Vision） | `config.toml` の `rag_vision_reasoning_effort` | 推論深度（`none` / `low` / `medium` / `high`） |
+| `timeout`（Vision クライアント側） | `config.toml` の `rag_vision_api_timeout` | リクエストタイムアウト秒 |
 
 ### ハードウェアサーベイの取得方法
 

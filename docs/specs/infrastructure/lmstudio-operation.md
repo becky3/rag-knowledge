@@ -34,6 +34,18 @@ lms server status      # 状態確認
 lms server stop        # 停止
 ```
 
+### 接続先の確認
+
+`lms` CLI はローカルの LM Studio インスタンスを操作するが、ランタイム（本プロジェクト）が実際に接続する先は `.env` の `LMSTUDIO_BASE_URL` である。
+両者が一致していないと、`lms load` でモデルをロードしてもアプリは別のサーバーへ接続し続けて疎通失敗の原因となる。
+
+操作前に以下を確認する:
+
+- `.env` の `LMSTUDIO_BASE_URL` のホスト/ポート
+- `lms server status` の出力に表示される LM Studio サーバーのリッスン先
+
+両者のホスト/ポートが一致しない場合、`.env` を修正するか、`lms` CLI 側でリモート接続を構成する必要がある。
+
 ### モデルのロード・unload
 
 `lmstudio.toml` の `models.embedding.key` / `models.vision.key` を参照して `lms load <key>` を実行する。
