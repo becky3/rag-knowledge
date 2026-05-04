@@ -357,11 +357,16 @@ BM25 のトークナイズには日本語形態素解析（fugashi）を使用�
 | `rag_chunk_overlap` | 共通設定値 | チャンク間のオーバーラップ文字数。文脈の断絶を防ぐ |
 | `rag_embedding_context_length` | 共通設定値 | Embedding モデルのコンテキスト長（トークン数）。トークン安全上限の算出基準 |
 | `rag_worst_token_char_ratio` | 共通設定値 | 最悪ケーストークン/文字比率。導出手順は「トークン/文字比率の導出手順」を参照 |
-| `embedding_model_local` | 共通設定値 | ローカル Embedding モデル名 |
 | `embedding_model_online` | 共通設定値 | オンライン Embedding モデル名 |
 | `embedding_prefix_enabled` | 共通設定値 | Embedding プレフィックス付与の有無。モデルの推奨設定に従う |
 | `rag_bm25_k1` | 共通設定値 | BM25 の用語頻度飽和パラメータ。検索精度チューニング用 |
 | `rag_bm25_b` | 共通設定値 | BM25 の文書長正規化パラメータ。検索精度チューニング用 |
+
+#### `lmstudio.toml`（LM Studio モデル key）
+
+| 設定項目 | 層 | 設計意図 |
+|---------|-----|---------|
+| `models.embedding.key` | 共通設定値 | ローカル Embedding モデルの key。`lms load` および API 呼び出しの `model` パラメータで使用される。詳細は [infrastructure/lmstudio-reference.md](infrastructure/lmstudio-reference.md) 参照 |
 
 #### `.env`（環境依存値）
 

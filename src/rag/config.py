@@ -23,7 +23,7 @@ import os
 import sys
 import tomllib
 from pathlib import Path
-from typing import Annotated, Any, Literal
+from typing import Annotated, Any, Literal, TypedDict, cast
 
 from pydantic import BaseModel, Field, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -40,6 +40,7 @@ PROJECT_ROOT = Path(__file__).parent.parent.parent
 _PROJECT_ROOT = PROJECT_ROOT  # 後方互換のための旧 private 名
 _ENV_FILE = PROJECT_ROOT / ".env"
 _TOML_FILE = PROJECT_ROOT / "config.toml"
+_LMSTUDIO_TOML_FILE = PROJECT_ROOT / "lmstudio.toml"
 
 
 class _EnvLoader(BaseSettings):
@@ -218,10 +219,15 @@ class RAGSettings(BaseModel):
     site_ingest_temp_dir: str
     rag_embedding_concurrency: int = Field(ge=1)
 
+    # --- lmstudio.toml から取得（LM Studio モデル key） ---
+    # ローカル Embedding モデルの key（lms load で使用）
+    embedding_model_local: str = Field(min_length=1)
+    # Vision モデルの key（lms load で使用）
+    rag_vision_model: str = Field(min_length=1)
+
     # --- config.toml から取得（共通設定値） ---
 
     # Embedding モデル
-    embedding_model_local: str
     embedding_model_online: str
     # 検索クエリに prefix を付与して検索精度を向上させる（モデル依存）
     embedding_prefix_enabled: bool
@@ -341,8 +347,8 @@ class RAGSettings(BaseModel):
     rag_bluesky_force_youtube_reingest: bool
 
     # メディア解析（Vision モデル）
-    # LM Studio 上の Vision モデルを指定
-    rag_vision_model: str
+    # rag_vision_model は lmstudio.toml が SSoT（_load_lmstudio_config 経由で読み込み、
+    # get_settings で RAGSettings に統合）
     # 推論の深度を制御し、処理速度と品質のバランスを調整
     rag_vision_reasoning_effort: Literal["none", "low", "medium", "high"]
     # 動画フレーム抽出の間隔（秒）。抽出頻度を制御し、処理時間とカバレッジのバランスを調整
@@ -389,6 +395,25 @@ class RAGSettings(BaseModel):
         return self
 
 
+# lmstudio.toml の TOML パスと RAGSettings フィールド名の対応表（SSoT）
+# 新フィールド追加時はここだけ更新する。_LMSTUDIO_FIELD_NAMES と _load_lmstudio_config
+# は本定数から派生する。
+_LMSTUDIO_TOML_PATHS: dict[str, tuple[str, ...]] = {
+    "embedding_model_local": ("models", "embedding", "key"),
+    "rag_vision_model": ("models", "vision", "key"),
+}
+
+# lmstudio.toml が SSoT のフィールド名（_LMSTUDIO_TOML_PATHS から派生、重複検出に使用）
+_LMSTUDIO_FIELD_NAMES = frozenset(_LMSTUDIO_TOML_PATHS.keys())
+
+
+class _LMStudioFlatData(TypedDict):
+    """lmstudio.toml から読み込んだフラット辞書（RAGSettings 統合用）."""
+
+    embedding_model_local: str
+    rag_vision_model: str
+
+
 def _load_toml_config() -> dict[str, Any]:
     """config.toml を読み込み、層の重複を検証する."""
     if not _TOML_FILE.exists():
@@ -404,8 +429,20 @@ def _load_toml_config() -> dict[str, Any]:
             f"{sorted(env_overlap)}"
         )
         raise ValueError(msg)
+    # config.toml に lmstudio.toml SSoT のフィールドが混入していないか検証
+    lmstudio_overlap = set(data.keys()) & _LMSTUDIO_FIELD_NAMES
+    if lmstudio_overlap:
+        msg = (
+            f"config.toml に lmstudio.toml で管理する設定が含まれています "
+            f"（lmstudio.toml に移動してください）: {sorted(lmstudio_overlap)}"
+        )
+        raise ValueError(msg)
     # 未知のキーを検証
-    toml_field_names = frozenset(RAGSettings.model_fields.keys()) - _ENV_FIELD_NAMES
+    toml_field_names = (
+        frozenset(RAGSettings.model_fields.keys())
+        - _ENV_FIELD_NAMES
+        - _LMSTUDIO_FIELD_NAMES
+    )
     unknown = set(data.keys()) - toml_field_names
     if unknown:
         msg = f"config.toml に未知の設定が含まれています: {sorted(unknown)}"
@@ -413,16 +450,83 @@ def _load_toml_config() -> dict[str, Any]:
     return data
 
 
+def _collect_lmstudio_paths(
+    data: Any, prefix: tuple[str, ...] = (),
+) -> set[tuple[str, ...]]:
+    """lmstudio.toml の dict をリーフまで再帰し、全リーフパスを返す."""
+    paths: set[tuple[str, ...]] = set()
+    if isinstance(data, dict):
+        for key, value in data.items():
+            paths.update(_collect_lmstudio_paths(value, (*prefix, key)))
+    else:
+        paths.add(prefix)
+    return paths
+
+
+def _load_lmstudio_config() -> _LMStudioFlatData:
+    """lmstudio.toml を読み込み、モデル key を辞書で返す.
+
+    返り値のキーは RAGSettings の対応フィールド名（_LMSTUDIO_TOML_PATHS で定義）。
+    TOML パスのいずれかが欠損している場合は ValueError を送出（fail-fast）。
+    _LMSTUDIO_TOML_PATHS に列挙されていない未知のキーが含まれている場合も
+    ValueError を送出する（config.toml の未知キー検証と同等の挙動）。
+    キーが空文字列の場合は RAGSettings の Field(min_length=1) で fail-fast する。
+    """
+    if not _LMSTUDIO_TOML_FILE.exists():
+        msg = f"lmstudio.toml が見つかりません: {_LMSTUDIO_TOML_FILE}"
+        raise FileNotFoundError(msg)
+    with open(_LMSTUDIO_TOML_FILE, "rb") as f:
+        data = tomllib.load(f)
+    result: dict[str, str] = {}
+    for field_name, toml_path in _LMSTUDIO_TOML_PATHS.items():
+        node: Any = data
+        for segment in toml_path:
+            if not isinstance(node, dict) or segment not in node:
+                joined = ".".join(toml_path)
+                msg = (
+                    f"lmstudio.toml に必須フィールドが見つかりません: "
+                    f"{joined} (path={_LMSTUDIO_TOML_FILE})"
+                )
+                raise ValueError(msg)
+            node = node[segment]
+        if not isinstance(node, str):
+            joined = ".".join(toml_path)
+            msg = (
+                f"lmstudio.toml の {joined} は文字列である必要があります "
+                f"(actual type={type(node).__name__}, path={_LMSTUDIO_TOML_FILE})"
+            )
+            raise ValueError(msg)
+        result[field_name] = node
+    # 未知キー/セクションの検出（必須フィールド検証後、config.toml の未知キー検証と整合）
+    known_paths = set(_LMSTUDIO_TOML_PATHS.values())
+    actual_paths = _collect_lmstudio_paths(data)
+    unknown_paths = actual_paths - known_paths
+    if unknown_paths:
+        unknown_keys = sorted(".".join(p) for p in unknown_paths)
+        msg = (
+            f"lmstudio.toml に未知の設定が含まれています "
+            f"(path={_LMSTUDIO_TOML_FILE}): {unknown_keys}"
+        )
+        raise ValueError(msg)
+    # _LMSTUDIO_TOML_PATHS の全キーを result に格納したため、TypedDict として扱える
+    return cast(_LMStudioFlatData, result)
+
+
 @functools.lru_cache(maxsize=1)
 def get_settings() -> RAGSettings:
     """キャッシュ付きでRAGSettingsインスタンスを返す.
 
-    .env から環境依存値、config.toml から共通設定値を取得し、
-    統合した RAGSettings を返す。
+    .env から環境依存値、config.toml から共通設定値、
+    lmstudio.toml から LM Studio モデル key を取得し、統合した RAGSettings を返す。
     """
     env_loader = _EnvLoader()  # type: ignore[call-arg]  # pydantic-settings が .env/環境変数から読み込み
     toml_data = _load_toml_config()
-    return RAGSettings(**env_loader.model_dump(), **toml_data)
+    lmstudio_data = _load_lmstudio_config()
+    return RAGSettings(
+        **env_loader.model_dump(),
+        **toml_data,
+        **lmstudio_data,
+    )
 
 
 def log_fake_mode_status(settings: RAGSettings) -> None:

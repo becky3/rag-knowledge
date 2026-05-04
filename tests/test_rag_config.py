@@ -18,7 +18,12 @@ import pytest
 from pydantic import ValidationError
 
 from settings_defaults import TEST_SETTINGS_DEFAULTS
-from rag.config import RAGSettings, _ENV_FIELD_NAMES, _load_toml_config
+from rag.config import (
+    RAGSettings,
+    _ENV_FIELD_NAMES,
+    _load_lmstudio_config,
+    _load_toml_config,
+)
 
 
 def _make_settings(**overrides: object) -> RAGSettings:
@@ -186,13 +191,135 @@ class TestTomlConfigValidation:
 
         assert _ENV_FIELD_NAMES == frozenset(_EnvLoader.model_fields.keys())
 
+    def test_rejects_lmstudio_fields_in_toml(self, tmp_path: Path) -> None:
+        """config.toml に lmstudio.toml SSoT のフィールドが含まれている場合 ValueError."""
+        toml_file = tmp_path / "config.toml"
+        toml_file.write_text('embedding_model_local = "old-model"\n')
+        with patch("rag.config._TOML_FILE", toml_file):
+            with pytest.raises(ValueError, match="lmstudio.toml"):
+                _load_toml_config()
+
+
+class TestLMStudioConfigValidation:
+    """_load_lmstudio_config のバリデーションテスト (#721)."""
+
+    def test_valid_lmstudio_toml_loads_successfully(self, tmp_path: Path) -> None:
+        """有効な lmstudio.toml が正常に読み込めること."""
+        lmstudio_file = tmp_path / "lmstudio.toml"
+        lmstudio_file.write_text(
+            '[models.embedding]\nkey = "embed-x"\n'
+            '[models.vision]\nkey = "vision-x"\n'
+        )
+        with patch("rag.config._LMSTUDIO_TOML_FILE", lmstudio_file):
+            data = _load_lmstudio_config()
+        assert data == {
+            "embedding_model_local": "embed-x",
+            "rag_vision_model": "vision-x",
+        }
+
+    def test_missing_lmstudio_toml_raises_error(self, tmp_path: Path) -> None:
+        """lmstudio.toml が存在しない場合は FileNotFoundError."""
+        with patch("rag.config._LMSTUDIO_TOML_FILE", tmp_path / "nonexistent.toml"):
+            with pytest.raises(FileNotFoundError, match="lmstudio.toml"):
+                _load_lmstudio_config()
+
+    def test_missing_models_section_raises_error(self, tmp_path: Path) -> None:
+        """[models] セクションが欠損している場合は ValueError."""
+        lmstudio_file = tmp_path / "lmstudio.toml"
+        lmstudio_file.write_text('[other]\nfoo = "bar"\n')
+        with patch("rag.config._LMSTUDIO_TOML_FILE", lmstudio_file):
+            with pytest.raises(ValueError, match="必須フィールドが見つかりません"):
+                _load_lmstudio_config()
+
+    def test_intermediate_node_not_dict_raises_error(self, tmp_path: Path) -> None:
+        """中間ノードが dict じゃない場合は ValueError."""
+        lmstudio_file = tmp_path / "lmstudio.toml"
+        lmstudio_file.write_text('models = "not a section"\n')
+        with patch("rag.config._LMSTUDIO_TOML_FILE", lmstudio_file):
+            with pytest.raises(ValueError, match="必須フィールドが見つかりません"):
+                _load_lmstudio_config()
+
+    def test_unknown_key_raises_error(self, tmp_path: Path) -> None:
+        """lmstudio.toml に未知のキーが含まれている場合は ValueError."""
+        lmstudio_file = tmp_path / "lmstudio.toml"
+        lmstudio_file.write_text(
+            '[models.embedding]\nkey = "embed-x"\n'
+            '[models.vision]\nkey = "vision-x"\n'
+            '[server]\nauto_start = true\n'
+        )
+        with patch("rag.config._LMSTUDIO_TOML_FILE", lmstudio_file):
+            with pytest.raises(ValueError, match="未知の設定"):
+                _load_lmstudio_config()
+
+    def test_unknown_subkey_raises_error(self, tmp_path: Path) -> None:
+        """既知セクション内の未知のサブキーも ValueError."""
+        lmstudio_file = tmp_path / "lmstudio.toml"
+        lmstudio_file.write_text(
+            '[models.embedding]\nkey = "embed-x"\nlegacy_param = 123\n'
+            '[models.vision]\nkey = "vision-x"\n'
+        )
+        with patch("rag.config._LMSTUDIO_TOML_FILE", lmstudio_file):
+            with pytest.raises(ValueError, match="未知の設定"):
+                _load_lmstudio_config()
+
+    def test_missing_embedding_key_raises_error(self, tmp_path: Path) -> None:
+        """embedding key が欠損している場合は ValueError."""
+        lmstudio_file = tmp_path / "lmstudio.toml"
+        lmstudio_file.write_text('[models.vision]\nkey = "vision-x"\n')
+        with patch("rag.config._LMSTUDIO_TOML_FILE", lmstudio_file):
+            with pytest.raises(
+                ValueError, match="models.embedding.key"
+            ):
+                _load_lmstudio_config()
+
+    def test_missing_vision_key_raises_error(self, tmp_path: Path) -> None:
+        """vision key が欠損している場合は ValueError."""
+        lmstudio_file = tmp_path / "lmstudio.toml"
+        lmstudio_file.write_text(
+            '[models.embedding]\nkey = "embed-x"\n'
+        )
+        with patch("rag.config._LMSTUDIO_TOML_FILE", lmstudio_file):
+            with pytest.raises(ValueError, match="models.vision.key"):
+                _load_lmstudio_config()
+
+    def test_non_string_key_raises_error(self, tmp_path: Path) -> None:
+        """key が文字列以外の場合は ValueError."""
+        lmstudio_file = tmp_path / "lmstudio.toml"
+        lmstudio_file.write_text(
+            '[models.embedding]\nkey = 123\n'
+            '[models.vision]\nkey = "vision-x"\n'
+        )
+        with patch("rag.config._LMSTUDIO_TOML_FILE", lmstudio_file):
+            with pytest.raises(ValueError, match="文字列である必要があります"):
+                _load_lmstudio_config()
+
+    def test_empty_key_raises_validation_error(self, tmp_path: Path) -> None:
+        """空文字列 key は RAGSettings の Field(min_length=1) で fail-fast."""
+        # _load_lmstudio_config は通すが、RAGSettings 構築時に ValidationError
+        from settings_defaults import TEST_SETTINGS_DEFAULTS
+
+        with pytest.raises(ValidationError):
+            RAGSettings(
+                **{**TEST_SETTINGS_DEFAULTS, "embedding_model_local": ""},
+            )
+        with pytest.raises(ValidationError):
+            RAGSettings(
+                **{**TEST_SETTINGS_DEFAULTS, "rag_vision_model": ""},
+            )
+
+    def test_lmstudio_field_names_derived_from_paths(self) -> None:
+        """_LMSTUDIO_FIELD_NAMES が _LMSTUDIO_TOML_PATHS から派生していること."""
+        from rag.config import _LMSTUDIO_FIELD_NAMES, _LMSTUDIO_TOML_PATHS
+
+        assert _LMSTUDIO_FIELD_NAMES == frozenset(_LMSTUDIO_TOML_PATHS.keys())
+
 
 class TestGetSettingsIntegration:
     """get_settings() の統合テスト (#207)."""
 
     # config.toml の全必須フィールド（TOML形式文字列）
+    # embedding_model_local / rag_vision_model は lmstudio.toml が SSoT のため含めない
     _TOML_CONTENT = """\
-embedding_model_local = "nomic-embed-text"
 embedding_model_online = "text-embedding-3-small"
 embedding_prefix_enabled = true
 rag_chunk_size = 200
@@ -241,7 +368,6 @@ rag_pdf_quality_greek_threshold = 0.15
 rag_pdf_quality_cjk_min_threshold = 0.05
 rag_pdf_quality_min_chars_per_page = 10
 rag_pdf_quality_sample_pages = 10
-rag_vision_model = "google/gemma-4-26b-a4b"
 rag_vision_reasoning_effort = "none"
 rag_vision_frame_interval = 5
 rag_vision_max_tokens = 1024
@@ -257,6 +383,22 @@ site_ingest_error_count = 10
 rag_embedding_retry_count = 3
 rag_embedding_retry_base_delay = 1.0
 """
+
+    _LMSTUDIO_CONTENT = """\
+[models.embedding]
+key = "test-embed-model"
+
+[models.vision]
+key = "test-vision-model"
+"""
+
+    def _setup_files(self, tmp_path: Path) -> tuple[Path, Path]:
+        """テスト用 config.toml / lmstudio.toml を tmp_path に書き出してパスを返す."""
+        toml_file = tmp_path / "config.toml"
+        toml_file.write_text(self._TOML_CONTENT)
+        lmstudio_file = tmp_path / "lmstudio.toml"
+        lmstudio_file.write_text(self._LMSTUDIO_CONTENT)
+        return toml_file, lmstudio_file
 
     def _set_all_env(self, monkeypatch: pytest.MonkeyPatch, **overrides: str) -> None:
         """全必須 env フィールドを monkeypatch で設定する."""
@@ -285,10 +427,12 @@ rag_embedding_retry_base_delay = 1.0
         from rag.config import get_settings
 
         get_settings.cache_clear()
-        toml_file = tmp_path / "config.toml"
-        toml_file.write_text(self._TOML_CONTENT)
+        toml_file, lmstudio_file = self._setup_files(tmp_path)
         self._set_all_env(monkeypatch, EMBEDDING_PROVIDER="online")
-        with patch("rag.config._TOML_FILE", toml_file):
+        with (
+            patch("rag.config._TOML_FILE", toml_file),
+            patch("rag.config._LMSTUDIO_TOML_FILE", lmstudio_file),
+        ):
             settings = get_settings()
             assert settings.embedding_provider == "online"
         get_settings.cache_clear()
@@ -302,8 +446,13 @@ rag_embedding_retry_base_delay = 1.0
         toml_file.write_text(self._TOML_CONTENT.replace(
             "rag_chunk_size = 200", "rag_chunk_size = 999"
         ))
+        lmstudio_file = tmp_path / "lmstudio.toml"
+        lmstudio_file.write_text(self._LMSTUDIO_CONTENT)
         self._set_all_env(monkeypatch)
-        with patch("rag.config._TOML_FILE", toml_file):
+        with (
+            patch("rag.config._TOML_FILE", toml_file),
+            patch("rag.config._LMSTUDIO_TOML_FILE", lmstudio_file),
+        ):
             settings = get_settings()
             assert settings.rag_chunk_size == 999
         get_settings.cache_clear()
@@ -317,11 +466,40 @@ rag_embedding_retry_base_delay = 1.0
         toml_file.write_text(self._TOML_CONTENT.replace(
             "rag_chunk_size = 200", "rag_chunk_size = 300"
         ))
+        lmstudio_file = tmp_path / "lmstudio.toml"
+        lmstudio_file.write_text(self._LMSTUDIO_CONTENT)
         self._set_all_env(monkeypatch, RAG_TRANSPORT="http")
-        with patch("rag.config._TOML_FILE", toml_file):
+        with (
+            patch("rag.config._TOML_FILE", toml_file),
+            patch("rag.config._LMSTUDIO_TOML_FILE", lmstudio_file),
+        ):
             settings = get_settings()
             assert settings.rag_chunk_size == 300
             assert settings.rag_transport == "http"
+        get_settings.cache_clear()
+
+    def test_lmstudio_values_reflected(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """lmstudio.toml の値が RAGSettings に反映されること."""
+        from rag.config import get_settings
+
+        get_settings.cache_clear()
+        toml_file = tmp_path / "config.toml"
+        toml_file.write_text(self._TOML_CONTENT)
+        lmstudio_file = tmp_path / "lmstudio.toml"
+        lmstudio_file.write_text(
+            '[models.embedding]\nkey = "embed-from-lmstudio"\n'
+            '[models.vision]\nkey = "vision-from-lmstudio"\n'
+        )
+        self._set_all_env(monkeypatch)
+        with (
+            patch("rag.config._TOML_FILE", toml_file),
+            patch("rag.config._LMSTUDIO_TOML_FILE", lmstudio_file),
+        ):
+            settings = get_settings()
+            assert settings.embedding_model_local == "embed-from-lmstudio"
+            assert settings.rag_vision_model == "vision-from-lmstudio"
         get_settings.cache_clear()
 
 

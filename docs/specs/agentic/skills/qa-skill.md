@@ -129,7 +129,7 @@ QA 検証グループ:
 3. メインリポジトリから `.env` をコピーし、ストレージパスを worktree 内の絶対パスに変更する。以下も設定する:
    - `CHROMADB_SERVER_PORT=8001`（メインリポジトリの MCP サーバーとのポート競合回避）
    - `CHROMADB_AUTO_START` はデフォルト（`true`）のままでよい（`ChromaDBServerManager` は起動前に heartbeat チェックを行い、既存インスタンスが応答すれば起動をスキップするため競合しない）
-4. LM Studio の接続先を確認し、必要に応じて `localhost` に変更する
+4. LM Studio のセットアップ・モデルロード手順は `docs/specs/infrastructure/lmstudio-operation.md` を参照する
 5. `.tmp` ディレクトリを作成する
 6. メインリポジトリから `.qa/` ディレクトリをコピーする（`.qa/` は `.gitignore` 対象のため worktree に含まれない）
 7. ChromaDB サーバーを手動起動する: `uv run chroma run --path <persist_dir> --port <CHROMADB_SERVER_PORT>`（初回は venv 構築のため起動に時間がかかる。目安: 10〜20 秒。heartbeat 確認前に十分待機すること）
@@ -142,8 +142,14 @@ QA 検証グループ:
 - 現在のブランチ・ディレクトリを確認する
 - MCP サーバーの状態を確認する（MCP フェーズでは HTTP モードで起動中かつ `/mcp` で enabled であること、CLI 検証時は停止推奨）。disabled の場合はユーザーに有効化を依頼する
 - ChromaDB サーバー疎通確認: `curl http://localhost:<CHROMADB_SERVER_PORT>/api/v2/heartbeat` で応答を確認する
-- LM Studio の接続確認（Embedding API が必要なグループの場合）
-- LM Studio Vision モデルの確認（グループ A でメディア解析ステップを実行する場合）: Vision 対応モデルがロードされているか確認する
+- LM Studio の状態確認（Embedding API が必要なグループの場合）
+  - `lms server status` でサーバー起動を確認
+  - `.env` の `LMSTUDIO_BASE_URL` のホスト/ポートと `lms server status` のリッスン先が一致することを確認
+    - 不一致だと `lms load` してもアプリは別サーバーへ接続し続けるため要注意
+  - `lms ps` で `lmstudio.toml` の `models.embedding.key` がロード中であることを確認、未ロードなら `lms load <key>`
+  - 詳細手順: `docs/specs/infrastructure/lmstudio-operation.md`
+- LM Studio Vision モデルの確認（グループ A でメディア解析ステップを実行する場合）
+  - `lms ps` で `lmstudio.toml` の `models.vision.key` がロード中であることを確認、未ロードなら `lms load <key>`
 - ffmpeg の確認（メディア解析の動画処理を検証する場合）: `ffmpeg -version` で利用可能か確認する
 - `.env` のストレージパスが worktree 内の絶対パスを指していることを確認する
 
@@ -249,8 +255,9 @@ NG が検出された場合、Issue 起票を提案する。
 |---|----------------|---------|---------|
 | 1 | `add-document --file README.md` | Markdown 取り込み成功 | `ingest` |
 | 2 | `add-document --file .qa/pdf_add_test.pdf` | PDF 取り込み成功 | `ingest` |
-| 3 | LM Studio を停止した状態で `add-document --file .qa/image_add_test.jpg` | 取り込み成功するがメディア解析テキストなし（フォールバック動作）。エラーで中断しないこと | `ingest` |
-| 4 | LM Studio を起動した状態で `add-document --file .qa/image_add_test.jpg --upload-mode replace` | 画像取り込み成功。メディア解析テキストが生成されること。search 結果に画像の解析テキストが含まれることを確認する | `ingest` |
+| 3 | LM Studio Vision モデルを `lms unload` した状態（Embedding モデルは load 中）で `add-document --file .qa/image_add_test.jpg` | 取り込み成功するがメディア解析テキストなし（フォールバック動作）。エラーで中断しないこと | `ingest` |
+| 4a | `cp .qa/image_replace_test.jpg .qa/image_add_test.jpg`（A-3 と内容バイトが異なる別画像で上書きするための事前準備） | コピー成功（同名ファイルが別バイトに置き換わる） | `none` |
+| 4b | LM Studio Vision モデルを `lms load <key>` した状態で `add-document --file .qa/image_add_test.jpg --upload-mode replace` | 上書き成功（`overwritten=1`）。pipeline が変更検知して Vision 解析を実行。メディア解析テキストが生成されること。search 結果に新画像の解析テキストが含まれることを確認する | `ingest` |
 | 5 | `add-document --file .qa/video_add_test.mp4` | 動画取り込み成功。ffmpeg フレーム抽出 → Vision モデルで各フレーム解析 → タイムスタンプ付きテキスト生成。search 結果に動画の解析テキストが含まれること | `ingest` |
 | 6 | `add-document --file README.md --upload-mode replace` | 上書き成功、エラーなし | `none` |
 | 7 | `crawl-documents docs/specs/`（`dir_path` は positional 引数） | ディレクトリ一括取り込み成功 | `ingest` |
@@ -270,8 +277,9 @@ CLI / MCP 対応:
 **MCP テスト時の注意:**
 
 - A-2 (PDF): 大きい PDF は MCP パラメータサイズ制約で失敗する場合がある。失敗時は CLI で代替実行する
-- A-3 (フォールバック): LM Studio の停止・再起動はユーザーの手動操作が必要。MCP テスト時はスキップする
-- A-4 (画像), A-5 (動画): LM Studio Vision モデルが未ロードの場合はスキップする
+- A-3 (フォールバック): Vision モデル unload が必要。`lms unload <key>` で実施する
+  - 手順: `docs/specs/infrastructure/lmstudio-operation.md`
+- A-4 (画像), A-5 (動画): LM Studio Vision モデルが未ロードの場合はスキップする（`lms ps` で確認）
 - A-7 (crawl-documents): HTTP モード非対応のため MCP テスト時はスキップする
 
 ### B) Web

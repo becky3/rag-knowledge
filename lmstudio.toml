@@ -1,0 +1,12 @@
+# LM Studio 設定 — Claude が `lms load` で参照するモデル key の SSoT
+# 仕様: docs/specs/infrastructure/lmstudio-reference.md
+# 運用手順: docs/specs/infrastructure/lmstudio-operation.md
+#
+# ロードパラメータ（context_length / gpu_offload / ttl_seconds / parallel 等）は
+# LM Studio 側の per-model preset に委譲する。本ファイルには key のみ保持する。
+
+[models.embedding]
+key = "text-embedding-nomic-embed-text-v2-moe"
+
+[models.vision]
+key = "google/gemma-4-26b-a4b"

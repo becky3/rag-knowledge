@@ -24,8 +24,10 @@ TEST_SETTINGS_DEFAULTS: dict[str, object] = {
     "rag_dns_rebinding_protection": True,
     "rag_debug_log_enabled": False,
     "rag_embedding_concurrency": 32,
-    # config.toml フィールド
+    # lmstudio.toml フィールド
     "embedding_model_local": "nomic-embed-text",
+    "rag_vision_model": "google/gemma-4-26b-a4b",
+    # config.toml フィールド
     "embedding_model_online": "text-embedding-3-small",
     "embedding_prefix_enabled": True,
     "rag_embedding_retry_count": 3,
@@ -107,8 +109,7 @@ TEST_SETTINGS_DEFAULTS: dict[str, object] = {
     "rag_aozora_max_works": 200,
     "rag_aozora_request_interval": 1.0,
     "rag_aozora_request_timeout": 30,
-    # メディア解析（Vision モデル）
-    "rag_vision_model": "google/gemma-4-26b-a4b",
+    # メディア解析（Vision モデル） - rag_vision_model は lmstudio.toml フィールドに移動済み
     "rag_vision_reasoning_effort": "none",
     "rag_vision_frame_interval": 5,
     "rag_vision_max_tokens": 1024,
