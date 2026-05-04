@@ -10,7 +10,10 @@ PDF テキスト抽出 / AsciiDoc → Markdown 変換は **converter 層の責�
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Any, Protocol
+from typing import TYPE_CHECKING, Any, Protocol
+
+if TYPE_CHECKING:
+    from rag.config import RAGSettings
 
 
 class LocalFetcher(Protocol):
@@ -91,6 +94,11 @@ class RealLocalFetcher:
         return path.stat().st_size
 
 
-def create_local_fetcher() -> LocalFetcher:
-    """LocalFetcher を生成するファクトリ."""
+def create_local_fetcher(settings: RAGSettings) -> LocalFetcher:
+    """LocalFetcher を生成するファクトリ.
+
+    settings は他 source の create_*_fetcher との API 一貫性のため受け取るが、
+    Local Fake 廃止（Issue #722）以降は常に RealLocalFetcher を返すため未使用。
+    """
+    del settings
     return RealLocalFetcher()

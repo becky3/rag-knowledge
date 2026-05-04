@@ -257,10 +257,13 @@ class TestCreateLocalFetcher:
     """
 
     def test_returns_real_local_fetcher(self) -> None:
+        from rag.config import RAGSettings
         from rag.pipeline.ingesters.local import (
             RealLocalFetcher,
             create_local_fetcher,
         )
+        from settings_defaults import TEST_SETTINGS_DEFAULTS
 
-        fetcher = create_local_fetcher()
+        settings = RAGSettings(**TEST_SETTINGS_DEFAULTS)
+        fetcher = create_local_fetcher(settings)
         assert isinstance(fetcher, RealLocalFetcher)

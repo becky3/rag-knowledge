@@ -12,7 +12,7 @@ from typing import Any
 
 import pytest
 
-from rag.config import RAGSettings, log_fake_mode_status
+from rag.config import RAGSettings, _EnvLoader, log_fake_mode_status
 from rag.pipeline.ingesters._fake.youtube import FakeYoutubeFetcher
 from rag.pipeline.ingesters.youtube_fetcher import (
     RealYoutubeFetcher,
@@ -67,6 +67,57 @@ def _enable_rag_logger_propagation() -> Any:
     finally:
         rag_logger.propagate = original_rag_propagate
         rag_config_logger.propagate = original_rag_config_propagate
+
+
+class TestEmbeddingFakeModeSettings:
+    """Issue #722 で追加された Embedding fake mode の Settings 統合.
+
+    本番デフォルトを False（real）に変更したため、`_EnvLoader` および
+    `RAGSettings` の Field 定義が変更後の状態であることを直接検証する。
+    pytest autouse fixture が env で True を強制するため、Field レベルの
+    回帰検出は本テストでのみ可能。
+    """
+
+    def test_env_loader_has_embedding_fake_mode_field(self) -> None:
+        assert "rag_embedding_fake_mode" in _EnvLoader.model_fields
+        assert "rag_embedding_fake_dimensions" in _EnvLoader.model_fields
+
+    def test_env_loader_default_is_false(
+        self, monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """`_EnvLoader.rag_embedding_fake_mode` のデフォルトが False（real）.
+
+        autouse fixture `_force_embedding_fake_mode` が env で `true` を強制するため、
+        Field デフォルトを直接検証するには env から該当キーを除去する必要がある。
+        """
+        monkeypatch.delenv("RAG_EMBEDDING_FAKE_MODE", raising=False)
+        monkeypatch.delenv("RAG_EMBEDDING_FAKE_DIMENSIONS", raising=False)
+        loader = _EnvLoader(
+            embedding_provider="local",
+            lmstudio_base_url="http://localhost:1234",
+            chromadb_persist_dir="./chroma_db",
+            bm25_persist_dir="./bm25_index",
+            source_store_dir="./source_store",
+            converted_store_dir="./converted_store",
+            rag_transport="stdio",
+            rag_http_host="127.0.0.1",
+            rag_http_port=8081,
+            rag_dns_rebinding_protection=True,
+            rag_debug_log_enabled=False,
+        )  # type: ignore[call-arg]
+        assert loader.rag_embedding_fake_mode is False
+        assert loader.rag_embedding_fake_dimensions == 768
+
+    def test_rag_settings_has_embedding_fake_mode_field(self) -> None:
+        assert "rag_embedding_fake_mode" in RAGSettings.model_fields
+        assert "rag_embedding_fake_dimensions" in RAGSettings.model_fields
+
+    def test_env_loader_no_local_fake_mode_field(self) -> None:
+        """Local Fake は廃止済み（Issue #722）。Field が完全に削除されていること."""
+        assert "rag_local_fake_mode" not in _EnvLoader.model_fields
+        assert "rag_local_fake_fixture_dir" not in _EnvLoader.model_fields
+        assert "rag_local_fake_mode" not in RAGSettings.model_fields
+        assert "rag_local_fake_fixture_dir" not in RAGSettings.model_fields
 
 
 class TestLogFakeModeStatus:

@@ -84,6 +84,8 @@ CLI / MCP サーバー / pytest のいずれの起動経路でも、**起動時�
   「fake モードで起動中、実外部アクセスは発生しません」「本番運用時は `RAG_{SOURCE_TYPE}_FAKE_MODE=false` を `.env` に設定してください」のガイドを含める
 - **real モード**: INFO レベルでログ出力する。「real モードで起動中、実外部アクセスが発生します」と明示
 
+**例外**: Embedding はテスト専用フック扱いのため、real モード（デフォルト）では INFO ログを出さない（通常運用のため）。`rag_embedding_fake_mode=True` を明示設定したときのみ WARNING ログを出力する。詳細は <<### Fake Embedding（テスト専用フック）@self>>「起動時警告ログ」を参照。
+
 複数 source（インジェスター系・Embedding 系）が存在する場合、各 source ごとに独立して状態を出力する。
 
 **起動時 1 回保証**: Settings はプロセス内シングルトンとして実装し、ログ出力は Settings 初期化時に 1 回のみ発生させる。pytest 実行時も session 開始時の Settings 初期化で 1 回のみ出力される（pytest-xdist 並列実行時は各 worker で 1 回ずつ）。テストごとに繰り返し WARNING が出力されないようにする。

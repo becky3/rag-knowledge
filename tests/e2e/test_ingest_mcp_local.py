@@ -73,6 +73,11 @@ class TestMcpLocalIngest:
         assert "[FAKE MODE: embedding]" in response, (
             f"Embedding fake ラベルが応答に含まれていない: {response[:500]}"
         )
+        # Local Fake 廃止（Issue #722）に伴い、[FAKE MODE: local] ラベルは
+        # 二度と付与されないこと。本 PR の本質的変更点を回帰検出で固定する
+        assert "[FAKE MODE: local]" not in response, (
+            f"Local fake ラベルが残存している（Issue #722 で廃止済）: {response[:500]}"
+        )
 
 
 class TestCliCrawlDocuments:
