@@ -71,6 +71,8 @@
 | `infrastructure/upload-auth.md` | `src/rag/server.py`, `src/rag/config.py` |
 | `infrastructure/scheduled-rebuild.md` | `src/rag/server.py` |
 | `infrastructure/media-analysis.md` | `src/rag/media/` |
+| `infrastructure/lmstudio-reference.md` | `src/rag/config.py`（`_load_lmstudio_config`, `_LMSTUDIO_TOML_PATHS`）, `src/rag/embedding/factory.py`, `src/rag/pipeline/factory.py`, `lmstudio.toml` |
+| `infrastructure/lmstudio-operation.md` | （運用手順書、対応実装なし） |
 | `infrastructure/fake-mode.md` | `src/rag/config.py`（`*_fake_*` フィールド + `log_fake_mode_status`）, `src/rag/pipeline/ingesters/{source_type}_fetcher.py` 群, `src/rag/pipeline/ingesters/_fake/`, `tests/conftest.py` |
 | `infrastructure/fake-adapters/youtube.md` | `src/rag/pipeline/ingesters/youtube_fetcher.py`, `src/rag/pipeline/ingesters/_fake/youtube/` |
 | `ingesters/common.md` | `src/rag/pipeline/ingesters/_common.py` |

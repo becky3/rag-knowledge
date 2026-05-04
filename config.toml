@@ -2,7 +2,7 @@
 # 設定管理仕様: docs/specs/rag-knowledge.md#設定管理
 
 # Embedding モデル
-embedding_model_local = "text-embedding-nomic-embed-text-v2-moe"
+# embedding_model_local（LM Studio ローカル Embedding モデル）は lmstudio.toml が SSoT
 embedding_model_online = "text-embedding-3-small"
 # Embedding 入力にタスク種別プレフィックス（search_query: / search_document:）を付与
 embedding_prefix_enabled = true
@@ -110,8 +110,7 @@ rag_aozora_request_interval = 1.0
 rag_aozora_request_timeout = 30
 
 # メディア解析（Vision モデル）
-# LM Studio にロードする Vision 対応モデルの識別子
-rag_vision_model = "google/gemma-4-26b-a4b"
+# rag_vision_model（LM Studio Vision モデルの識別子）は lmstudio.toml が SSoT
 # Vision API の推論深度（none / low / medium / high）
 rag_vision_reasoning_effort = "none"
 # 動画フレーム抽出間隔（秒）

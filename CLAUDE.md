@@ -59,23 +59,20 @@ worktree で CLI 操作・動作確認を行う場合、以下のセットアッ
    cp .env <worktree-path>/.env
    ```
 
-2. LM Studio の接続先を確認し、必要に応じて `localhost` に変更する:
-
-   ```
-   LMSTUDIO_BASE_URL=http://localhost:1234/v1
-   ```
-
-3. `.tmp` ディレクトリを作成する:
+2. `.tmp` ディレクトリを作成する:
 
    ```bash
    mkdir -p <worktree-path>/.tmp
    ```
 
-4. ChromaDB サーバーを起動する。ポート競合時（前セッションの停止漏れ等）は `.env` で `CHROMADB_SERVER_PORT` を変更すること。初回は venv 構築のため起動に時間がかかる（目安: 10〜20 秒）。heartbeat 確認前に十分待機すること:
+3. ChromaDB サーバーを起動する。ポート競合時（前セッションの停止漏れ等）は `.env` で `CHROMADB_SERVER_PORT` を変更すること
+   - 初回は venv 構築のため起動に時間がかかる（目安: 10〜20 秒）。heartbeat 確認前に十分待機すること:
 
    ```bash
    uv run chroma run --path <worktree-path>/.tmp/test_chroma_db
    ```
+
+LM Studio の起動・モデルロードは [docs/specs/infrastructure/lmstudio-operation.md](docs/specs/infrastructure/lmstudio-operation.md) を参照。
 
 ### CLI 動作確認の確認観点
 

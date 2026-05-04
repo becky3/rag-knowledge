@@ -32,7 +32,7 @@ MCP サーバーとして独立動作し、18 個のツールを提供する。
 |---|--------|---------|---------|
 | シークレット | OS セキュアストレージ (keyring) | 管理外 | 漏洩時に直接被害が発生する値。py-common-lib の `get_secret` で取得 |
 | 環境依存値 | `.env` | 管理外 | デプロイ先・マシンごとに異なる値 |
-| 共通設定値 | `config.toml` | **管理する** | プロジェクトとして統一管理する値 |
+| 共通設定値 | `config.toml` / `lmstudio.toml` | **管理する** | プロジェクトとして統一管理する値（`lmstudio.toml` は LM Studio で読み込むモデル key の SSoT） |
 
 #### `.env`（環境依存値）
 
@@ -52,7 +52,7 @@ MCP サーバーとして独立動作し、18 個のツールを提供する。
 
 | カテゴリ | 設定項目 |
 |---------|---------|
-| Embedding モデル | `embedding_model_local`, `embedding_model_online`, `embedding_prefix_enabled`, `rag_embedding_retry_count`, `rag_embedding_retry_base_delay` |
+| Embedding モデル | `embedding_model_online`, `embedding_prefix_enabled`, `rag_embedding_retry_count`, `rag_embedding_retry_base_delay` |
 | チャンキング | `rag_chunk_size`, `rag_chunk_overlap`, `rag_embedding_context_length`, `rag_worst_token_char_ratio` |
 | 検索 | `rag_retrieval_count`, `rag_similarity_threshold` |
 | ハイブリッド検索 | `rag_hybrid_search_enabled`, `rag_vector_weight`, `rag_bm25_k1`, `rag_bm25_b`, `rag_min_combined_score` |
@@ -69,6 +69,18 @@ MCP サーバーとして独立動作し、18 個のツールを提供する。
 | YouTube インジェスター | `rag_youtube_max_videos`, `rag_youtube_request_interval`, `rag_youtube_request_timeout`, `rag_youtube_transcript_languages`, `rag_youtube_merge_gap_sec`, `rag_youtube_merge_max_chars`, `rag_youtube_max_duration` |
 | 青空文庫インジェスター | `rag_aozora_max_works`, `rag_aozora_request_interval`, `rag_aozora_request_timeout` |
 | サイト一括取り込み | `site_ingest_delay_sec`, `site_ingest_max_pages`, `site_ingest_download_timeout`, `site_ingest_timeout_sec`, `site_ingest_error_count` |
+
+#### `lmstudio.toml`（LM Studio モデル key）
+
+| カテゴリ | 設定項目 |
+|---------|---------|
+| Embedding モデル | `models.embedding.key`（ローカル Embedding モデルの key） |
+| Vision モデル | `models.vision.key`（メディア解析用 Vision モデルの key） |
+
+`lmstudio.toml` の詳細・運用は以下を参照。
+
+- [infrastructure/lmstudio-reference.md](infrastructure/lmstudio-reference.md) — CLI 仕様参照
+- [infrastructure/lmstudio-operation.md](infrastructure/lmstudio-operation.md) — 運用手順
 
 - `hnsw_m` と `hnsw_construction_ef` はコレクション作成時のみ適用される（不変）。既存コレクションへの反映には `rebuild --mode full`（コレクション削除 → 再作成）が必要。`hnsw_search_ef` は起動時に `collection.modify()` で既存コレクションにも自動適用される
 - Embedding モデルを変更した場合、既存データとの類似度計算が不正確になるため、コレクション再構築が必要

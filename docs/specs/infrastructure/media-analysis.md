@@ -58,12 +58,21 @@
 
 ### 設定項目
 
+#### `config.toml`（共通設定値）
+
 | 設定項目 | 層 | 設計意図 |
 |---------|-----|---------|
-| `rag_vision_model` | 共通設定値 | Vision モデルの識別子。LM Studio の `/v1/models` で返されるモデル ID と一致させる |
 | `rag_vision_reasoning_effort` | 共通設定値 | Vision API の reasoning_effort パラメータ。推論の深度を制御し、処理速度と品質のバランスを調整する。有効値はモデル・推論エンジンに依存する |
 | `rag_vision_frame_interval` | 共通設定値 | 動画フレーム抽出の間隔（秒）。抽出頻度を制御し、処理時間とカバレッジのバランスを調整する |
 | `rag_vision_max_tokens` | 共通設定値 | Vision API レスポンスの最大トークン数。出力長を制限する |
+
+#### `lmstudio.toml`（LM Studio モデル key）
+
+| 設定項目 | 層 | 設計意図 |
+|---------|-----|---------|
+| `models.vision.key` | 共通設定値 | Vision モデルの識別子。`lms load` および API 呼び出しの `model` パラメータで使用される。詳細は [lmstudio-reference.md](lmstudio-reference.md) 参照 |
+
+#### `.env`（環境依存値）
 
 `LMSTUDIO_BASE_URL` は環境依存値（`.env`）で管理。Embedding と共用する。
 
@@ -147,7 +156,7 @@ API リクエスト形式:
 |-----------|-----|
 | エンドポイント | `{LMSTUDIO_BASE_URL}/chat/completions` |
 | メソッド | POST |
-| `model` | `rag_vision_model` で指定 |
+| `model` | `lmstudio.toml` の `models.vision.key` で指定 |
 | `messages` | `role: "user"`, `content` に画像データ（base64）とプロンプトを含む |
 | `max_tokens` | `rag_vision_max_tokens` で指定 |
 | `reasoning_effort` | `rag_vision_reasoning_effort` で指定 |
