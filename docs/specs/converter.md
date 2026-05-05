@@ -22,6 +22,55 @@
 - メディアファイルの取得・保存（インジェスターの範疇）
 - Vision モデルの管理・設定（メディア解析モジュールの範疇）
 
+## 責務境界
+
+概要で示した 3 段パイプラインにおける converter の責務範囲、および隣接ステージ（特に ingester）との分担基準を定義する。新規 source_type 追加時・新規変換器追加時の判断指針として用いる。
+
+### 役割分担の原則
+
+| ステージ | 責務 | 扱うデータ |
+|---|---|---|
+| Ingester | 外部からの取得 + raw データの配置（無加工保存）| 取得元のオリジナル形式（HTML / JSON / PDF / バイナリ等） |
+| **Converter** | **raw データ → 統一テキスト形式への変換** | source_store の任意形式 → converted_store の UTF-8 テキスト |
+| Indexer | 変換済みテキストのチャンキング・索引化 | converted_store の統一テキスト形式 |
+
+ingester の責務制約（`metadata.db アクセス禁止 / git 操作禁止 / オリジナルデータの無加工保存 / ファイル削除禁止`）の SSoT は [ingesters/common.md「責務の限定」](ingesters/common.md#責務の限定) を参照。
+「Ingester は取り込み機構であり、元データを可能な限りいじらない」原則の上位整理は [architecture.md § 3.1 Ingester の役割と責務境界](architecture.md#ingester-の役割と責務境界) を参照。
+
+### source_type 固有処理の集約先
+
+新規 source_type 追加時、または既存 source_type 由来のデータに対して新たな変換ロジック（フィールド構造に依存したテキスト抽出・タイトル付与・メディア結合等）が必要になった場合は、**converter 側に集約する**。ingester で raw データを書き換えてはならない。
+
+#### Why
+
+- ingester は「無加工保存原則」に従い、取得した raw データに加工を加えない。これにより以下の利点を得る:
+  - DB 破損時に source_store からの再構築が可能（再取得不要）
+  - 変換方式を改訂したときに、source_store を再利用して全件再変換できる
+  - ingester 側の不具合（誤った変換ロジック）が source_store のオリジナル性を損なわない
+- 上記の原則を踏まえると、source_type 固有のフィールド扱い・テキスト構造化は converter 側で行う必要がある（どこかでは行わなければ index 化できないため）
+
+#### 判断フロー
+
+新規対応の必要が生じたとき、以下のいずれに該当するかで配置先を決める:
+
+| 必要な処理 | 配置先 | 例 |
+|---|---|---|
+| 取得 + raw 配置 + .meta 生成 | ingester | 新 API クライアント実装、新メディア種の取得経路追加 |
+| raw データから検索対象テキストを抽出する処理[^converter-scope] | converter | JSON フィールドからのテキスト抽出ハンドラ、新拡張子の Markdown 化 |
+| チャンキング・Embedding・索引構築 | indexer | 変換済みテキストの分割方針改訂等 |
+
+[^converter-scope]: ファイル形式・source_type に固有のロジックを含む。
+
+### 既存実装での具体例（参照）
+
+converter 側で source_type 固有処理を持つ既存例:
+
+- `_convert_json` で source_type ごとに JSON ハンドラを分岐（BlueSky / YouTube / Zenn 記事 / Zenn スクラップ）
+- Zenn 記事の `_prepend_title_from_meta`（body_html にタイトルが含まれないため、converter 側で .meta から先頭付与）
+- BlueSky 投稿のメディア解析テキスト埋め込み（`<image:N>` / `<video:N>` タグ生成）
+
+これらは ingester 側で raw データを書き換える代わりに converter 側で構築しており、上記原則の体現である。
+
 ## 背景
 
 - 3 段パイプラインにおいて、source_store のオリジナルデータ（HTML, PDF, JSON 等）をインデクサーが直接扱うと、インデクサーにファイル形式ごとの変換ロジックが混在する
@@ -30,7 +79,8 @@
 
 ## 制約
 
-- **ファイル形式の判定は拡張子ベース**: source_store 内のファイル拡張子で変換方式を決定する。拡張子が同一であれば source_type に関わらず同じ変換方式を適用する。ただし、source_type 固有の前処理が必要な場合は source_type に応じた分岐を許容する
+- **ファイル形式の判定は拡張子ベース**: source_store 内のファイル拡張子で変換方式を決定する。拡張子が同一であれば source_type に関わらず同じ変換方式を適用する。
+  ただし、source_type 固有の前処理が必要な場合は source_type に応じた分岐を許容する（converter 側に集約する根拠は [責務境界](#責務境界) を参照）
 - **source_type の判定**: ファイルの source_store 内トップレベルディレクトリから判定する（値は [`_schema/enums.yml`](../../_schema/enums.yml) の `source_type` を参照）
 - **変換対象外ファイル**: `.meta` サイドカーファイルおよび `metadata.db` は変換対象外とする（スキップする）
 - **変換結果は UTF-8 テキスト**: 変換処理（HTML → Markdown、PDF テキスト抽出、JSON → テキスト）の出力は UTF-8 エンコーディングとする。パススルーファイルはバイト列コピーであり、この制約の対象外（元のエンコーディングをそのまま保持する）
