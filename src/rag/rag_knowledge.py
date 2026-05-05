@@ -9,11 +9,11 @@ import asyncio
 import hashlib
 import logging
 import mimetypes
-from collections.abc import Sequence
 from pathlib import Path, PurePosixPath
 from typing import TYPE_CHECKING, Any, cast
 from urllib.parse import urldefrag
 
+from .admin.formatting import format_file_size
 from .admin.models import DocumentResult
 from .converter.converter import get_converted_rel_path
 from .indexer.smart_chunking import smart_chunk
@@ -30,61 +30,6 @@ if TYPE_CHECKING:
     from .hybrid_search import HybridSearchEngine
 
 logger = logging.getLogger(__name__)
-
-
-def format_raw_search_results(raw: RawSearchResults) -> str:
-    """RawSearchResults をテキスト形式にフォーマットする.
-
-    server.py（MCP）と cli.py（CLI）で共通使用する。
-    仕様: docs/specs/search-response.md
-
-    Returns:
-        フォーマット済みテキスト。結果なしの場合は結果なしメッセージ。
-    """
-    if not raw.vector_results and not raw.bm25_results:
-        return "該当する情報が見つかりませんでした"
-
-    sections: list[tuple[str, Sequence[VectorSearchItem | BM25SearchItem]]] = []
-    if raw.vector_results:
-        sections.append(("## ベクトル検索結果 (意味的類似度)\n", raw.vector_results))
-    if raw.bm25_results:
-        sections.append(("## BM25 検索結果 (キーワード一致)\n", raw.bm25_results))
-
-    parts: list[str] = []
-    for header, items in sections:
-        parts.append(header)
-        for i, item in enumerate(items, start=1):
-            # スコア行: ベクトルは distance、BM25 は score
-            if isinstance(item, VectorSearchItem):
-                parts.append(f"### Result {i} [distance={item.distance:.3f}]")
-            else:
-                parts.append(f"### Result {i} [score={item.score:.3f}]")
-
-            chunk_pos = _format_chunk_position(item.chunk_index, item.total_chunks)
-            parts.append(f"Source: {item.source_url}")
-            if item.url:
-                parts.append(f"URL: {item.url}")
-            parts.append(f"Title: {item.title}")
-            parts.append(f"Chunk: {chunk_pos}")
-            parts.append(f"Type: {item.source_type}")
-            if item.section_path:
-                parts.append(f"Section: {item.section_path}")
-            if item.collected_at:
-                parts.append(f"Collected: {item.collected_at}")
-            parts.append("<<content>>")
-            parts.append(item.text)
-            parts.append("<</content>>")
-            parts.append("")
-
-    return "\n".join(parts).rstrip()
-
-
-def _format_chunk_position(chunk_index: int, total_chunks: int) -> str:
-    """チャンク位置を表示用文字列にフォーマットする."""
-    pos = chunk_index + 1
-    if total_chunks > 0:
-        return f"{pos}/{total_chunks}"
-    return f"{pos}/?"
 
 
 class RAGKnowledgeService:
@@ -764,39 +709,6 @@ def get_document(
     )
 
 
-def format_document_response(result: DocumentResult) -> str:
-    """DocumentResult をプレーンテキストレスポンスにフォーマットする.
-
-    Args:
-        result: ドキュメント取得結果
-
-    Returns:
-        フォーマット済みレスポンステキスト
-    """
-    if result.error:
-        return f"エラー: {result.error}"
-
-    lines = [
-        f"Source: {result.source_id}",
-        f"Title: {result.title}",
-        f"Type: {result.source_type}",
-        f"Format: {result.format}",
-    ]
-    if result.collected_at:
-        lines.append(f"Collected: {result.collected_at}")
-    for key, value in result.extra.items():
-        if (
-            value is None
-            or (isinstance(value, str) and value == "")
-            or (isinstance(value, (list, dict)) and len(value) == 0)
-        ):
-            continue
-        lines.append(f"{key}: {value}")
-    lines.append("")
-    lines.append(result.content)
-    return "\n".join(lines)
-
-
 def list_recent_sources(
     source_store_dir: str,
     source_type: str,
@@ -868,14 +780,3 @@ def list_recent_sources(
         lines.append(f"   Size: {format_file_size(src.file_size)}")
 
     return "\n".join(lines)
-
-
-def format_file_size(size_bytes: int) -> str:
-    """バイト数を人間が読みやすい単位に変換する."""
-    if size_bytes < 1024:
-        return f"{size_bytes} B"
-    if size_bytes < 1024 * 1024:
-        return f"{size_bytes / 1024:.1f} KB"
-    if size_bytes < 1024 * 1024 * 1024:
-        return f"{size_bytes / (1024 * 1024):.1f} MB"
-    return f"{size_bytes / (1024 * 1024 * 1024):.1f} GB"

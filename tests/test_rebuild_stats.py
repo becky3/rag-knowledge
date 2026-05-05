@@ -16,7 +16,7 @@ import pytest
 
 from rag.cli import _format_elapsed
 from rag.pipeline.models import PipelineMode, PipelineSummary
-from rag.rag_knowledge import format_file_size
+from rag.admin.formatting import format_file_size
 from rag.server.cli_subprocess import (
     CLISubprocessError,
     _format_full_rebuild_summary,

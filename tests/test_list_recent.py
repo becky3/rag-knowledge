@@ -370,21 +370,21 @@ class TestFormatFileSize:
     """format_file_size のテスト."""
 
     def test_bytes(self) -> None:
-        from rag.rag_knowledge import format_file_size
+        from rag.admin.formatting import format_file_size
 
         assert format_file_size(500) == "500 B"
 
     def test_kilobytes(self) -> None:
-        from rag.rag_knowledge import format_file_size
+        from rag.admin.formatting import format_file_size
 
         assert format_file_size(46285) == "45.2 KB"
 
     def test_megabytes(self) -> None:
-        from rag.rag_knowledge import format_file_size
+        from rag.admin.formatting import format_file_size
 
         assert format_file_size(5 * 1024 * 1024) == "5.0 MB"
 
     def test_gigabytes(self) -> None:
-        from rag.rag_knowledge import format_file_size
+        from rag.admin.formatting import format_file_size
 
         assert format_file_size(2 * 1024 * 1024 * 1024) == "2.0 GB"

@@ -1341,7 +1341,8 @@ def run_get_document(args: argparse.Namespace) -> None:
         args: コマンドライン引数
     """
     from .config import get_settings
-    from .rag_knowledge import format_document_response, get_document
+    from .admin.formatting import format_document_response
+    from .rag_knowledge import get_document
 
     json_out = _is_json_output(args)
     settings = get_settings()
@@ -2109,7 +2110,7 @@ def run_search(args: argparse.Namespace) -> None:
             result_data["warnings"] = warnings
         _output_result(result_data)
     else:
-        from .rag_knowledge import format_raw_search_results
+        from .search.formatting import format_raw_search_results
         print(format_raw_search_results(raw))
 
 
@@ -2357,7 +2358,7 @@ def run_generate_api_key(args: argparse.Namespace) -> None:
 
 def _format_cli_size(size_bytes: int) -> str:
     """バイト数を人間が読みやすい単位に変換する."""
-    from .rag_knowledge import format_file_size
+    from .admin.formatting import format_file_size
 
     return format_file_size(size_bytes)
 

@@ -9,11 +9,9 @@ from pathlib import Path
 
 import pytest
 
-from rag.rag_knowledge import (
-    DocumentResult,
-    format_document_response,
-    get_document,
-)
+from rag.admin.formatting import format_document_response
+from rag.admin.models import DocumentResult
+from rag.rag_knowledge import get_document
 
 
 @pytest.fixture
