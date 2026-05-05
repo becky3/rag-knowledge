@@ -5,13 +5,13 @@ on:
     branches: [develop, main]
     paths:
       - "src/**/*.py"
-      - "scripts/check_raw_http.sh"
+      - "scripts/check_raw_http.py"
       - ".github/workflows/check-raw-http.yml"
   push:
     branches: [develop, main]
     paths:
       - "src/**/*.py"
-      - "scripts/check_raw_http.sh"
+      - "scripts/check_raw_http.py"
       - ".github/workflows/check-raw-http.yml"
 
 permissions:
@@ -23,4 +23,4 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - name: Check for raw HTTP client usage
-        run: bash scripts/check_raw_http.sh
+        run: uv run python scripts/check_raw_http.py

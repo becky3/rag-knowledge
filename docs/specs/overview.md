@@ -44,6 +44,7 @@ RAG Knowledge は、外部 Web ページから収集した知識をベクトル 
 | 34 | Zenn Fake Adapter | Zenn API 用 FakeZennFetcher | [infrastructure/fake-adapters/zenn.md](infrastructure/fake-adapters/zenn.md) |
 | 35 | Aozora Fake Adapter | 青空文庫用 FakeAozoraFetcher（カタログ ZIP / XHTML を fixture から bytes 返却） | [infrastructure/fake-adapters/aozora.md](infrastructure/fake-adapters/aozora.md) |
 | 36 | LM Studio 管理基盤 | `lmstudio.toml` を SSoT とした LM Studio モデル key の集約と CLI リファレンス | [infrastructure/lmstudio-reference.md](infrastructure/lmstudio-reference.md) |
+| 37 | Raw HTTP クライアント検出 | `src/` 配下で ConstrainedClient を経由しない直接 HTTP クライアント利用を CI で検出する AST ベース検出器 | [workflows/check-raw-http.md](workflows/check-raw-http.md) |
 
 ## 3. 技術スタック
 
