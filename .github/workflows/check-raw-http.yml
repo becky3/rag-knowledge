@@ -5,13 +5,13 @@ on:
     branches: [develop, main]
     paths:
       - "src/**/*.py"
-      - "scripts/check_raw_http.sh"
+      - "scripts/check_raw_http.py"
       - ".github/workflows/check-raw-http.yml"
   push:
     branches: [develop, main]
     paths:
       - "src/**/*.py"
-      - "scripts/check_raw_http.sh"
+      - "scripts/check_raw_http.py"
       - ".github/workflows/check-raw-http.yml"
 
 permissions:
@@ -22,5 +22,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+        with:
+          python-version-file: ".python-version"
       - name: Check for raw HTTP client usage
-        run: bash scripts/check_raw_http.sh
+        run: uv run python scripts/check_raw_http.py

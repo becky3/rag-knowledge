@@ -445,6 +445,7 @@ git-flow ベースのブランチ戦略を採用。詳細は `~/.claude/docs/spe
 - [Fake モード基盤](docs/specs/infrastructure/fake-mode.md)
 - [YouTube Fake Adapter](docs/specs/infrastructure/fake-adapters/youtube.md)
 - [QA 戦略](docs/specs/workflows/qa-strategy.md)
+- [Raw HTTP クライアント検出](docs/specs/workflows/check-raw-http.md)
 
 ### インジェスター仕様
 
