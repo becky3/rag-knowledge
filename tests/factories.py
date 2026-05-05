@@ -124,8 +124,6 @@ def make_source_management_adapter(**overrides: Any) -> Any:
     defaults: dict[str, Any] = {
         "vector_store": overrides.pop("vector_store", MagicMock()),
         "bm25_index": None,
-        "source_store_dir": None,
-        "converted_store_dir": None,
     }
     defaults.update(overrides)
     return RealSourceManagementAdapter(**defaults)

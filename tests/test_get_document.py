@@ -50,7 +50,7 @@ class TestGetDocumentFormatText:
 
         result = get_document(
             source_id="web/https/example.com/page.html",
-            format="text",
+            format_type="text",
             source_store_dir=str(source_dir),
             converted_store_dir=str(converted_dir),
         )
@@ -80,7 +80,7 @@ class TestGetDocumentFormatText:
 
         result = get_document(
             source_id="web/https/example.com/page.html",
-            format="text",
+            format_type="text",
             source_store_dir=str(source_dir),
             converted_store_dir=str(converted_dir),
         )
@@ -110,7 +110,7 @@ class TestGetDocumentFormatOriginal:
 
         result = get_document(
             source_id="local/notes/memo.md",
-            format="original",
+            format_type="original",
             source_store_dir=str(source_dir),
             converted_store_dir=str(converted_dir),
         )
@@ -136,7 +136,7 @@ class TestGetDocumentFormatOriginal:
 
         result = get_document(
             source_id="web/https/example.com/doc.pdf",
-            format="original",
+            format_type="original",
             source_store_dir=str(source_dir),
             converted_store_dir=str(converted_dir),
         )
@@ -158,7 +158,7 @@ class TestGetDocumentEdgeCases:
 
         result = get_document(
             source_id="any",
-            format="invalid",
+            format_type="invalid",
             source_store_dir=str(source_dir),
             converted_store_dir=str(converted_dir),
         )
@@ -179,7 +179,7 @@ class TestGetDocumentEdgeCases:
 
         result = get_document(
             source_id="nonexistent",
-            format="text",
+            format_type="text",
             source_store_dir=str(source_dir),
             converted_store_dir=str(converted_dir),
         )
@@ -209,7 +209,7 @@ class TestGetDocumentEdgeCases:
 
         result = get_document(
             source_id="local/old/doc.txt",
-            format="original",
+            format_type="original",
             source_store_dir=str(source_dir),
             converted_store_dir=str(converted_dir),
         )

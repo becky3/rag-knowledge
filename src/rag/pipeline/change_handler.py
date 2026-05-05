@@ -11,6 +11,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+from collections.abc import Awaitable, Callable
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import TYPE_CHECKING, Protocol
@@ -59,17 +60,17 @@ class RealChangeHandler:
         self._indexer = indexer
         self._metadata_builder = metadata_builder
         self._db = db
-
-    async def process_change(self, entry: ChangeEntry) -> None:
-        """1 ファイルの変更を処理する."""
-        handler = {
+        self._dispatch: dict[ChangeStatus, Callable[[ChangeEntry], Awaitable[None]]] = {
             ChangeStatus.ADDED: self._handle_added,
             ChangeStatus.MODIFIED: self._handle_modified,
             ChangeStatus.DELETED: self._handle_deleted,
             ChangeStatus.RENAMED: self._handle_renamed,
             ChangeStatus.META_ONLY: self._handle_meta_only,
         }
-        await handler[entry.status](entry)
+
+    async def process_change(self, entry: ChangeEntry) -> None:
+        """1 ファイルの変更を処理する."""
+        await self._dispatch[entry.status](entry)
 
     async def _handle_added(self, entry: ChangeEntry) -> None:
         """追加ファイルを処理する."""

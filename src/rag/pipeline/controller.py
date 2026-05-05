@@ -818,44 +818,6 @@ class PipelineController:
         """1ファイルの変更を処理する（ChangeHandler 委譲）."""
         await self._change_handler.process_change(entry)
 
-    async def _handle_added(self, entry: ChangeEntry) -> None:
-        """追加ファイルを処理する（ChangeHandler 委譲）."""
-        await self._change_handler._handle_added(entry)  # noqa: SLF001
-
-    async def _handle_modified(self, entry: ChangeEntry) -> None:
-        """変更ファイルを処理する（ChangeHandler 委譲）."""
-        await self._change_handler._handle_modified(entry)  # noqa: SLF001
-
-    async def _handle_deleted(self, entry: ChangeEntry) -> None:
-        """削除ファイルを処理する（ChangeHandler 委譲）."""
-        await self._change_handler._handle_deleted(entry)  # noqa: SLF001
-
-    async def _handle_renamed(self, entry: ChangeEntry) -> None:
-        """リネームファイルを処理する（ChangeHandler 委譲）."""
-        await self._change_handler._handle_renamed(entry)  # noqa: SLF001
-
-    async def _handle_meta_only(self, entry: ChangeEntry) -> None:
-        """.meta のみ変更を処理する（ChangeHandler 委譲）."""
-        await self._change_handler._handle_meta_only(entry)  # noqa: SLF001
-
-    # --- metadata 操作（MetadataBuilder への委譲） ---
-
-    def _register_in_db(self, file_path: str) -> None:
-        """ファイルを metadata.db に登録する（MetadataBuilder 委譲）."""
-        self._metadata_builder.register_in_db(file_path)
-
-    def _update_in_db(self, file_path: str) -> None:
-        """ファイルの metadata.db を更新する（MetadataBuilder 委譲）."""
-        self._metadata_builder.update_in_db(file_path)
-
-    def _resolve_source_id(self, file_path: str) -> str:
-        """file_path から source_id を解決する（MetadataBuilder 委譲）."""
-        return self._metadata_builder.resolve_source_id(file_path)
-
-    def _build_metadata(self, file_path: str) -> SourceMetadata:
-        """ファイルから SourceMetadata を構築する（MetadataBuilder 委譲）."""
-        return self._metadata_builder.build_metadata(file_path)
-
     def _build_metadata_from_record(
         self,
         record: SourceRecord,

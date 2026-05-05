@@ -20,9 +20,11 @@
 
 | ディレクトリ | 責務 |
 |---|---|
+| `src/rag/admin/` | 管理系 Port + Adapter（`SourceManagementPort` / `StatsPort`）と関連 dto / 境界整形ロジック |
 | `src/rag/converter/` | source_store のファイルを converted_store のテキストに変換（HTML→Markdown、PDF テキスト抽出等） |
 | `src/rag/embedding/` | Embedding プロバイダー抽象化（ローカル / OpenAI）とファクトリ |
 | `src/rag/indexer/` | converted_store からチャンキング・Embedding 生成・ChromaDB/BM25 インデックス構築 |
+| `src/rag/search/` | 検索系 Port + Adapter（`SearchPort`）と関連 dto / 境界整形ロジック |
 | `src/rag/media/` | メディア解析（画像・動画を Vision モデルでテキスト化） |
 | `src/rag/ingesters/` | レガシーインジェスタープラグイン（BaseIngester 抽象基底・IngestedContent 共通モデル） |
 | `src/rag/infrastructure/` | インフラ基盤（ChromaDB サーバーのライフサイクル管理・ファイルベースロック） |
@@ -42,7 +44,6 @@
 | `src/rag/config.py` | pydantic-settings による環境変数・設定管理 |
 | `src/rag/filter_parser.py` | 検索フィルター式のパーサー |
 | `src/rag/upload.py` | Upload HTTP API のファイルアップロード処理 |
-| `src/rag/rag_knowledge.py` | ナレッジサービス（取り込み・検索・削除のオーケストレーション） |
 | `src/rag/markdown.py` | RAG 用 Markdown コンバーター（リンク・画像 URL 除去） |
 | `src/rag/vector_store.py` | ベクトルストア（ChromaDB による Embedding 格納・検索） |
 | `src/rag/bm25_index.py` | BM25 インデックス（日本語形態素解析・ディスク永続化） |
@@ -59,7 +60,7 @@
 | 仕様書 | 実装モジュール |
 |---|---|
 | `rag-knowledge.md` | `src/rag/` 全体 |
-| `search-response.md` | `src/rag/server/`, `src/rag/rag_knowledge.py` |
+| `search-response.md` | `src/rag/server/`, `src/rag/search/`, `src/rag/admin/` |
 | `source-store.md` | `src/rag/store/` |
 | `pipeline-controller.md` | `src/rag/pipeline/` |
 | `converter.md` | `src/rag/converter/` |

@@ -37,6 +37,10 @@ class StatsPort(Protocol):
         """指定 source_type のソースを公開日時順で一覧取得する."""
         ...
 
+    def close(self) -> None:
+        """リソースを解放する（VectorStore.close への委譲）."""
+        ...
+
 
 class RealStatsAdapter:
     """StatsPort の本番実装."""
@@ -80,6 +84,10 @@ class RealStatsAdapter:
             ascending=ascending,
             filters=filters,
         )
+
+    def close(self) -> None:
+        """リソースを解放する."""
+        self._vector_store.close()
 
 
 def list_recent_sources(

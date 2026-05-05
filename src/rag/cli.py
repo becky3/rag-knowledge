@@ -908,10 +908,10 @@ async def _ingest_page_for_testing(
 async def create_search_adapter(
     *,
     persist_dir: str,
-    threshold: float | None = None,
-    bm25_index: "BM25Index | None" = None,
-    vector_weight: float = 0.6,
-    min_combined_score: float | None = None,
+    threshold: float | None,
+    bm25_index: "BM25Index | None",
+    vector_weight: float,
+    min_combined_score: float | None,
 ) -> "RealSearchAdapter":
     """SearchPort 実装（RealSearchAdapter）を生成する.
 
@@ -1417,7 +1417,7 @@ def run_get_document(args: argparse.Namespace) -> None:
 
     result = get_document(
         source_id=args.source_id,
-        format=args.format,
+        format_type=args.format,
         source_store_dir=settings.source_store_dir,
         converted_store_dir=settings.converted_store_dir,
     )

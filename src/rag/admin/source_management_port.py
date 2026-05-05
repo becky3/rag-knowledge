@@ -33,8 +33,8 @@ _VALID_FORMATS: frozenset[str] = frozenset({"text", "original"})
 class SourceManagementPort(Protocol):
     """ソース管理 Port.
 
-    ベクトルストア / BM25 / source_store / converted_store にまたがる
-    ソース単位の CRUD 系操作を抽象化する。
+    ベクトルストア / BM25 にまたがるソース単位の CRUD 系操作を抽象化する。
+    `get_document` は VectorStore に依存しないため module-level 関数で提供する。
     """
 
     async def source_exists(self, source_url: str) -> bool:
@@ -49,11 +49,8 @@ class SourceManagementPort(Protocol):
         """ソース URL 指定で知識を削除する."""
         ...
 
-    def get_document(self, source_id: str, format: str) -> DocumentResult:
-        """ドキュメント全文を取得する.
-
-        format=\"text\" は converted_store、format=\"original\" は source_store から取得。
-        """
+    def close(self) -> None:
+        """リソースを解放する（VectorStore.close への委譲）."""
         ...
 
 
@@ -65,21 +62,15 @@ class RealSourceManagementAdapter:
         vector_store: VectorStore,
         *,
         bm25_index: BM25Index | None,
-        source_store_dir: Path | None = None,
-        converted_store_dir: Path | None = None,
     ) -> None:
         """RealSourceManagementAdapter を初期化する.
 
         Args:
             vector_store: ベクトルストア
             bm25_index: BM25 インデックス（オプション）
-            source_store_dir: source_store ルートディレクトリ（get_document で使用）
-            converted_store_dir: converted_store ルートディレクトリ（get_document で使用）
         """
         self._vector_store = vector_store
         self._bm25_index = bm25_index
-        self._source_store_dir = source_store_dir
-        self._converted_store_dir = converted_store_dir
 
     async def source_exists(self, source_url: str) -> bool:
         """ソース URL に対応するチャンクが存在するか確認する（軽量版）."""
@@ -126,49 +117,37 @@ class RealSourceManagementAdapter:
 
         return total_deleted
 
-    def get_document(self, source_id: str, format: str) -> DocumentResult:
-        """ドキュメント全文を取得する（MCP/CLI 共通ロジック）."""
-        if self._source_store_dir is None or self._converted_store_dir is None:
-            raise RuntimeError(
-                "get_document requires source_store_dir and converted_store_dir; "
-                "RealSourceManagementAdapter must be constructed with both",
-            )
-        return get_document(
-            source_id=source_id,
-            format=format,
-            source_store_dir=str(self._source_store_dir),
-            converted_store_dir=str(self._converted_store_dir),
-        )
+    def close(self) -> None:
+        """リソースを解放する."""
+        self._vector_store.close()
 
 
 def get_document(
     source_id: str,
-    format: str,
+    format_type: str,
     source_store_dir: str,
     converted_store_dir: str,
 ) -> DocumentResult:
     """ドキュメント全文を取得する（MCP/CLI 共通ロジック）.
 
-    Adapter 経由とスタンドアロン経由の両方から利用される。
-
     Args:
         source_id: ソース識別子
-        format: 取得形式（"text" または "original"）
+        format_type: 取得形式（"text" または "original"）
         source_store_dir: source_store のルートディレクトリパス
         converted_store_dir: converted_store のルートディレクトリパス
 
     Returns:
         DocumentResult
     """
-    if format not in _VALID_FORMATS:
+    if format_type not in _VALID_FORMATS:
         valid = ", ".join(sorted(_VALID_FORMATS))
         return DocumentResult(
             source_id=source_id,
             title="",
             source_type="",
-            format=format,
+            format=format_type,
             content="",
-            error=f"無効な format: {format!r}（有効値: {valid}）",
+            error=f"無効な format: {format_type!r}（有効値: {valid}）",
         )
 
     from rag.store.source_store import SourceStore
@@ -181,7 +160,7 @@ def get_document(
                 source_id=source_id,
                 title="",
                 source_type="",
-                format=format,
+                format=format_type,
                 content="",
                 error=f"ソースが見つかりません: {source_id}",
             )
@@ -194,7 +173,7 @@ def get_document(
         collected_at = source_meta.collected_at if source_meta else ""
         extra = source_meta.extra if source_meta else {}
 
-        if format == "original":
+        if format_type == "original":
             ext = PurePosixPath(file_path).suffix.lower()
             if ext not in _TEXT_EXTENSIONS:
                 mime_type = (
@@ -211,7 +190,7 @@ def get_document(
                     source_id=source_id,
                     title=title,
                     source_type=source_type,
-                    format=format,
+                    format=format_type,
                     content=info,
                     is_binary=True,
                     collected_at=collected_at,
@@ -224,7 +203,7 @@ def get_document(
                     source_id=source_id,
                     title=title,
                     source_type=source_type,
-                    format=format,
+                    format=format_type,
                     content="",
                     error=f"ファイルが見つかりません: {file_path}",
                 )
@@ -238,13 +217,13 @@ def get_document(
                 source_id=source_id,
                 title=title,
                 source_type=source_type,
-                format=format,
+                format=format_type,
                 content=content,
                 collected_at=collected_at,
                 extra=extra,
             )
 
-    # format == "text": converted_store から読み取り
+    # format_type == "text": converted_store から読み取り
     converted_rel = get_converted_rel_path(file_path)
     converted_path = Path(converted_store_dir) / converted_rel
 
@@ -253,7 +232,7 @@ def get_document(
             source_id=source_id,
             title=title,
             source_type=source_type,
-            format=format,
+            format=format_type,
             content="",
             error=(
                 f"変換済みファイルが見つかりません: {converted_rel}\n"
@@ -271,7 +250,7 @@ def get_document(
         source_id=source_id,
         title=title,
         source_type=source_type,
-        format=format,
+        format=format_type,
         content=content,
         collected_at=collected_at,
         extra=extra,

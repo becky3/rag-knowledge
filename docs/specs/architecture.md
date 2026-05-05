@@ -153,25 +153,27 @@ subprocess を起動し、Scrapy 等の外部プロセスで取得を行う経�
 
 ### 3.6 Service ファミリー（RAG ナレッジ操作の Port 群）
 
-MCP / CLI から呼び出される RAG ナレッジ操作（検索・ソース管理・統計）は、責務単位の 3 Port に分離する。各 Port は独立した Adapter を持ち、Service ファサードを介さず直接利用される。
+MCP / CLI から呼び出される RAG ナレッジ操作（検索・ソース管理・統計）は、責務単位の 3 Port に分離する。各 Port は独立した Adapter を持ち、CLI / evaluation の呼び出し側から直接利用される。
 
 | Port | 主な責務 |
 |---|---|
 | `SearchPort` | 関連知識の検索（vector / hybrid）と raw 結果取得 |
-| `SourceManagementPort` | ソースの存在確認 / 全文取得 / 削除 / ドキュメント全文取得 |
+| `SourceManagementPort` | ソースの存在確認 / 全文取得 / 削除 |
 | `StatsPort` | ナレッジベース統計 / source_type 別ソース一覧 |
 
 各 Port の役割と Real Adapter の依存関係:
 
 - **`SearchPort`**: `VectorStore` と `BM25Index` を依存として保持し、`HybridSearchEngine` を内部生成する。`hybrid_search_enabled` フラグで切替
-- **`SourceManagementPort`**: `VectorStore` と `BM25Index` を依存として保持し、削除時の BM25 同期を含む。`get_document` は source_store / converted_store の path 経由で動作する別系統メソッド
-- **`StatsPort`**: `VectorStore` を依存として保持し、`list_recent` は metadata.db を直接参照（source_store_dir 経由）
+- **`SourceManagementPort`**: `VectorStore` と `BM25Index` を依存として保持し、削除時の BM25 同期を含む
+- **`StatsPort`**: `VectorStore` を依存として保持し、`list_recent` は metadata.db を直接参照する（source_store の path 経由で動作する別系統メソッド）
+
+ドキュメント全文取得（`get_document` / `format=text|original`）は VectorStore に依存しないため Port メソッドではなく `admin/source_management_port.py` の module-level 関数として提供する。CLI / MCP ツールは関数を直接 import して使用する。
 
 設計意図:
 
-- `RAGKnowledgeService` (旧 god class、1078 LOC) は god class への退行を構造的に防ぐため責務単位の 3 Port に分離した
+- 責務単位の 3 Port に分離することで god class への退行を構造的に防ぐ
 - 公開 API（MCP ツール）は不変。CLI / evaluation の呼び出し側は各 Port を直接利用する
-- 旧 `_ingest_crawled_page`（評価フィクスチャ投入専用ロジック）は CLI の `_ingest_page_for_testing` private 関数として CLI 内に閉じる（評価機能の運用判断は別 Issue で扱う）
+- 評価フィクスチャ投入専用ロジック（`_ingest_page_for_testing`）は CLI 内 private 関数として閉じる（評価機能の運用判断は別 Issue で扱う）
 
 ### 3.7 Pipeline 内部 Port ファミリー
 
@@ -185,10 +187,9 @@ MCP / CLI から呼び出される RAG ナレッジ操作（検索・ソース�
 
 設計意図:
 
-- god class 化していた `PipelineController` (旧 1197 LOC) を責務単位の Port に分離
+- 責務単位の Port に分離することで god class への退行を構造的に防ぐ
 - Controller は引き続き 5 つの公開実行メソッド（`run_incremental` / `run_full_rebuild` / `run_convert_only` / `run_index_only` / `ingest_and_index`）を提供する。これらは内部で各 Port Adapter を呼び出す orchestration 層
 - 共通処理ループ（`_run_processing_loop`）/ エラー処理（`_build_error_entry`）/ 自動コミット（`_auto_commit_for_incremental`）は引き続き Controller の補助メソッドとして残る（パイプライン実行のオーケストレーション責務に内包）
-- Controller の内部 private メソッド（`_classify_changes` 等）は proxy として Adapter に委譲する形を維持し、既存テストの内部メソッド呼び出しを互換させる
 
 ## 4. 構造判断の定量基準（参考値）
 

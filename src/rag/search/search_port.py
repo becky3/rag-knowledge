@@ -51,6 +51,10 @@ class SearchPort(Protocol):
         """ベクトル検索・BM25 検索の生結果を個別に返す."""
         ...
 
+    def close(self) -> None:
+        """リソースを解放する（VectorStore.close への委譲）."""
+        ...
+
 
 class RealSearchAdapter:
     """SearchPort の本番実装.
