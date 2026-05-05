@@ -171,7 +171,7 @@ flowchart TD
 
 | ファイル | 役割 |
 |---------|------|
-| `src/rag/server.py` | MCP ツール定義。パラメータ検証と共通関数呼び出し |
+| `src/rag/server/tools/listing.py` | MCP ツール定義（`rag_list_recent`, `rag_stats`）。パラメータ検証と共通関数呼び出し |
 | `src/rag/cli.py` | CLI サブコマンド定義。パラメータ検証と共通関数呼び出し |
 | `src/rag/rag_knowledge.py` | 共通ロジック。MetadataDB へのクエリとフォーマット処理 |
 | `src/rag/filter_parser.py` | `parse_filters()` — `key=value` 文字列のパース（`rag_search` と共通） |

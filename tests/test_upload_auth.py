@@ -16,10 +16,10 @@ from unittest.mock import MagicMock, patch
 import httpx
 import pytest
 
-from rag.server import (
+from rag.server import mcp
+from rag.server.transport import (
     _check_api_key_registered,
     _validate_bind_address,
-    mcp,
 )
 
 
@@ -36,7 +36,7 @@ def _default_mock_settings(**overrides: object) -> MagicMock:
 @pytest.fixture(autouse=True)
 def _mock_settings():
     """全テストで get_settings をモックする."""
-    with patch("rag.server.get_settings", return_value=_default_mock_settings()):
+    with patch("rag.server.bootstrap.config.get_settings", return_value=_default_mock_settings()):
         yield
 
 

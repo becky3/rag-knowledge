@@ -17,7 +17,8 @@ import logging
 import pytest
 
 from expected_tools import EXPECTED_MCP_TOOL_NAMES
-from rag.server import _configure_and_run, _reset_safe_browsing_client
+from rag.server.bootstrap import _configure_and_run
+from rag.server.safe_browsing_wiring import _reset_safe_browsing_client
 
 
 @pytest.fixture(autouse=True)
@@ -67,14 +68,14 @@ class TestRagSearchOutput:
 
     async def test_output_contains_vector_and_bm25_sections(self) -> None:
         """出力にベクトル検索結果とBM25検索結果のセクションが含まれること."""
-        from rag.server import rag_search
+        from rag.server.tools.search import rag_search
 
         cli_result = self._make_cli_result(
             vector_results=[{"text": "ベクトルの結果テキスト", "source_url": "https://example.com/vec1", "distance": 0.234, "chunk_index": 2, "title": "ガイドページ", "source_type": "web", "total_chunks": 15, "collected_at": "", "section_path": ""}],
             bm25_results=[{"text": "BM25の結果テキスト", "source_url": "https://example.com/bm25_1", "score": 4.521, "doc_id": "doc1", "chunk_index": 4, "title": "サンプル記事", "source_type": "zenn", "total_chunks": 20, "collected_at": "", "section_path": ""}],
         )
 
-        with patch("rag.server._run_cli_subprocess", new_callable=AsyncMock, return_value=cli_result) as mock_subprocess:
+        with patch("rag.server.cli_subprocess._run_cli_subprocess", new_callable=AsyncMock, return_value=cli_result) as mock_subprocess:
             result = await rag_search("テストクエリ")
 
         mock_subprocess.assert_called_once_with("search", ["--query", "テストクエリ"])
@@ -83,13 +84,13 @@ class TestRagSearchOutput:
 
     async def test_output_contains_chunk_metadata(self) -> None:
         """各結果にSource/Title/Chunk/Typeメタデータが含まれること."""
-        from rag.server import rag_search
+        from rag.server.tools.search import rag_search
 
         cli_result = self._make_cli_result(
             vector_results=[{"text": "チャンクテキスト", "source_url": "https://example.com/docs/guide", "distance": 0.234, "chunk_index": 2, "title": "ガイドページ", "source_type": "web", "total_chunks": 15, "collected_at": "", "section_path": ""}],
         )
 
-        with patch("rag.server._run_cli_subprocess", new_callable=AsyncMock, return_value=cli_result):
+        with patch("rag.server.cli_subprocess._run_cli_subprocess", new_callable=AsyncMock, return_value=cli_result):
             result = await rag_search("テスト")
 
         assert "Source: https://example.com/docs/guide" in result
@@ -100,27 +101,27 @@ class TestRagSearchOutput:
 
     async def test_chunk_position_with_unknown_total(self) -> None:
         """total_chunks=0（レガシーデータ）のとき Chunk: N/? と表示されること."""
-        from rag.server import rag_search
+        from rag.server.tools.search import rag_search
 
         cli_result = self._make_cli_result(
             vector_results=[{"text": "テキスト", "source_url": "https://example.com/page1", "distance": 0.1, "chunk_index": 4, "total_chunks": 0, "title": "", "source_type": "", "collected_at": "", "section_path": ""}],
         )
 
-        with patch("rag.server._run_cli_subprocess", new_callable=AsyncMock, return_value=cli_result):
+        with patch("rag.server.cli_subprocess._run_cli_subprocess", new_callable=AsyncMock, return_value=cli_result):
             result = await rag_search("テスト")
 
         assert "Chunk: 5/?" in result
 
     async def test_output_contains_raw_scores(self) -> None:
         """出力に生スコアが含まれること."""
-        from rag.server import rag_search
+        from rag.server.tools.search import rag_search
 
         cli_result = self._make_cli_result(
             vector_results=[{"text": "テキスト", "source_url": "https://example.com/v", "distance": 0.567, "chunk_index": 0, "total_chunks": 0, "title": "", "source_type": "", "collected_at": "", "section_path": ""}],
             bm25_results=[{"text": "テキスト", "source_url": "https://example.com/b", "score": 3.456, "doc_id": "d1", "chunk_index": 0, "total_chunks": 0, "title": "", "source_type": "", "collected_at": "", "section_path": ""}],
         )
 
-        with patch("rag.server._run_cli_subprocess", new_callable=AsyncMock, return_value=cli_result):
+        with patch("rag.server.cli_subprocess._run_cli_subprocess", new_callable=AsyncMock, return_value=cli_result):
             result = await rag_search("テスト")
 
         assert "[distance=0.567]" in result
@@ -128,31 +129,31 @@ class TestRagSearchOutput:
 
     async def test_empty_results_returns_not_found_message(self) -> None:
         """0件時に「該当する情報が見つかりませんでした」が返ること."""
-        from rag.server import rag_search
+        from rag.server.tools.search import rag_search
 
         cli_result = self._make_cli_result()
 
-        with patch("rag.server._run_cli_subprocess", new_callable=AsyncMock, return_value=cli_result):
+        with patch("rag.server.cli_subprocess._run_cli_subprocess", new_callable=AsyncMock, return_value=cli_result):
             result = await rag_search("存在しないクエリ")
 
         assert result == "該当する情報が見つかりませんでした"
 
     async def test_chunk_text_returned_directly(self) -> None:
         """チャンクテキストがそのまま返却されること（ページ全文ではない）."""
-        from rag.server import rag_search
+        from rag.server.tools.search import rag_search
 
         cli_result = self._make_cli_result(
             vector_results=[{"text": "これはチャンクテキストです", "source_url": "https://example.com/page1", "distance": 0.1, "chunk_index": 0, "title": "ページ1", "source_type": "web", "total_chunks": 5, "collected_at": "", "section_path": ""}],
         )
 
-        with patch("rag.server._run_cli_subprocess", new_callable=AsyncMock, return_value=cli_result):
+        with patch("rag.server.cli_subprocess._run_cli_subprocess", new_callable=AsyncMock, return_value=cli_result):
             result = await rag_search("テスト")
 
         assert "これはチャンクテキストです" in result
 
     async def test_same_source_different_chunks_shown_individually(self) -> None:
         """同一ソースの異なるチャンクが個別に表示されること."""
-        from rag.server import rag_search
+        from rag.server.tools.search import rag_search
 
         cli_result = self._make_cli_result(
             vector_results=[
@@ -161,7 +162,7 @@ class TestRagSearchOutput:
             ],
         )
 
-        with patch("rag.server._run_cli_subprocess", new_callable=AsyncMock, return_value=cli_result):
+        with patch("rag.server.cli_subprocess._run_cli_subprocess", new_callable=AsyncMock, return_value=cli_result):
             result = await rag_search("テスト")
 
         assert "チャンク1のテキスト" in result
@@ -181,7 +182,7 @@ class TestConfigureAndRun:
         mock_settings.rag_log_dir = None
 
         with (
-            patch.object(mod, "get_settings", return_value=mock_settings),
+            patch("rag.config.get_settings", return_value=mock_settings),
             patch.object(mod.mcp, "run") as mock_run,
         ):
             _configure_and_run()
@@ -199,8 +200,8 @@ class TestConfigureAndRun:
         mock_settings.rag_log_dir = None
 
         with (
-            patch.object(mod, "get_settings", return_value=mock_settings),
-            patch.object(mod, "_check_api_key_registered", return_value=None),
+            patch("rag.config.get_settings", return_value=mock_settings),
+            patch("rag.server.transport._check_api_key_registered", return_value=None),
             patch.object(mod.mcp, "run") as mock_run,
         ):
             _configure_and_run()
@@ -220,8 +221,8 @@ class TestConfigureAndRun:
         mock_settings.rag_log_dir = None
 
         with (
-            patch.object(mod, "get_settings", return_value=mock_settings),
-            patch.object(mod, "_check_api_key_registered", return_value=None),
+            patch("rag.config.get_settings", return_value=mock_settings),
+            patch("rag.server.transport._check_api_key_registered", return_value=None),
             patch.object(
                 mod.mcp, "run", side_effect=KeyboardInterrupt
             ),
@@ -240,7 +241,7 @@ class TestConfigureAndRun:
         mock_settings.rag_log_dir = None
 
         with (
-            patch.object(mod, "get_settings", return_value=mock_settings),
+            patch("rag.config.get_settings", return_value=mock_settings),
             patch.object(
                 mod.mcp, "run", side_effect=KeyboardInterrupt
             ),
@@ -259,7 +260,7 @@ class TestConfigureAndRun:
         mock_settings.rag_log_dir = None
 
         with (
-            patch.object(mod, "get_settings", return_value=mock_settings),
+            patch("rag.config.get_settings", return_value=mock_settings),
             patch.object(mod.mcp, "run"),
             patch.object(mod.logger, "info") as mock_log,
         ):
@@ -279,7 +280,7 @@ class TestAttachLogFileHandler:
 
     def test_handler_not_attached_when_rag_log_dir_is_none(self) -> None:
         from py_common_lib.logging import SessionRotatingFileHandler
-        from rag.server import _attach_log_file_handler
+        from rag.server.bootstrap import _attach_log_file_handler
 
         rag_logger = self._build_rag_logger()
         mock_settings = MagicMock()
@@ -297,7 +298,7 @@ class TestAttachLogFileHandler:
         self, tmp_path: Path
     ) -> None:
         from py_common_lib.logging import SessionRotatingFileHandler
-        from rag.server import _attach_log_file_handler
+        from rag.server.bootstrap import _attach_log_file_handler
 
         rag_logger = self._build_rag_logger()
         mock_settings = MagicMock()
@@ -324,7 +325,7 @@ class TestRagGetDocumentTool:
 
     async def test_format_text_returns_document(self) -> None:
         """format=text でドキュメントが返ること."""
-        from rag.server import rag_get_document
+        from rag.server.tools.search import rag_get_document
 
         cli_result: dict[str, object] = {
             "source_id": "https://example.com/docs/guide",
@@ -341,8 +342,8 @@ class TestRagGetDocumentTool:
         mock_settings.rag_max_response_chars = None
 
         with (
-            patch("rag.server._run_cli_subprocess", new_callable=AsyncMock, return_value=cli_result),
-            patch("rag.server.get_settings", return_value=mock_settings),
+            patch("rag.server.cli_subprocess._run_cli_subprocess", new_callable=AsyncMock, return_value=cli_result),
+            patch("rag.server.tools.search.config.get_settings", return_value=mock_settings),
         ):
             result = await rag_get_document("https://example.com/docs/guide")
 
@@ -354,7 +355,7 @@ class TestRagGetDocumentTool:
 
     async def test_format_original_returns_document(self) -> None:
         """format=original でドキュメントが返ること."""
-        from rag.server import rag_get_document
+        from rag.server.tools.search import rag_get_document
 
         cli_result: dict[str, object] = {
             "source_id": "https://example.com/page.html",
@@ -371,8 +372,8 @@ class TestRagGetDocumentTool:
         mock_settings.rag_max_response_chars = None
 
         with (
-            patch("rag.server._run_cli_subprocess", new_callable=AsyncMock, return_value=cli_result),
-            patch("rag.server.get_settings", return_value=mock_settings),
+            patch("rag.server.cli_subprocess._run_cli_subprocess", new_callable=AsyncMock, return_value=cli_result),
+            patch("rag.server.tools.search.config.get_settings", return_value=mock_settings),
         ):
             result = await rag_get_document("https://example.com/page.html", format="original")
 
@@ -381,10 +382,11 @@ class TestRagGetDocumentTool:
 
     async def test_cli_error_returns_error(self) -> None:
         """CLI サブプロセスエラー時にエラーメッセージを返すこと."""
-        from rag.server import CLISubprocessError, rag_get_document
+        from rag.server.cli_subprocess import CLISubprocessError
+        from rag.server.tools.search import rag_get_document
 
         with patch(
-            "rag.server._run_cli_subprocess",
+            "rag.server.cli_subprocess._run_cli_subprocess",
             new_callable=AsyncMock,
             side_effect=CLISubprocessError("ソースが見つかりません"),
         ):
@@ -394,7 +396,7 @@ class TestRagGetDocumentTool:
 
     async def test_truncation_with_max_response_chars(self) -> None:
         """rag_max_response_chars でトランケーションされ、通知文込みで上限内に収まること."""
-        from rag.server import rag_get_document
+        from rag.server.tools.search import rag_get_document
 
         max_chars = 200
         long_content = "あ" * 1000
@@ -413,8 +415,8 @@ class TestRagGetDocumentTool:
         mock_settings.rag_max_response_chars = max_chars
 
         with (
-            patch("rag.server._run_cli_subprocess", new_callable=AsyncMock, return_value=cli_result),
-            patch("rag.server.get_settings", return_value=mock_settings),
+            patch("rag.server.cli_subprocess._run_cli_subprocess", new_callable=AsyncMock, return_value=cli_result),
+            patch("rag.server.tools.search.config.get_settings", return_value=mock_settings),
         ):
             result = await rag_get_document("https://example.com/long")
 
@@ -424,7 +426,7 @@ class TestRagGetDocumentTool:
 
     async def test_no_truncation_when_limit_is_none(self) -> None:
         """rag_max_response_chars=None のときトランケーションされないこと."""
-        from rag.server import rag_get_document
+        from rag.server.tools.search import rag_get_document
 
         long_content = "あ" * 1000
         cli_result: dict[str, object] = {
@@ -442,8 +444,8 @@ class TestRagGetDocumentTool:
         mock_settings.rag_max_response_chars = None
 
         with (
-            patch("rag.server._run_cli_subprocess", new_callable=AsyncMock, return_value=cli_result),
-            patch("rag.server.get_settings", return_value=mock_settings),
+            patch("rag.server.cli_subprocess._run_cli_subprocess", new_callable=AsyncMock, return_value=cli_result),
+            patch("rag.server.tools.search.config.get_settings", return_value=mock_settings),
         ):
             result = await rag_get_document("https://example.com/long")
 
@@ -452,7 +454,7 @@ class TestRagGetDocumentTool:
 
     async def test_invalid_format_returns_error(self) -> None:
         """無効な format 値でエラーが返ること."""
-        from rag.server import rag_get_document
+        from rag.server.tools.search import rag_get_document
 
         result = await rag_get_document("source", format="invalid")
 
@@ -474,13 +476,13 @@ class TestRagStatsOutput:
 
     async def test_stats_contains_index_data(self) -> None:
         """インデックスセクションの統計が表示されること."""
-        from rag.server import rag_stats
+        from rag.server.tools.listing import rag_stats
 
         cli_result = self._make_cli_result(
             index={"total_chunks": 150, "source_count": 3},
         )
 
-        with patch("rag.server._run_cli_subprocess", new_callable=AsyncMock, return_value=cli_result):
+        with patch("rag.server.cli_subprocess._run_cli_subprocess", new_callable=AsyncMock, return_value=cli_result):
             result = await rag_stats()
 
         assert "📊 RAG Knowledge 統計" in result
@@ -489,13 +491,13 @@ class TestRagStatsOutput:
 
     async def test_stats_empty_sources(self) -> None:
         """ソースが空の場合."""
-        from rag.server import rag_stats
+        from rag.server.tools.listing import rag_stats
 
         cli_result = self._make_cli_result(
             index={"total_chunks": 0, "source_count": 0},
         )
 
-        with patch("rag.server._run_cli_subprocess", new_callable=AsyncMock, return_value=cli_result):
+        with patch("rag.server.cli_subprocess._run_cli_subprocess", new_callable=AsyncMock, return_value=cli_result):
             result = await rag_stats()
 
         assert "📊 RAG Knowledge 統計" in result
@@ -503,13 +505,13 @@ class TestRagStatsOutput:
 
     async def test_stats_four_sections(self) -> None:
         """4セクション構成の出力フォーマット."""
-        from rag.server import rag_stats
+        from rag.server.tools.listing import rag_stats
 
         cli_result = self._make_cli_result(
             index={"total_chunks": 5, "source_count": 1},
         )
 
-        with patch("rag.server._run_cli_subprocess", new_callable=AsyncMock, return_value=cli_result):
+        with patch("rag.server.cli_subprocess._run_cli_subprocess", new_callable=AsyncMock, return_value=cli_result):
             result = await rag_stats()
 
         assert "■ source_store" in result
@@ -530,8 +532,9 @@ class TestRagCrawlZennTool:
             "placed": 5, "skipped": 2, "overwritten": 0, "errors": 0,
             "error_details": [],
         }
-        with patch.object(
-            mod, "_run_cli_subprocess", new_callable=AsyncMock, return_value=mock_result,
+        with patch(
+            "rag.server.cli_subprocess._run_cli_subprocess",
+            new_callable=AsyncMock, return_value=mock_result,
         ) as mock_cli:
             result = await mod.rag_crawl_zenn("testuser")
 
@@ -549,8 +552,9 @@ class TestRagCrawlZennTool:
             "placed": 0, "skipped": 0, "overwritten": 0, "errors": 0,
             "error_details": [],
         }
-        with patch.object(
-            mod, "_run_cli_subprocess", new_callable=AsyncMock, return_value=mock_result,
+        with patch(
+            "rag.server.cli_subprocess._run_cli_subprocess",
+            new_callable=AsyncMock, return_value=mock_result,
         ) as mock_cli:
             await mod.rag_crawl_zenn(
                 "testuser", max_articles=10, content_type="articles", force=True,
@@ -569,8 +573,9 @@ class TestRagCrawlZennTool:
         """ロック競合時に専用エラーメッセージを返すこと."""
         mod = import_module("rag.server")
 
-        with patch.object(
-            mod, "_run_cli_subprocess", new_callable=AsyncMock,
+        with patch(
+            "rag.server.cli_subprocess._run_cli_subprocess",
+            new_callable=AsyncMock,
             side_effect=mod.CLISubprocessError("ロック取得失敗", code="LOCK_CONFLICT"),
         ):
             result = await mod.rag_crawl_zenn("testuser")
@@ -582,8 +587,9 @@ class TestRagCrawlZennTool:
         """CLI エラー時にエラーメッセージを返すこと."""
         mod = import_module("rag.server")
 
-        with patch.object(
-            mod, "_run_cli_subprocess", new_callable=AsyncMock,
+        with patch(
+            "rag.server.cli_subprocess._run_cli_subprocess",
+            new_callable=AsyncMock,
             side_effect=mod.CLISubprocessError("username が空です"),
         ):
             result = await mod.rag_crawl_zenn("")
@@ -888,8 +894,9 @@ class TestRagDeleteTool:
         """正常系: 削除成功メッセージが返ること."""
         mod = import_module("rag.server")
         mock_result = {"deleted": True, "pipeline": None}
-        with patch.object(
-            mod, "_run_cli_subprocess", new_callable=AsyncMock, return_value=mock_result,
+        with patch(
+            "rag.server.cli_subprocess._run_cli_subprocess",
+            new_callable=AsyncMock, return_value=mock_result,
         ) as mock_cli:
             result = await mod.rag_delete("https://example.com/page")
 
@@ -901,8 +908,9 @@ class TestRagDeleteTool:
         """ソースが見つからない場合のメッセージが返ること."""
         mod = import_module("rag.server")
         mock_result = {"not_found": True}
-        with patch.object(
-            mod, "_run_cli_subprocess", new_callable=AsyncMock, return_value=mock_result,
+        with patch(
+            "rag.server.cli_subprocess._run_cli_subprocess",
+            new_callable=AsyncMock, return_value=mock_result,
         ):
             result = await mod.rag_delete("https://example.com/missing")
 
@@ -912,8 +920,9 @@ class TestRagDeleteTool:
     async def test_lock_conflict(self) -> None:
         """ロック競合時に専用メッセージを返すこと."""
         mod = import_module("rag.server")
-        with patch.object(
-            mod, "_run_cli_subprocess", new_callable=AsyncMock,
+        with patch(
+            "rag.server.cli_subprocess._run_cli_subprocess",
+            new_callable=AsyncMock,
             side_effect=mod.CLISubprocessError("排他制御エラー", code="LOCK_CONFLICT"),
         ):
             result = await mod.rag_delete("https://example.com/page")
@@ -933,8 +942,9 @@ class TestRagRebuildTool:
             "total_files": 10, "processed": 8, "errors": [], "warnings": [],
             "elapsed": 5.5,
         }
-        with patch.object(
-            mod, "_run_cli_subprocess", new_callable=AsyncMock, return_value=mock_result,
+        with patch(
+            "rag.server.cli_subprocess._run_cli_subprocess",
+            new_callable=AsyncMock, return_value=mock_result,
         ) as mock_cli:
             result = await mod.rag_rebuild("incremental")
 
@@ -959,8 +969,9 @@ class TestRagRebuildTool:
             },
             "elapsed": 10.0,
         }
-        with patch.object(
-            mod, "_run_cli_subprocess", new_callable=AsyncMock, return_value=mock_result,
+        with patch(
+            "rag.server.cli_subprocess._run_cli_subprocess",
+            new_callable=AsyncMock, return_value=mock_result,
         ) as mock_cli:
             await mod.rag_rebuild("full", source_type="web")
 
@@ -972,8 +983,9 @@ class TestRagRebuildTool:
     async def test_lock_conflict(self) -> None:
         """ロック競合時に専用メッセージを返すこと."""
         mod = import_module("rag.server")
-        with patch.object(
-            mod, "_run_cli_subprocess", new_callable=AsyncMock,
+        with patch(
+            "rag.server.cli_subprocess._run_cli_subprocess",
+            new_callable=AsyncMock,
             side_effect=mod.CLISubprocessError("lock conflict", code="LOCK_CONFLICT"),
         ):
             result = await mod.rag_rebuild("full")
@@ -984,8 +996,9 @@ class TestRagRebuildTool:
     async def test_cli_error(self) -> None:
         """CLISubprocessError 時にエラーメッセージを返すこと."""
         mod = import_module("rag.server")
-        with patch.object(
-            mod, "_run_cli_subprocess", new_callable=AsyncMock,
+        with patch(
+            "rag.server.cli_subprocess._run_cli_subprocess",
+            new_callable=AsyncMock,
             side_effect=mod.CLISubprocessError("rebuild failed"),
         ):
             result = await mod.rag_rebuild("full")
@@ -1021,8 +1034,8 @@ class TestRagSiteIngestSafeBrowsing:
         mock_settings = MagicMock()
 
         with (
-            patch.object(mod, "_get_safe_browsing_client", return_value=mock_sb_client),
-            patch.object(mod, "get_settings", return_value=mock_settings),
+            patch("rag.server.tools.ingest_site.safe_browsing_wiring._get_safe_browsing_client", return_value=mock_sb_client),
+            patch("rag.config.get_settings", return_value=mock_settings),
             patch("rag.utils.url.check_ssrf"),
         ):
             result = await mod.rag_site_ingest("https://malicious.example.com")
@@ -1039,9 +1052,9 @@ class TestRagSiteIngestSafeBrowsing:
         mock_cli_result = {"ingest": {"placed": 1, "skipped": 0, "errors": 0}}
 
         with (
-            patch.object(mod, "_get_safe_browsing_client", return_value=None),
-            patch.object(mod, "_run_cli_subprocess", new_callable=AsyncMock, return_value=mock_cli_result) as mock_run,
-            patch.object(mod, "_format_cli_ingest_result", return_value="取り込み完了"),
+            patch("rag.server.tools.ingest_site.safe_browsing_wiring._get_safe_browsing_client", return_value=None),
+            patch("rag.server.cli_subprocess._run_cli_subprocess", new_callable=AsyncMock, return_value=mock_cli_result) as mock_run,
+            patch("rag.server.cli_subprocess._format_cli_ingest_result", return_value="取り込み完了"),
         ):
             result = await mod.rag_site_ingest(url="https://example.com")
 

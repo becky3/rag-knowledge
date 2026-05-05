@@ -5,7 +5,7 @@
 外部 Web ページから収集した知識をベクトル DB に蓄積し、
 MCP クライアントからのクエリに対して関連情報を検索・提供する
 RAG（Retrieval-Augmented Generation）基盤。
-MCP サーバーとして独立動作し、18 個のツールを提供する。
+MCP サーバーとして独立動作し、ナレッジ操作用の MCP ツール群および HTTP アップロードエンドポイントを提供する。
 
 スコープ:
 
@@ -165,11 +165,117 @@ MCP サーバーの全ツールは CLI サブプロセスに委譲する（薄�
 - 読み取り系ツール（検索・統計・一覧）: SEGFAULT リスクは低いが、一貫性のため同一パターンに統一する。サブプロセス起動のオーバーヘッドは許容する
 - ロジックの重複を排除し、CLI と MCP で同一のコードパスを通す
 
+### server 構造
+
+`src/rag/server/` は薄層アダプターパターンの実装を architectural concern ごとに分割したパッケージ。各ファイルは単一の責務を持ち、責務境界をパス構造として固定する。
+
+#### パッケージ構造
+
+```mermaid
+flowchart TD
+    subgraph server["src/rag/server/"]
+        init["__init__.py<br/>公開 API 集約・tool/upload 副作用 import"]
+        main["__main__.py<br/>python -m rag.server エントリ"]
+        mcp_mod["_mcp.py<br/>FastMCP インスタンス単一定義"]
+        bootstrap["bootstrap.py<br/>起動シーケンス"]
+        transport["transport.py<br/>バインドアドレス・API キー検証"]
+        http_auth["http_auth.py<br/>API キー認証 middleware"]
+        logging_setup["logging_setup.py<br/>ログ設定"]
+        cli_sub["cli_subprocess.py<br/>CLI 委譲・共有フォーマッター"]
+        fake_labels["fake_labels.py<br/>Fake モードラベル"]
+        sbw["safe_browsing_wiring.py<br/>SafeBrowsing シングルトン"]
+
+        subgraph tools["tools/ (MCP tool)"]
+            tool_files["search / ingest_* / delete / rebuild / listing"]
+        end
+
+        subgraph upload["upload/ (HTTP custom_route)"]
+            upload_files["document / journal / _helpers"]
+        end
+    end
+
+    main --> bootstrap
+    bootstrap --> transport
+    bootstrap --> mcp_mod
+    bootstrap --> logging_setup
+    init --> mcp_mod
+    init --> tools
+    init --> upload
+    tools --> mcp_mod
+    tools --> cli_sub
+    tools --> fake_labels
+    tools --> sbw
+    upload --> mcp_mod
+    upload --> cli_sub
+    upload --> http_auth
+    upload --> logging_setup
+    http_auth --> upload
+    cli_sub --> logging_setup
+
+    style mcp_mod fill:#fff3cd,stroke:#856404
+    style init fill:#d4edda,stroke:#155724
+    style main fill:#d4edda,stroke:#155724
+```
+
+#### ディレクトリ構成
+
+| パス | 責務 |
+|---|---|
+| `src/rag/server/__init__.py` | パッケージの公開 API を集約。`_mcp.py` から `mcp` を re-export + 各サブモジュールの import（副作用で `@mcp.tool()` / `@mcp.custom_route()` 登録）+ テスト互換のための内部シンボル re-export |
+| `src/rag/server/__main__.py` | `python -m rag.server` のエントリポイント。`bootstrap._configure_and_run()` を呼び出す |
+| `src/rag/server/_mcp.py` | `mcp = FastMCP("rag")` インスタンスの単一定義。`__init__.py` から分離している理由は、`__init__.py` ↔ tool サブモジュール間の循環 import 回避と mypy 静的解析対応のため |
+| `src/rag/server/bootstrap.py` | プロセス起動シーケンス・ログファイル handler の attach・ChromaDB マネージャ起動・FastMCP run 呼び出し |
+| `src/rag/server/transport.py` | HTTP モードのバインドアドレス検証・API キー登録確認 |
+| `src/rag/server/http_auth.py` | HTTP モードの API キー認証 middleware |
+| `src/rag/server/logging_setup.py` | ログ値サニタイズ・CLI 子プロセス出力をログ handler に流す処理 |
+| `src/rag/server/cli_subprocess.py` | CLI サブプロセス起動・JSON Lines パース・共有フォーマッター（パイプライン実行結果系） |
+| `src/rag/server/fake_labels.py` | Fake モード状態の表示ラベル生成・source ↔ Fake source マッピング定数 |
+| `src/rag/server/safe_browsing_wiring.py` | SafeBrowsingClient のプロセス内シングルトン管理 |
+| `src/rag/server/tools/` | MCP tool 定義（`@mcp.tool()`）。各ファイルはツール本体 + 専用フォーマッター + 専用 validation を同居させる |
+| `src/rag/server/upload/` | HTTP custom_route（`@mcp.custom_route()`）によるアップロード API |
+
+#### tools/ サブパッケージの分割原則
+
+| パス | 含まれる tool |
+|---|---|
+| `tools/search.py` | `rag_search`, `rag_get_document` |
+| `tools/ingest_zenn.py` | `rag_crawl_zenn`, `rag_add_zenn` |
+| `tools/ingest_bluesky.py` | `rag_crawl_bluesky`, `rag_add_bluesky` |
+| `tools/ingest_youtube.py` | `rag_add_youtube`, `rag_crawl_youtube` |
+| `tools/ingest_local.py` | `rag_add_document`, `rag_crawl_documents`, `rag_add_journal` |
+| `tools/ingest_aozora.py` | `rag_update_aozora_catalog`, `rag_search_aozora`, `rag_add_aozora`, `rag_crawl_aozora` |
+| `tools/ingest_site.py` | `rag_site_ingest` |
+| `tools/delete.py` | `rag_delete` |
+| `tools/rebuild.py` | `rag_rebuild` |
+| `tools/listing.py` | `rag_list_recent`, `rag_stats` |
+
+各 tool ファイルの設計原則:
+
+- ツール本体（`@mcp.tool()` で装飾された async 関数）
+- そのツール専用の出力フォーマッター（`_format_cli_*_result`）
+- そのツール専用の引数 validation 定数（`_VALID_*` 等）
+
+を 1 ファイルに同居させる。ツール変更時に参照する範囲を 1 ファイルに収める凝集度を優先する設計。
+
+複数ツールで共有するフォーマッター（パイプライン実行結果の整形・チャンク位置整形・ingest 結果整形・rebuild サマリ整形等）は `cli_subprocess.py` に集約する。具体的な関数名は実装側 `cli_subprocess.py` の docstring を SSoT とする。
+
+#### upload/ サブパッケージの分割原則
+
+| パス | 含まれる route |
+|---|---|
+| `upload/document.py` | `upload_document` (POST `/upload/document`) |
+| `upload/journal.py` | `upload_journal` (POST `/upload/journal`) |
+| `upload/_helpers.py` | エラー/成功レスポンス生成・multipart フォーム値デコード・ファイル読み取り |
+
+#### MCP tool の登録メカニズム
+
+`src/rag/server/__init__.py` がパッケージ import 時に各 tool サブモジュールを import することで、`@mcp.tool()` デコレータの副作用として全 MCP tool が `mcp` インスタンスに登録される。テスト側で `import_module("rag.server")` した時点で全 MCP tool が利用可能になる。
+
 ## インターフェース
 
 ### MCP ツール
 
-MCP サーバーが公開する 18 個のツール。
+MCP サーバーが公開するツール群。
 
 #### rag_search
 

@@ -17,7 +17,7 @@ import pytest
 from rag.cli import _format_elapsed
 from rag.pipeline.models import PipelineMode, PipelineSummary
 from rag.rag_knowledge import format_file_size
-from rag.server import (
+from rag.server.cli_subprocess import (
     CLISubprocessError,
     _format_full_rebuild_summary,
     _format_rebuild_summary,
@@ -130,7 +130,7 @@ class TestRagRebuild:
     @pytest.mark.asyncio
     async def test_full_rebuild_success(self) -> None:
         """CLI サブプロセス経由の full rebuild が2フェーズ結果を返すこと."""
-        from rag.server import rag_rebuild
+        from rag.server.tools.rebuild import rag_rebuild
 
         mock_cli_result: dict[str, object] = {
             "type": "result",
@@ -152,7 +152,7 @@ class TestRagRebuild:
             "elapsed": 1.2,
         }
 
-        with patch("rag.server._run_cli_subprocess", new_callable=AsyncMock, return_value=mock_cli_result):
+        with patch("rag.server.cli_subprocess._run_cli_subprocess", new_callable=AsyncMock, return_value=mock_cli_result):
             result = await rag_rebuild(mode="full")
 
         assert "再構築完了" in result
@@ -164,7 +164,7 @@ class TestRagRebuild:
     @pytest.mark.asyncio
     async def test_rebuild_with_source_type(self) -> None:
         """source_type 指定の rebuild が正しい引数で CLI を呼ぶこと."""
-        from rag.server import rag_rebuild
+        from rag.server.tools.rebuild import rag_rebuild
 
         mock_cli_result: dict[str, object] = {
             "type": "result",
@@ -177,7 +177,7 @@ class TestRagRebuild:
         }
 
         with patch(
-            "rag.server._run_cli_subprocess",
+            "rag.server.cli_subprocess._run_cli_subprocess",
             new_callable=AsyncMock,
             return_value=mock_cli_result,
         ) as mock_subprocess:
@@ -191,7 +191,7 @@ class TestRagRebuild:
     @pytest.mark.asyncio
     async def test_rebuild_with_path(self) -> None:
         """path 指定の rebuild が正しい引数で CLI を呼ぶこと."""
-        from rag.server import rag_rebuild
+        from rag.server.tools.rebuild import rag_rebuild
 
         mock_cli_result: dict[str, object] = {
             "type": "result",
@@ -204,7 +204,7 @@ class TestRagRebuild:
         }
 
         with patch(
-            "rag.server._run_cli_subprocess",
+            "rag.server.cli_subprocess._run_cli_subprocess",
             new_callable=AsyncMock,
             return_value=mock_cli_result,
         ) as mock_subprocess:
@@ -220,7 +220,7 @@ class TestRagRebuild:
     @pytest.mark.asyncio
     async def test_incremental_mode(self) -> None:
         """incremental モードが正常に動作すること."""
-        from rag.server import rag_rebuild
+        from rag.server.tools.rebuild import rag_rebuild
 
         mock_cli_result: dict[str, object] = {
             "type": "result",
@@ -233,7 +233,7 @@ class TestRagRebuild:
         }
 
         with patch(
-            "rag.server._run_cli_subprocess",
+            "rag.server.cli_subprocess._run_cli_subprocess",
             new_callable=AsyncMock,
             return_value=mock_cli_result,
         ) as mock_subprocess:
@@ -359,7 +359,7 @@ class TestRebuildStructuredErrors:
         production 出力経路に届けるための要件（Issue #602 問題 3+4）。
         仕様: docs/specs/pipeline-controller.md
         """
-        from rag.server import rag_rebuild
+        from rag.server.tools.rebuild import rag_rebuild
 
         mock_cli_result: dict[str, object] = {
             "type": "result",
@@ -379,7 +379,7 @@ class TestRebuildStructuredErrors:
         }
 
         with patch(
-            "rag.server._run_cli_subprocess",
+            "rag.server.cli_subprocess._run_cli_subprocess",
             new_callable=AsyncMock,
             return_value=mock_cli_result,
         ):
@@ -399,7 +399,7 @@ class TestRebuildStructuredErrors:
         stdout に result 行がある限り MCP クライアントはサマリを受け取る。
         仕様: docs/specs/rebuild-stats.md「MCP 応答契約」。
         """
-        from rag.server import rag_rebuild
+        from rag.server.tools.rebuild import rag_rebuild
 
         result_payload = json.dumps({
             "type": "result",
@@ -447,10 +447,10 @@ class TestRebuildStructuredErrors:
     @pytest.mark.asyncio
     async def test_lock_conflict_returns_error(self) -> None:
         """ロック競合時にエラーメッセージを返すこと."""
-        from rag.server import rag_rebuild
+        from rag.server.tools.rebuild import rag_rebuild
 
         with patch(
-            "rag.server._run_cli_subprocess",
+            "rag.server.cli_subprocess._run_cli_subprocess",
             new_callable=AsyncMock,
             side_effect=CLISubprocessError("ロック競合", code="LOCK_CONFLICT"),
         ):
@@ -461,10 +461,10 @@ class TestRebuildStructuredErrors:
     @pytest.mark.asyncio
     async def test_cli_error_returns_error(self) -> None:
         """CLI サブプロセスエラー時にエラーメッセージを返すこと."""
-        from rag.server import rag_rebuild
+        from rag.server.tools.rebuild import rag_rebuild
 
         with patch(
-            "rag.server._run_cli_subprocess",
+            "rag.server.cli_subprocess._run_cli_subprocess",
             new_callable=AsyncMock,
             side_effect=CLISubprocessError("subprocess failed"),
         ):
@@ -475,10 +475,10 @@ class TestRebuildStructuredErrors:
     @pytest.mark.asyncio
     async def test_unexpected_exception_propagates(self) -> None:
         """想定外例外は握り潰さず再 raise されること."""
-        from rag.server import rag_rebuild
+        from rag.server.tools.rebuild import rag_rebuild
 
         with patch(
-            "rag.server._run_cli_subprocess",
+            "rag.server.cli_subprocess._run_cli_subprocess",
             new_callable=AsyncMock,
             side_effect=RuntimeError("unexpected"),
         ), pytest.raises(RuntimeError, match="unexpected"):
@@ -494,7 +494,7 @@ class TestRagStats:
     @pytest.mark.asyncio
     async def test_stats_output_format(self) -> None:
         """4セクション構成の出力フォーマット."""
-        from rag.server import rag_stats
+        from rag.server.tools.listing import rag_stats
 
         mock_cli_result: dict[str, object] = {
             "source_store": {"total_files": 5, "total_size": 1024},
@@ -503,7 +503,7 @@ class TestRagStats:
             "pipeline": {"last_processed_at": None, "run_count": 0, "last_commit_id": None, "deleted_count": 0},
         }
 
-        with patch("rag.server._run_cli_subprocess", new_callable=AsyncMock, return_value=mock_cli_result):
+        with patch("rag.server.cli_subprocess._run_cli_subprocess", new_callable=AsyncMock, return_value=mock_cli_result):
             result = await rag_stats()
 
         assert "📊 RAG Knowledge 統計" in result
@@ -515,7 +515,7 @@ class TestRagStats:
     @pytest.mark.asyncio
     async def test_stats_source_store_unset(self) -> None:
         """source_store 未設定時は「未設定」表示."""
-        from rag.server import rag_stats
+        from rag.server.tools.listing import rag_stats
 
         mock_cli_result: dict[str, object] = {
             "source_store": {"status": "unconfigured"},
@@ -524,7 +524,7 @@ class TestRagStats:
             "pipeline": {"status": "unconfigured"},
         }
 
-        with patch("rag.server._run_cli_subprocess", new_callable=AsyncMock, return_value=mock_cli_result):
+        with patch("rag.server.cli_subprocess._run_cli_subprocess", new_callable=AsyncMock, return_value=mock_cli_result):
             result = await rag_stats()
 
         lines = result.split("\n")
@@ -536,7 +536,7 @@ class TestRagStats:
     @pytest.mark.asyncio
     async def test_stats_with_source_store_data(self) -> None:
         """source_store に実データがある場合の統計表示."""
-        from rag.server import rag_stats
+        from rag.server.tools.listing import rag_stats
 
         mock_cli_result: dict[str, object] = {
             "source_store": {
@@ -549,7 +549,7 @@ class TestRagStats:
             "pipeline": {"status": "uninitialized"},
         }
 
-        with patch("rag.server._run_cli_subprocess", new_callable=AsyncMock, return_value=mock_cli_result):
+        with patch("rag.server.cli_subprocess._run_cli_subprocess", new_callable=AsyncMock, return_value=mock_cli_result):
             result = await rag_stats()
 
         assert "総ファイル数: 1" in result
@@ -558,7 +558,7 @@ class TestRagStats:
     @pytest.mark.asyncio
     async def test_stats_index_section(self) -> None:
         """インデックスセクションの統計表示."""
-        from rag.server import rag_stats
+        from rag.server.tools.listing import rag_stats
 
         mock_cli_result: dict[str, object] = {
             "source_store": {"status": "unconfigured"},
@@ -567,7 +567,7 @@ class TestRagStats:
             "pipeline": {"status": "unconfigured"},
         }
 
-        with patch("rag.server._run_cli_subprocess", new_callable=AsyncMock, return_value=mock_cli_result):
+        with patch("rag.server.cli_subprocess._run_cli_subprocess", new_callable=AsyncMock, return_value=mock_cli_result):
             result = await rag_stats()
 
         assert "総チャンク数: 1,234" in result
@@ -576,7 +576,7 @@ class TestRagStats:
     @pytest.mark.asyncio
     async def test_stats_pipeline_section(self) -> None:
         """パイプラインセクションの統計表示."""
-        from rag.server import rag_stats
+        from rag.server.tools.listing import rag_stats
 
         mock_cli_result: dict[str, object] = {
             "source_store": {"total_files": 0, "total_size": 0},
@@ -590,7 +590,7 @@ class TestRagStats:
             },
         }
 
-        with patch("rag.server._run_cli_subprocess", new_callable=AsyncMock, return_value=mock_cli_result):
+        with patch("rag.server.cli_subprocess._run_cli_subprocess", new_callable=AsyncMock, return_value=mock_cli_result):
             result = await rag_stats()
 
         assert "最終処理: 2026-03-19T10:30:00+09:00" in result
@@ -601,7 +601,7 @@ class TestRagStats:
     @pytest.mark.asyncio
     async def test_stats_pipeline_uninitialized(self) -> None:
         """metadata.db が存在しない場合「未初期化」表示."""
-        from rag.server import rag_stats
+        from rag.server.tools.listing import rag_stats
 
         mock_cli_result: dict[str, object] = {
             "source_store": {"total_files": 0, "total_size": 0},
@@ -610,7 +610,7 @@ class TestRagStats:
             "pipeline": {"status": "uninitialized"},
         }
 
-        with patch("rag.server._run_cli_subprocess", new_callable=AsyncMock, return_value=mock_cli_result):
+        with patch("rag.server.cli_subprocess._run_cli_subprocess", new_callable=AsyncMock, return_value=mock_cli_result):
             result = await rag_stats()
 
         lines = result.split("\n")
@@ -622,10 +622,10 @@ class TestRagStats:
     @pytest.mark.asyncio
     async def test_stats_cli_error(self) -> None:
         """CLI サブプロセスエラー時にエラーメッセージを返すこと."""
-        from rag.server import rag_stats
+        from rag.server.tools.listing import rag_stats
 
         with patch(
-            "rag.server._run_cli_subprocess",
+            "rag.server.cli_subprocess._run_cli_subprocess",
             new_callable=AsyncMock,
             side_effect=CLISubprocessError("subprocess failed"),
         ):

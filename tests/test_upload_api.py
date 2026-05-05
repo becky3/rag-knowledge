@@ -16,11 +16,9 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import httpx
 import pytest
 
-from rag.server import (
-    CLISubprocessError,
-    _decode_form_value,
-    mcp,
-)
+from rag.server import mcp
+from rag.server.cli_subprocess import CLISubprocessError
+from rag.server.upload._helpers import _decode_form_value
 
 
 def _default_mock_settings(**overrides: object) -> MagicMock:
@@ -37,15 +35,24 @@ def _default_mock_settings(**overrides: object) -> MagicMock:
 
 @pytest.fixture(autouse=True)
 def _mock_settings():
-    """全テストで get_settings をモックする."""
-    with patch("rag.server.get_settings", return_value=_default_mock_settings()):
+    """全テストで get_settings をモックする（upload.document / upload.journal / upload._helpers / tools.ingest_local の 4 箇所）."""
+    settings = _default_mock_settings()
+    with (
+        patch("rag.server.upload.document.config.get_settings", return_value=settings),
+        patch("rag.server.upload.journal.config.get_settings", return_value=settings),
+        patch("rag.server.upload._helpers.config.get_settings", return_value=settings),
+        patch("rag.server.tools.ingest_local.config.get_settings", return_value=settings),
+    ):
         yield
 
 
 @pytest.fixture(autouse=True)
 def _mock_auth():
-    """全テストで API キー認証をバイパスする."""
-    with patch("rag.server._check_api_key", return_value=None):
+    """全テストで API キー認証をバイパスする（document / journal の http_auth 経由）."""
+    with (
+        patch("rag.server.upload.document.http_auth._check_api_key", return_value=None),
+        patch("rag.server.upload.journal.http_auth._check_api_key", return_value=None),
+    ):
         yield
 
 
@@ -113,7 +120,7 @@ class TestUploadDocumentValidation:
     async def test_file_size_exceeds_limit_returns_413(self, client: httpx.AsyncClient) -> None:
         """ファイルサイズ上限超過で 413 を返す."""
         with patch(
-            "rag.server.get_settings",
+            "rag.server.upload.document.config.get_settings",
             return_value=_default_mock_settings(rag_upload_max_file_size_mb=1),
         ):
             large_data = b"x" * (1 * 1024 * 1024 + 1)
@@ -184,7 +191,7 @@ class TestUploadDocumentIntegration:
     @pytest.mark.asyncio
     async def test_successful_upload(self, client: httpx.AsyncClient) -> None:
         """正常なファイルアップロードが 200 を返す."""
-        with patch("rag.server._run_cli_subprocess", new_callable=AsyncMock, return_value={}):
+        with patch("rag.server.cli_subprocess._run_cli_subprocess", new_callable=AsyncMock, return_value={}):
             resp = await client.post(
                 "/upload/document",
                 files={"file": ("notes.md", b"# Test content", "text/plain")},
@@ -199,7 +206,7 @@ class TestUploadDocumentIntegration:
     async def test_duplicate_file_returns_409(self, client: httpx.AsyncClient) -> None:
         """upload_mode=fail で同名ファイルが存在する場合 409 を返す."""
         with patch(
-            "rag.server._run_cli_subprocess",
+            "rag.server.cli_subprocess._run_cli_subprocess",
             new_callable=AsyncMock,
             side_effect=CLISubprocessError(
                 "同名ファイルが既に存在します: local/.upload/2026/01/01/test.md",
@@ -228,7 +235,7 @@ class TestUploadJournalIntegration:
         mock_cli_result = {"entry_id": "20260326-120000-test"}
 
         with patch(
-            "rag.server._run_cli_subprocess",
+            "rag.server.cli_subprocess._run_cli_subprocess",
             new_callable=AsyncMock,
             return_value=mock_cli_result,
         ):
@@ -258,7 +265,7 @@ class TestUploadJournalIntegration:
 
         japanese_title = "QA \u30c6\u30b9\u30c8\u30bb\u30c3\u30b7\u30e7\u30f3\u8a18\u9332"  # "QA テストセッション記録"
 
-        with patch("rag.server._run_cli_subprocess", side_effect=capture_cli):
+        with patch("rag.server.cli_subprocess._run_cli_subprocess", side_effect=capture_cli):
             resp = await client.post(
                 "/upload/journal",
                 files={"file": ("session.md", b"# Test", "text/plain")},
@@ -309,7 +316,7 @@ class TestUploadJournalIntegration:
         async with httpx.AsyncClient(
             transport=transport, base_url="http://test"
         ) as raw_client:
-            with patch("rag.server._run_cli_subprocess", side_effect=capture_cli):
+            with patch("rag.server.cli_subprocess._run_cli_subprocess", side_effect=capture_cli):
                 resp = await raw_client.post(
                     "/upload/journal",
                     content=raw_body,
@@ -337,7 +344,7 @@ class TestIngestLockConflict:
     ) -> None:
         """ingest ロック競合時に 429 + Retry-After=30 + 取り込み中メッセージ."""
         with patch(
-            "rag.server._run_cli_subprocess",
+            "rag.server.cli_subprocess._run_cli_subprocess",
             new_callable=AsyncMock,
             side_effect=CLISubprocessError(
                 "ロック競合", code="LOCK_CONFLICT", lock_type="write",
@@ -360,7 +367,7 @@ class TestIngestLockConflict:
     ) -> None:
         """rebuild ロック競合時に 503 + Retry-After=300 + 再構築中メッセージ."""
         with patch(
-            "rag.server._run_cli_subprocess",
+            "rag.server.cli_subprocess._run_cli_subprocess",
             new_callable=AsyncMock,
             side_effect=CLISubprocessError(
                 "ロック競合", code="LOCK_CONFLICT", lock_type="rebuild",
@@ -383,7 +390,7 @@ class TestIngestLockConflict:
     ) -> None:
         """lock_type 欠落時は安全側（ingest 相当の 429 + 短め Retry-After）."""
         with patch(
-            "rag.server._run_cli_subprocess",
+            "rag.server.cli_subprocess._run_cli_subprocess",
             new_callable=AsyncMock,
             side_effect=CLISubprocessError("ロック競合", code="LOCK_CONFLICT"),
         ):
@@ -401,7 +408,7 @@ class TestIngestLockConflict:
     ) -> None:
         """ジャーナル: ingest ロック競合時に 429 + Retry-After=30."""
         with patch(
-            "rag.server._run_cli_subprocess",
+            "rag.server.cli_subprocess._run_cli_subprocess",
             new_callable=AsyncMock,
             side_effect=CLISubprocessError(
                 "ロック競合", code="LOCK_CONFLICT", lock_type="write",
@@ -423,7 +430,7 @@ class TestIngestLockConflict:
     ) -> None:
         """ジャーナル: rebuild ロック競合時に 503 + Retry-After=300."""
         with patch(
-            "rag.server._run_cli_subprocess",
+            "rag.server.cli_subprocess._run_cli_subprocess",
             new_callable=AsyncMock,
             side_effect=CLISubprocessError(
                 "ロック競合", code="LOCK_CONFLICT", lock_type="rebuild",
@@ -448,9 +455,9 @@ class TestIngestLockConflict:
             rag_upload_retry_after_write_sec=45,
             rag_upload_retry_after_rebuild_sec=600,
         )
-        with patch("rag.server.get_settings", return_value=custom_settings):
+        with patch("rag.server.upload.document.config.get_settings", return_value=custom_settings):
             with patch(
-                "rag.server._run_cli_subprocess",
+                "rag.server.cli_subprocess._run_cli_subprocess",
                 new_callable=AsyncMock,
                 side_effect=CLISubprocessError(
                     "ロック競合", code="LOCK_CONFLICT", lock_type="write",
@@ -464,7 +471,7 @@ class TestIngestLockConflict:
             assert resp.headers["Retry-After"] == "45"
 
             with patch(
-                "rag.server._run_cli_subprocess",
+                "rag.server.cli_subprocess._run_cli_subprocess",
                 new_callable=AsyncMock,
                 side_effect=CLISubprocessError(
                     "ロック競合", code="LOCK_CONFLICT", lock_type="rebuild",
@@ -481,7 +488,7 @@ class TestIngestLockConflict:
     async def test_document_cli_error_returns_500(self, client: httpx.AsyncClient) -> None:
         """ドキュメントアップロード時に CLI エラー（非ロック）で 500 を返す."""
         with patch(
-            "rag.server._run_cli_subprocess",
+            "rag.server.cli_subprocess._run_cli_subprocess",
             new_callable=AsyncMock,
             side_effect=CLISubprocessError("unexpected error"),
         ):
@@ -496,7 +503,7 @@ class TestIngestLockConflict:
     async def test_journal_cli_error_returns_500(self, client: httpx.AsyncClient) -> None:
         """ジャーナルアップロード時に CLI エラー（非ロック）で 500 を返す."""
         with patch(
-            "rag.server._run_cli_subprocess",
+            "rag.server.cli_subprocess._run_cli_subprocess",
             new_callable=AsyncMock,
             side_effect=CLISubprocessError("unexpected error"),
         ):
@@ -518,10 +525,10 @@ class TestMCPToolIngestLock:
     @pytest.mark.asyncio
     async def test_rag_add_document_ingest_lock_returns_ingest_message(self) -> None:
         """rag_add_document: ingest ロック競合時に取り込み中メッセージ."""
-        from rag.server import rag_add_document
+        from rag.server.tools.ingest_local import rag_add_document
 
         with patch(
-            "rag.server._run_cli_subprocess",
+            "rag.server.cli_subprocess._run_cli_subprocess",
             new_callable=AsyncMock,
             side_effect=CLISubprocessError(
                 "ロック競合", code="LOCK_CONFLICT", lock_type="write",
@@ -540,10 +547,10 @@ class TestMCPToolIngestLock:
     @pytest.mark.asyncio
     async def test_rag_add_document_rebuild_lock_returns_rebuild_message(self) -> None:
         """rag_add_document: rebuild ロック競合時に再構築中メッセージ."""
-        from rag.server import rag_add_document
+        from rag.server.tools.ingest_local import rag_add_document
 
         with patch(
-            "rag.server._run_cli_subprocess",
+            "rag.server.cli_subprocess._run_cli_subprocess",
             new_callable=AsyncMock,
             side_effect=CLISubprocessError(
                 "ロック競合", code="LOCK_CONFLICT", lock_type="rebuild",
@@ -562,10 +569,10 @@ class TestMCPToolIngestLock:
     @pytest.mark.asyncio
     async def test_rag_add_journal_ingest_lock_returns_ingest_message(self) -> None:
         """rag_add_journal: ingest ロック競合時に取り込み中メッセージ."""
-        from rag.server import rag_add_journal
+        from rag.server.tools.ingest_local import rag_add_journal
 
         with patch(
-            "rag.server._run_cli_subprocess",
+            "rag.server.cli_subprocess._run_cli_subprocess",
             new_callable=AsyncMock,
             side_effect=CLISubprocessError(
                 "ロック競合", code="LOCK_CONFLICT", lock_type="write",
@@ -584,10 +591,10 @@ class TestMCPToolIngestLock:
     @pytest.mark.asyncio
     async def test_rag_add_journal_rebuild_lock_returns_rebuild_message(self) -> None:
         """rag_add_journal: rebuild ロック競合時に再構築中メッセージ."""
-        from rag.server import rag_add_journal
+        from rag.server.tools.ingest_local import rag_add_journal
 
         with patch(
-            "rag.server._run_cli_subprocess",
+            "rag.server.cli_subprocess._run_cli_subprocess",
             new_callable=AsyncMock,
             side_effect=CLISubprocessError(
                 "ロック競合", code="LOCK_CONFLICT", lock_type="rebuild",
@@ -623,7 +630,7 @@ class TestResponseFormat:
     async def test_error_response_no_internal_info(self, client: httpx.AsyncClient) -> None:
         """エラーレスポンスにスタックトレースや内部パスが含まれない."""
         with patch(
-            "rag.server._run_cli_subprocess",
+            "rag.server.cli_subprocess._run_cli_subprocess",
             new_callable=AsyncMock,
             side_effect=RuntimeError("internal error detail"),
         ):

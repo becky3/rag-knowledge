@@ -164,9 +164,9 @@ CLI は `--output json` 指定時に JSON Lines 形式で stdout に出力する
 |-----------|-------------|-----------|
 | `progress` | ファイル処理完了ごと | `processed`（int）、`total`（int）、`current`（str: 処理済みファイルパス） |
 | `result` | 処理完了時（最終行） | コマンド固有のフィールド（`mode`, `total_files`, `processed`, `errors`, `warnings`, `elapsed` 等。`full` モードは `convert` / `index` オブジェクトに分割）。`errors` は [pipeline-controller.md](pipeline-controller.md) の `PipelineSummary.errors` スキーマに従う構造化 dict のリスト（`{path, size_bytes, message, phase}`）を出力する。ingest 系コマンドでは `IngestResult` の全観測性フィールド（`partial_failures` / `aborted` 等）も併せて含める（[ingesters/common.md](ingesters/common.md) の「JSON シリアライズ」参照） |
-| `error` | エラー時（最終行） | `error`（bool, 常に `true`）、`code`（str: エラー種別コード、[`_schema/enums.yml`](../../_schema/enums.yml) の `cli_error_code` 参照）、`message`（str）、`details`（dict, 任意: 種別固有の付加情報）。`code="LOCK_CONFLICT"` の場合、`details.lock_type` に `"write"` または `"rebuild"` のロック種別識別子を含める。サーバー側（`server.py`）はこの識別子を `CLISubprocessError.lock_type` として受け取り、Upload HTTP API の HTTP ステータス（429 / 503）・`Retry-After` 値の選択、および MCP ツールのエラーメッセージ切替に使用する。詳細は [`content-upload.md`](infrastructure/content-upload.md) の「書き込み排他制御の制約」を参照 |
+| `error` | エラー時（最終行） | `error`（bool, 常に `true`）、`code`（str: エラー種別コード、[`_schema/enums.yml`](../../_schema/enums.yml) の `cli_error_code` 参照）、`message`（str）、`details`（dict, 任意: 種別固有の付加情報）。`code="LOCK_CONFLICT"` の場合、`details.lock_type` に `"write"` または `"rebuild"` のロック種別識別子を含める。サーバー側（`src/rag/server/`）はこの識別子を `CLISubprocessError.lock_type` として受け取り、Upload HTTP API の HTTP ステータス（429 / 503）・`Retry-After` 値の選択、および MCP ツールのエラーメッセージ切替に使用する。詳細は [`content-upload.md`](infrastructure/content-upload.md) の「書き込み排他制御の制約」を参照 |
 
-MCP サーバー（server.py）は stdout を行単位で読み取り、`progress` 行を MCP 通知に変換し、`result` / `error` 行で処理結果を確定する。
+MCP サーバー（`src/rag/server/`）は stdout を行単位で読み取り、`progress` 行を MCP 通知に変換し、`result` / `error` 行で処理結果を確定する。
 
 #### CLI exit code 体系（2 値）
 
@@ -184,13 +184,13 @@ Python 標準の argparse はバリデーション失敗時に exit code 2 を�
 本プロジェクトでは 2 値契約との一貫性を優先し、`_JsonAwareArgumentParser`（`src/rag/cli.py`）で exit code を 1 に統一する。
 `--output json` 指定時は `_output_error` 経由で構造化エラー行を出力する。
 
-**SEGFAULT の扱い**: C 拡張のクラッシュにより `_SEGFAULT_EXIT_CODES`（`src/rag/server.py` で定義）に含まれる exit code が返る場合、2 値契約の範囲外として MCP 応答契約で個別検出する（後述の優先度 1 参照）。
+**SEGFAULT の扱い**: C 拡張のクラッシュにより `_SEGFAULT_EXIT_CODES`（`src/rag/server/cli_subprocess.py` で定義）に含まれる exit code が返る場合、2 値契約の範囲外として MCP 応答契約で個別検出する（後述の優先度 1 参照）。
 
 **スケジューラ運用**: 致命的失敗の検知は exit code（`cmd && ...`）、workload の errors/aborted の判定は JSON parse（`jq '.errors | length > 0'` / `jq '.aborted'`）で行う。
 
 #### MCP 応答契約（stdout 判定ロジック）
 
-`src/rag/server.py::_run_cli_subprocess` は CLI の stdout を以下の優先順位で判定する。SEGFAULT 検出を除き、exit code は判定に使わず debug ログ出力および「出力なし」エラーメッセージでの参照のみに用いる。
+`src/rag/server/cli_subprocess.py::_run_cli_subprocess` は CLI の stdout を以下の優先順位で判定する。SEGFAULT 検出を除き、exit code は判定に使わず debug ログ出力および「出力なし」エラーメッセージでの参照のみに用いる。
 
 | 優先 | 検出対象 | 動作 |
 |------|----------|------|
@@ -234,7 +234,7 @@ CLI は `--output json` 指定時にこの callback 内で進捗 JSON を stdout
 | ファイル | 役割 |
 |-------------|------|
 | `src/rag/cli.py` | CLI コマンド。`--output json` 指定時に JSON Lines 形式で進捗・結果を出力。MCP 薄層アダプターからサブプロセスとして呼び出される際のエントリポイント |
-| `src/rag/server.py` | MCP ツール（薄層アダプター）。パラメータ検証を行い CLI をサブプロセスで起動。stdout を行単位でストリーミングし、進捗を MCP 通知として転送 |
+| `src/rag/server/` | MCP ツール（薄層アダプター）。パラメータ検証を行い CLI をサブプロセスで起動。stdout を行単位でストリーミングし、進捗を MCP 通知として転送。CLI サブプロセス起動・stdout 解析は `cli_subprocess.py`、各ツール定義は `tools/` 配下に分割配置 |
 
 ### rag_stats 出力項目
 

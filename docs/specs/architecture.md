@@ -154,7 +154,7 @@ subprocess を起動し、Scrapy 等の外部プロセスで取得を行う経�
 |---|---|---|
 | 内部 dto / モデル | `<package>/models.py`（例: `store/models.py` / `pipeline/models.py`） | dataclass / Enum / TypedDict |
 | Port（Adapter が従う interface 契約） | `<package>/<feature>_<role>.py`（例: `pipeline/ingesters/youtube_fetcher.py`） | Protocol / ABC |
-| 公開 API contract | MCP ツール定義（`server.py`）/ HTTP スキーマ（`pydantic` BaseModel） | pydantic BaseModel / Discriminated Union |
+| 公開 API contract | MCP ツール定義（`src/rag/server/tools/`）/ HTTP スキーマ（`pydantic` BaseModel） | pydantic BaseModel / Discriminated Union |
 
 `dict[str, Any]` は境界（外部 API レスポンス・JSON 応答・MCP 応答テキスト等）でのみ許容し、越境後は構造化型（dataclass / Enum / TypedDict）に変換する。
 

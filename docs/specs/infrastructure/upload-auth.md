@@ -162,7 +162,9 @@ flowchart TB
 
 | ファイル | 役割 |
 |---------|------|
-| `src/rag/server.py` | API キー検証（`_check_api_key`）、バインドアドレス検証、サーバー起動制御 |
+| `src/rag/server/http_auth.py` | API キー検証（`_check_api_key`） |
+| `src/rag/server/transport.py` | バインドアドレス検証（`_validate_bind_address`）、API キー登録確認（`_check_api_key_registered`） |
+| `src/rag/server/bootstrap.py` | サーバー起動制御（`_configure_and_run`） |
 | `src/rag/cli.py` | `generate-api-key` サブコマンド |
 
 ## エッジケース

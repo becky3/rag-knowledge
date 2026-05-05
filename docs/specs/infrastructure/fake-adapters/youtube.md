@@ -154,7 +154,7 @@ JSON のフィールド構造は対応する Real Fetcher の戻り値と同じ�
 
 ### CLI / MCP からの利用
 
-CLI / MCP のインジェスター生成箇所（`src/rag/cli.py` / `src/rag/server.py`）では、`create_youtube_fetcher(settings)` でファクトリ関数から Fetcher を生成し、`YoutubeIngester` のコンストラクタ引数 `fetcher` として渡す。
+CLI / MCP のインジェスター生成箇所（`src/rag/cli.py` / `src/rag/server/tools/ingest_youtube.py`）では、`create_youtube_fetcher(settings)` でファクトリ関数から Fetcher を生成し、`YoutubeIngester` のコンストラクタ引数 `fetcher` として渡す。
 
 ### pytest fixture
 
