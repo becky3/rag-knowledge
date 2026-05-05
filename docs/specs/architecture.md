@@ -208,7 +208,10 @@ subprocess を起動し、Scrapy 等の外部プロセスで取得を行う経�
 - **facade メソッドへの `client` 引数渡しは禁止**: facade はコンストラクタで Adapter（Protocol 型）を受け取り、`ConstrainedClient` は Adapter 内に内包する（[ingesters/common.md「Protocol 注入規約」](ingesters/common.md#protocol-注入規約) 参照）
 - **HTTP ステータスチェックは共通ヘルパー経由**: ConstrainedClient 対応の Adapter は HTTP GET を共通ヘルパー経由で実行する
   （[ingesters/common.md「HTTP ステータスチェックの共通ヘルパー」](ingesters/common.md#http-ステータスチェックの共通ヘルパー) 参照）
-- **Fake モード切替は factory に閉じる**: factory が Fake モード環境変数を見て Real / Fake を返す。Fake は `ConstrainedClient` を持たず、所有権原則の対象外（[Fake モード基盤](infrastructure/fake-mode.md) 参照）
+- **Fake モード切替は factory に閉じる（Fake モード対象 Adapter のみ）**:
+  ingester 系 Real / Fake 切替を行う Adapter は factory が Fake モード環境変数を見て Real / Fake を返す。
+  Fake は `ConstrainedClient` を持たず、所有権原則の対象外（[Fake モード基盤](infrastructure/fake-mode.md) 参照）。
+  Fake モード非対象の Adapter（`SafeBrowsingClient` 等の独立クライアント）は本制約の適用外
 
 ## 7. Fake モード基盤
 

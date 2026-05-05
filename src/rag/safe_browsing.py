@@ -110,6 +110,12 @@ class SafeBrowsingClient:
     - SOCIAL_ENGINEERING: フィッシングサイト
     - UNWANTED_SOFTWARE: 不要なソフトウェア配布サイト
     - POTENTIALLY_HARMFUL_APPLICATION: 有害な可能性のあるアプリ配布サイト
+
+    ``ConstrainedClient`` 所有権: Pattern C (都度生成)。
+    本クラスは同一インスタンスへの並行 API 呼び出しを許容する設計のため、
+    HTTP クライアントは API 呼び出しごとに生成・破棄する（``_call_api_single``
+    の docstring を参照）。所有権原則の判断軸は
+    ``docs/specs/architecture.md §6`` を参照。
     """
 
     API_URL = "https://safebrowsing.googleapis.com/v4/threatMatches:find"
