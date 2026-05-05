@@ -56,8 +56,11 @@ Issue #735 で Python AST ベースの検出器に置換し、`Import` / `Import
 
 ### 許可リスト
 
-`# safety:allowed` を含むコメントが付与された行は、検出パターンに合致しても違反として扱わない。
+`# safety:allowed` マーカーを持つコメントが付与された行は、検出パターンに合致しても違反として扱わない。
 
+- 厳密一致: コメント先頭の `#` 直後（空白許容）に `safety:allowed` がある場合のみ許可。マーカー直後はホワイトスペースまたはコメント終端である必要がある（追加文脈は空白を挟んで記述可）。例:
+  - 許可: `# safety:allowed`、`# safety:allowed - reason here`、`#safety:allowed`
+  - 不許可: `# not safety:allowed`、`# safety:allowed-but`、`# safety:allowed_var`
 - 同一行コメント方式: 違反候補となる AST ノードの開始行（`lineno` 属性）に同じ行番号で `# safety:allowed` コメントが存在すれば許可
 - 複数行呼び出しの注意: `httpx.Client(\n    timeout=...\n)` のように呼び出しが複数行に跨る場合は、開始行（`httpx` または `httpx.Client` が出現する行）に `# safety:allowed` コメントを付与する必要がある。末尾行（閉じ括弧の行）に付与しても尊重されない
 

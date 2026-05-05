@@ -10,13 +10,18 @@ from __future__ import annotations
 
 import ast
 import io
+import re
 import sys
 import tokenize
 from collections.abc import Iterable
 from dataclasses import dataclass
 from pathlib import Path
 
-ALLOWED_MARKER = "safety:allowed"
+# `# safety:allowed` 同一行コメントを厳密一致で識別する。
+# `# not safety:allowed` や `# safety:allowed-but` のような部分一致を許容しない:
+# `^#\s*safety:allowed` は `#` 直後（空白許容）の出現に限定し、
+# `(?=\s|$)` look-ahead で直後がホワイトスペースまたは行末であることを要求する。
+_ALLOWED_PATTERN = re.compile(r"^#\s*safety:allowed(?=\s|$)")
 
 _BANNED_ATTRIBUTES: dict[str, frozenset[str]] = {
     "aiohttp": frozenset({"ClientSession"}),
@@ -57,7 +62,7 @@ def _build_allowed_lines(source: str) -> set[int]:
     try:
         tokens = tokenize.generate_tokens(io.StringIO(source).readline)
         for tok in tokens:
-            if tok.type == tokenize.COMMENT and ALLOWED_MARKER in tok.string:
+            if tok.type == tokenize.COMMENT and _ALLOWED_PATTERN.match(tok.string):
                 allowed.add(tok.start[0])
     except tokenize.TokenError:
         pass

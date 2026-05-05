@@ -123,6 +123,37 @@ class TestAllowlist:
         violations = _check(source)
         assert violations == []
 
+    def test_safety_allowed_with_trailing_context(self) -> None:
+        """`# safety:allowed` の後にホワイトスペース＋追加コメントが続く形は許可."""
+        source = "import httpx\nclient = httpx.Client()  # safety:allowed - reason here\n"
+        violations = _check(source)
+        assert violations == []
+
+
+class TestAllowlistStrictMatching:
+    """許可リストは厳密一致のみ。部分一致による誤許可を防ぐ."""
+
+    def test_negated_safety_allowed_is_not_allowed(self) -> None:
+        """`# not safety:allowed` は許可扱いにならず、違反として検出される."""
+        source = "import httpx\nclient = httpx.Client()  # not safety:allowed\n"
+        violations = _check(source)
+        assert len(violations) == 1
+        assert violations[0].lineno == 2
+
+    def test_safety_allowed_suffix_is_not_allowed(self) -> None:
+        """`# safety:allowed-but` のようなサフィックス付きは許可扱いにならない."""
+        source = "import httpx\nclient = httpx.Client()  # safety:allowed-but\n"
+        violations = _check(source)
+        assert len(violations) == 1
+        assert violations[0].lineno == 2
+
+    def test_safety_allowed_with_underscore_is_not_allowed(self) -> None:
+        """`# safety:allowed_var` のような単語接続も許可扱いにならない."""
+        source = "import httpx\nclient = httpx.Client()  # safety:allowed_var\n"
+        violations = _check(source)
+        assert len(violations) == 1
+        assert violations[0].lineno == 2
+
 
 class TestNoFalsePositives:
     """docstring / コメント / 文字列リテラル内の literal を誤検出しないこと."""
