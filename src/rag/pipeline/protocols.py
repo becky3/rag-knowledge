@@ -127,20 +127,13 @@ class IndexerProtocol(Protocol):
         """
         ...
 
-    def set_bm25_deferred_save(self, enabled: bool) -> None:
-        """BM25 の遅延 save モードを切り替える.
+    def batch_writes(self) -> contextlib.AbstractContextManager[None]:
+        """バッチ書き込みコンテキスト.
 
-        Args:
-            enabled: True で遅延モード有効
+        各インデックス実装が保有する ``IndexWriteStrategy``
+        （BM25 用の deferred save → flush 等）を nest して enter/exit する。
+        呼び出し側はインデックスの種類（BM25 / Vector 等）を意識しない。
         """
-        ...
-
-    def flush_bm25(self) -> None:
-        """BM25 の未保存変更を一括 rebuild + 永続化する."""
-        ...
-
-    def bm25_deferred(self) -> contextlib.AbstractContextManager[None]:
-        """BM25 遅延 save のコンテキストマネージャ."""
         ...
 
     async def clear(

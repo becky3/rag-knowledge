@@ -142,14 +142,8 @@ class StubIndexer:
         self.cleared.append(source_type)
         self.cleared_calls.append((source_type, path))
 
-    def set_bm25_deferred_save(self, enabled: bool) -> None:
-        pass
-
-    def flush_bm25(self) -> None:
-        pass
-
     @contextlib.contextmanager
-    def bm25_deferred(self) -> Iterator[None]:
+    def batch_writes(self) -> Iterator[None]:
         yield
 
 

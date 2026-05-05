@@ -130,7 +130,22 @@ subprocess を起動し、Scrapy 等の外部プロセスで取得を行う経�
 
 他 Ingester から web 取り込みへの委譲は `WebDelegator` Protocol 経由で行う（直接 import を禁止）。委譲経路の構造は youtube への委譲（`YoutubeDelegator`）と同型。
 
-### 3.4 BaseIngester 抽象化の対象範囲
+### 3.4 IndexWriteStrategy（インデクサー内部 Port）
+
+`Indexer` は媒体ごとに性質の異なる書き込み戦略を持つインデックス（BM25・Vector Store 等）を保有する。
+これらの「バッチ書き込み手順」を `IndexWriteStrategy` Protocol（context manager）で抽象化し、
+`Indexer.batch_writes()` が保有する全 strategy を nest して enter/exit する。
+
+| 観点 | 内容 |
+|---|---|
+| 役割 | バッチ処理時の書き込み戦略をインデックス実装ごとに表現する |
+| 各実装の例 | `BM25WriteStrategy`（deferred save → flush）/ Vector Store は逐次 upsert のため独立 strategy を持たない |
+| 呼び出し側 | `PipelineController` の `run_incremental` / `run_full_rebuild` / `run_index_only` が `with self._indexer.batch_writes():` 経由で利用 |
+
+`IndexerProtocol` は BM25 等の実装詳細名を露出させない（呼び出し側は `batch_writes()` のみを知る）。
+配置・各実装の詳細は [indexer.md「バッチ書き込み戦略（IndexWriteStrategy）」](indexer.md#バッチ書き込み戦略indexwritestrategy) を参照。
+
+### 3.5 BaseIngester 抽象化の対象範囲
 
 - Ingester ファミリーの全クラスが `BaseIngester` 継承対象（対象 `source_type` の SSoT は [`_schema/enums.yml`](../../_schema/enums.yml)、継承の実体は各 Ingester のコードが SSoT）
 - `BaseIngester` は Ingester ファミリーの共通 Port（Protocol / ABC）として位置付ける。§1 の Dependency Rule に従い、パイプライン制御層は具象 Ingester ではなく `BaseIngester` 経由で操作する
@@ -168,7 +183,7 @@ subprocess を起動し、Scrapy 等の外部プロセスで取得を行う経�
 | 契約の種類 | 定義場所 | 表現 |
 |---|---|---|
 | 内部 dto / モデル | `<package>/models.py`（例: `store/models.py` / `pipeline/models.py`） | dataclass / Enum / TypedDict |
-| Port（Adapter が従う interface 契約） | `<package>/<feature>_<role>.py`（例: `pipeline/ingesters/youtube_fetcher.py`） | Protocol / ABC |
+| Port（Adapter が従う interface 契約） | `<package>/<feature>_<role>.py`（例: `pipeline/ingesters/youtube_fetcher.py`）。Protocol と複数実装を 1 ファイルに集約する場合は `<package>/<feature>.py` 形式（例: `indexer/write_strategy.py`）も許容する | Protocol / ABC |
 | 公開 API contract | MCP ツール定義（`src/rag/server/tools/`）/ HTTP スキーマ（`pydantic` BaseModel） | pydantic BaseModel / Discriminated Union |
 
 `dict[str, Any]` は境界（外部 API レスポンス・JSON 応答・MCP 応答テキスト等）でのみ許容し、越境後は構造化型（dataclass / Enum / TypedDict）に変換する。

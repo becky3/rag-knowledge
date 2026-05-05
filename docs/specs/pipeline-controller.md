@@ -209,6 +209,8 @@ git diff から取得する変更ファイルリストの各エントリが持�
 8. 削除ファイルはインデクサーでインデックスから削除し、metadata.db で論理削除する
 9. `pipeline_history` に実行履歴を追加する
 
+インデクサーへのインデックス追加・更新・削除は、`Indexer.batch_writes()` のバッチ書き込みコンテキスト内で実行する。コンテキスト内では各 `IndexWriteStrategy` が自身の戦略（BM25 は deferred save → flush 等）を適用し、コンテキスト終了時に一括 flush する。詳細は [indexer.md](indexer.md) の「バッチ書き込み戦略（IndexWriteStrategy）」を参照。
+
 ```mermaid
 flowchart TD
     START["パイプライン開始"]
