@@ -438,7 +438,7 @@ CLI / MCP 対応: `rag_stats` / `rag_list_recent` / `rag_search` / `rag_get_docu
 
 目的: MCP サーバーのログファイル出力（`SessionRotatingFileHandler`）が想定どおり動作していることの検証。サーバー起動ログ・MCP ツール呼び出しログ・CLI 転送ログの 3 経路が同一ファイルに記録されることを確認する。
 
-対象実装: `py_common_lib.logging.SessionRotatingFileHandler`（py-common-lib 提供）、`src/rag/server.py` の `_write_cli_lines_to_handlers` およびサーバーフォーマッタ。
+対象実装: `py_common_lib.logging.SessionRotatingFileHandler`（py-common-lib 提供）、`src/rag/server/logging_setup.py` の `_write_cli_lines_to_handlers` およびサーバーフォーマッタ。
 
 前提:
 

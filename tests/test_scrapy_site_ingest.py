@@ -24,7 +24,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from rag.server import _reset_safe_browsing_client
+from rag.server.safe_browsing_wiring import _reset_safe_browsing_client
 
 
 @pytest.fixture(autouse=True)
@@ -111,7 +111,7 @@ class TestMcpSiteIngestValidation:
     async def test_invalid_regex_pattern_returns_error(self) -> None:
         """不正な正規表現パターンがエラーを返すこと."""
         mod = import_module("rag.server")
-        with patch.object(mod, "_get_safe_browsing_client", return_value=None):
+        with patch("rag.server.tools.ingest_site.safe_browsing_wiring._get_safe_browsing_client", return_value=None):
             result = await mod.rag_site_ingest(
                 url="https://example.com",
                 url_pattern="[invalid(",
@@ -145,9 +145,9 @@ class TestMcpSiteIngestCliDelegation:
 
         mod = import_module("rag.server")
         with (
-            patch.object(mod, "_get_safe_browsing_client", return_value=None),
-            patch.object(mod, "_run_cli_subprocess", new_callable=AsyncMock, return_value=mock_result) as mock_cli,
-            patch.object(mod, "_format_cli_ingest_result", return_value="OK") as mock_format,
+            patch("rag.server.tools.ingest_site.safe_browsing_wiring._get_safe_browsing_client", return_value=None),
+            patch("rag.server.cli_subprocess._run_cli_subprocess", new_callable=AsyncMock, return_value=mock_result) as mock_cli,
+            patch("rag.server.cli_subprocess._format_cli_ingest_result", return_value="OK") as mock_format,
         ):
             result = await mod.rag_site_ingest(
                 url="https://example.com",
@@ -173,9 +173,9 @@ class TestMcpSiteIngestCliDelegation:
 
         mod = import_module("rag.server")
         with (
-            patch.object(mod, "_get_safe_browsing_client", return_value=None),
-            patch.object(mod, "_run_cli_subprocess", new_callable=AsyncMock, return_value=mock_result) as mock_cli,
-            patch.object(mod, "_format_cli_ingest_result", return_value="OK"),
+            patch("rag.server.tools.ingest_site.safe_browsing_wiring._get_safe_browsing_client", return_value=None),
+            patch("rag.server.cli_subprocess._run_cli_subprocess", new_callable=AsyncMock, return_value=mock_result) as mock_cli,
+            patch("rag.server.cli_subprocess._format_cli_ingest_result", return_value="OK"),
         ):
             await mod.rag_site_ingest(
                 url="https://example.com",
@@ -197,8 +197,8 @@ class TestMcpSiteIngestCliDelegation:
 
         mod = import_module("rag.server")
         with (
-            patch.object(mod, "_run_cli_subprocess", new_callable=AsyncMock, return_value=mock_result) as mock_cli,
-            patch.object(mod, "_format_cli_ingest_result", return_value="OK"),
+            patch("rag.server.cli_subprocess._run_cli_subprocess", new_callable=AsyncMock, return_value=mock_result) as mock_cli,
+            patch("rag.server.cli_subprocess._format_cli_ingest_result", return_value="OK"),
         ):
             await mod.rag_site_ingest(
                 urls=["https://example.com/a", "https://example.com/b"],
@@ -220,9 +220,9 @@ class TestMcpSiteIngestCliDelegation:
 
         mod = import_module("rag.server")
         with (
-            patch.object(mod, "_get_safe_browsing_client", return_value=None),
-            patch.object(mod, "_run_cli_subprocess", new_callable=AsyncMock, return_value=mock_result) as mock_cli,
-            patch.object(mod, "_format_cli_ingest_result", return_value="OK"),
+            patch("rag.server.tools.ingest_site.safe_browsing_wiring._get_safe_browsing_client", return_value=None),
+            patch("rag.server.cli_subprocess._run_cli_subprocess", new_callable=AsyncMock, return_value=mock_result) as mock_cli,
+            patch("rag.server.cli_subprocess._format_cli_ingest_result", return_value="OK"),
         ):
             await mod.rag_site_ingest(
                 url="https://example.com",
@@ -234,12 +234,12 @@ class TestMcpSiteIngestCliDelegation:
     @pytest.mark.asyncio
     async def test_cli_subprocess_error_returns_error_message(self) -> None:
         """CLISubprocessError が適切なエラーメッセージに変換されること."""
-        from rag.server import CLISubprocessError
+        from rag.server.cli_subprocess import CLISubprocessError
 
         mod = import_module("rag.server")
         with (
-            patch.object(mod, "_get_safe_browsing_client", return_value=None),
-            patch.object(mod, "_run_cli_subprocess", new_callable=AsyncMock, side_effect=CLISubprocessError("failed")),
+            patch("rag.server.tools.ingest_site.safe_browsing_wiring._get_safe_browsing_client", return_value=None),
+            patch("rag.server.cli_subprocess._run_cli_subprocess", new_callable=AsyncMock, side_effect=CLISubprocessError("failed")),
         ):
             result = await mod.rag_site_ingest(
                 url="https://example.com",
@@ -252,12 +252,12 @@ class TestMcpSiteIngestCliDelegation:
     @pytest.mark.asyncio
     async def test_lock_conflict_returns_specific_error(self) -> None:
         """ロック競合時に専用エラーメッセージが返ること."""
-        from rag.server import CLISubprocessError
+        from rag.server.cli_subprocess import CLISubprocessError
 
         mod = import_module("rag.server")
         with (
-            patch.object(mod, "_get_safe_browsing_client", return_value=None),
-            patch.object(mod, "_run_cli_subprocess", new_callable=AsyncMock, side_effect=CLISubprocessError("lock", code="LOCK_CONFLICT")),
+            patch("rag.server.tools.ingest_site.safe_browsing_wiring._get_safe_browsing_client", return_value=None),
+            patch("rag.server.cli_subprocess._run_cli_subprocess", new_callable=AsyncMock, side_effect=CLISubprocessError("lock", code="LOCK_CONFLICT")),
         ):
             result = await mod.rag_site_ingest(
                 url="https://example.com",

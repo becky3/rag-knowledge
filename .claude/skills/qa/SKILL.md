@@ -447,7 +447,7 @@ MCP サーバーのログファイル出力（`SessionRotatingFileHandler`）が
 仕様:
 
 - [docs/specs/rag-knowledge.md](../../../docs/specs/rag-knowledge.md) の「MCP サーバーのロガー設定 / ログファイル出力」
-- 実装: `py_common_lib.logging.SessionRotatingFileHandler`（py-common-lib 提供）/ `src/rag/server.py` の `_write_cli_lines_to_handlers`
+- 実装: `py_common_lib.logging.SessionRotatingFileHandler`（py-common-lib 提供）/ `src/rag/server/logging_setup.py` の `_write_cli_lines_to_handlers`
 
 #### グループ準備
 

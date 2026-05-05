@@ -16,7 +16,7 @@ from py_common_lib.logging import (
     SessionRotatingFileHandler,
     build_session_filename,
 )
-from rag.server import LOG_FILE_PREFIX, _write_cli_lines_to_handlers
+from rag.server.logging_setup import LOG_FILE_PREFIX, _write_cli_lines_to_handlers
 
 
 def _make_record(message: str) -> logging.LogRecord:

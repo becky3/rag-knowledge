@@ -31,13 +31,13 @@
 | `src/rag/pipeline/ingesters/` | パイプラインアーキテクチャ用インジェスター（source_store へのファイル配置 + .meta 生成） |
 | `src/rag/scrapy/` | Scrapy subprocess によるサイト一括取り込み（スパイダー・ミドルウェア・ブリッジ） |
 | `src/rag/store/` | source_store 管理（ファイル配置・.meta 読み書き・metadata.db 操作・URL パス変換） |
+| `src/rag/server/` | MCP 薄層アダプター（FastMCP + 全ツール CLI サブプロセス委譲）。詳細は `docs/specs/rag-knowledge.md` の「server 構造」セクションを参照 |
 | `src/rag/utils/` | ユーティリティ（URL 正規化・パス変換） |
 
 ### ルートレベルファイル
 
 | ファイル | 責務 |
 |---|---|
-| `src/rag/server.py` | MCP 薄層アダプター（全ツール CLI サブプロセス委譲） |
 | `src/rag/cli.py` | CLI エントリーポイント（取り込み・検索・評価・DB 初期化、JSON 出力モード対応） |
 | `src/rag/config.py` | pydantic-settings による環境変数・設定管理 |
 | `src/rag/filter_parser.py` | 検索フィルター式のパーサー |
@@ -59,17 +59,17 @@
 | 仕様書 | 実装モジュール |
 |---|---|
 | `rag-knowledge.md` | `src/rag/` 全体 |
-| `search-response.md` | `src/rag/server.py`, `src/rag/rag_knowledge.py` |
+| `search-response.md` | `src/rag/server/`, `src/rag/rag_knowledge.py` |
 | `source-store.md` | `src/rag/store/` |
 | `pipeline-controller.md` | `src/rag/pipeline/` |
 | `converter.md` | `src/rag/converter/` |
 | `indexer.md` | `src/rag/indexer/` |
 | `site-ingest.md` | `src/rag/scrapy/` |
-| `rebuild-stats.md` | `src/rag/cli.py`, `src/rag/server.py` |
-| `infrastructure/content-listing.md` | `src/rag/cli.py`, `src/rag/server.py` |
-| `infrastructure/content-upload.md` | `src/rag/upload.py`, `src/rag/server.py` |
-| `infrastructure/upload-auth.md` | `src/rag/server.py`, `src/rag/config.py` |
-| `infrastructure/scheduled-rebuild.md` | `src/rag/server.py` |
+| `rebuild-stats.md` | `src/rag/cli.py`, `src/rag/server/` |
+| `infrastructure/content-listing.md` | `src/rag/cli.py`, `src/rag/server/` |
+| `infrastructure/content-upload.md` | `src/rag/upload.py`, `src/rag/server/` |
+| `infrastructure/upload-auth.md` | `src/rag/server/`, `src/rag/config.py` |
+| `infrastructure/scheduled-rebuild.md` | `src/rag/server/` |
 | `infrastructure/media-analysis.md` | `src/rag/media/` |
 | `infrastructure/lmstudio-reference.md` | `src/rag/config.py`（`_load_lmstudio_config`, `_LMSTUDIO_TOML_PATHS`）, `src/rag/embedding/factory.py`, `src/rag/pipeline/factory.py`, `lmstudio.toml` |
 | `infrastructure/lmstudio-operation.md` | （運用手順書、対応実装なし） |

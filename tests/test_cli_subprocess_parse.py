@@ -20,7 +20,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from rag.server import CLISubprocessError, _run_cli_subprocess
+from rag.server.cli_subprocess import CLISubprocessError, _run_cli_subprocess
 
 
 def _make_mock_process(stdout_lines: list[str], exit_code: int = 1) -> MagicMock:

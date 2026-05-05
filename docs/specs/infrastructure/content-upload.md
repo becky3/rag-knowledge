@@ -56,12 +56,12 @@ MCP は JSON ベースのテキストプロトコルであるため、ツール�
 
 - **適用対象**: 全書き込み操作（ingest / delete 等）に適用する。Upload HTTP API（`/upload/document`、`/upload/journal`）、MCP ツール（`rag_add_document`、`rag_add_journal`）、CLI 直接実行の全てが対象
 - **ロック方式**: OS ファイルロックによるプロセス間排他制御。Unix では `fcntl.flock`、Windows では `msvcrt.locking` を使用する。
-  ロック取得処理の実施主体は CLI とし、MCP サーバー（`server.py`）からの書き込みも CLI サブプロセスを起動して同一のロック取得処理を利用する。
-  `server.py` 自身はロックファイルを直接操作しない
+  ロック取得処理の実施主体は CLI とし、MCP サーバー（`src/rag/server/`）からの書き込みも CLI サブプロセスを起動して同一のロック取得処理を利用する。
+  サーバー側自身はロックファイルを直接操作しない
 - **ロックファイル**: source_store ディレクトリ直下に配置する。`write_lock`（書き込みロック、ファイル名 `.write.lock`）と `rebuild_lock`（再構築ロック、ファイル名 `.rebuild.lock`）でそれぞれ別のロックファイルを使用する
 - **ノンブロッキング**: CLI はロック取得を試み（`LOCK_NB` / `LK_NBLCK`）、取得できない場合は待機せず即座にエラーを返却する。
   CLI はロック競合時に JSON Lines の error メッセージ（`type: "error"`）にロック競合コード（`LOCK_CONFLICT`）とロック種別（`write` / `rebuild`）を含め、exit code 1 で終了する。
-  `server.py` は CLI サブプロセスの error メッセージからロック競合を判定し、Upload HTTP API ではロック種別に応じた HTTP 応答（`write` 競合 = 429、`rebuild` 競合 = 503）+ `Retry-After` ヘッダ、MCP ツールではロック種別に応じたエラーメッセージとして返却する。
+  サーバー側（`src/rag/server/cli_subprocess.py`）は CLI サブプロセスの error メッセージからロック競合を判定し、Upload HTTP API ではロック種別に応じた HTTP 応答（`write` 競合 = 429、`rebuild` 競合 = 503）+ `Retry-After` ヘッダ、MCP ツールではロック種別に応じたエラーメッセージとして返却する。
   CLI 直接実行では標準エラー出力 + exit code 1 を返す
 - **ロック種別の伝搬**: CLI のロック競合エラーには種別識別子（`write` または `rebuild`）を含める。この識別子は Upload HTTP API の HTTP ステータスコード・`Retry-After` 値の選択と、MCP ツールのエラーメッセージの切替に使用する。識別子の意味は「取得失敗したロック」であり、外部プロセスの保持状態を示す
 - **lock_type 不明時のフォールバック**: CLI エラー応答に `details.lock_type` が含まれない
@@ -315,7 +315,7 @@ MCP ツールはクライアントからコンテンツを文字列で受け取�
 
 | ファイル | 役割 |
 |---------|------|
-| `src/rag/server.py` | MCP ツール定義（薄層アダプター）+ Upload HTTP API エンドポイント定義。CLI サブプロセスの起動・進捗中継を担当 |
+| `src/rag/server/` | MCP ツール定義（薄層アダプター、`tools/` 配下）+ Upload HTTP API エンドポイント定義（`upload/` 配下）。CLI サブプロセスの起動・進捗中継は `cli_subprocess.py` |
 | `src/rag/upload.py` | ファイル名サニタイズ（MCP ツール・Upload API 共通）。コンテンツデコードは CLI 側に移行 |
 | `src/rag/cli.py` | CLI コマンド。`--stdin` オプションによる stdin 入力、`--output json` による JSON Lines 出力をサポート |
 | `src/rag/pipeline/ingesters/local.py` | Local インジェスター（ドキュメント取り込み） |
