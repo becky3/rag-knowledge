@@ -925,7 +925,7 @@ def _build_bm25_index_from_fixture(
         構築済みBM25Indexインスタンス
     """
     from .bm25_index import BM25Index
-    from .rag_knowledge import smart_chunk
+    from .indexer.smart_chunking import smart_chunk
 
     with open(fixture_path, encoding="utf-8") as f:
         fixture_data = json.load(f)
