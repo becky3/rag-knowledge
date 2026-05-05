@@ -364,7 +364,7 @@ class PipelineController:
             await self._indexer.add(record.source_id, converted_path, metadata)
 
         logger.info("Phase 2: Index started (%d files)", len(index_records))
-        with self._indexer.bm25_deferred():
+        with self._indexer.batch_writes():
             index_summary = await self._run_processing_loop(
                 index_records,
                 process_fn=_index_single,
@@ -581,7 +581,7 @@ class PipelineController:
         if self._git.has_commits():
             to_commit = self._git.get_head_commit()
 
-        with self._indexer.bm25_deferred():
+        with self._indexer.batch_writes():
             summary = await self._run_processing_loop(
                 records,
                 process_fn=_index_single,
@@ -909,7 +909,7 @@ class PipelineController:
         concurrency: int = 1,
     ) -> PipelineSummary:
         """変更エントリを処理する."""
-        with self._indexer.bm25_deferred():
+        with self._indexer.batch_writes():
             summary = await self._run_processing_loop(
                 changes,
                 process_fn=self._process_single_change,

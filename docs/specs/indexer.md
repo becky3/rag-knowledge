@@ -127,7 +127,13 @@ Embedding に渡る最終テキストは「Embedding プレフィックス + チ
 - ChromaDB は upsert 方式で冪等性を確保する。同一チャンク ID で再実行しても結果が変わらない
 - BM25 インデックスはドキュメント追加・削除後にインメモリインデックスの再構築が必要（lazy rebuild: 検索実行時に自動再構築）
 - BM25 の永続化はアトミックスワップ（一時ディレクトリ + リネーム）で破損を防止する
-- バッチ処理（全再構築・インデックス再構築・差分更新）時、パイプライン制御は BM25 の遅延 save モードを有効にし、個別の add/delete ごとの rebuild + 永続化をスキップする。バッチ完了後に一括で rebuild + 永続化を実行する。これにより N 件のソース処理で N 回発生していた BM25 rebuild が 1 回に削減される
+- バッチ処理（全再構築・インデックス再構築・差分更新）時、パイプライン制御は
+  `Indexer.batch_writes()` 経由でバッチ書き込みコンテキストを宣言する。
+  `Indexer` は内部で保有する `IndexWriteStrategy` 群（インデックスごとの書き込み戦略）を
+  nest して enter/exit し、各インデックス実装が「自分の書き込み戦略」を選択する。
+  呼び出し側は実装詳細（BM25 / Vector 等）を意識しない。
+  BM25 用 strategy はバッチ中の rebuild + 永続化を抑止し、バッチ完了時に一括実行する。
+  これにより N 件のソース処理で N 回発生していた BM25 rebuild が 1 回に削減される
 
 ### バッチサイズ
 
@@ -177,8 +183,23 @@ Embedding に渡る最終テキストは「Embedding プレフィックス + チ
 | インデックス削除 | source_id | なし | 指定 source_id に紐づく全チャンクを ChromaDB と BM25 から削除する |
 | メタデータ更新 | source_id、メタデータ | なし | チャンクの再生成は行わず、ChromaDB 内の既存チャンクのメタデータのみを upsert する。BM25 はメタデータを保持しないため更新不要 |
 | インデックスクリア | source_type フィルタ（任意） | なし | インデックスをクリアする。source_type 指定時は該当 source_type のチャンクのみ削除する（他の source_type のインデックスは維持）。フィルタなしの場合は ChromaDB と BM25 を全クリアする |
+| バッチ書き込みコンテキスト | なし | context manager | `with indexer.batch_writes():` でバッチ書き込みスコープを宣言する。スコープ内では各 `IndexWriteStrategy` 実装が自身の書き込み戦略を適用し、スコープ終了時に一括 flush する |
 
 インデックス全再構築（`clear` + 全ファイル `add`）はパイプライン制御（`run_index_only` / `run_full_rebuild`）がオーケストレーションする。インデクサー自体は個別操作のみを提供する。
+
+### バッチ書き込み戦略（IndexWriteStrategy）
+
+`Indexer` 内部の各インデックス（BM25 / Vector Store 等）は性質の異なる書き込み戦略を持つ。これを `IndexWriteStrategy` Protocol（context manager）で抽象化し、`Indexer.batch_writes()` がインデックス実装ごとの戦略を nest して enter/exit する。
+
+| 観点 | 内容 |
+|---|---|
+| Protocol 配置 | `src/rag/indexer/write_strategy.py` |
+| インターフェース | `__enter__()` / `__exit__(exc_type, exc, tb)` を持つ context manager protocol |
+| BM25 用実装 | `BM25WriteStrategy`（enter で deferred save 有効化、exit で flush）。例外時も exit は flush を試行する |
+| Vector Store | 逐次 upsert で完結するため独立 strategy を持たない（Indexer が strategy リストに追加しない） |
+| 呼び出し側の責務 | `pipeline/controller.py` は `with self._indexer.batch_writes():` を宣言するのみ。インデックス実装の詳細を知らない |
+
+設計意図: 「BM25」という実装詳細名を `IndexerProtocol` から排除し、各インデックス実装が自分の書き込み戦略を選択する構造にする。新しいインデックス追加時は対応する `IndexWriteStrategy` 実装を `Indexer.__init__` で組み立てて strategy リストに追加するだけで、呼び出し側のコードは変更不要。
 
 ### インデックス追加・更新の処理手順
 

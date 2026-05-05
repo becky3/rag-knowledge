@@ -20,6 +20,7 @@ from rag.content_detector import ContentType, detect_content_type
 from rag.heading_chunker import chunk_by_headings
 from rag.indexer.chunk_id import generate_chunk_id, parse_chunk_index
 from rag.indexer.metadata import build_chunk_metadata
+from rag.indexer.write_strategy import BM25WriteStrategy, IndexWriteStrategy
 from rag.store.metadata_db import MetadataDB
 from rag.store.models import SourceMetadata, SourceType
 from rag.table_chunker import chunk_table_data
@@ -67,6 +68,9 @@ class Indexer:
         self._chunk_overlap = chunk_overlap
         self._embedding_checked = False
         self._embedding_lock = asyncio.Lock()
+        self._write_strategies: list[IndexWriteStrategy] = [
+            BM25WriteStrategy(bm25_index),
+        ]
 
         # 実効サイズの算出: min(chunk_size, 安全上限 - overhead)
         # 仕様: docs/specs/indexer.md「オーバーヘッドと実効サイズ」
@@ -215,32 +219,23 @@ class Indexer:
             "メタデータを更新: %s (%d チャンク)", source_id, total_chunks,
         )
 
-    def set_bm25_deferred_save(self, enabled: bool) -> None:
-        """BM25 の遅延 save モードを切り替える.
-
-        Args:
-            enabled: True で遅延モード有効
-        """
-        self._bm25.set_deferred_save(enabled)
-
-    def flush_bm25(self) -> None:
-        """BM25 の未保存変更を一括 rebuild + 永続化する."""
-        self._bm25.flush()
-
     @contextlib.contextmanager
-    def bm25_deferred(self) -> Iterator[None]:
-        """BM25 遅延 save のコンテキストマネージャ.
+    def batch_writes(self) -> Iterator[None]:
+        """バッチ書き込みコンテキスト.
 
-        バッチ処理中は個別の rebuild + 永続化をスキップし、
-        ブロック終了時に一括で実行する。
-        エラー時も処理済み分を永続化する（部分失敗は PipelineSummary.errors で管理）。
+        保有する全 ``IndexWriteStrategy`` を ``ExitStack`` で nest し、enter/exit する。
+        各 strategy がインデックス実装ごとの戦略（BM25 は deferred save → flush 等）を
+        適用する。``with`` ブロック内で例外が発生した場合も、すでに enter 済みの
+        strategy は LIFO 順で確実に exit される（``ExitStack`` の保証）。
+
+        strategy の ``__exit__`` 自体が例外を投げた場合は呼び出し側に伝播し、
+        パイプラインを中断する。with ブロック内のソース処理エラーは
+        ``_run_processing_loop`` 側で ``PipelineSummary.errors`` に集約される。
         """
-        self.set_bm25_deferred_save(True)
-        try:
+        with contextlib.ExitStack() as stack:
+            for strategy in self._write_strategies:
+                stack.enter_context(strategy)
             yield
-        finally:
-            self.set_bm25_deferred_save(False)
-            self.flush_bm25()
 
     async def clear(
         self,
