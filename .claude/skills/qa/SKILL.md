@@ -209,7 +209,7 @@ NG を検出した場合、Issue 起票を提案する。
 | A) Local | migrate-journal | `.qa/journals/`（古いジャーナル 10 件、`--repository rag-knowledge`） |
 | B) Web | site-ingest（クロール） | `https://www.stat.go.jp/`（`--max-pages 20`） |
 | B) Web | site-ingest（複数URL） | `https://www.stat.go.jp/data/jinsui/` と `https://www.stat.go.jp/data/roudou/` |
-| C) SNS | Zenn ユーザー | `rhythmcan` |
+| C) SNS | Zenn ユーザー | `testuser`（fake モード） / `rhythmcan`（real モード） |
 | C) SNS | BlueSky ハンドル | `rhythmcan.bsky.social` |
 | C) SNS | BlueSky --max-posts | `5`（メディア付き投稿を含むため増加） |
 | C) SNS | BlueSky --force | C-2 の後に `--max-posts 1 --force` で上書き再取得 |
@@ -281,7 +281,7 @@ MCP 対応: `rag_site_ingest`（`url` パラメータ / `urls` パラメータ�
 
 | # | コマンド（CLI） | 期待結果 | 検証種別 |
 |---|----------------|---------|---------|
-| 1 | `crawl-zenn rhythmcan --max-articles 1` | Zenn 記事 1 件取り込み成功 | `ingest` |
+| 1 | `crawl-zenn testuser --max-articles 1`（fake モード） / `crawl-zenn rhythmcan --max-articles 1`（real モード） | Zenn 記事取り込み成功 | `ingest` |
 | 2 | `crawl-bluesky rhythmcan.bsky.social --max-posts 5` | BlueSky 投稿取り込み成功。メディア付き投稿がある場合、source_store の `bluesky/{did}/{year}/{month}/media/{rkey}/` にメディアファイル（`image_0.{ext}` / `video_0.ts`）が配置されていること。投稿内に外部リンクを含む投稿がある場合、site_ingest 経由で URL 先が取得され `URL 自動取り込み: Web N件` が表示されること | `ingest` |
 | 3 | `crawl-bluesky rhythmcan.bsky.social --max-posts 1 --force` | `--force` による上書き再取得成功。既存投稿が上書きされ、CLI に `完了: N件配置`（N > 0）と表示されること | `ingest` |
 | 4 | `ingest-bluesky <Web リンク付き投稿 URL>` | 投稿 1 件配置 + `URL 自動取り込み: Web N件` が表示される。site_ingest が呼ばれ、URL 先 Web ページが source_store に配置されること | `ingest` |
