@@ -6,12 +6,15 @@
 from __future__ import annotations
 
 from types import TracebackType
-from typing import cast
+from typing import TYPE_CHECKING, cast
 from unittest.mock import MagicMock
 
 import pytest
 
 from rag.indexer.write_strategy import BM25WriteStrategy, IndexWriteStrategy
+
+if TYPE_CHECKING:
+    from rag.indexer.indexer import Indexer
 
 
 class TestBM25WriteStrategy:
@@ -109,10 +112,6 @@ def _build_indexer() -> "Indexer":
         embedding_context_length=512,
         worst_token_char_ratio=0.7,
     )
-
-
-if False:  # type checking only
-    from rag.indexer.indexer import Indexer
 
 
 class TestIndexerBatchWrites:

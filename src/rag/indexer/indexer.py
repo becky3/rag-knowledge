@@ -225,8 +225,12 @@ class Indexer:
 
         保有する全 ``IndexWriteStrategy`` を ``ExitStack`` で nest し、enter/exit する。
         各 strategy がインデックス実装ごとの戦略（BM25 は deferred save → flush 等）を
-        適用する。例外時も既に enter 済みの strategy は exit される（部分失敗は
-        ``PipelineSummary.errors`` で管理）。
+        適用する。``with`` ブロック内で例外が発生した場合も、すでに enter 済みの
+        strategy は LIFO 順で確実に exit される（``ExitStack`` の保証）。
+
+        strategy の ``__exit__`` 自体が例外を投げた場合は呼び出し側に伝播し、
+        パイプラインを中断する。with ブロック内のソース処理エラーは
+        ``_run_processing_loop`` 側で ``PipelineSummary.errors`` に集約される。
         """
         with contextlib.ExitStack() as stack:
             for strategy in self._write_strategies:
