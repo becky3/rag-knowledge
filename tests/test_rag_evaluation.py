@@ -459,7 +459,7 @@ class TestEvaluateRetrieval:
 
     @pytest.fixture
     def mock_rag_service(self) -> MagicMock:
-        """モックRAGKnowledgeServiceを作成する."""
+        """モック SearchPort を作成する."""
         mock = MagicMock()
         mock.retrieve = AsyncMock()
         return mock
@@ -813,7 +813,7 @@ class TestEvaluateRetrievalWithFailureTags:
 
     @pytest.fixture
     def mock_rag_service(self) -> MagicMock:
-        """モックRAGKnowledgeServiceを作成する."""
+        """モック SearchPort を作成する."""
         mock = MagicMock()
         mock.retrieve = AsyncMock()
         return mock

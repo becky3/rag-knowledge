@@ -100,23 +100,47 @@ def make_vector_store_http(embedding_provider: Any, **overrides: Any) -> Any:
     )
 
 
-def make_rag_knowledge_service(**overrides: Any) -> Any:
-    """RAGKnowledgeService のテスト用ファクトリ."""
-    from rag.rag_knowledge import RAGKnowledgeService
+def make_search_adapter(**overrides: Any) -> Any:
+    """RealSearchAdapter のテスト用ファクトリ."""
+    from rag.search.search_port import RealSearchAdapter
 
     defaults: dict[str, Any] = {
         "vector_store": overrides.pop("vector_store", MagicMock()),
-        "chunk_size": 200,
-        "chunk_overlap": 30,
-        "similarity_threshold": None,
         "bm25_index": None,
+        "similarity_threshold": None,
         "hybrid_search_enabled": False,
         "vector_weight": 1.0,
         "min_combined_score": None,
         "debug_log_enabled": False,
     }
     defaults.update(overrides)
-    return RAGKnowledgeService(**defaults)
+    return RealSearchAdapter(**defaults)
+
+
+def make_source_management_adapter(**overrides: Any) -> Any:
+    """RealSourceManagementAdapter のテスト用ファクトリ."""
+    from rag.admin.source_management_port import RealSourceManagementAdapter
+
+    defaults: dict[str, Any] = {
+        "vector_store": overrides.pop("vector_store", MagicMock()),
+        "bm25_index": None,
+        "source_store_dir": None,
+        "converted_store_dir": None,
+    }
+    defaults.update(overrides)
+    return RealSourceManagementAdapter(**defaults)
+
+
+def make_stats_adapter(**overrides: Any) -> Any:
+    """RealStatsAdapter のテスト用ファクトリ."""
+    from rag.admin.stats_port import RealStatsAdapter
+
+    defaults: dict[str, Any] = {
+        "vector_store": overrides.pop("vector_store", MagicMock()),
+        "source_store_dir": None,
+    }
+    defaults.update(overrides)
+    return RealStatsAdapter(**defaults)
 
 
 def make_safe_browsing_client(**overrides: Any) -> Any:
