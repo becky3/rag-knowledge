@@ -337,15 +337,15 @@ class TestBM25MetadataPersistence:
 
 
 class TestBuildWhereClause:
-    """RAGKnowledgeService._build_where_clause のテスト."""
+    """rag.search.filters.build_where_clause のテスト."""
 
     def _build(
         self,
         source_type: str | None = None,
         filters: dict[str, str] | None = None,
     ) -> dict | None:
-        from rag.rag_knowledge import RAGKnowledgeService
-        return RAGKnowledgeService._build_where_clause(source_type, filters)
+        from rag.search.filters import build_where_clause
+        return build_where_clause(source_type, filters)
 
     def test_both_none_returns_none(self) -> None:
         """source_type=None, filters=None → None."""
@@ -387,13 +387,13 @@ class TestBuildWhereClause:
 
 
 class TestBuildBM25Filters:
-    """RAGKnowledgeService._build_bm25_filters のテスト."""
+    """rag.search.filters.build_bm25_filters のテスト."""
 
     def _build(
         self, filters: dict[str, str],
     ) -> dict[str, str]:
-        from rag.rag_knowledge import RAGKnowledgeService
-        return RAGKnowledgeService._build_bm25_filters(filters)
+        from rag.search.filters import build_bm25_filters
+        return build_bm25_filters(filters)
 
     def test_adds_custom_prefix(self) -> None:
         """キーに custom: プレフィックスが付く."""

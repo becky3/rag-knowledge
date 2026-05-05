@@ -209,7 +209,7 @@ class TestListRecentSources:
 
     def test_format_output(self, tmp_path: Path) -> None:
         """出力フォーマットが仕様に準拠する."""
-        from rag.rag_knowledge import list_recent_sources
+        from rag.admin.stats_port import list_recent_sources
 
         source_store_dir = self._setup_db(tmp_path)
         db = MetadataDB(source_store_dir / "metadata.db")
@@ -232,7 +232,7 @@ class TestListRecentSources:
 
     def test_format_output_ascending(self, tmp_path: Path) -> None:
         """昇順指定時のヘッダー表示."""
-        from rag.rag_knowledge import list_recent_sources
+        from rag.admin.stats_port import list_recent_sources
 
         source_store_dir = self._setup_db(tmp_path)
         db = MetadataDB(source_store_dir / "metadata.db")
@@ -245,7 +245,7 @@ class TestListRecentSources:
 
     def test_zero_results(self, tmp_path: Path) -> None:
         """0件の場合のフォーマット."""
-        from rag.rag_knowledge import list_recent_sources
+        from rag.admin.stats_port import list_recent_sources
 
         source_store_dir = self._setup_db(tmp_path)
         result = list_recent_sources(str(source_store_dir), "web", 10)
@@ -253,14 +253,14 @@ class TestListRecentSources:
 
     def test_db_not_exists(self, tmp_path: Path) -> None:
         """metadata.db が存在しない場合."""
-        from rag.rag_knowledge import list_recent_sources
+        from rag.admin.stats_port import list_recent_sources
 
         result = list_recent_sources(str(tmp_path / "nonexistent"), "web", 10)
         assert result == "source_type: web（0件 / 全0件）"
 
     def test_partial_display(self, tmp_path: Path) -> None:
         """limit で表示件数を制限し、総件数は全件数を表示."""
-        from rag.rag_knowledge import list_recent_sources
+        from rag.admin.stats_port import list_recent_sources
 
         source_store_dir = self._setup_db(tmp_path)
         db = MetadataDB(source_store_dir / "metadata.db")
@@ -282,7 +282,7 @@ class TestListRecentSources:
         """filters 指定時に該当レコードのみ返り、総件数も絞り込み後の件数を反映する."""
         import json
 
-        from rag.rag_knowledge import list_recent_sources
+        from rag.admin.stats_port import list_recent_sources
 
         source_store_dir = self._setup_db(tmp_path)
         db = MetadataDB(source_store_dir / "metadata.db")
@@ -317,7 +317,7 @@ class TestListRecentSources:
         """filters 指定で該当ソースが0件の場合."""
         import json
 
-        from rag.rag_knowledge import list_recent_sources
+        from rag.admin.stats_port import list_recent_sources
 
         source_store_dir = self._setup_db(tmp_path)
         db = MetadataDB(source_store_dir / "metadata.db")
@@ -338,7 +338,7 @@ class TestListRecentSources:
         """filters=None は全件返却（既存動作を維持）."""
         import json
 
-        from rag.rag_knowledge import list_recent_sources
+        from rag.admin.stats_port import list_recent_sources
 
         source_store_dir = self._setup_db(tmp_path)
         db = MetadataDB(source_store_dir / "metadata.db")
@@ -355,7 +355,7 @@ class TestListRecentSources:
 
     def test_filters_invalid_key_returns_error(self, tmp_path: Path) -> None:
         """filters のキー名が不正な場合、例外ではなくエラーメッセージを返す."""
-        from rag.rag_knowledge import list_recent_sources
+        from rag.admin.stats_port import list_recent_sources
 
         source_store_dir = self._setup_db(tmp_path)
 
@@ -370,21 +370,21 @@ class TestFormatFileSize:
     """format_file_size のテスト."""
 
     def test_bytes(self) -> None:
-        from rag.rag_knowledge import format_file_size
+        from rag.admin.formatting import format_file_size
 
         assert format_file_size(500) == "500 B"
 
     def test_kilobytes(self) -> None:
-        from rag.rag_knowledge import format_file_size
+        from rag.admin.formatting import format_file_size
 
         assert format_file_size(46285) == "45.2 KB"
 
     def test_megabytes(self) -> None:
-        from rag.rag_knowledge import format_file_size
+        from rag.admin.formatting import format_file_size
 
         assert format_file_size(5 * 1024 * 1024) == "5.0 MB"
 
     def test_gigabytes(self) -> None:
-        from rag.rag_knowledge import format_file_size
+        from rag.admin.formatting import format_file_size
 
         assert format_file_size(2 * 1024 * 1024 * 1024) == "2.0 GB"

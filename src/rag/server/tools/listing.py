@@ -11,7 +11,7 @@ from typing import Any
 from .. import cli_subprocess
 from .._mcp import mcp
 from ..cli_subprocess import CLISubprocessError
-from ...rag_knowledge import format_file_size
+from ...admin.formatting import format_file_size
 
 _VALID_LISTING_SOURCE_TYPES: frozenset[str] = frozenset(
     {"web", "zenn", "bluesky", "youtube", "local", "aozora", "journal"},

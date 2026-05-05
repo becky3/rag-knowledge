@@ -51,7 +51,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from rag.cli import (
     _build_bm25_index_from_fixture,
-    create_rag_service,
+    create_search_adapter,
 )
 from rag.evaluation import evaluate_retrieval
 
@@ -121,9 +121,7 @@ async def run_single_evaluation(
         fixture_path, chunk_size=chunk_size, chunk_overlap=chunk_overlap,
         k1=k1, b=b,
     )
-    rag_service = await create_rag_service(
-        chunk_size=chunk_size,
-        chunk_overlap=chunk_overlap,
+    search = await create_search_adapter(
         threshold=threshold,
         bm25_index=bm25_index,
         vector_weight=vector_weight,
@@ -132,7 +130,7 @@ async def run_single_evaluation(
     )
 
     report = await evaluate_retrieval(
-        rag_service=rag_service,
+        search=search,
         dataset_path=dataset_path,
         n_results=n_results,
     )

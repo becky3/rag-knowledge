@@ -142,7 +142,7 @@ flowchart TD
     MCP["MCP rag_list_recent"]
     CLI["CLI list-recent"]
     VALIDATE["パラメータ検証"]
-    SERVICE["共通関数 (rag_knowledge.py)"]
+    SERVICE["StatsPort.list_recent / list_recent_sources"]
     METADB["MetadataDB"]
     FORMAT["テキストフォーマット"]
     RESPONSE["レスポンス返却"]
@@ -161,7 +161,7 @@ flowchart TD
 
 1. MCP ツールまたは CLI からパラメータを受け取る
 2. `source_type`、`limit`、`order`、`filters` のバリデーションを実行する
-3. `rag_knowledge.py` の共通関数 `list_recent_sources` を呼び出す
+3. `StatsPort.list_recent` Adapter メソッド（または `list_recent_sources` 共通関数）を呼び出す
 4. `MetadataDB` から以下の 2 クエリを発行する:
    - 一覧取得: `source_type` + `status = 'active'` + `filters`（指定時）でフィルタし、`published_at` でソート（`order` に応じて昇順/降順）して `limit` 件取得
    - 総件数取得: 同条件の `COUNT(*)` で該当 source_type の全件数を取得（`filters` 指定時は絞り込み後の件数）
@@ -173,7 +173,8 @@ flowchart TD
 |---------|------|
 | `src/rag/server/tools/listing.py` | MCP ツール定義（`rag_list_recent`, `rag_stats`）。パラメータ検証と共通関数呼び出し |
 | `src/rag/cli.py` | CLI サブコマンド定義。パラメータ検証と共通関数呼び出し |
-| `src/rag/rag_knowledge.py` | 共通ロジック。MetadataDB へのクエリとフォーマット処理 |
+| `src/rag/admin/stats_port.py` | `StatsPort` Protocol + `RealStatsAdapter` + `list_recent_sources` 関数。MetadataDB へのクエリ |
+| `src/rag/admin/formatting.py` | `format_file_size` 等のフォーマット処理 |
 | `src/rag/filter_parser.py` | `parse_filters()` — `key=value` 文字列のパース（`rag_search` と共通） |
 | `src/rag/store/metadata_db.py` | MetadataDB。`source_type` + メタデータフィルタ + `published_at` ソートのクエリ |
 | `src/rag/store/resolve.py` | `resolve_published_at()` — source_type ごとの公開日時解決 |

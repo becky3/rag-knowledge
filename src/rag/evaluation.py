@@ -14,7 +14,7 @@ from enum import Enum
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
-    from .rag_knowledge import RAGKnowledgeService
+    from .search.search_port import SearchPort
 
 logger = logging.getLogger(__name__)
 
@@ -318,14 +318,14 @@ def load_evaluation_dataset(dataset_path: str) -> list[EvaluationDatasetQuery]:
 
 
 async def evaluate_retrieval(
-    rag_service: RAGKnowledgeService,
+    search: SearchPort,
     dataset_path: str,
     n_results: int = 5,
 ) -> EvaluationReport:
     """データセットを使ってRAG検索の精度を評価する.
 
     Args:
-        rag_service: RAGKnowledgeServiceインスタンス
+        search: SearchPort 実装（検索 Adapter）
         dataset_path: 評価データセットファイルのパス
         n_results: 各クエリで取得する結果数
 
@@ -359,7 +359,7 @@ async def evaluate_retrieval(
     for dataset_query in queries:
         # RAG検索実行
         try:
-            result = await rag_service.retrieve(dataset_query.query, n_results=n_results)
+            result = await search.retrieve(dataset_query.query, n_results=n_results)
             retrieved_sources = result.sources
         except Exception:
             logger.exception("Failed to evaluate query: %s", dataset_query.id)
