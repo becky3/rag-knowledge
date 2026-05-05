@@ -25,7 +25,7 @@ from rag.evaluation import (
     evaluate_retrieval,
     load_evaluation_dataset,
 )
-from rag.rag_knowledge import RAGRetrievalResult
+from rag.search.models import RAGRetrievalResult
 
 
 class TestCalculatePrecisionRecall:

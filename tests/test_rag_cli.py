@@ -329,7 +329,7 @@ class TestCLIEvaluate:
         )
 
         with patch("rag.cli._build_bm25_index_from_fixture", return_value=MagicMock()):
-            with patch("rag.cli.create_rag_service") as mock_create_service:
+            with patch("rag.cli.create_search_adapter") as mock_create_service:
                 with patch(
                     "rag.cli.evaluate_retrieval", new=AsyncMock(return_value=mock_report)
                 ):
@@ -386,7 +386,7 @@ class TestCLIEvaluate:
 
         mock_eval = AsyncMock(return_value=mock_report)
         with patch("rag.cli._build_bm25_index_from_fixture", return_value=MagicMock()):
-            with patch("rag.cli.create_rag_service") as mock_create_service:
+            with patch("rag.cli.create_search_adapter") as mock_create_service:
                 with patch("rag.cli.evaluate_retrieval", new=mock_eval):
                     mock_service = AsyncMock()
                     mock_create_service.return_value = mock_service
@@ -441,7 +441,7 @@ class TestCLIEvaluate:
         )
 
         with patch("rag.cli._build_bm25_index_from_fixture", return_value=MagicMock()):
-            with patch("rag.cli.create_rag_service") as mock_create_service:
+            with patch("rag.cli.create_search_adapter") as mock_create_service:
                 with patch(
                     "rag.cli.evaluate_retrieval", new=AsyncMock(return_value=mock_report)
                 ):
@@ -504,7 +504,7 @@ class TestCLIEvaluate:
         )
 
         with patch("rag.cli._build_bm25_index_from_fixture", return_value=MagicMock()):
-            with patch("rag.cli.create_rag_service") as mock_create_service:
+            with patch("rag.cli.create_search_adapter") as mock_create_service:
                 with patch(
                     "rag.cli.evaluate_retrieval", new=AsyncMock(return_value=mock_report)
                 ):
@@ -561,7 +561,7 @@ class TestCLIEvaluate:
 
         mock_eval = AsyncMock(return_value=mock_report)
         with patch("rag.cli._build_bm25_index_from_fixture", return_value=MagicMock()):
-            with patch("rag.cli.create_rag_service") as mock_create_service:
+            with patch("rag.cli.create_search_adapter") as mock_create_service:
                 with patch("rag.cli.evaluate_retrieval", new=mock_eval):
                     mock_service = AsyncMock()
                     mock_create_service.return_value = mock_service
@@ -618,7 +618,7 @@ class TestCLIEvaluate:
 
         mock_eval = AsyncMock(return_value=mock_report)
         with patch("rag.cli._build_bm25_index_from_fixture", return_value=MagicMock()):
-            with patch("rag.cli.create_rag_service") as mock_create_service:
+            with patch("rag.cli.create_search_adapter") as mock_create_service:
                 with patch("rag.cli.evaluate_retrieval", new=mock_eval):
                     mock_service = AsyncMock()
                     mock_create_service.return_value = mock_service
@@ -674,7 +674,7 @@ class TestCLIEvaluate:
 
         mock_eval = AsyncMock(return_value=mock_report)
         with patch("rag.cli._build_bm25_index_from_fixture", return_value=MagicMock()):
-            with patch("rag.cli.create_rag_service") as mock_create_service:
+            with patch("rag.cli.create_search_adapter") as mock_create_service:
                 with patch("rag.cli.evaluate_retrieval", new=mock_eval):
                     mock_service = AsyncMock()
                     mock_create_service.return_value = mock_service
@@ -728,7 +728,7 @@ class TestCLIEvaluate:
         mock_eval = AsyncMock(return_value=mock_report)
         mock_bm25_builder = MagicMock(return_value=MagicMock())
         with patch("rag.cli._build_bm25_index_from_fixture", mock_bm25_builder):
-            with patch("rag.cli.create_rag_service") as mock_create_service:
+            with patch("rag.cli.create_search_adapter") as mock_create_service:
                 with patch("rag.cli.evaluate_retrieval", new=mock_eval):
                     mock_service = AsyncMock()
                     mock_create_service.return_value = mock_service
@@ -741,11 +741,9 @@ class TestCLIEvaluate:
                     assert bm25_kwargs[1]["chunk_size"] == 300
                     assert bm25_kwargs[1]["chunk_overlap"] == 50
 
-                    # create_rag_serviceにchunkパラメータが渡されたか確認
+                    # create_search_adapter は chunk_size/chunk_overlap を受け取らない
+                    # （SearchPort はチャンキングと無関係。BM25 構築側でのみ chunk 使用）
                     mock_create_service.assert_called_once()
-                    call_kwargs = mock_create_service.call_args
-                    assert call_kwargs[1]["chunk_size"] == 300
-                    assert call_kwargs[1]["chunk_overlap"] == 50
 
     @pytest.mark.asyncio
     async def test_bm25_params_propagation(self, tmp_path: Path) -> None:
@@ -790,7 +788,7 @@ class TestCLIEvaluate:
         mock_eval = AsyncMock(return_value=mock_report)
         mock_bm25_builder = MagicMock(return_value=MagicMock())
         with patch("rag.cli._build_bm25_index_from_fixture", mock_bm25_builder):
-            with patch("rag.cli.create_rag_service") as mock_create_service:
+            with patch("rag.cli.create_search_adapter") as mock_create_service:
                 with patch("rag.cli.evaluate_retrieval", new=mock_eval):
                     mock_service = AsyncMock()
                     mock_create_service.return_value = mock_service
@@ -845,7 +843,7 @@ class TestCLIEvaluate:
 
         mock_eval = AsyncMock(return_value=mock_report)
         with patch("rag.cli._build_bm25_index_from_fixture", return_value=MagicMock()):
-            with patch("rag.cli.create_rag_service") as mock_create_service:
+            with patch("rag.cli.create_search_adapter") as mock_create_service:
                 with patch("rag.cli.evaluate_retrieval", new=mock_eval):
                     mock_service = AsyncMock()
                     mock_create_service.return_value = mock_service
@@ -909,7 +907,7 @@ class TestCLIEvaluate:
 
         mock_eval = AsyncMock(return_value=mock_report)
         with patch("rag.cli._build_bm25_index_from_fixture", return_value=MagicMock()):
-            with patch("rag.cli.create_rag_service") as mock_create_service:
+            with patch("rag.cli.create_search_adapter") as mock_create_service:
                 with patch("rag.cli.evaluate_retrieval", new=mock_eval):
                     mock_service = AsyncMock()
                     mock_create_service.return_value = mock_service
@@ -964,7 +962,7 @@ class TestCLIEvaluate:
 
         mock_eval = AsyncMock(return_value=mock_report)
         with patch("rag.cli._build_bm25_index_from_fixture", return_value=MagicMock()):
-            with patch("rag.cli.create_rag_service") as mock_create_service:
+            with patch("rag.cli.create_search_adapter") as mock_create_service:
                 with patch("rag.cli.evaluate_retrieval", new=mock_eval):
                     mock_service = AsyncMock()
                     mock_create_service.return_value = mock_service
@@ -1012,22 +1010,12 @@ class TestCLIInitTestDb:
             bm25_b=0.75,
         )
 
-        with patch("rag.cli.create_rag_service") as mock_create_service:
-            mock_service = AsyncMock()
-            mock_service._ingest_crawled_page = AsyncMock(return_value=1)
-            mock_create_service.return_value = mock_service
-
+        with patch("rag.cli._ingest_page_for_testing") as mock_ingest:
+            mock_ingest.return_value = 1
             await init_test_db(args)
 
-            # create_rag_serviceが正しい引数で呼ばれたか確認
-            mock_create_service.assert_called_once_with(
-                chunk_size=200,
-                chunk_overlap=30,
-                persist_dir=str(persist_dir),
-            )
-
-            # _ingest_crawled_pageが呼ばれたか確認
-            mock_service._ingest_crawled_page.assert_called_once()
+            # _ingest_page_for_testing が呼ばれたか確認（評価フィクスチャ投入経路）
+            mock_ingest.assert_called_once()
 
     @pytest.mark.asyncio
     async def test_init_test_db_creates_bm25_index(self, tmp_path: Path) -> None:
@@ -1063,11 +1051,8 @@ class TestCLIInitTestDb:
             bm25_b=0.75,
         )
 
-        with patch("rag.cli.create_rag_service") as mock_create_service:
-            mock_service = AsyncMock()
-            mock_service._ingest_crawled_page = AsyncMock(return_value=1)
-            mock_create_service.return_value = mock_service
-
+        with patch("rag.cli._ingest_page_for_testing") as mock_ingest:
+            mock_ingest.return_value = 1
             await init_test_db(args)
 
         # BM25インデックスが永続化されたか確認

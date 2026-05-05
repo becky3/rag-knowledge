@@ -11,7 +11,7 @@ import pytest
 
 from rag.admin.formatting import format_document_response
 from rag.admin.models import DocumentResult
-from rag.rag_knowledge import get_document
+from rag.admin.source_management_port import get_document
 
 
 @pytest.fixture

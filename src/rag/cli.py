@@ -53,8 +53,9 @@ if TYPE_CHECKING:
     from .safe_browsing import SafeBrowsingClient
     from .pipeline.ingesters.youtube import YoutubeIngester
     from .pipeline.models import PipelineSummary
-    from .rag_knowledge import RAGKnowledgeService
+    from .search.search_port import RealSearchAdapter
     from .store.source_store import SourceStore
+    from .vector_store import VectorStore
 
 
 class EvaluationParams(TypedDict):
@@ -844,36 +845,92 @@ def main() -> None:
         _SYNC_COMMANDS[args.command](args)  # type: ignore[operator]
 
 
-async def create_rag_service(
+async def _ingest_page_for_testing(
     *,
+    vector_store: "VectorStore",
+    url: str,
+    title: str,
+    text: str,
+    crawled_at: str,
     chunk_size: int,
     chunk_overlap: int,
+) -> int:
+    """評価フィクスチャ投入専用のチャンキング + ChromaDB 投入.
+
+    `init-test-db` CLI コマンド専用。本番取り込みパス（インジェスター →
+    コンバーター → インデクサー）とは別系統。Issue #739 で運用判断中。
+
+    Args:
+        vector_store: 投入先の VectorStore
+        url: ページ URL
+        title: ページタイトル
+        text: ページ本文テキスト
+        crawled_at: 取得日時（ISO 8601 形式）
+        chunk_size: チャンクの最大文字数
+        chunk_overlap: チャンク間のオーバーラップ文字数
+
+    Returns:
+        保存されたチャンク数
+    """
+    from .indexer.smart_chunking import smart_chunk
+    from .vector_store import DocumentChunk
+
+    chunks = smart_chunk(text, chunk_size, chunk_overlap)
+    if not chunks:
+        logger.info("No chunks generated for page: %s", url)
+        return 0
+
+    normalized_url, _ = urldefrag(url)
+    url_hash = hashlib.sha256(normalized_url.encode()).hexdigest()[:16]
+    document_chunks = [
+        DocumentChunk(
+            id=f"{url_hash}_{i}",
+            text=content,
+            metadata={
+                "source_id": normalized_url,
+                "title": title,
+                "chunk_index": i,
+                "crawled_at": crawled_at,
+                "source_type": "web",
+                "section_path": section_path,
+            },
+        )
+        for i, (content, section_path) in enumerate(chunks)
+    ]
+    new_ids = {chunk.id for chunk in document_chunks}
+
+    count = await vector_store.add_documents(document_chunks)
+    await vector_store.delete_stale_chunks(normalized_url, new_ids)
+    logger.info("Ingested page %s: %d chunks", normalized_url, count)
+    return count
+
+
+async def create_search_adapter(
+    *,
     persist_dir: str,
     threshold: float | None = None,
     bm25_index: "BM25Index | None" = None,
     vector_weight: float = 0.6,
     min_combined_score: float | None = None,
-) -> "RAGKnowledgeService":
-    """RAGKnowledgeServiceを生成する.
+) -> "RealSearchAdapter":
+    """SearchPort 実装（RealSearchAdapter）を生成する.
 
     全パラメータは呼び出し元が明示的に指定する。settings へのフォールバックは行わない。
 
     Args:
-        chunk_size: チャンクサイズ
-        chunk_overlap: チャンクオーバーラップ
-        persist_dir: ChromaDB永続化ディレクトリ
-        threshold: 類似度閾値（Noneの場合はフィルタリングなし）
-        bm25_index: BM25インデックス（指定時はハイブリッド検索を有効化）
+        persist_dir: ChromaDB 永続化ディレクトリ
+        threshold: 類似度閾値（None の場合はフィルタリングなし）
+        bm25_index: BM25 インデックス（指定時はハイブリッド検索を有効化）
         vector_weight: ベクトル検索の重み α
-        min_combined_score: combined_scoreの下限閾値（None=フィルタなし）
+        min_combined_score: combined_score の下限閾値（None=フィルタなし）
 
     Returns:
-        RAGKnowledgeServiceインスタンス
+        RealSearchAdapter インスタンス
     """
     from .config import get_settings
     from .embedding.factory import get_embedding_provider
+    from .search.search_port import RealSearchAdapter
     from .vector_store import VectorStore
-    from .rag_knowledge import RAGKnowledgeService
 
     settings = get_settings()
     embedding_provider = get_embedding_provider(settings, settings.embedding_provider)
@@ -887,12 +944,10 @@ async def create_rag_service(
         hnsw_search_ef=settings.hnsw_search_ef,
     )
 
-    return RAGKnowledgeService(
+    return RealSearchAdapter(
         vector_store=vector_store,
-        chunk_size=chunk_size,
-        chunk_overlap=chunk_overlap,
-        similarity_threshold=threshold,
         bm25_index=bm25_index,
+        similarity_threshold=threshold,
         hybrid_search_enabled=bm25_index is not None,
         vector_weight=vector_weight,
         min_combined_score=min_combined_score,
@@ -972,11 +1027,9 @@ async def run_evaluation(args: argparse.Namespace) -> None:
         b=bm25_b,
     )
 
-    # RAGサービス初期化（BM25込みでハイブリッド検索を有効化）
+    # SearchPort 初期化（BM25込みでハイブリッド検索を有効化）
     min_combined_score: float | None = args.min_combined_score
-    rag_service = await create_rag_service(
-        chunk_size=args.chunk_size,
-        chunk_overlap=args.chunk_overlap,
+    search = await create_search_adapter(
         threshold=args.threshold,
         persist_dir=args.persist_dir,
         bm25_index=bm25_index,
@@ -986,7 +1039,7 @@ async def run_evaluation(args: argparse.Namespace) -> None:
 
     # 評価実行
     report = await evaluate_retrieval(
-        rag_service=rag_service,
+        search=search,
         dataset_path=args.dataset,
         n_results=args.n_results,
     )
@@ -1304,15 +1357,30 @@ async def init_test_db(args: argparse.Namespace) -> None:
             "crawled_at": datetime.now(timezone.utc).isoformat(),
         })
 
-    # RAGKnowledgeService 経由で投入（本番と同じチャンキングパス）
-    rag_service = await create_rag_service(
-        chunk_size=args.chunk_size,
-        chunk_overlap=args.chunk_overlap,
-        persist_dir=args.persist_dir,
+    # 評価フィクスチャ投入（init-test-db 専用ロジック、Issue #739 で運用判断中）
+    # 本番取り込みパスとは独立した経路として CLI 内に閉じる
+    from .config import get_settings
+    from .embedding.factory import get_embedding_provider
+    from .vector_store import VectorStore
+
+    settings = get_settings()
+    embedding_provider = get_embedding_provider(settings, settings.embedding_provider)
+    vector_store = VectorStore(
+        embedding_provider=embedding_provider,
+        persist_directory=args.persist_dir,
+        collection_name=settings.chromadb_collection_name,
+        hnsw_m=settings.hnsw_m,
+        hnsw_construction_ef=settings.hnsw_construction_ef,
+        hnsw_search_ef=settings.hnsw_search_ef,
     )
     total = 0
     for page in pages:
-        count = await rag_service._ingest_crawled_page(**page)
+        count = await _ingest_page_for_testing(
+            vector_store=vector_store,
+            chunk_size=args.chunk_size,
+            chunk_overlap=args.chunk_overlap,
+            **page,
+        )
         total += count
     logger.info(
         "Added %d chunks from %d documents to test ChromaDB at %s",
@@ -1340,9 +1408,9 @@ def run_get_document(args: argparse.Namespace) -> None:
     Args:
         args: コマンドライン引数
     """
-    from .config import get_settings
     from .admin.formatting import format_document_response
-    from .rag_knowledge import get_document
+    from .admin.source_management_port import get_document
+    from .config import get_settings
 
     json_out = _is_json_output(args)
     settings = get_settings()
@@ -2007,7 +2075,7 @@ def run_list_recent(args: argparse.Namespace) -> None:
             len(sources),
         )
     else:
-        from .rag_knowledge import list_recent_sources
+        from .admin.stats_port import list_recent_sources
         print(list_recent_sources(
             settings.source_store_dir, args.source_type, limit, ascending=ascending,
             filters=parsed_filters,
@@ -2029,7 +2097,7 @@ def run_search(args: argparse.Namespace) -> None:
     from .bm25_index import BM25Index
     from .config import RAGSettings, get_settings
     from .embedding.factory import get_embedding_provider
-    from .rag_knowledge import RAGKnowledgeService
+    from .search.search_port import RealSearchAdapter
     from .vector_store import VectorStore
 
     json_out = _is_json_output(args)
@@ -2052,12 +2120,10 @@ def run_search(args: argparse.Namespace) -> None:
             persist_dir=settings.bm25_persist_dir,
         )
 
-    service = RAGKnowledgeService(
+    search = RealSearchAdapter(
         vector_store=vector_store,
-        chunk_size=settings.rag_chunk_size,
-        chunk_overlap=settings.rag_chunk_overlap,
-        similarity_threshold=None,
         bm25_index=bm25_index,
+        similarity_threshold=None,
         hybrid_search_enabled=True,
         vector_weight=settings.rag_vector_weight,
         min_combined_score=settings.rag_min_combined_score,
@@ -2094,10 +2160,12 @@ def run_search(args: argparse.Namespace) -> None:
                 sys.exit(1)
 
     raw = _asyncio.run(
-        service.retrieve_raw_results(
-            args.query, n_results=n_results, source_type=source_type,
+        search.retrieve_raw_results(
+            query=args.query,
+            n_results=n_results,
+            source_type=source_type,
             filters=parsed_filters,
-        )
+        ),
     )
 
     if json_out:

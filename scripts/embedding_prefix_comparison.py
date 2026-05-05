@@ -36,11 +36,12 @@ from pathlib import Path
 # プロジェクトルートをパスに追加
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
+from rag.cli import _ingest_page_for_testing
 from rag.config import get_settings
 from rag.embedding.factory import get_embedding_provider
 from rag.evaluation import evaluate_retrieval
+from rag.search.search_port import RealSearchAdapter
 from rag.vector_store import VectorStore
-from rag.rag_knowledge import RAGKnowledgeService
 
 OUTPUT_DIR = Path(".tmp/prefix-comparison")
 DEFAULT_DATASET = "tests/fixtures/rag_evaluation_dataset.json"
@@ -113,31 +114,36 @@ async def build_and_evaluate(
         logger.info("[%s] Indexing %d documents...", label, len(pages))
 
         # BM25インデックス構築（ハイブリッドモード時のみ）
-        # _smart_chunk を使うため RAGKnowledgeService 経由で構築
         from rag.bm25_index import BM25Index
 
         bm25_index: BM25Index | None = None
         if hybrid:
             bm25_index = BM25Index()
 
-        rag_service = RAGKnowledgeService(
+        # 評価フィクスチャ投入経路（init-test-db と同じ smart_chunking を使用）
+        for page in pages:
+            await _ingest_page_for_testing(
+                vector_store=vector_store,
+                chunk_size=settings.rag_chunk_size,
+                chunk_overlap=settings.rag_chunk_overlap,
+                **page,
+            )
+
+        # SearchPort 構築
+        search = RealSearchAdapter(
             vector_store=vector_store,
-            chunk_size=settings.rag_chunk_size,
-            chunk_overlap=settings.rag_chunk_overlap,
-            similarity_threshold=settings.rag_similarity_threshold,
             bm25_index=bm25_index,
+            similarity_threshold=settings.rag_similarity_threshold,
             hybrid_search_enabled=hybrid,
             vector_weight=settings.rag_vector_weight,
+            min_combined_score=None,
+            debug_log_enabled=settings.rag_debug_log_enabled,
         )
-
-        # 本番と同じ _ingest_crawled_page 経由でデータ投入
-        for page in pages:
-            await rag_service._ingest_crawled_page(**page)
 
         # 評価実行
         logger.info("[%s] Evaluating...", label)
         report = await evaluate_retrieval(
-            rag_service=rag_service,
+            search=search,
             dataset_path=dataset_path,
             n_results=5,
         )
