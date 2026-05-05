@@ -110,6 +110,12 @@ class SafeBrowsingClient:
     - SOCIAL_ENGINEERING: フィッシングサイト
     - UNWANTED_SOFTWARE: 不要なソフトウェア配布サイト
     - POTENTIALLY_HARMFUL_APPLICATION: 有害な可能性のあるアプリ配布サイト
+
+    ``ConstrainedClient`` 所有権: Pattern C (都度生成)。
+    本クラスは同一インスタンスへの並行 API 呼び出しを許容する設計のため、
+    HTTP クライアントは API 呼び出しごとに生成・破棄する（``_call_api_single``
+    の docstring を参照）。所有権原則の判断軸は
+    ``docs/specs/architecture.md §6`` を参照。
     """
 
     API_URL = "https://safebrowsing.googleapis.com/v4/threatMatches:find"
@@ -324,14 +330,23 @@ class SafeBrowsingClient:
         return await self._call_api_single(urls)
 
     async def _call_api_single(self, urls: list[str]) -> dict[str, SafeBrowsingResult]:
-        """Safe Browsing API を 1 回呼び出す."""
+        """Safe Browsing API を 1 回呼び出す.
+
+        ``ConstrainedClient`` 所有権: Pattern C (都度生成)。
+        ``SafeBrowsingClient`` は同一インスタンスへの並行 API 呼び出しを許容する
+        設計のため、1 回の API 呼び出しごとに HTTP クライアントを新規生成して
+        ``async with`` ブロック内で完結させ、再入・並行利用による状態干渉を防ぐ。
+        ``_cc_kwargs`` 設定時は ``ConstrainedClient`` 経路、未設定時は raw httpx
+        経路 (``# safety:allowed`` 付きの直接利用) を取るが、いずれも 1
+        リクエストごとに生成・破棄する点で Pattern C と同じ並行安全性を持つ。
+        所有権原則の判断軸は ``docs/specs/architecture.md §6`` を参照。
+        """
         from py_common_lib.httpx import ConstrainedClient
 
         request_body = self._build_request_body(urls)
         headers = {"x-goog-api-key": self._api_key}
 
         if self._cc_kwargs is not None:
-            # 都度生成: 再入・並行利用による状態干渉を防ぐ
             cc_kwargs = {**self._cc_kwargs, "headers": headers}
             cc = ConstrainedClient(**cc_kwargs)
             async with cc as client:

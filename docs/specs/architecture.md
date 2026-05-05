@@ -6,6 +6,22 @@ rag-knowledge プロジェクトのアーキテクチャ説明・採用方針・
 用語の定義は agent-commons の `architecture-guide.md`（語彙集）を参照する。
 本仕様書は語彙の上に乗る形で rag-knowledge 固有の採用方針・構造判断を記述する。
 
+## 記述方針
+
+本仕様書では rot 防止のため、以下の列挙ルールを適用する:
+
+- **記述する**: クラス名・Protocol 名（構造判断の語彙）/ `source_type` 値（公開 API 契約・概念）
+- **記述しない**: 配置パス（ディレクトリ・モジュールパス。実装側コードが SSoT）/ 件数のスナップショット（「7 Ingester」等。追加・rename で rot するため）
+
+クラス名・Protocol 名から実装の物理位置を辿るには `grep -rn "<ClassName>" src/` を使う（コード側が SSoT）。
+
+ただし以下は **例外として配置パスの記載を許容する**:
+
+- **§1 アーキテクチャ概要**: 層と主要モジュールのオリエンテーション目的でモジュールパス（`pipeline/ingesters/<source>` 等のワイルドカード型）を例示する
+- **§2 / §2.1 正解パターン**: 新規 Adapter 追加時の参照点として、youtube / bluesky の正解パターンを示すために配置ファイル名を残す（教育的価値を優先）
+
+例外箇所では rot 受容と引き換えに読者の到達性を優先する。例外を増やす際は記述方針側に列挙すること。
+
 ## 1. アーキテクチャ概要
 
 rag-knowledge は **Ports and Adapters**（hexagonal）スタイルを採用する。
@@ -69,19 +85,19 @@ rag-knowledge には外部データ取得経路として 2 系統がある:
 
 ### 3.1 Ingester ファミリー
 
-`source_type` ごとに 1 クラスが対応する。各クラスは `BaseIngester` を実装し、共通 Port を介してパイプライン制御層から操作される。
+`source_type` ごとに 1 つの Ingester クラスが対応する。各クラスは `BaseIngester` を実装し、共通 Port を介してパイプライン制御層から操作される。
 
-| クラス | 配置 | 対応 `source_type` |
-|---|---|---|
-| `AozoraIngester` | `pipeline/ingesters/aozora/_facade.py` | `aozora` |
-| `BlueskyIngester` | `pipeline/ingesters/bluesky/_facade.py` | `bluesky` |
-| `JournalIngester` | `pipeline/ingesters/journal.py` | `journal` |
-| `LocalIngester` | `pipeline/ingesters/local/_facade.py` | `local` |
-| `WebIngester` | `pipeline/ingesters/web/_facade.py` | `web` |
-| `YoutubeIngester` | `pipeline/ingesters/youtube.py` | `youtube` |
-| `ZennIngester` | `pipeline/ingesters/zenn/_facade.py` | `zenn` |
+| クラス | 対応 `source_type` |
+|---|---|
+| `AozoraIngester` | `aozora` |
+| `BlueskyIngester` | `bluesky` |
+| `JournalIngester` | `journal` |
+| `LocalIngester` | `local` |
+| `WebIngester` | `web` |
+| `YoutubeIngester` | `youtube` |
+| `ZennIngester` | `zenn` |
 
-`source_type` の SSoT は [`_schema/enums.yml`](../../_schema/enums.yml)。
+`source_type` の値定義の SSoT は [`_schema/enums.yml`](../../_schema/enums.yml)。各クラスの配置は `grep -rn "<ClassName>" src/` で辿る。
 
 他 Ingester から特定媒体への委譲が必要な場合は、専用 Delegator Protocol（例: `YoutubeDelegator` / `WebDelegator`）経由で実施する。委譲先 Ingester 本体を直接 import せず、Port を介した Adapter 注入の形で構造を揃える（[正解パターン: youtube インジェスター](#2-正解パターン-youtube-インジェスター)と同型）。
 
@@ -94,14 +110,11 @@ Ingester は **取り込み機構** であり、元データの加工を可能�
 
 ### 3.2 Runner ファミリー
 
-subprocess を起動し、Scrapy 等の外部プロセスで取得を行う経路。Runner Protocol 経由で Real / Fake を切り替える。
+subprocess を起動し、Scrapy 等の外部プロセスで取得を行う経路。Runner Protocol 経由で Real / Fake を切り替える。Runner ファミリーは以下の構造を持つ:
 
-| 役割 | 配置 |
-|---|---|
-| `ScrapyRunner` Protocol | `src/rag/scrapy/runner.py` |
-| `RealScrapyRunner` | `src/rag/scrapy/runner.py` |
-| `FakeScrapyRunner` | `src/rag/scrapy/_fake/__init__.py` |
-| bridge 層（クロール結果 → `IngestResult` 変換） | `src/rag/scrapy/bridge.py`（詳細は [site-ingest.md](site-ingest.md) を参照） |
+- **`ScrapyRunner` Protocol**: subprocess 起動の抽象 Port
+- **`RealScrapyRunner` / `FakeScrapyRunner`**: Real / Fake 実装が同 Protocol を実装する
+- **bridge 層**: subprocess の出力（クロール結果）を `IngestResult` に変換する中間層。詳細は [site-ingest.md](site-ingest.md) を参照
 
 `ScrapyRunner` は `WebIngester` の Fetcher 相当依存として注入され、subprocess を起動・管理する。Runner ファミリーは Ingester ファミリーから注入される位置関係であり、パイプライン制御層から直接 Runner を操作することはない。
 
@@ -117,7 +130,7 @@ subprocess を起動し、Scrapy 等の外部プロセスで取得を行う経�
 
 ### 3.4 BaseIngester 抽象化の対象範囲
 
-- 7 Ingester（aozora / bluesky / journal / local / web / youtube / zenn）が `BaseIngester` 継承対象
+- Ingester ファミリーの全クラスが `BaseIngester` 継承対象（対象 `source_type` の SSoT は [`_schema/enums.yml`](../../_schema/enums.yml)、継承の実体は各 Ingester のコードが SSoT）
 - `BaseIngester` は Ingester ファミリーの共通 Port（Protocol / ABC）として位置付ける。§1 の Dependency Rule に従い、パイプライン制御層は具象 Ingester ではなく `BaseIngester` 経由で操作する
 - `ScrapyRunner` は `WebIngester` の Fetcher 相当依存として位置付け、`BaseIngester` 継承対象外
 
@@ -158,7 +171,49 @@ subprocess を起動し、Scrapy 等の外部プロセスで取得を行う経�
 
 `dict[str, Any]` は境界（外部 API レスポンス・JSON 応答・MCP 応答テキスト等）でのみ許容し、越境後は構造化型（dataclass / Enum / TypedDict）に変換する。
 
-## 6. Fake モード基盤
+## 6. ConstrainedClient 所有権原則
+
+外部 HTTP アクセスを担う `ConstrainedClient`（[py-common-lib](https://github.com/becky3/py-common-lib/blob/main/src/py_common_lib/httpx/constrained_client.py)）の **生成・破棄を誰が担うか**（所有権）の判断基準を定義する。
+
+`ConstrainedClient` は安全制約（リクエスト総数上限・最低リクエスト間隔・操作全体タイムアウト・サーキットブレーカー）を内包し、1 インスタンスにつき 1 つのバジェット枠とリクエストカウンタを持つ。所有権の置き場所はこのバジェット枠の共有範囲を直接規定するため、構造判断として本セクションで明文化する。
+
+各 Adapter が実際にどのパターンを採用しているかは Real Adapter のコード（クラス docstring + 実装）が SSoT である。本仕様書では現状の帰属を列挙せず、判断軸と各パターンの Why のみを定義する。
+現状の採用状況を確認したい場合は `grep -rn "所有権: Pattern" src/` で各 Real Adapter の docstring を辿る。
+
+### 6.1 採用パターンの定義
+
+| ID | 名称 | 採用条件と Why |
+|---|---|---|
+| A | CLI 所有 | **委譲先 Adapter と同一 `ConstrainedClient` を共有してバジェットを合算する必要があるとき**。委譲経路でのバジェット合算・サーキットブレーカー連動を成立させるため、複数 Adapter の上位に位置する起動経路（CLI / MCP）で生成して各 Adapter の factory に注入する |
+| B | Adapter 所有 | **単独 Adapter で完結し、外部に `ConstrainedClient` を共有する必要がないとき**。Adapter のライフサイクル開始時に内部生成し、終了時に破棄する。起動経路に余計なボイラープレートを増やさないため、委譲のないインジェスターはこのパターンを採る |
+| C | 都度生成 | **並行・再入時の状態干渉を避ける必要があるとき**。同一インスタンスへの並行呼び出しを許容する Adapter で、1 回の API 呼び出しごとに新規生成して呼び出し終了で破棄する |
+
+### 6.2 採用条件の判断軸
+
+新規 Adapter 追加時は以下のチェックリストでパターンを選定する:
+
+- 質問 1: **他 Adapter（委譲先）と同一の `ConstrainedClient` を共有してバジェットを合算する必要があるか？**
+  - Yes → **A: CLI 所有** を採用
+  - No → 質問 2 へ
+- 質問 2: **同一 Adapter 内で並行・再入による状態干渉のリスクがあるか？**（複数の同時呼び出しが 1 つの client 状態を共有すると問題が起きる設計か）
+  - Yes → **C: 都度生成** を採用
+  - No → **B: Adapter 所有** を採用
+
+委譲経路でのバジェット共有要件は [ingesters/common.md「インジェスター間の委譲」](ingesters/common.md#インジェスター間の委譲) を参照。
+
+### 6.3 共通制約
+
+採用パターンを問わず以下を遵守する:
+
+- **facade メソッドへの `client` 引数渡しは禁止**: facade はコンストラクタで Adapter（Protocol 型）を受け取り、`ConstrainedClient` は Adapter 内に内包する（[ingesters/common.md「Protocol 注入規約」](ingesters/common.md#protocol-注入規約) 参照）
+- **HTTP ステータスチェックは共通ヘルパー経由**: ConstrainedClient 対応の Adapter は HTTP GET を共通ヘルパー経由で実行する
+  （[ingesters/common.md「HTTP ステータスチェックの共通ヘルパー」](ingesters/common.md#http-ステータスチェックの共通ヘルパー) 参照）
+- **Fake モード切替は factory に閉じる（Fake モード対象 Adapter のみ）**:
+  ingester 系 Real / Fake 切替を行う Adapter は factory が Fake モード環境変数を見て Real / Fake を返す。
+  Fake は `ConstrainedClient` を持たず、所有権原則の対象外（[Fake モード基盤](infrastructure/fake-mode.md) 参照）。
+  Fake モード非対象の Adapter（`SafeBrowsingClient` 等の独立クライアント）は本制約の適用外
+
+## 7. Fake モード基盤
 
 外部 API・ライブラリの実アクセスを排除する仕組み。詳細は [Fake モード基盤仕様](infrastructure/fake-mode.md) を参照。
 
@@ -171,7 +226,7 @@ subprocess を起動し、Scrapy 等の外部プロセスで取得を行う経�
 
 新規インジェスターは原則として Fake Adapter を備える（youtube パターン）。Fake Adapter なしでの追加は QA 戦略の L2 Mock E2E テストが書けなくなるため、構造レビューの対象とする。
 
-## 7. 関連ドキュメント
+## 8. 関連ドキュメント
 
 - [全体仕様概要](overview.md) — 機能一覧と仕様書マップ
 - [QA 戦略](workflows/qa-strategy.md) — L1 / L2 / L3 の責務分離

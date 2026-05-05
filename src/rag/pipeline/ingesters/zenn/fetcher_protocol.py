@@ -87,6 +87,11 @@ class RealZennFetcher:
     ``ConstrainedClient`` を内部生成し、``fetch_get`` 経由で API を叩く。
     factory は本クラスのインスタンスを返す前にコンテキストマネージャ
     （``async with``）で client のライフサイクルを管理する必要がある。
+
+    ``ConstrainedClient`` 所有権: Pattern B (Adapter 所有)。
+    Zenn インジェスターは委譲を行わない単独完結の取り込みであり、外部に
+    ``ConstrainedClient`` を共有する必要がないため、本 Adapter が内部生成・
+    破棄を担う。所有権原則の判断軸は ``docs/specs/architecture.md §6`` を参照。
     """
 
     def __init__(

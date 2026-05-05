@@ -218,6 +218,13 @@ class RealBlueskyMediaDownloader:
 
     BlueSky CDN への HTTP 通信、SSRF 防止のための同一オリジンリダイレクト
     追従、HLS マスター/バリアント解決、ts セグメント結合をすべて内包する。
+
+    ``ConstrainedClient`` 所有権: Pattern A (CLI 所有)。
+    BlueSky 投稿取り込み経路では本 MediaDownloader と ``RealBlueskyFetcher`` が
+    委譲先 Adapter（YouTube / Web）と同一 ``ConstrainedClient`` を共有して
+    バジェットを合算する必要があるため、上位の起動経路（CLI / MCP）が
+    ``ConstrainedClient`` を生成し、本 Adapter にコンストラクタ注入する。
+    所有権原則の判断軸は ``docs/specs/architecture.md §6`` を参照。
     """
 
     def __init__(
