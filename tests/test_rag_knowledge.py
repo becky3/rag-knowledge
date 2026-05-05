@@ -246,7 +246,7 @@ class TestRAGDebugLog:
         ]
 
         # Act
-        with caplog.at_level(logging.INFO, logger="rag.rag_knowledge"):
+        with caplog.at_level(logging.INFO, logger="rag.search.search_port"):
             await rag_service_log_enabled.retrieve("しれんのしろ アイテム", n_results=5)
 
         # Assert
@@ -279,7 +279,7 @@ class TestRAGDebugLog:
         ]
 
         # Act
-        with caplog.at_level(logging.INFO, logger="rag.rag_knowledge"):
+        with caplog.at_level(logging.INFO, logger="rag.search.search_port"):
             await rag_service_log_enabled.retrieve("test query", n_results=5)
 
         # Assert - INFOレベルではdistanceとsourceのみ（テキストは含まない）
@@ -308,7 +308,7 @@ class TestRAGDebugLog:
         ]
 
         # Act
-        with caplog.at_level(logging.DEBUG, logger="rag.rag_knowledge"):
+        with caplog.at_level(logging.DEBUG, logger="rag.search.search_port"):
             await rag_service_log_enabled.retrieve("test query", n_results=5)
 
         # Assert
@@ -332,7 +332,7 @@ class TestRAGDebugLog:
         ]
 
         # Act
-        with caplog.at_level(logging.DEBUG, logger="rag.rag_knowledge"):
+        with caplog.at_level(logging.DEBUG, logger="rag.search.search_port"):
             await rag_service_log_disabled.retrieve("test query", n_results=5)
 
         # Assert
