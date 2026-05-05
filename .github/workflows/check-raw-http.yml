@@ -22,5 +22,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+        with:
+          python-version-file: ".python-version"
       - name: Check for raw HTTP client usage
         run: uv run python scripts/check_raw_http.py
