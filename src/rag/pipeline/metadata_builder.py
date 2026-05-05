@@ -11,7 +11,7 @@ import hashlib
 import json
 import logging
 from datetime import datetime, timezone
-from typing import TYPE_CHECKING, Protocol
+from typing import TYPE_CHECKING, Any, Protocol
 
 from rag.store.meta import meta_path_for, read_meta
 from rag.store.models import SourceMetadata, SourceRecord
@@ -133,7 +133,7 @@ class RealMetadataBuilder:
         """
         return file_path
 
-    def _read_meta_dict(self, file_path: str) -> dict[str, str] | None:
+    def _read_meta_dict(self, file_path: str) -> dict[str, Any] | None:
         """ファイルの .meta を読み込む."""
         source_type = detect_source_type(file_path)
         if source_type in NO_META_TYPES:

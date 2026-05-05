@@ -112,7 +112,7 @@ def list_recent_sources(
         db.initialize()
         from rag.store.models import SourceType
 
-        st = cast("SourceType", source_type)
+        st = cast(SourceType, source_type)
         try:
             sources = db.list_sources(
                 source_type=st,
