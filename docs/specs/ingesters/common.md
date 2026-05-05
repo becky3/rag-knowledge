@@ -80,7 +80,8 @@ ConstrainedClient はサーキットブレーカーの責務（HTTP レスポン
 
 - **依存方向**: 委譲元 → 委譲先の一方向のみ。循環依存は禁止
 - **越境直 import の禁止**: 委譲元は委譲先のモジュールを直 import せず、Protocol 経由でのみ呼び出す（後述「Protocol 注入規約」）
-- **ConstrainedClient の共有**: 委譲元の ConstrainedClient を委譲先に渡す。バジェット（リクエスト総数上限）は委譲元と委譲先で共有される。ただし、ConstrainedClient 非対応の委譲先（YouTube インジェスター等）は対象外
+- **ConstrainedClient の共有**: 委譲元の ConstrainedClient を委譲先に渡す。バジェット（リクエスト総数上限）は委譲元と委譲先で共有される。ただし、ConstrainedClient 非対応の委譲先（YouTube インジェスター等）は対象外。
+  生成・破棄を誰が担うかの判断基準（CLI 所有 / Adapter 所有 / 都度生成）は [architecture.md「ConstrainedClient 所有権原則」](../architecture.md#6-constrainedclient-所有権原則) を参照
 - **エラー隔離**: 委譲先の取り込み失敗が委譲元の取り込み結果に影響してはならない
 - **source_store の共有**: 委譲元と委譲先は同一の source_store インスタンスを使用する
 
@@ -98,7 +99,7 @@ ConstrainedClient はサーキットブレーカーの責務（HTTP レスポン
 
 ### BaseIngester 共通基底
 
-7 Ingester（aozora / bluesky / journal / local / web / youtube / zenn）は `BaseIngester` 抽象基底（`pipeline/ingesters/base.py`）を継承する。
+Ingester ファミリーの全クラスは `BaseIngester` 抽象基底を継承する（対象 `source_type` の SSoT は [`_schema/enums.yml`](../../../_schema/enums.yml)、継承の実体は各 Ingester のコードが SSoT）。
 
 - **継承の意図**: 「Ingester ファミリーの一員である」ことをコード上で明示し、上位層から `BaseIngester` 型として Ingester 一般を扱える
 - **共通契約**: コンストラクタで `source_store: SourceStore`（[source-store.md](../source-store.md) 参照）を受け取り、`source_store` プロパティとして公開する

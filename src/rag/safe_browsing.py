@@ -324,14 +324,23 @@ class SafeBrowsingClient:
         return await self._call_api_single(urls)
 
     async def _call_api_single(self, urls: list[str]) -> dict[str, SafeBrowsingResult]:
-        """Safe Browsing API を 1 回呼び出す."""
+        """Safe Browsing API を 1 回呼び出す.
+
+        ``ConstrainedClient`` 所有権: Pattern C (都度生成)。
+        ``SafeBrowsingClient`` は同一インスタンスへの並行 API 呼び出しを許容する
+        設計のため、1 回の API 呼び出しごとに HTTP クライアントを新規生成して
+        ``async with`` ブロック内で完結させ、再入・並行利用による状態干渉を防ぐ。
+        ``_cc_kwargs`` 設定時は ``ConstrainedClient`` 経路、未設定時は raw
+        ``httpx.AsyncClient`` 経路を取るが、いずれも 1 リクエストごとに生成・
+        破棄する点で Pattern C と同じ並行安全性を持つ。所有権原則の判断軸は
+        ``docs/specs/architecture.md §6`` を参照。
+        """
         from py_common_lib.httpx import ConstrainedClient
 
         request_body = self._build_request_body(urls)
         headers = {"x-goog-api-key": self._api_key}
 
         if self._cc_kwargs is not None:
-            # 都度生成: 再入・並行利用による状態干渉を防ぐ
             cc_kwargs = {**self._cc_kwargs, "headers": headers}
             cc = ConstrainedClient(**cc_kwargs)
             async with cc as client:
