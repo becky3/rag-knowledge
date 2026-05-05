@@ -106,7 +106,9 @@ rag-knowledge には外部データ取得経路として 2 系統がある:
 Ingester は **取り込み機構** であり、元データの加工を可能な限り行わず raw bytes を `source_store` に
 配置することを責務とする。インデックス化向けのテキスト変換・正規化は converter の責務。詳細な責務制約
 （無加工保存・metadata.db アクセス禁止・git 操作禁止・ファイル削除禁止）の SSoT は
-[ingesters/common.md「責務の限定」](ingesters/common.md#責務の限定) を参照。
+[ingesters/common.md「責務の限定」](ingesters/common.md#責務の限定) を参照。converter 側から見た責務境界
+（source_type 固有処理を converter に集約する根拠・判断フロー）は
+[converter.md「責務境界」](converter.md#責務境界) を参照。
 
 ### 3.2 Runner ファミリー
 
