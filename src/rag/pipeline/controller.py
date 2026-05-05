@@ -9,9 +9,7 @@
 from __future__ import annotations
 
 import asyncio
-import hashlib
 import inspect
-import json
 import logging
 import subprocess
 from collections import Counter
@@ -25,10 +23,12 @@ from rag.converter.converter import (
     ConversionSkippedError,
     get_converted_rel_path,
 )
+from rag.pipeline.change_detector import RealChangeDetector
+from rag.pipeline.change_handler import RealChangeHandler
 from rag.pipeline.git_ops import GitOperations
+from rag.pipeline.metadata_builder import RealMetadataBuilder
 from rag.pipeline.models import (
     ChangeEntry,
-    ChangeStatus,
     FullRebuildResult,
     PipelineErrorEntry,
     PipelineMode,
@@ -37,7 +37,6 @@ from rag.pipeline.models import (
     PipelineSummary,
 )
 from rag.pipeline.protocols import ConverterProtocol, IndexerProtocol
-from rag.store.meta import meta_path_for, read_meta
 from rag.store.metadata_db import MetadataDB
 from rag.store.models import (
     NULL_COMMIT_HASH,
@@ -46,12 +45,8 @@ from rag.store.models import (
     SourceStatus,
     SourceType,
 )
-from rag.store.resolve import resolve_published_at, resolve_title
 from rag.store.source_store import (
-    NO_META_TYPES,
     SourceStore,
-    detect_source_type,
-    is_source_file,
 )
 
 from rag.pipeline.ingesters._common import ProgressCallback
@@ -76,6 +71,22 @@ class PipelineController:
         self._converter = converter
         self._indexer = indexer
         self._git = GitOperations(source_store.root_dir)
+        self._change_detector = RealChangeDetector(
+            source_store=source_store,
+            git=self._git,
+        )
+        self._metadata_builder = RealMetadataBuilder(
+            source_store=source_store,
+            db=source_store.db,
+        )
+        self._change_handler = RealChangeHandler(
+            source_store=source_store,
+            converted_store_dir=converted_store_dir,
+            converter=converter,
+            indexer=indexer,
+            metadata_builder=self._metadata_builder,
+            db=source_store.db,
+        )
 
     @property
     def db(self) -> MetadataDB:
@@ -613,149 +624,28 @@ class PipelineController:
 
         return summary
 
-    # --- 変更ファイルの特定 ---
+    # --- 変更ファイルの特定（ChangeDetector への委譲） ---
 
     def _scan_all_as_added(self) -> list[ChangeEntry]:
-        """全追跡ファイルを「追加」として返す.
-
-        `is_source_file` で独立ソースのみを対象とする（sidecar・ロック・
-        attachment は除外）。
-        """
-        all_files = self._git.list_all_files()
-        entries: list[ChangeEntry] = []
-        for f in all_files:
-            if not is_source_file(f):
-                continue
-            entries.append(ChangeEntry(
-                status=ChangeStatus.ADDED,
-                file_path=f,
-            ))
-        return entries
+        """全追跡ファイルを「追加」として返す（ChangeDetector 委譲）."""
+        return self._change_detector.scan_all_as_added()
 
     def _supplement_hidden_changes(
         self,
         raw_diff: list[tuple[str, str, str]],
         from_commit_id: str,
     ) -> list[tuple[str, str, str]]:
-        """ネット差分で検出されない中間変更を補完する.
-
-        git diff（ネット差分）では「削除→同一内容再追加」が差分ゼロになる。
-        git log で中間コミットの全触ファイルを取得し、ネット差分に含まれないが
-        HEAD に存在するファイルを MODIFIED として追加する。
-
-        `is_source_file` で独立ソースのみを補完対象とする（sidecar・attachment は
-        `_classify_changes` 側の処理に任せ、ここでは生成しない）。
-        """
-        touched = self._git.get_files_touched_in_range(from_commit_id)
-        if not touched:
-            return raw_diff
-
-        net_files = {entry[1] for entry in raw_diff}
-        hidden = touched - net_files
-        if not hidden:
-            return raw_diff
-
-        head_files = set(self._git.list_all_files())
-        supplemented = list(raw_diff)
-        added_count = 0
-        for file_path in sorted(hidden):
-            if file_path not in head_files:
-                continue
-            if not is_source_file(file_path):
-                continue
-            logger.debug(
-                "中間コミットで変更されたがネット差分に出ないファイルを"
-                "MODIFIED として追加: %s",
-                file_path,
-            )
-            supplemented.append(("M", file_path, ""))
-            added_count += 1
-        if added_count:
-            logger.info(
-                "中間コミットで変更されたがネット差分に出ないファイルを"
-                "MODIFIED として %d 件追加",
-                added_count,
-            )
-        return supplemented
+        """ネット差分で検出されない中間変更を補完する（ChangeDetector 委譲）."""
+        return self._change_detector.supplement_hidden_changes(
+            raw_diff, from_commit_id,
+        )
 
     def _classify_changes(
         self,
         raw_diff: list[tuple[str, str, str]],
     ) -> list[ChangeEntry]:
-        """git diff の生出力を ChangeEntry に分類する.
-
-        .meta ファイルのみの変更を meta_only として検出する。
-        複合ソースの attachment（例: BlueSky の media/）の変更時は
-        `find_existing_parent` で親ソースを解決し、親ソースを再変換対象に含める。
-        """
-        data_entries: dict[str, ChangeEntry] = {}
-        meta_files: list[tuple[str, str, str]] = []
-        # 再変換が必要な親ソース（attachment 変更に連動）
-        attachment_parents: set[str] = set()
-
-        for status_char, file_path, old_path in raw_diff:
-            if file_path.endswith(".meta"):
-                meta_files.append((status_char, file_path, old_path))
-                continue
-            # リネーム時は旧パスの attachment 親も再変換対象に追加する。
-            # attachment が別 rkey/ディレクトリへ移動した場合、旧親ソースが
-            # 参照を失うため再変換が必要（converted に古い埋め込みが残るのを防止）
-            if status_char == "R" and old_path:
-                old_parent = self._source_store.find_existing_parent(old_path)
-                if old_parent is not None:
-                    attachment_parents.add(old_parent)
-            # attachment の変更は親ソースの再変換トリガー。attachment 自身は
-            # 独立 ChangeEntry として登録しない（仕様: pipeline-controller.md
-            # 「attachment の扱い」）
-            parent = self._source_store.find_existing_parent(file_path)
-            if parent is not None:
-                attachment_parents.add(parent)
-                continue
-            # 独立ソース以外（sidecar / ロック / OS 生成 / 孤児 attachment 等）は
-            # 処理対象から除外する
-            if not is_source_file(file_path):
-                continue
-            entry = self._map_status(status_char, file_path, old_path)
-            data_entries[file_path] = entry
-
-        # attachment 変更に対応する親ソースを MODIFIED として追加
-        for parent_path in attachment_parents:
-            if parent_path in data_entries:
-                continue
-            data_entries[parent_path] = ChangeEntry(
-                status=ChangeStatus.MODIFIED,
-                file_path=parent_path,
-            )
-
-        # .meta のみの変更を検出（対応する独立ソースのみ）
-        for _status_char, meta_path, _old_path in meta_files:
-            data_path = meta_path.removesuffix(".meta")
-            if data_path in data_entries:
-                continue
-            if not is_source_file(data_path):
-                continue
-            data_entries[data_path] = ChangeEntry(
-                status=ChangeStatus.META_ONLY,
-                file_path=data_path,
-            )
-
-        return list(data_entries.values())
-
-    @staticmethod
-    def _map_status(
-        status_char: str,
-        file_path: str,
-        old_path: str,
-    ) -> ChangeEntry:
-        """git status 文字を ChangeStatus にマッピングする."""
-        mapping = {
-            "A": ChangeStatus.ADDED,
-            "M": ChangeStatus.MODIFIED,
-            "D": ChangeStatus.DELETED,
-            "R": ChangeStatus.RENAMED,
-        }
-        status = mapping.get(status_char, ChangeStatus.MODIFIED)
-        return ChangeEntry(status=status, file_path=file_path, old_path=old_path)
+        """git diff の生出力を ChangeEntry に分類する（ChangeDetector 委譲）."""
+        return self._change_detector.classify_changes(raw_diff)
 
     # --- 共通処理ループ ---
 
@@ -925,261 +815,53 @@ class PipelineController:
         return summary
 
     async def _process_single_change(self, entry: ChangeEntry) -> None:
-        """1ファイルの変更を処理する."""
-        handler = {
-            ChangeStatus.ADDED: self._handle_added,
-            ChangeStatus.MODIFIED: self._handle_modified,
-            ChangeStatus.DELETED: self._handle_deleted,
-            ChangeStatus.RENAMED: self._handle_renamed,
-            ChangeStatus.META_ONLY: self._handle_meta_only,
-        }
-        await handler[entry.status](entry)
+        """1ファイルの変更を処理する（ChangeHandler 委譲）."""
+        await self._change_handler.process_change(entry)
 
     async def _handle_added(self, entry: ChangeEntry) -> None:
-        """追加ファイルを処理する."""
-        # 論理削除済みファイルは処理をスキップ
-        # （DB=active / インデックス未登録の不整合を防止）
-        source_id = self._resolve_source_id(entry.file_path)
-        existing = self.db.get_source(source_id)
-        if existing is not None and existing.status is SourceStatus.DELETED:
-            return
-
-        self._register_in_db(entry.file_path)
-        converted_path = await asyncio.to_thread(
-            self._converter.convert,
-            entry.file_path,
-            self._source_store.root_dir,
-            self._converted_store_dir,
-        )
-        metadata = self._build_metadata(entry.file_path)
-        await self._indexer.add(source_id, converted_path, metadata)
+        """追加ファイルを処理する（ChangeHandler 委譲）."""
+        await self._change_handler._handle_added(entry)  # noqa: SLF001
 
     async def _handle_modified(self, entry: ChangeEntry) -> None:
-        """変更ファイルを処理する."""
-        self._update_in_db(entry.file_path)
-        converted_path = await asyncio.to_thread(
-            self._converter.convert,
-            entry.file_path,
-            self._source_store.root_dir,
-            self._converted_store_dir,
-        )
-        source_id = self._resolve_source_id(entry.file_path)
-        metadata = self._build_metadata(entry.file_path)
-        await self._indexer.update(source_id, converted_path, metadata)
+        """変更ファイルを処理する（ChangeHandler 委譲）."""
+        await self._change_handler._handle_modified(entry)  # noqa: SLF001
 
     async def _handle_deleted(self, entry: ChangeEntry) -> None:
-        """削除ファイルを処理する."""
-        source_id = self._resolve_source_id(entry.file_path)
-        self._converter.delete(entry.file_path, self._converted_store_dir)
-        await self._indexer.delete(source_id)
-        try:
-            self.db.set_status(source_id, SourceStatus.DELETED)
-        except KeyError:
-            logger.warning(
-                "削除対象が metadata.db に存在しません: %s", source_id,
-            )
+        """削除ファイルを処理する（ChangeHandler 委譲）."""
+        await self._change_handler._handle_deleted(entry)  # noqa: SLF001
 
     async def _handle_renamed(self, entry: ChangeEntry) -> None:
-        """リネームファイルを処理する."""
-        old_source_id = self._resolve_source_id(entry.old_path)
-
-        # コンバーター: 新パスで変換
-        converted_path = await asyncio.to_thread(
-            self._converter.convert,
-            entry.file_path,
-            self._source_store.root_dir,
-            self._converted_store_dir,
-        )
-
-        # 旧パスの converted を削除
-        self._converter.delete(entry.old_path, self._converted_store_dir)
-
-        # インデクサー: 旧パス削除 + 新パス追加
-        await self._indexer.delete(old_source_id)
-        new_source_id = self._resolve_source_id(entry.file_path)
-        metadata = self._build_metadata(entry.file_path)
-        await self._indexer.add(new_source_id, converted_path, metadata)
-
-        # metadata.db 更新: source_id = file_path なのでリネーム = source_id 変更
-        # 全 source_type で DELETE old + INSERT new に統一
-        try:
-            self.db.set_status(old_source_id, SourceStatus.DELETED)
-        except KeyError:
-            pass
-        self._register_in_db(entry.file_path)
+        """リネームファイルを処理する（ChangeHandler 委譲）."""
+        await self._change_handler._handle_renamed(entry)  # noqa: SLF001
 
     async def _handle_meta_only(self, entry: ChangeEntry) -> None:
-        """.meta のみ変更を処理する."""
-        source_id = self._resolve_source_id(entry.file_path)
-        source_type = detect_source_type(entry.file_path)
+        """.meta のみ変更を処理する（ChangeHandler 委譲）."""
+        await self._change_handler._handle_meta_only(entry)  # noqa: SLF001
 
-        # metadata.db 更新
-        if source_type not in NO_META_TYPES:
-            full_path = self._source_store.root_dir / entry.file_path
-            meta_file = meta_path_for(full_path)
-            if meta_file.exists():
-                meta_data = read_meta(full_path)
-                title = str(meta_data.get("title", ""))
-                if title:
-                    now = datetime.now(timezone.utc).isoformat()
-                    meta_json = json.dumps(
-                        meta_data, ensure_ascii=False, default=str,
-                    )
-                    try:
-                        self.db.update_source(
-                            source_id,
-                            title=title,
-                            updated_at=now,
-                            meta=meta_json,
-                        )
-                    except KeyError:
-                        logger.warning(
-                            "meta_only 更新対象が metadata.db にありません: %s",
-                            source_id,
-                        )
-                        return
-
-        # インデクサー: メタデータのみ更新
-        metadata = self._build_metadata(entry.file_path)
-        await self._indexer.upsert_metadata(source_id, metadata)
-
-    # --- metadata 操作ヘルパー ---
+    # --- metadata 操作（MetadataBuilder への委譲） ---
 
     def _register_in_db(self, file_path: str) -> None:
-        """ファイルを metadata.db に登録する."""
-        full_path = self._source_store.root_dir / file_path
-        data = full_path.read_bytes()
-        content_hash = hashlib.sha256(data).hexdigest()
-        now = datetime.now(timezone.utc).isoformat()
-
-        source_type = detect_source_type(file_path)
-        meta_dict = self._read_meta_dict(file_path)
-
-        source_id = file_path
-        title = resolve_title(
-            source_type, file_path, meta_dict,
-        )
-
-        existing = self.db.get_source(source_id)
-        if existing:
-            collected_at = existing.collected_at
-        elif meta_dict and "collected_at" in meta_dict:
-            collected_at = str(meta_dict["collected_at"])
-        else:
-            collected_at = now
-
-        published_at = resolve_published_at(
-            source_type, meta_dict, collected_at,
-        )
-
-        meta_json = (
-            json.dumps(meta_dict, ensure_ascii=False, default=str)
-            if meta_dict
-            else "{}"
-        )
-
-        self.db.register_source(
-            source_id=source_id,
-            source_type=source_type,
-            title=title,
-            content_hash=content_hash,
-            file_size=len(data),
-            collected_at=collected_at,
-            updated_at=now,
-            published_at=published_at,
-            meta=meta_json,
-        )
+        """ファイルを metadata.db に登録する（MetadataBuilder 委譲）."""
+        self._metadata_builder.register_in_db(file_path)
 
     def _update_in_db(self, file_path: str) -> None:
-        """ファイルの metadata.db を更新する."""
-        full_path = self._source_store.root_dir / file_path
-        data = full_path.read_bytes()
-        content_hash = hashlib.sha256(data).hexdigest()
-        now = datetime.now(timezone.utc).isoformat()
-
-        source_id = self._resolve_source_id(file_path)
-        try:
-            self.db.update_source(
-                source_id,
-                content_hash=content_hash,
-                file_size=len(data),
-                updated_at=now,
-            )
-        except KeyError:
-            self._register_in_db(file_path)
+        """ファイルの metadata.db を更新する（MetadataBuilder 委譲）."""
+        self._metadata_builder.update_in_db(file_path)
 
     def _resolve_source_id(self, file_path: str) -> str:
-        """file_path から source_id を解決する.
-
-        source_id = file_path（source_store 内の相対パス）。
-        """
-        return file_path
-
-    def _read_meta_dict(self, file_path: str) -> dict[str, str] | None:
-        """ファイルの .meta を読み込む."""
-        source_type = detect_source_type(file_path)
-        if source_type in NO_META_TYPES:
-            return None
-        full_path = self._source_store.root_dir / file_path
-        meta_file = meta_path_for(full_path)
-        if not meta_file.exists():
-            return None
-        try:
-            return read_meta(full_path)
-        except Exception:
-            logger.warning(".meta の読み込みに失敗: %s", meta_file)
-            return None
+        """file_path から source_id を解決する（MetadataBuilder 委譲）."""
+        return self._metadata_builder.resolve_source_id(file_path)
 
     def _build_metadata(self, file_path: str) -> SourceMetadata:
-        """ファイルから SourceMetadata を構築する."""
-        source_type = detect_source_type(file_path)
-        meta_dict = self._read_meta_dict(file_path) or {}
-
-        source_id = file_path
-        title = resolve_title(
-            source_type, file_path, meta_dict,
-        )
-        collected_at = str(meta_dict.get(
-            "collected_at",
-            datetime.now(timezone.utc).isoformat(),
-        ))
-
-        extra = dict(meta_dict)
-        for key in ("source_id", "source_type", "title", "collected_at"):
-            extra.pop(key, None)
-
-        return SourceMetadata(
-            source_id=source_id,
-            source_type=source_type,
-            title=title,
-            collected_at=collected_at,
-            extra=extra,
-        )
+        """ファイルから SourceMetadata を構築する（MetadataBuilder 委譲）."""
+        return self._metadata_builder.build_metadata(file_path)
 
     def _build_metadata_from_record(
         self,
         record: SourceRecord,
     ) -> SourceMetadata:
-        """SourceRecord から SourceMetadata を構築する."""
-        source_id = record.source_id
-        source_type = record.source_type
-        title = record.title
-        collected_at_db = record.collected_at
-
-        meta_dict = self._read_meta_dict(source_id) or {}
-        collected_at = str(meta_dict.get("collected_at", collected_at_db))
-
-        extra = dict(meta_dict)
-        for key in ("source_id", "source_type", "title", "collected_at"):
-            extra.pop(key, None)
-
-        return SourceMetadata(
-            source_id=source_id,
-            source_type=source_type,
-            title=title,
-            collected_at=collected_at,
-            extra=extra,
-        )
+        """SourceRecord から SourceMetadata を構築する（MetadataBuilder 委譲）."""
+        return self._metadata_builder.build_metadata_from_record(record)
 
 
 # --- モジュールレベルユーティリティ ---
