@@ -35,7 +35,7 @@ def _default_mock_settings(**overrides: object) -> MagicMock:
 
 @pytest.fixture(autouse=True)
 def _mock_settings():
-    """全テストで get_settings をモックする（document / journal / _helpers の 3 箇所）."""
+    """全テストで get_settings をモックする（upload.document / upload.journal / upload._helpers / tools.ingest_local の 4 箇所）."""
     settings = _default_mock_settings()
     with (
         patch("rag.server.upload.document.config.get_settings", return_value=settings),
