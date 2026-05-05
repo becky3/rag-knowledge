@@ -98,6 +98,13 @@ class RealBlueskyFetcher:
     AT Protocol AppView の HTTP 通信を内包する。BlueskyIngester から見た
     ``BlueskyFetcher`` Protocol の単一の Real 実装。HTTP DI を完結させる
     ため、外部から ConstrainedClient をコンストラクタ注入で受け取る。
+
+    ``ConstrainedClient`` 所有権: Pattern A (CLI 所有)。
+    BlueSky 投稿取り込みは投稿内 URL の自動取り込み（YouTube / Web への委譲）を
+    伴い、委譲先 Adapter と同一 ``ConstrainedClient`` を共有してバジェットを
+    合算する必要があるため、上位の起動経路（CLI / MCP）が ``ConstrainedClient``
+    を生成し、本 Fetcher と委譲先 Adapter の両方に注入する。所有権原則の判断軸は
+    ``docs/specs/architecture.md §6`` を参照。
     """
 
     def __init__(

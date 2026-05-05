@@ -52,6 +52,11 @@ class RealAozoraFetcher:
 
     ``ConstrainedClient`` を内部生成し、``fetch_get`` 経由でカタログ ZIP /
     作品 XHTML を取得する。client のライフサイクルは ``async with`` で管理する。
+
+    ``ConstrainedClient`` 所有権: Pattern B (Adapter 所有)。
+    青空文庫インジェスターは委譲を行わない単独完結の取り込みであり、外部に
+    ``ConstrainedClient`` を共有する必要がないため、本 Adapter が内部生成・
+    破棄を担う。所有権原則の判断軸は ``docs/specs/architecture.md §6`` を参照。
     """
 
     def __init__(
