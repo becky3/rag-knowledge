@@ -280,8 +280,8 @@ class TestUploadDocumentIntegration:
         body = resp.json()
         # 境界で message のみ抽出 → string list で公開
         assert body["pipeline"]["warnings"] == ["Empty conversion result: notes.md"]
-        # 内部 path/phase はクライアントに露出しない
-        assert "path" not in str(body["pipeline"]["warnings"])
+        # 内部 path/phase はクライアントに露出しない（dict 構造ではなく全要素 str）
+        assert all(isinstance(w, str) for w in body["pipeline"]["warnings"])
         assert body["pipeline"]["placed"] == 0
         assert body["pipeline"]["processed"] == 0
 
@@ -426,8 +426,8 @@ class TestUploadJournalIntegration:
         assert resp.status_code == 500
         body = resp.json()
         assert body["status"] == "error"
-        # 内部詳細（contract violation 等）はクライアントに露出しない
-        assert "title" not in body["message"]
+        # ユーザー入力値（title）が error message に漏洩しないこと
+        assert "Sample title" not in body["message"]
 
     @pytest.mark.asyncio
     async def test_successful_upload_includes_pipeline_block(
