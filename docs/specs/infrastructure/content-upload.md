@@ -176,14 +176,44 @@ MCP サーバー（HTTP モード）に `custom_route()` で併設する HTTP �
 4. 一時ファイルにコンテンツを書き出す
 5. CLI サブプロセスを実行する（`add-journal --file <一時ファイルパス> --title <title> --repository <repo> --output json`）
 6. サブプロセス完了後、一時ファイルを削除する
+7. CLI result JSON の `entry_id` を取得し、`journal/{repository}/{entry_id}.md` の形式で `source_id` を組み立てる。
+   entry_id の決定権は Journal インジェスター（`JournalIngester._generate_entry_id`）にあり、Upload API は独立に entry_id を計算しない。
+   CLI が entry_id を返さなかった場合は契約違反として HTTP 500 で失敗する（`title` 等へのフォールバックは行わない。silent failure 防止のため）
 
 #### 共通レスポンス形式
 
 成功時（HTTP 200）:
 
 ```json
-{"status": "ok", "message": "説明テキスト", "source_id": "ソース識別子"}
+{
+  "status": "ok",
+  "message": "説明テキスト",
+  "source_id": "ソース識別子",
+  "pipeline": {
+    "placed": 1,
+    "overwritten": 0,
+    "processed": 1,
+    "warnings": [],
+    "errors": []
+  }
+}
 ```
+
+`pipeline` ブロックはパイプライン実行結果の観測情報で、Upload API（`/upload/document` および `/upload/journal`）はリクエストごとに 1 ファイルを受け付ける契約のため、batch 用フィールド（`partial_failures` 等）と固定値フィールド（`pipeline.mode` / `pipeline.total_files`）は含めない。
+
+| フィールド | 型 | 意味 |
+|---|---|---|
+| `placed` | int | 新規配置件数（0 または 1） |
+| `overwritten` | int | 上書き件数（0 または 1。`upload_mode=replace` で既存ファイルがあった場合に 1） |
+| `processed` | int | パイプラインが正常処理した件数。0 のときは `pipeline.errors` / `pipeline.warnings` を確認する（メディア解析失敗・チャンキング 0 件等） |
+| `warnings` | array | パイプライン実行時の警告メッセージ文字列の配列。クライアントへの公開境界で `message` 文字列のみを抽出する（CLI 内部の `PipelineWarningEntry` の `path` / `phase` 等の構造は公開しない） |
+| `errors` | array | パイプライン実行時のエラーメッセージ文字列の配列。`warnings` と同じく境界で `message` 文字列のみを抽出する |
+
+`pipeline.warnings` / `pipeline.errors` のメッセージ書式は CLI の出力に従う（公開契約として固定しない）。クライアントは表示用途のみとし、内容のパース・パターンマッチに依存しない。
+
+HTTP 200（success 経路）でも `pipeline.errors` / `pipeline.warnings` に要素が含まれることがある（部分的失敗・workload エラー）。
+HTTP 5xx は CLI subprocess の異常終了・予期しない例外時のみ。
+クライアントは success 時も `pipeline.processed` および `pipeline.errors` を確認することで silent failure を検出できる。
 
 エラー時（HTTP 4xx / 5xx）:
 

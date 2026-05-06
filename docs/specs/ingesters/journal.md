@@ -108,6 +108,14 @@ source_store 内の相対パスを source_id として使用する。
 - タイムスタンプは UTC
 - topic が空になる場合（日本語のみのタイトル等）はタイムスタンプのみ
 
+#### CLI result への entry_id 露出
+
+`add-journal` CLI の result JSON には、自動生成・指定の別を問わず確定した `entry_id` を含める。共通の JSON シリアライズ仕様（[common.md](common.md)）の汎用フィールドに加えて、journal 固有の追加フィールドとして付与する。
+
+これは Upload HTTP API（`/upload/journal`）が source_id を組み立てるための SSoT として参照する。
+Upload API 側で entry_id を独立に計算するとファイル配置（インジェスター内部の決定）と乖離するため、
+entry_id の決定権は本インジェスターに集約する（[content-upload.md](../infrastructure/content-upload.md) 参照）。
+
 ### ファイル配置規則
 
 #### 単一エントリ（`rag_add_journal`）

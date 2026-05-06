@@ -355,20 +355,22 @@ MCP サーバーが HTTP モードで起動中であること（worktree セッ�
 | 3 | `curl -X POST http://localhost:<RAG_HTTP_PORT>/upload/document -H "X-API-Key: $(cat /tmp/qa_api_key.txt)" -F "file=@.qa/upload_doc_test.md" -F "upload_mode=replace"` | HTTP 200 | `none` |
 | 4 | `curl -X POST http://localhost:<RAG_HTTP_PORT>/upload/journal -H "X-API-Key: $(cat /tmp/qa_api_key.txt)" -F "file=@.qa/journal_upload_test.md" -F "title=QA スキルの仕様書・スキル定義作成" -F "repository=rag-knowledge"` | HTTP 200、`status: ok` と `source_id` が返る | `ingest` |
 | 5 | `curl -X POST http://localhost:<RAG_HTTP_PORT>/upload/journal -H "X-API-Key: $(cat /tmp/qa_api_key.txt)" -F "file=@.qa/journal_upload_test.md" -F "repository=rag-knowledge"` | HTTP 400（必須フィールド `title` 欠落） | `none` |
-| 6 | 下記の並行リクエストコマンドを実行 | いずれか一方が HTTP 409 Conflict（ロック競合） | `none` |
+| 6 | 下記の並行リクエストコマンドを実行 | いずれか一方が HTTP 429（write 競合）または HTTP 503（rebuild 競合）+ `Retry-After` ヘッダ | `none` |
 
 F-6 並行リクエストコマンド（API キーをファイル経由で共有し、バックグラウンドプロセスへの変数伝搬問題を回避する）:
 
 ```bash
-curl -s -w "\nBG: %{http_code}\n" -X POST http://localhost:<RAG_HTTP_PORT>/upload/document \
+curl -i -s -w "\nBG: %{http_code}\n" -X POST http://localhost:<RAG_HTTP_PORT>/upload/document \
   -H "X-API-Key: $(cat /tmp/qa_api_key.txt)" -F "file=@.qa/upload_doc_test.md" -F "upload_mode=replace" \
   > /tmp/upload_bg.txt 2>&1 &
 bg_pid=$!
-curl -s -w "\nFG: %{http_code}\n" -X POST http://localhost:<RAG_HTTP_PORT>/upload/document \
+curl -i -s -w "\nFG: %{http_code}\n" -X POST http://localhost:<RAG_HTTP_PORT>/upload/document \
   -H "X-API-Key: $(cat /tmp/qa_api_key.txt)" -F "file=@.qa/upload_doc_test.md" -F "upload_mode=replace"
 wait "$bg_pid"
 cat /tmp/upload_bg.txt
 ```
+
+`-i` を付与することで HTTP レスポンスヘッダー（`Retry-After` 含む）を出力に含める。期待結果の `429/503 + Retry-After` を検証時に確認できるようにする。
 
 #### グループ片付け
 
