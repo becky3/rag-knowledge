@@ -6,6 +6,7 @@
 from __future__ import annotations
 
 import re
+from typing import Any
 
 from starlette.requests import Request
 from starlette.responses import JSONResponse
@@ -35,11 +36,57 @@ def _upload_error(
     )
 
 
-def _upload_success(message: str, source_id: str) -> JSONResponse:
-    """Upload API の成功レスポンスを生成する."""
-    return JSONResponse(
-        {"status": "ok", "message": message, "source_id": source_id},
-    )
+def _extract_pipeline_response(cli_result: dict[str, Any]) -> dict[str, Any]:
+    """CLI subprocess の result dict から Upload API の pipeline ブロックを抽出する.
+
+    Upload API は単一ファイル投入が前提のため、batch 用フィールド（partial_failures
+    等）と固定値フィールド（pipeline.mode / total_files）は含めない。
+    `placed`・`overwritten` は IngestResult、`processed`・`warnings`・`errors` は
+    PipelineSummary 由来。CLI 由来の `warnings` / `errors` は `PipelineWarningEntry` /
+    `PipelineErrorEntry` の dict 配列だが、Upload API では境界で `message` 文字列のみを
+    抽出してクライアントに返す（内部 path / phase 等の構造を公開契約に固定しないため）。
+    """
+    pipeline = cli_result.get("pipeline") or {}
+    return {
+        "placed": cli_result.get("placed", 0),
+        "overwritten": cli_result.get("overwritten", 0),
+        "processed": pipeline.get("processed", 0),
+        "warnings": _extract_messages(pipeline.get("warnings", [])),
+        "errors": _extract_messages(pipeline.get("errors", [])),
+    }
+
+
+def _extract_messages(entries: list[Any]) -> list[str]:
+    """PipelineWarningEntry / PipelineErrorEntry の配列から message 文字列のみを抽出する.
+
+    要素が dict（`{path, message, phase}` 等）の場合は `message` フィールドを取り出す。
+    既に文字列の場合（テスト mock や互換性のため）はそのまま返す。
+    """
+    result: list[str] = []
+    for entry in entries:
+        if isinstance(entry, dict):
+            msg = entry.get("message", "")
+            if isinstance(msg, str):
+                result.append(msg)
+        elif isinstance(entry, str):
+            result.append(entry)
+    return result
+
+
+def _upload_success(
+    message: str,
+    source_id: str,
+    *,
+    cli_result: dict[str, Any] | None = None,
+) -> JSONResponse:
+    """Upload API の成功レスポンスを生成する.
+
+    cli_result が指定された場合、`pipeline` ブロックをレスポンスに含める。
+    """
+    body: dict[str, Any] = {"status": "ok", "message": message, "source_id": source_id}
+    if cli_result is not None:
+        body["pipeline"] = _extract_pipeline_response(cli_result)
+    return JSONResponse(body)
 
 
 def _upload_lock_conflict_response(e: CLISubprocessError) -> JSONResponse:

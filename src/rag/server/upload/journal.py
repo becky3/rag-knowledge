@@ -96,13 +96,20 @@ async def upload_journal(request: Request) -> Response:
 
             cli_result = await cli_subprocess._run_cli_subprocess("add-journal", args)
 
-            # CLI の result から entry_id を取得（利用可能な場合）
-            resolved_entry_id = cli_result.get("entry_id") or entry_id_str or title
+            # CLI の result から entry_id を取得。不在は CLI 側の契約違反のため 500 で明示失敗
+            resolved_entry_id = cli_result.get("entry_id")
+            if not isinstance(resolved_entry_id, str) or not resolved_entry_id:
+                logger.error(
+                    "Upload journal contract violation: CLI add-journal did not return entry_id (repository=%s, title=%s)",
+                    _sanitize_log_value(repository), _sanitize_log_value(title),
+                )
+                return _upload_error(500, "インジェスト処理中にエラーが発生しました")
             source_id = f"journal/{repository}/{resolved_entry_id}.md"
             logger.info("Journal uploaded: %s/%s", _sanitize_log_value(repository), _sanitize_log_value(resolved_entry_id))
             return _upload_success(
                 f"ジャーナルエントリを登録しました: {repository}/{resolved_entry_id}",
                 source_id=source_id,
+                cli_result=cli_result,
             )
         finally:
             if tmp_path is not None:

@@ -89,7 +89,7 @@ async def upload_document(request: Request) -> Response:
             if upload_mode != "fail":
                 args.extend(["--upload-mode", upload_mode])
 
-            await cli_subprocess._run_cli_subprocess("add-document", args)
+            cli_result = await cli_subprocess._run_cli_subprocess("add-document", args)
 
             _today = _dt.date.today()
             source_id = f"local/{_LOCAL_UPLOAD_DIR}/{_today.year}/{_today.month:02d}/{_today.day:02d}/{sanitized}"
@@ -97,6 +97,7 @@ async def upload_document(request: Request) -> Response:
             return _upload_success(
                 f"ドキュメントを取り込みました: {sanitized}",
                 source_id=source_id,
+                cli_result=cli_result,
             )
         finally:
             if tmp_path is not None:

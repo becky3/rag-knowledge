@@ -290,6 +290,8 @@ def _is_json_output(args: argparse.Namespace) -> bool:
 def _ingest_result_to_dict(
     ingest_result: "IngestResult",
     pipeline_summary: "PipelineSummary | None",
+    *,
+    entry_id: str | None = None,
 ) -> dict[str, object]:
     """IngestResult + PipelineSummary を JSON 出力用 dict に変換する.
 
@@ -306,6 +308,8 @@ def _ingest_result_to_dict(
         "aborted": ingest_result.aborted,
         "abort_reason": ingest_result.abort_reason,
     }
+    if entry_id is not None:
+        data["entry_id"] = entry_id
     if pipeline_summary is not None:
         data["pipeline"] = {
             "mode": pipeline_summary.mode.value,
@@ -2308,6 +2312,7 @@ async def run_add_journal(args: argparse.Namespace) -> None:
         _print_ingest_result(
             ingest_result, pipeline_summary, context=f"journal/{args.repository}",
             json_output=json_out,
+            entry_id=ingester.last_entry_id,
         )
 
 
@@ -2474,10 +2479,11 @@ def _print_ingest_result(
     *,
     context: str = "",
     json_output: bool = False,
+    entry_id: str | None = None,
 ) -> None:
     """取り込み結果を標準出力に表示する."""
     if json_output:
-        _output_result(_ingest_result_to_dict(ingest_result, pipeline_summary))
+        _output_result(_ingest_result_to_dict(ingest_result, pipeline_summary, entry_id=entry_id))
         return
     print(ingest_result.summary(context=context))
     if pipeline_summary is not None:

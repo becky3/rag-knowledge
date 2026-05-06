@@ -203,6 +203,121 @@ class TestUploadDocumentIntegration:
         assert "source_id" in body
 
     @pytest.mark.asyncio
+    async def test_successful_upload_includes_pipeline_block(
+        self, client: httpx.AsyncClient,
+    ) -> None:
+        """成功レスポンスに pipeline ブロック（5 フィールド）が含まれる."""
+        cli_result = {
+            "placed": 1,
+            "overwritten": 0,
+            "skipped": 0,
+            "errors": 0,
+            "pipeline": {
+                "mode": "incremental",
+                "total_files": 1,
+                "processed": 1,
+                "warnings": [],
+                "errors": [],
+            },
+        }
+        with patch(
+            "rag.server.cli_subprocess._run_cli_subprocess",
+            new_callable=AsyncMock,
+            return_value=cli_result,
+        ):
+            resp = await client.post(
+                "/upload/document",
+                files={"file": ("notes.md", b"# Test", "text/plain")},
+            )
+
+        assert resp.status_code == 200
+        body = resp.json()
+        assert "pipeline" in body
+        assert body["pipeline"] == {
+            "placed": 1,
+            "overwritten": 0,
+            "processed": 1,
+            "warnings": [],
+            "errors": [],
+        }
+
+    @pytest.mark.asyncio
+    async def test_pipeline_warnings_passthrough(self, client: httpx.AsyncClient) -> None:
+        """pipeline.warnings が message 文字列リストとして抽出される（A-3 silent failure 検出）.
+
+        CLI が返す PipelineWarningEntry の dict 配列から、Upload API は境界で
+        message フィールドのみを取り出して string list として公開する。
+        """
+        cli_result = {
+            "placed": 0,
+            "overwritten": 0,
+            "pipeline": {
+                "mode": "incremental",
+                "total_files": 1,
+                "processed": 0,
+                # CLI 由来の実際の構造（dict 配列）
+                "warnings": [
+                    {
+                        "path": "local/.upload/2026/05/06/notes.md",
+                        "message": "Empty conversion result: notes.md",
+                        "phase": "convert",
+                    },
+                ],
+                "errors": [],
+            },
+        }
+        with patch(
+            "rag.server.cli_subprocess._run_cli_subprocess",
+            new_callable=AsyncMock,
+            return_value=cli_result,
+        ):
+            resp = await client.post(
+                "/upload/document",
+                files={"file": ("notes.md", b"# Test", "text/plain")},
+            )
+
+        assert resp.status_code == 200
+        body = resp.json()
+        # 境界で message のみ抽出 → string list で公開
+        assert body["pipeline"]["warnings"] == ["Empty conversion result: notes.md"]
+        # 内部 path/phase はクライアントに露出しない
+        assert "path" not in str(body["pipeline"]["warnings"])
+        assert body["pipeline"]["placed"] == 0
+        assert body["pipeline"]["processed"] == 0
+
+    @pytest.mark.asyncio
+    async def test_overwritten_count_in_replace_mode(
+        self, client: httpx.AsyncClient,
+    ) -> None:
+        """upload_mode=replace で overwritten カウントがレスポンスに含まれる（A-4b）."""
+        cli_result = {
+            "placed": 0,
+            "overwritten": 1,
+            "pipeline": {
+                "mode": "incremental",
+                "total_files": 1,
+                "processed": 1,
+                "warnings": [],
+                "errors": [],
+            },
+        }
+        with patch(
+            "rag.server.cli_subprocess._run_cli_subprocess",
+            new_callable=AsyncMock,
+            return_value=cli_result,
+        ):
+            resp = await client.post(
+                "/upload/document",
+                files={"file": ("notes.md", b"# Test", "text/plain")},
+                data={"upload_mode": "replace"},
+            )
+
+        assert resp.status_code == 200
+        body = resp.json()
+        assert body["pipeline"]["overwritten"] == 1
+        assert body["pipeline"]["placed"] == 0
+
+    @pytest.mark.asyncio
     async def test_duplicate_file_returns_409(self, client: httpx.AsyncClient) -> None:
         """upload_mode=fail で同名ファイルが存在する場合 409 を返す."""
         with patch(
@@ -252,6 +367,105 @@ class TestUploadJournalIntegration:
         body = resp.json()
         assert body["status"] == "ok"
         assert "source_id" in body
+
+    @pytest.mark.asyncio
+    async def test_source_id_uses_cli_entry_id(self, client: httpx.AsyncClient) -> None:
+        """source_id レスポンスが CLI 由来の entry_id を使用する（title fallback しない）."""
+        # title と entry_id を意図的に異なる値にして、source_id がどちらに従うか検証
+        mock_cli_result = {
+            "entry_id": "20260506-014853-actual-entry",
+            "placed": 1,
+            "overwritten": 0,
+            "pipeline": {
+                "mode": "incremental",
+                "total_files": 1,
+                "processed": 1,
+                "warnings": [],
+                "errors": [],
+            },
+        }
+
+        with patch(
+            "rag.server.cli_subprocess._run_cli_subprocess",
+            new_callable=AsyncMock,
+            return_value=mock_cli_result,
+        ):
+            resp = await client.post(
+                "/upload/journal",
+                files={"file": ("session.md", b"# Session log", "text/plain")},
+                data={
+                    "title": "Display title which differs",
+                    "repository": "rag-knowledge",
+                },
+            )
+
+        assert resp.status_code == 200
+        body = resp.json()
+        assert body["source_id"] == "journal/rag-knowledge/20260506-014853-actual-entry.md"
+
+    @pytest.mark.asyncio
+    async def test_missing_entry_id_returns_500(self, client: httpx.AsyncClient) -> None:
+        """CLI が entry_id を返さなかった場合は契約違反として 500 を返す（fallback しない）."""
+        # CLI 実装漏れを模擬: entry_id を含まない result
+        mock_cli_result = {"placed": 1}
+
+        with patch(
+            "rag.server.cli_subprocess._run_cli_subprocess",
+            new_callable=AsyncMock,
+            return_value=mock_cli_result,
+        ):
+            resp = await client.post(
+                "/upload/journal",
+                files={"file": ("session.md", b"# Test", "text/plain")},
+                data={
+                    "title": "Sample title",
+                    "repository": "rag-knowledge",
+                },
+            )
+
+        assert resp.status_code == 500
+        body = resp.json()
+        assert body["status"] == "error"
+        # 内部詳細（contract violation 等）はクライアントに露出しない
+        assert "title" not in body["message"]
+
+    @pytest.mark.asyncio
+    async def test_successful_upload_includes_pipeline_block(
+        self, client: httpx.AsyncClient,
+    ) -> None:
+        """成功レスポンスに pipeline ブロックが含まれる."""
+        cli_result = {
+            "entry_id": "20260326-120000-test",
+            "placed": 1,
+            "overwritten": 0,
+            "pipeline": {
+                "mode": "incremental",
+                "total_files": 1,
+                "processed": 1,
+                "warnings": [],
+                "errors": [],
+            },
+        }
+        with patch(
+            "rag.server.cli_subprocess._run_cli_subprocess",
+            new_callable=AsyncMock,
+            return_value=cli_result,
+        ):
+            resp = await client.post(
+                "/upload/journal",
+                files={"file": ("session.md", b"# Test", "text/plain")},
+                data={"title": "T", "repository": "rag-knowledge"},
+            )
+
+        assert resp.status_code == 200
+        body = resp.json()
+        assert body["pipeline"] == {
+            "placed": 1,
+            "overwritten": 0,
+            "processed": 1,
+            "warnings": [],
+            "errors": [],
+        }
 
     @pytest.mark.asyncio
     async def test_japanese_title_passed_to_cli(self, client: httpx.AsyncClient) -> None:
