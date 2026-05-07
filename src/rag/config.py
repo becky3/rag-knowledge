@@ -315,7 +315,7 @@ class RAGSettings(BaseModel):
 
     # YouTube インジェスター — API BAN 回避のためのレート制限
     rag_youtube_max_videos: int = Field(ge=1, le=500)
-    rag_youtube_request_interval: float = Field(ge=0.1, le=60.0)
+    rag_youtube_request_interval: float = Field(ge=60.0, le=600.0)
     rag_youtube_request_timeout: int = Field(ge=1, le=120)
     # 字幕取得の優先言語順（先頭が最優先）
     rag_youtube_transcript_languages: list[str] = Field(min_length=1)

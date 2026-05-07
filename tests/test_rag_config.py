@@ -121,6 +121,36 @@ class TestZennRequestInterval:
             _make_settings(rag_zenn_request_interval=60.1)
 
 
+# --- YouTube インジェスター: rag_youtube_request_interval ---
+
+
+class TestYoutubeRequestInterval:
+    """rag_youtube_request_interval のバリデーションテスト (#748)."""
+
+    def test_default_value(self) -> None:
+        """テスト用デフォルト値が 60.0 であること."""
+        settings = _make_settings()
+        assert settings.rag_youtube_request_interval == 60.0
+
+    def test_valid_range(self) -> None:
+        """許容範囲の境界値が設定できること."""
+        settings = _make_settings(rag_youtube_request_interval=60.0)
+        assert settings.rag_youtube_request_interval == 60.0
+
+        settings = _make_settings(rag_youtube_request_interval=600.0)
+        assert settings.rag_youtube_request_interval == 600.0
+
+    def test_below_minimum(self) -> None:
+        """下限未満でバリデーションエラーになること."""
+        with pytest.raises(ValidationError):
+            _make_settings(rag_youtube_request_interval=59.9)
+
+    def test_above_maximum(self) -> None:
+        """上限超過でバリデーションエラーになること."""
+        with pytest.raises(ValidationError):
+            _make_settings(rag_youtube_request_interval=600.1)
+
+
 # --- ログファイル出力: rag_log_dir ---
 
 
@@ -352,7 +382,7 @@ rag_bluesky_request_interval = 1.0
 rag_bluesky_include_reposts = true
 rag_bluesky_force_youtube_reingest = false
 rag_youtube_max_videos = 100
-rag_youtube_request_interval = 30.0
+rag_youtube_request_interval = 60.0
 rag_youtube_request_timeout = 30
 rag_youtube_transcript_languages = ["ja", "en"]
 rag_youtube_merge_gap_sec = 2.0
