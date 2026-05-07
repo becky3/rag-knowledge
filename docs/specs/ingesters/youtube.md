@@ -73,6 +73,7 @@ youtube-transcript-api は非公式 API を使用しており、短時間に多�
 ### 外部ツール依存
 
 - **FFmpeg**: yt-dlp の音声変換（`FFmpegExtractAudio`）に必要。Whisper フォールバック時に音声を WAV 形式に変換する際に使用する。未インストールの場合、音声文字起こしが失敗する
+- **JS ランタイム**: yt-dlp の JS challenge 評価に必要。`deno` / `node` / `bun` / `quickjs` のいずれか 1 つを OS にインストールしておく。未インストールの場合、yt-dlp が劣化抽出モード（公式で deprecated 警告）に移行し、音声ダウンロード経路で transient エラーを引き起こすことがある
 
 ### バリデーションとクランプの使い分け
 
