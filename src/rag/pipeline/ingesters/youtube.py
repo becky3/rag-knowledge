@@ -448,7 +448,12 @@ class YoutubeIngester(BaseIngester):
                     consecutive_errors = 0
 
             except Exception as e:
-                logger.error("動画処理失敗 (video_id=%s): %s", video_id, e)
+                # transient な外部ライブラリ起因エラーの原因特定のため
+                # traceback を残す（外部 lib 内部の None 参照等の発生箇所を追跡可能にする）
+                logger.error(
+                    "動画処理失敗 (video_id=%s): %s",
+                    video_id, e, exc_info=True,
+                )
                 result.errors += 1
                 result.error_details.append(IngestErrorDetail(
                     category=IngestErrorCategory.METADATA_FETCH.value,

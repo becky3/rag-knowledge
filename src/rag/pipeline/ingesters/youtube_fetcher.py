@@ -29,6 +29,18 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
+# yt-dlp が JS challenge 評価に使う候補ランタイム。
+# yt-dlp 既定は deno のみだが、OS にインストール済みのいずれかが選ばれるよう
+# 全候補を有効化する。未インストールのランタイムはサイレントにスキップされる。
+# JS ランタイム不在時の劣化抽出モードでは音声 DL 経路が transient TypeError を
+# 引き起こすことがあり、それを防ぐ目的で必要。
+_YTDLP_JS_RUNTIMES: dict[str, dict[str, str]] = {
+    "deno": {},
+    "node": {},
+    "bun": {},
+    "quickjs": {},
+}
+
 
 class YoutubeFetcher(Protocol):
     """YouTube 外部アクセス処理の抽象 Port.
@@ -104,6 +116,7 @@ class RealYoutubeFetcher:
                 "quiet": True,
                 "no_warnings": True,
                 "socket_timeout": request_timeout,
+                "js_runtimes": _YTDLP_JS_RUNTIMES,
             }
             with yt_dlp.YoutubeDL(ydl_opts) as ydl:
                 info: dict[str, Any] = ydl.extract_info(
@@ -207,6 +220,7 @@ class RealYoutubeFetcher:
                 "no_warnings": True,
                 "socket_timeout": request_timeout,
                 "playlistend": max_videos,
+                "js_runtimes": _YTDLP_JS_RUNTIMES,
             }
             with yt_dlp.YoutubeDL(ydl_opts) as ydl:
                 info: dict[str, Any] = ydl.extract_info(playlist_url, download=False)
@@ -233,6 +247,7 @@ class RealYoutubeFetcher:
                 "quiet": True,
                 "no_warnings": True,
                 "socket_timeout": request_timeout,
+                "js_runtimes": _YTDLP_JS_RUNTIMES,
             }
             with yt_dlp.YoutubeDL(ydl_opts) as ydl:
                 ydl.download([f"https://www.youtube.com/watch?v={video_id}"])
