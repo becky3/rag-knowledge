@@ -21,6 +21,8 @@ from urllib.parse import urldefrag, urlparse
 import scrapy
 from scrapy.http import Response
 
+from rag.scrapy._constants import WEB_EXTENSIONS
+
 
 class SiteSpider(scrapy.Spider):  # type: ignore[misc]
     """汎用サイトクロール Spider.
@@ -226,9 +228,6 @@ class SiteSpider(scrapy.Spider):  # type: ignore[misc]
             return None
         return resolved_filepath
 
-    # .html 付加をスキップする Web 系拡張子
-    _WEB_EXTENSIONS = {".html", ".htm", ".xhtml", ".shtml", ".php", ".asp", ".aspx", ".jsp"}
-
     @staticmethod
     def _url_to_filename(url: str) -> str:
         """URL からファイル相対パスを生成する.
@@ -243,7 +242,7 @@ class SiteSpider(scrapy.Spider):  # type: ignore[misc]
         if not path:
             return "index.html"
         suffix = Path(path).suffix.lower()
-        if suffix in SiteSpider._WEB_EXTENSIONS:
+        if suffix in WEB_EXTENSIONS:
             return path
         return f"{path}.html"
 
