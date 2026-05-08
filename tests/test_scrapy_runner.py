@@ -509,6 +509,111 @@ class TestRealScrapyRunnerRun:
         assert params["url_pattern"] == ""
 
     @pytest.mark.asyncio()
+    async def test_url_pattern_auto_generated_from_file_url(self, tmp_path: Path) -> None:
+        """開始 URL の末尾セグメントが Web 系拡張子の場合、親ディレクトリまで丸めた url_pattern が生成されること."""
+        runner = RealScrapyRunner(**make_scrapy_runner_args(temp_dir=tmp_path))
+
+        mock_process = AsyncMock()
+        mock_process.wait.return_value = 0
+        mock_process.stderr = _async_lines_iter([])
+
+        with patch("asyncio.create_subprocess_exec", return_value=mock_process):
+            result = await runner.run(start_url="https://example.com/docs/vol1/index.html")
+
+        params_path = result.output_dir.parent / "spider_params.json"
+        params = json.loads(params_path.read_text(encoding="utf-8"))
+        # 末尾の index.html を取り除き、親ディレクトリ /docs/vol1 までで丸める
+        assert params["url_pattern"] == r"^https://example\.com/docs/vol1(?:/|$)"
+
+    @pytest.mark.asyncio()
+    async def test_url_pattern_auto_generated_keeps_extensionless_path(
+        self, tmp_path: Path
+    ) -> None:
+        """末尾スラッシュなし + 拡張子なしのケースで丸めが発火しないこと（既存 from_path テストとの境界条件）."""
+        runner = RealScrapyRunner(**make_scrapy_runner_args(temp_dir=tmp_path))
+
+        mock_process = AsyncMock()
+        mock_process.wait.return_value = 0
+        mock_process.stderr = _async_lines_iter([])
+
+        with patch("asyncio.create_subprocess_exec", return_value=mock_process):
+            result = await runner.run(start_url="https://example.com/docs/guide")
+
+        params_path = result.output_dir.parent / "spider_params.json"
+        params = json.loads(params_path.read_text(encoding="utf-8"))
+        # 拡張子なしのパスは既存挙動を維持（/docs/guide まで）
+        assert params["url_pattern"] == r"^https://example\.com/docs/guide(?:/|$)"
+
+    @pytest.mark.asyncio()
+    async def test_url_pattern_root_level_file_url_keeps_self_only(self, tmp_path: Path) -> None:
+        """ルート直下の Web 系拡張子ファイル URL では従来挙動（自身のみマッチ）を保持すること."""
+        runner = RealScrapyRunner(**make_scrapy_runner_args(temp_dir=tmp_path))
+
+        mock_process = AsyncMock()
+        mock_process.wait.return_value = 0
+        mock_process.stderr = _async_lines_iter([])
+
+        with patch("asyncio.create_subprocess_exec", return_value=mock_process):
+            result = await runner.run(start_url="https://example.com/index.html")
+
+        params_path = result.output_dir.parent / "spider_params.json"
+        params = json.loads(params_path.read_text(encoding="utf-8"))
+        # 親ディレクトリがルートになるため丸めず、自身のみマッチするパターン
+        # （意図しない全ドメインクロールを防ぐ）
+        assert params["url_pattern"] == r"^https://example\.com/index\.html(?:/|$)"
+
+    @pytest.mark.asyncio()
+    async def test_url_pattern_non_web_extension_not_rolled_up(self, tmp_path: Path) -> None:
+        """末尾セグメントが Web 系拡張子に含まれない場合は丸めないこと（PDF 等）."""
+        runner = RealScrapyRunner(**make_scrapy_runner_args(temp_dir=tmp_path))
+
+        mock_process = AsyncMock()
+        mock_process.wait.return_value = 0
+        mock_process.stderr = _async_lines_iter([])
+
+        with patch("asyncio.create_subprocess_exec", return_value=mock_process):
+            result = await runner.run(start_url="https://example.com/docs/manual.pdf")
+
+        params_path = result.output_dir.parent / "spider_params.json"
+        params = json.loads(params_path.read_text(encoding="utf-8"))
+        # .pdf は _WEB_EXTENSIONS に含まれないため丸めず
+        assert params["url_pattern"] == r"^https://example\.com/docs/manual\.pdf(?:/|$)"
+
+    @pytest.mark.asyncio()
+    async def test_url_pattern_version_like_segment_not_rolled_up(self, tmp_path: Path) -> None:
+        """バージョン番号風セグメント（/api/v1.0 等）が Web 系拡張子と誤検出されないこと."""
+        runner = RealScrapyRunner(**make_scrapy_runner_args(temp_dir=tmp_path))
+
+        mock_process = AsyncMock()
+        mock_process.wait.return_value = 0
+        mock_process.stderr = _async_lines_iter([])
+
+        with patch("asyncio.create_subprocess_exec", return_value=mock_process):
+            result = await runner.run(start_url="https://example.com/api/v1.0")
+
+        params_path = result.output_dir.parent / "spider_params.json"
+        params = json.loads(params_path.read_text(encoding="utf-8"))
+        # .0 は _WEB_EXTENSIONS に含まれないため丸めず（誤検出回避）
+        assert params["url_pattern"] == r"^https://example\.com/api/v1\.0(?:/|$)"
+
+    @pytest.mark.asyncio()
+    async def test_url_pattern_dotfile_not_rolled_up(self, tmp_path: Path) -> None:
+        """先頭ドットの dotfile 形式（/.gitignore 等）が誤検出されないこと."""
+        runner = RealScrapyRunner(**make_scrapy_runner_args(temp_dir=tmp_path))
+
+        mock_process = AsyncMock()
+        mock_process.wait.return_value = 0
+        mock_process.stderr = _async_lines_iter([])
+
+        with patch("asyncio.create_subprocess_exec", return_value=mock_process):
+            result = await runner.run(start_url="https://example.com/repo/.gitignore")
+
+        params_path = result.output_dir.parent / "spider_params.json"
+        params = json.loads(params_path.read_text(encoding="utf-8"))
+        # dotfile（.gitignore）は Path.suffix が空文字列のため丸めず
+        assert params["url_pattern"] == r"^https://example\.com/repo/\.gitignore(?:/|$)"
+
+    @pytest.mark.asyncio()
     async def test_url_pattern_explicit_takes_priority(self, tmp_path: Path) -> None:
         """url_pattern を明示指定した場合は自動生成より優先されること."""
         runner = RealScrapyRunner(**make_scrapy_runner_args(temp_dir=tmp_path))
