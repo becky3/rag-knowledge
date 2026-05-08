@@ -21,9 +21,7 @@ from urllib.parse import urldefrag, urlparse
 import scrapy
 from scrapy.http import Response
 
-# Web 系拡張子（HTML 系コンテンツとみなす拡張子のセット）
-# spider.py の `.html` 付加判定と runner.py の url_pattern 自動生成判定で共有する
-_WEB_EXTENSIONS = {".html", ".htm", ".xhtml", ".shtml", ".php", ".asp", ".aspx", ".jsp"}
+from rag.scrapy._constants import WEB_EXTENSIONS
 
 
 class SiteSpider(scrapy.Spider):  # type: ignore[misc]
@@ -244,7 +242,7 @@ class SiteSpider(scrapy.Spider):  # type: ignore[misc]
         if not path:
             return "index.html"
         suffix = Path(path).suffix.lower()
-        if suffix in _WEB_EXTENSIONS:
+        if suffix in WEB_EXTENSIONS:
             return path
         return f"{path}.html"
 

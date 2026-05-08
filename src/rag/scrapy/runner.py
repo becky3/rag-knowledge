@@ -22,7 +22,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any, Protocol
 from urllib.parse import urlparse
 
-from rag.scrapy.spider import _WEB_EXTENSIONS
+from rag.scrapy._constants import WEB_EXTENSIONS
 
 if TYPE_CHECKING:
     from rag.config import RAGSettings
@@ -196,12 +196,12 @@ class RealScrapyRunner:
                 path = parsed.path.rstrip("/")
                 if path and path != "/":
                     # パス末尾セグメントが Web 系拡張子で終わる場合は親ディレクトリまで丸める
-                    # （同ディレクトリ内の他ファイル展開のため）。判定は spider.py の
-                    # _WEB_EXTENSIONS と共有し、HTML 系コンテンツのみを対象とすることで
+                    # （同ディレクトリ内の他ファイル展開のため）。判定は _constants.py の
+                    # WEB_EXTENSIONS を共有し、HTML 系コンテンツのみを対象とすることで
                     # バージョン番号風セグメント（/api/v1.0 等）の誤検出を防ぐ
                     head, _, last_segment = path.rpartition("/")
                     suffix = Path(last_segment).suffix.lower()
-                    if suffix in _WEB_EXTENSIONS and head:
+                    if suffix in WEB_EXTENSIONS and head:
                         # head が空（ルート直下ファイル URL）の場合は丸めず従来挙動を保持
                         path = head
                 if path and path != "/":

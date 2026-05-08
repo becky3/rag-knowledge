@@ -69,10 +69,10 @@ MCP ツール `rag_site_ingest` と CLI コマンド `site-ingest` の 2 つの�
 ### パスプレフィックス制約
 
 - `url_pattern` が未指定の場合、開始 URL のパスプレフィックスから正規表現パターンを自動生成する
-- 例: `https://example.com/docs/` → `^https://example\.com/docs/`
-- 開始 URL のパス末尾セグメントが Web 系拡張子（`_WEB_EXTENSIONS`）で終わる場合は、親ディレクトリまで丸めてパターンを生成する。これにより、開始 URL `.../vol1/index.html` を渡したときに同ディレクトリの `index2.html` 等にも展開される
+- 例: `https://example.com/docs/` → `^https://example\.com/docs(?:/|$)`
+- 開始 URL のパス末尾セグメントが Web 系拡張子（`WEB_EXTENSIONS`）で終わる場合は、親ディレクトリまで丸めてパターンを生成する。これにより、開始 URL `.../vol1/index.html` を渡したときに同ディレクトリの `index2.html` 等にも展開される
   - 例: `https://example.com/docs/vol1/index.html` → `^https://example\.com/docs/vol1(?:/|$)`
-  - 判定対象の拡張子セット `_WEB_EXTENSIONS`（`src/rag/scrapy/spider.py` で定義、`runner.py` から import して共有）: `.html` `.htm` `.xhtml` `.shtml` `.php` `.asp` `.aspx` `.jsp`
+  - 判定対象の拡張子セット `WEB_EXTENSIONS`（`src/rag/scrapy/_constants.py` で定義、`spider.py` / `runner.py` / `bridge.py` から import して共有）: `.html` `.htm` `.xhtml` `.shtml` `.php` `.asp` `.aspx` `.jsp`
   - 上記セットに含まれない拡張子（`.pdf`、`.txt`、`.md` 等）の場合は丸めず、開始 URL 自身のパスプレフィックスをそのまま使用する。これによりバージョン番号風セグメント（`/api/v1.0` 等）の誤検出を回避する
     - 例: `https://example.com/docs/manual.pdf` → `^https://example\.com/docs/manual\.pdf(?:/|$)`（開始 URL 自身のみマッチ）
   - 先頭ドットの dotfile 形式（`.gitignore` 等）は `Path.suffix` が空文字列となり、対象外

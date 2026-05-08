@@ -20,15 +20,15 @@ from rag.pipeline.ingesters._common import (
     IngestErrorDetail,
     IngestResult,
 )
-from rag.scrapy.spider import _WEB_EXTENSIONS
+from rag.scrapy._constants import WEB_EXTENSIONS
 from rag.store.path_converter import url_to_path
 
 # converter 系の追加拡張子（Web 系拡張子に加えて bridge で認識する拡張子）
 _CONVERTER_EXTENSIONS: frozenset[str] = frozenset({".pdf", ".json", ".md", ".txt", ".adoc"})
 
 # .html 付与をスキップする拡張子
-# Web 系拡張子（spider.py の _WEB_EXTENSIONS が SSoT）+ converter が認識する拡張子の和集合
-_KNOWN_WEB_EXTENSIONS: frozenset[str] = frozenset(_WEB_EXTENSIONS) | _CONVERTER_EXTENSIONS
+# Web 系拡張子（rag.scrapy._constants の WEB_EXTENSIONS が SSoT）+ converter が認識する拡張子の和集合
+_KNOWN_WEB_EXTENSIONS: frozenset[str] = WEB_EXTENSIONS | _CONVERTER_EXTENSIONS
 
 
 def _needs_html_extension(url: str) -> bool:
