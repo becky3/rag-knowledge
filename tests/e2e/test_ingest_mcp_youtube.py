@@ -55,7 +55,7 @@ class TestMcpYoutubeIngest:
         ingest_response = await call_mcp_tool(
             e2e_mcp_server,
             "rag_add_youtube",
-            {"video_url": _FAKE_VIDEO_URL},
+            {"video_urls": [_FAKE_VIDEO_URL]},
         )
         assert "完了" in ingest_response or "placed" in ingest_response.lower(), (
             f"取り込み完了を示すテキストが応答に含まれていない: {ingest_response}"
@@ -85,7 +85,7 @@ class TestMcpYoutubeIngest:
         response = await call_mcp_tool(
             e2e_mcp_server,
             "rag_add_youtube",
-            {"video_url": _FAKE_VIDEO_URL},
+            {"video_urls": [_FAKE_VIDEO_URL]},
         )
         assert "[FAKE MODE" in response, (
             f"fake モードラベルが応答に含まれていない: {response[:300]}"
@@ -108,7 +108,7 @@ class TestMcpYoutubeIngest:
         first = await call_mcp_tool(
             e2e_mcp_server,
             "rag_add_youtube",
-            {"video_url": _OVERWRITE_TEST_VIDEO_URL},
+            {"video_urls": [_OVERWRITE_TEST_VIDEO_URL]},
         )
         # 1 回目は新規取り込みのため「上書き」表記を含まないことを厳密に確認する。
         # （早期 return バグが「常に上書き 0 件」を返す挙動を 2 回目側で検出するため、
@@ -123,7 +123,7 @@ class TestMcpYoutubeIngest:
         second = await call_mcp_tool(
             e2e_mcp_server,
             "rag_add_youtube",
-            {"video_url": _OVERWRITE_TEST_VIDEO_URL},
+            {"video_urls": [_OVERWRITE_TEST_VIDEO_URL]},
         )
         # 2 回目は overwritten カウントが反映される（早期 return バグなら反映されない）
         assert "上書き" in second or "overwritten" in second.lower(), (

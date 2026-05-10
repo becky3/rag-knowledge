@@ -123,8 +123,10 @@ BlueSky 投稿は**複合ソース**として扱われる。投稿 JSON が親�
 
 | コマンド | 引数 | 振る舞い |
 |---------|------|---------|
-| `crawl-bluesky` | `handle`、`--max-posts`（任意）、`--include-reposts`（任意）、`--force`（任意） | `rag_crawl_bluesky` と同等の処理を CLI から実行する |
-| `ingest-bluesky` | `url`（1 件以上） | `rag_add_bluesky` と同等の処理を CLI から実行する |
+| `crawl-bluesky` | `handle`、`--max-posts`（任意）、`--include-reposts`（任意）、`--force`（任意）、`--skip-pipeline`（任意） | `rag_crawl_bluesky` と同等の処理を CLI から実行する |
+| `ingest-bluesky` | `url`（1 件以上）、`--skip-pipeline`（任意） | `rag_add_bluesky` と同等の処理を CLI から実行する |
+
+`--skip-pipeline` の共通仕様は [common.md](common.md#--skip-pipeline-フラグ共通仕様) を参照。
 
 ### 設定項目
 

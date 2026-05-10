@@ -48,7 +48,7 @@ class TestMcpAozoraIngest:
         add_response = await call_mcp_tool(
             e2e_mcp_server,
             "rag_add_aozora",
-            {"book_id": _FAKE_BOOK_ID},
+            {"book_ids": [_FAKE_BOOK_ID]},
         )
         assert "完了" in add_response or "placed" in add_response.lower(), (
             f"作品取り込みが完了していない: {add_response[:500]}"

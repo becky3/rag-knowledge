@@ -893,26 +893,36 @@ class TestRagDeleteTool:
     async def test_success(self) -> None:
         """正常系: 削除成功メッセージが返ること."""
         mod = import_module("rag.server")
-        mock_result = {"deleted": True, "pipeline": None}
+        mock_result = {
+            "deleted": True,
+            "deleted_count": 1,
+            "deleted_ids": ["https://example.com/page"],
+            "not_found_ids": [],
+            "pipeline": None,
+        }
         with patch(
             "rag.server.cli_subprocess._run_cli_subprocess",
             new_callable=AsyncMock, return_value=mock_result,
         ) as mock_cli:
-            result = await mod.rag_delete("https://example.com/page")
+            result = await mod.rag_delete(["https://example.com/page"])
 
-        mock_cli.assert_called_once_with("delete", ["https://example.com/page"], ctx=None)
+        # `--` separator で positional 群を分離（オプション注入対策）
+        mock_cli.assert_called_once_with("delete", ["--", "https://example.com/page"], ctx=None)
         assert "削除しました" in result
 
     @pytest.mark.asyncio
     async def test_not_found(self) -> None:
         """ソースが見つからない場合のメッセージが返ること."""
         mod = import_module("rag.server")
-        mock_result = {"not_found": True}
+        mock_result = {
+            "deleted": False,
+            "not_found_ids": ["https://example.com/missing"],
+        }
         with patch(
             "rag.server.cli_subprocess._run_cli_subprocess",
             new_callable=AsyncMock, return_value=mock_result,
         ):
-            result = await mod.rag_delete("https://example.com/missing")
+            result = await mod.rag_delete(["https://example.com/missing"])
 
         assert "見つかりませんでした" in result
 
@@ -925,9 +935,38 @@ class TestRagDeleteTool:
             new_callable=AsyncMock,
             side_effect=mod.CLISubprocessError("排他制御エラー", code="LOCK_CONFLICT"),
         ):
-            result = await mod.rag_delete("https://example.com/page")
+            result = await mod.rag_delete(["https://example.com/page"])
 
         assert "ロックを保持しています" in result
+
+    @pytest.mark.asyncio
+    async def test_bulk_delete_with_skip_pipeline(self) -> None:
+        """bulk 削除 + skip_pipeline で CLI に複数 source_id + --skip-pipeline が渡る."""
+        mod = import_module("rag.server")
+        mock_result = {
+            "deleted": True,
+            "deleted_count": 2,
+            "deleted_ids": ["src/a.md", "src/b.md"],
+            "not_found_ids": [],
+            "pipeline": None,
+        }
+        with patch(
+            "rag.server.cli_subprocess._run_cli_subprocess",
+            new_callable=AsyncMock, return_value=mock_result,
+        ) as mock_cli:
+            await mod.rag_delete(["src/a.md", "src/b.md"], skip_pipeline=True)
+
+        cli_args = mock_cli.call_args[0][1]
+        assert "src/a.md" in cli_args
+        assert "src/b.md" in cli_args
+        assert "--skip-pipeline" in cli_args
+
+    @pytest.mark.asyncio
+    async def test_empty_source_ids_returns_error(self) -> None:
+        """空 list でエラーメッセージが返る."""
+        mod = import_module("rag.server")
+        result = await mod.rag_delete([])
+        assert "エラー" in result
 
 
 class TestRagRebuildTool:

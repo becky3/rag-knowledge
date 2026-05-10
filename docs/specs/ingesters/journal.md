@@ -67,7 +67,7 @@ Journal インジェスターは、開発ジャーナル（セッションごと
 
 | コマンド | 引数 | 振る舞い |
 |---------|------|---------|
-| `add-journal` | `--title`, `--file`, `--repository`, `--entry-id`（任意） | 単一ジャーナルエントリを登録する。パイプライン処理（convert → index）まで一貫して実行する |
+| `add-journal` | `--title`, `--file` または `--stdin`（排他）, `--repository`, `--entry-id`（任意） | 単一ジャーナルエントリを登録する。パイプライン処理（convert → index）まで一貫して実行する。bulk 取り込みは対象外（session 記録 = 1 件運用のため） |
 | `migrate-journal` | `--dir`, `--repository` | 既存ジャーナルファイルを一括で source_store に配置する。パイプライン処理は含まない（事後に `rebuild --mode incremental` を実行する） |
 
 #### add-journal パラメータ
@@ -75,11 +75,13 @@ Journal インジェスターは、開発ジャーナル（セッションごと
 | パラメータ | 短縮 | 必須 | 説明 |
 |-----------|------|------|------|
 | `--title` | `-t` | はい | エントリタイトル |
-| `--file` | `-f` | はい | 本文 Markdown ファイルのパス。CLI がファイルを読み込んでコンテンツをインジェスターに渡す |
+| `--file` | `-f` | はい（`--stdin` と排他） | 本文 Markdown ファイルのパス。CLI がファイルを読み込んでコンテンツをインジェスターに渡す |
+| `--stdin` | — | はい（`--file` と排他） | stdin から Markdown を読み込む |
 | `--repository` | `-r` | はい | リポジトリ名 |
 | `--entry-id` | `-e` | いいえ | エントリ識別子（省略時は自動生成） |
 
 MCP ツール（`rag_add_journal`）経由では `content` パラメータに Markdown 文字列を直接渡す。CLI は `--file` で指定したファイルを読み込み、同じインジェスターインターフェースを呼び出す。
+`add-journal` は `--skip-pipeline` 対象外（外部 API 経由の単発取り込みが主用途のため）。
 
 #### migrate-journal パラメータ
 

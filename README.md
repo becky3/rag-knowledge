@@ -312,6 +312,30 @@ HTTP モード（`/mcp` パスが必要）:
 
 各コマンドの詳細は `uv run python -m rag.cli <command> --help` を参照。MCP ツール一覧は [rag-knowledge.md](docs/specs/rag-knowledge.md) を参照。
 
+### `--skip-pipeline` フラグ（バルク取り込みの高速化）
+
+全 ingest 系・crawl 系コマンドに `--skip-pipeline` フラグが用意されている。指定すると source_store への配置 + git commit までで停止し、後段のパイプライン処理（converter + indexer）をスキップする。連続取り込み時の BM25 全体再構築（1 件あたり 1 回発生）をまとめて 1 回にできる。
+
+```bash
+# 連続取り込み（pipeline をスキップ）
+uv run python -m rag.cli ingest-aozora 1234 5678 9012 --skip-pipeline
+uv run python -m rag.cli ingest-youtube https://youtu.be/A https://youtu.be/B --skip-pipeline
+
+# 末尾にまとめて 1 回 rebuild
+uv run python -m rag.cli rebuild --mode incremental
+```
+
+複数引数受付（`ingest-youtube` / `ingest-aozora` の `nargs='+'`、`delete` の `nargs='+'`）と組み合わせて使うと効果的。
+`add-document` / `add-journal` は外部 API 経由の単発取り込みが主用途のため bulk 化対象外（複数件は `crawl-documents` / `migrate-journal` を使用）。
+共通仕様は [docs/specs/ingesters/common.md](docs/specs/ingesters/common.md) の「`--skip-pipeline` フラグ共通仕様」を参照。
+
+> **破壊的変更（Issue #757）**:
+>
+> - `site-ingest` の `--download-only` フラグおよび MCP `rag_site_ingest` の `download_only` パラメータは廃止
+>   （`--skip-pipeline` / `skip_pipeline` に置き換え、同等の振る舞い）
+> - MCP `rag_add_youtube` / `rag_add_aozora` / `rag_delete` のパラメータは複数受付に変更
+>   （`video_url: str` → `video_urls: list[str]` / `book_id: str` → `book_ids: list[str]` / `source_id: str` → `source_ids: list[str]`）
+
 ## Journal CLI
 
 ### 単一エントリ登録

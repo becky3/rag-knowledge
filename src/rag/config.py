@@ -360,7 +360,7 @@ class RAGSettings(BaseModel):
     hnsw_search_ef: int = Field(ge=10, le=2000)
 
     # サイト一括取り込み（Scrapy subprocess）
-    # download_only 指定時も source_store への git commit は実行される（後から rebuild で差分処理可能）
+    # --skip-pipeline 指定時も source_store への git commit は実行される（後から rebuild で差分処理可能）
     site_ingest_delay_sec: float = Field(ge=0.05, le=60.0)
     site_ingest_max_pages: int = Field(ge=1, le=1000)
     site_ingest_download_timeout: int = Field(ge=1, le=300)

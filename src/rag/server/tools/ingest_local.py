@@ -137,6 +137,7 @@ async def rag_crawl_documents(
     dir_path: str,
     pattern: str = "**/*",
     upload_mode: str = "fail",
+    skip_pipeline: bool = False,
     ctx: MCPContext | None = None,
 ) -> str:
     """[rag-knowledge] RAG crawl documents - ディレクトリ内のドキュメントを一括取り込み.
@@ -151,6 +152,8 @@ async def rag_crawl_documents(
         dir_path: 取り込み対象ディレクトリのパス（絶対パスまたは相対パス）
         pattern: glob パターン（デフォルト: ``**/*`` で再帰的に全対応ファイルを検索）
         upload_mode: 同名ファイル存在時の動作。"fail"（スキップ、デフォルト）または "replace"（上書き）
+        skip_pipeline: True の場合、後段のパイプライン処理（converter + indexer）を
+            スキップする。CLI の `--skip-pipeline` と等価
 
     Returns:
         取り込み結果のサマリーテキスト
@@ -163,6 +166,8 @@ async def rag_crawl_documents(
         args.extend(["--pattern", pattern])
     if upload_mode != "fail":
         args.extend(["--upload-mode", upload_mode])
+    if skip_pipeline:
+        args.append("--skip-pipeline")
 
     label = _fake_mode_labels(_LOCAL_INGEST_FAKE_SOURCES)
     try:

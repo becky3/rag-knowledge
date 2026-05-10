@@ -120,8 +120,10 @@ site_ingest（URL ベースの Web クロール）とは独立したツールと
 
 | コマンド | 引数 | 振る舞い |
 |---------|------|---------|
-| `crawl-zenn` | `username`、`--max-articles`（任意）、`--content-type`（任意）、`--force`（任意） | `rag_crawl_zenn` と同等の処理を CLI から実行する |
-| `ingest-zenn` | `url`（1 件以上） | `rag_add_zenn` と同等の処理を CLI から実行する |
+| `crawl-zenn` | `username`、`--max-articles`（任意）、`--content-type`（任意）、`--force`（任意）、`--skip-pipeline`（任意） | `rag_crawl_zenn` と同等の処理を CLI から実行する |
+| `ingest-zenn` | `url`（1 件以上）、`--skip-pipeline`（任意） | `rag_add_zenn` と同等の処理を CLI から実行する |
+
+`--skip-pipeline` の共通仕様は [common.md](common.md#--skip-pipeline-フラグ共通仕様) を参照。
 
 ### 設定項目
 

@@ -214,8 +214,8 @@ class TestMcpSiteIngestCliDelegation:
             assert "--force" not in cli_args
 
     @pytest.mark.asyncio
-    async def test_download_only_flag_passed(self) -> None:
-        """download_only フラグが CLI 引数に含まれること."""
+    async def test_skip_pipeline_flag_passed(self) -> None:
+        """skip_pipeline フラグが CLI 引数に --skip-pipeline として含まれること."""
         mock_result = {"placed": 1, "skipped": 0, "overwritten": 0, "errors": 0}
 
         mod = import_module("rag.server")
@@ -226,10 +226,10 @@ class TestMcpSiteIngestCliDelegation:
         ):
             await mod.rag_site_ingest(
                 url="https://example.com",
-                download_only=True,
+                skip_pipeline=True,
             )
             cli_args = mock_cli.call_args[0][1]
-            assert "--download-only" in cli_args
+            assert "--skip-pipeline" in cli_args
 
     @pytest.mark.asyncio
     async def test_cli_subprocess_error_returns_error_message(self) -> None:
@@ -279,7 +279,7 @@ class TestCliSiteIngestValidation:
         """空 URL で sys.exit(1) すること."""
         from rag.cli import run_site_ingest
 
-        args = argparse.Namespace(url=[""], url_pattern="", max_pages=None, force=False, download_only=False)
+        args = argparse.Namespace(url=[""], url_pattern="", max_pages=None, force=False, skip_pipeline=False)
         with pytest.raises(SystemExit) as exc_info:
             await run_site_ingest(args)
         assert exc_info.value.code == 1
@@ -289,7 +289,7 @@ class TestCliSiteIngestValidation:
         """不正スキームで sys.exit(1) すること."""
         from rag.cli import run_site_ingest
 
-        args = argparse.Namespace(url=["ftp://example.com"], url_pattern="", max_pages=None, force=False, download_only=False)
+        args = argparse.Namespace(url=["ftp://example.com"], url_pattern="", max_pages=None, force=False, skip_pipeline=False)
         with pytest.raises(SystemExit) as exc_info:
             await run_site_ingest(args)
         assert exc_info.value.code == 1
@@ -299,7 +299,7 @@ class TestCliSiteIngestValidation:
         """プライベート IP で sys.exit(1) すること."""
         from rag.cli import run_site_ingest
 
-        args = argparse.Namespace(url=["http://10.0.0.1/page"], url_pattern="", max_pages=None, force=False, download_only=False)
+        args = argparse.Namespace(url=["http://10.0.0.1/page"], url_pattern="", max_pages=None, force=False, skip_pipeline=False)
         with pytest.raises(SystemExit) as exc_info:
             await run_site_ingest(args)
         assert exc_info.value.code == 1
@@ -309,7 +309,7 @@ class TestCliSiteIngestValidation:
         """不正な正規表現パターンで sys.exit(1) すること."""
         from rag.cli import run_site_ingest
 
-        args = argparse.Namespace(url=["https://example.com"], url_pattern="[bad(", max_pages=None, force=False, download_only=False)
+        args = argparse.Namespace(url=["https://example.com"], url_pattern="[bad(", max_pages=None, force=False, skip_pipeline=False)
         with pytest.raises(SystemExit) as exc_info:
             await run_site_ingest(args)
         assert exc_info.value.code == 1
@@ -349,7 +349,7 @@ class TestCliSiteIngestMaxPagesClamp:
             success=True,
         )
 
-        args = argparse.Namespace(url=["https://example.com"], url_pattern="", max_pages=-1, force=False, download_only=False)
+        args = argparse.Namespace(url=["https://example.com"], url_pattern="", max_pages=-1, force=False, skip_pipeline=False)
 
         with (
             patch.object(RealScrapyRunner, "run", new_callable=AsyncMock, return_value=mock_crawl_result) as mock_run,
@@ -373,7 +373,7 @@ class TestCliSiteIngestMaxPagesClamp:
             success=True,
         )
 
-        args = argparse.Namespace(url=["https://example.com"], url_pattern="", max_pages=999999, force=False, download_only=False)
+        args = argparse.Namespace(url=["https://example.com"], url_pattern="", max_pages=999999, force=False, skip_pipeline=False)
 
         with (
             patch.object(RealScrapyRunner, "run", new_callable=AsyncMock, return_value=mock_crawl_result) as mock_run,
@@ -400,7 +400,7 @@ class TestCliSiteIngestMaxPagesClamp:
         mock_settings = _make_cli_mock_settings()
         mock_settings.site_ingest_max_pages = 800
 
-        args = argparse.Namespace(url=["https://example.com"], url_pattern="", max_pages=None, force=False, download_only=False)
+        args = argparse.Namespace(url=["https://example.com"], url_pattern="", max_pages=None, force=False, skip_pipeline=False)
 
         with (
             patch.object(RealScrapyRunner, "run", new_callable=AsyncMock, return_value=mock_crawl_result) as mock_run,
@@ -428,7 +428,7 @@ class TestCliSiteIngestFlow:
             success=True,
         )
 
-        args = argparse.Namespace(url=["https://example.com"], url_pattern="", max_pages=10, force=False, download_only=False)
+        args = argparse.Namespace(url=["https://example.com"], url_pattern="", max_pages=10, force=False, skip_pipeline=False)
 
         with (
             patch.object(RealScrapyRunner, "run", new_callable=AsyncMock, return_value=mock_crawl_result),
@@ -477,7 +477,7 @@ class TestCliSiteIngestFlow:
         mock_controller.source_store = MagicMock()
         mock_controller.ingest_and_index = AsyncMock(return_value=mock_pipeline_summary)
 
-        args = argparse.Namespace(url=["https://example.com"], url_pattern="", max_pages=10, force=False, download_only=False)
+        args = argparse.Namespace(url=["https://example.com"], url_pattern="", max_pages=10, force=False, skip_pipeline=False)
 
         with (
             patch.object(RealScrapyRunner, "run", new_callable=AsyncMock, return_value=mock_crawl_result),
@@ -549,7 +549,7 @@ class TestCliSiteIngestFlow:
         mock_controller.source_store = MagicMock()
         mock_controller.ingest_and_index = AsyncMock(return_value=mock_pipeline_summary)
 
-        args = argparse.Namespace(url=["https://example.com"], url_pattern="", max_pages=10, force=False, download_only=False)
+        args = argparse.Namespace(url=["https://example.com"], url_pattern="", max_pages=10, force=False, skip_pipeline=False)
 
         with (
             patch.object(RealScrapyRunner, "run", new_callable=AsyncMock, return_value=mock_crawl_result),
@@ -606,7 +606,7 @@ class TestCliSiteIngestFlow:
         mock_controller.source_store = MagicMock()
         mock_controller.ingest_and_index = AsyncMock(return_value=mock_pipeline_summary)
 
-        args = argparse.Namespace(url=["https://example.com"], url_pattern="", max_pages=10, force=False, download_only=False)
+        args = argparse.Namespace(url=["https://example.com"], url_pattern="", max_pages=10, force=False, skip_pipeline=False)
 
         with (
             patch.object(RealScrapyRunner, "run", new_callable=AsyncMock, return_value=mock_crawl_result),
