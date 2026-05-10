@@ -12,6 +12,9 @@ details.lock_type に `e.kind` を正しく詰めることを検証する。サ�
   2 kind（rebuild / write）= 6 ケース
 - 既存の run_rebuild は rebuild_lock（別ロック）のためスコープ外
 - write_lock をモックして LockAcquisitionError を送出させる
+- kind=write はリトライ対象（Issue #755）のため、リトライ実時間を消費しないよう
+  `_WRITE_LOCK_RETRY_BACKOFFS_SEC` を空タプルに上書きする
+  `_disable_lock_retry_backoff` fixture をクラス単位で適用
 """
 
 from __future__ import annotations
@@ -20,12 +23,25 @@ import argparse
 import asyncio
 import io
 import json
+from collections.abc import Iterator
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 import pytest
 
 from rag.infrastructure.file_lock import LockAcquisitionError, LockKind
+
+
+@pytest.fixture
+def _disable_lock_retry_backoff() -> Iterator[None]:
+    """write_lock リトライのバックオフを無効化する fixture.
+
+    Issue #755 で導入した `_WRITE_LOCK_RETRY_BACKOFFS_SEC` を空タプルに置き換え、
+    既存テストの実時間消費（最大 ~1.85s × ケース数）を回避する。
+    リトライ動作自体の検証は `TestWriteLockRetryBehavior` で別途実施する。
+    """
+    with patch("rag.cli._WRITE_LOCK_RETRY_BACKOFFS_SEC", ()):
+        yield
 
 
 def _make_lock_mock(kind: LockKind) -> MagicMock:
@@ -44,6 +60,7 @@ def _parse_error_json(captured_out: str) -> dict[str, object]:
     return parsed
 
 
+@pytest.mark.usefixtures("_disable_lock_retry_backoff")
 class TestAddJournalLockConflict:
     """run_add_journal のロック競合 → lock_type 伝搬テスト."""
 
@@ -152,11 +169,14 @@ class TestAddJournalLockConflict:
         assert "取り込み" in str(parsed["message"])
 
 
+@pytest.mark.usefixtures("_disable_lock_retry_backoff")
 class TestIngestZennLockConflict:
     """run_ingest_zenn（ヘルパー経由）のロック競合 → lock_type 伝搬テスト.
 
-    ヘルパー `_write_lock_or_exit` を経由する代表関数として、
-    個別 try/except を使う add_journal / add_document とは別のパスを検証する。
+    ヘルパー `_write_lock_or_exit` 経由パスの代表として `run_ingest_zenn` で
+    検証する。書き込み系 CLI 関数は `_write_lock_or_exit` 経由に統一されており
+    （add_journal / add_document / ingest_zenn 等）、本テストはその統一パスの
+    回帰検出を担う。
     """
 
     @pytest.mark.parametrize("kind", ["rebuild", "write"])
@@ -251,3 +271,120 @@ class TestWriteLockOrExitHelper:
         details = parsed.get("details")
         assert isinstance(details, dict)
         assert details["lock_type"] == "rebuild"
+
+
+class TestWriteLockRetryBehavior:
+    """_write_lock_or_exit の write 競合時リトライ挙動テスト（Issue #755）.
+
+    CLI 連続実行時の OS ロック解放遅延を吸収するため、kind=write の
+    LockAcquisitionError に対してのみ短時間リトライする設計を検証する。
+
+    各テストは `_WRITE_LOCK_RETRY_BACKOFFS_SEC` を `(0.0, 0.0, 0.0, 0.0)` に
+    再 patch しつつ `time.sleep` を mock することで、リトライの実時間消費を回避し
+    試行回数のみを検証する。
+    """
+
+    def test_retry_succeeds_after_initial_failure(self) -> None:
+        """初回失敗 → リトライで成功するケース（kind=write）."""
+        mock_lock = MagicMock()
+        # 1 回目失敗 → 2 回目成功
+        mock_lock.acquire.side_effect = [
+            LockAcquisitionError(
+                Path("/tmp/test/.write.lock"), kind="write",
+            ),
+            None,  # 成功
+        ]
+        with (
+            patch(
+                "rag.infrastructure.file_lock.write_lock",
+                return_value=mock_lock,
+            ),
+            patch("rag.cli._WRITE_LOCK_RETRY_BACKOFFS_SEC", (0.0, 0.0, 0.0, 0.0)),
+            patch("time.sleep") as mock_sleep,
+        ):
+            from rag.cli import _write_lock_or_exit
+            with _write_lock_or_exit(Path("/tmp/test"), json_out=True):
+                pass
+        # acquire は 2 回呼ばれる（初回失敗 + 再試行成功）
+        assert mock_lock.acquire.call_count == 2
+        mock_lock.release.assert_called_once()
+        # backoff の sleep は 1 回呼ばれる（初回失敗後の 1 回目バックオフ）
+        assert mock_sleep.call_count == 1
+
+    def test_retry_exhausted_then_exits_with_lock_conflict(
+        self, capsys: pytest.CaptureFixture[str],
+    ) -> None:
+        """全リトライ失敗後に LOCK_CONFLICT で exit 1（kind=write）."""
+        mock_lock = MagicMock()
+        # 全試行で失敗
+        mock_lock.acquire.side_effect = LockAcquisitionError(
+            Path("/tmp/test/.write.lock"), kind="write",
+        )
+        with (
+            patch(
+                "rag.infrastructure.file_lock.write_lock",
+                return_value=mock_lock,
+            ),
+            patch("rag.cli._WRITE_LOCK_RETRY_BACKOFFS_SEC", (0.0, 0.0, 0.0, 0.0)),
+            patch("time.sleep"),
+        ):
+            from rag.cli import _write_lock_or_exit
+            with pytest.raises(SystemExit) as exc_info:
+                with _write_lock_or_exit(Path("/tmp/test"), json_out=True):
+                    pytest.fail("body should not execute when retries exhausted")
+            assert exc_info.value.code == 1
+        # 初回 + 4 回再試行 = 5 回試行
+        assert mock_lock.acquire.call_count == 5
+        mock_lock.release.assert_not_called()
+
+        captured = capsys.readouterr()
+        parsed = _parse_error_json(captured.out)
+        assert parsed["code"] == "LOCK_CONFLICT"
+        details = parsed.get("details")
+        assert isinstance(details, dict)
+        assert details["lock_type"] == "write"
+
+    def test_rebuild_kind_does_not_retry(
+        self, capsys: pytest.CaptureFixture[str],
+    ) -> None:
+        """kind=rebuild はリトライ対象外で初回失敗で即 exit."""
+        mock_lock = MagicMock()
+        mock_lock.acquire.side_effect = LockAcquisitionError(
+            Path("/tmp/test/.rebuild.lock"), kind="rebuild",
+        )
+        with (
+            patch(
+                "rag.infrastructure.file_lock.write_lock",
+                return_value=mock_lock,
+            ),
+            patch("rag.cli._WRITE_LOCK_RETRY_BACKOFFS_SEC", (0.0, 0.0, 0.0, 0.0)),
+            patch("time.sleep") as mock_sleep,
+        ):
+            from rag.cli import _write_lock_or_exit
+            with pytest.raises(SystemExit) as exc_info:
+                with _write_lock_or_exit(Path("/tmp/test"), json_out=True):
+                    pytest.fail("body should not execute when acquire fails")
+            assert exc_info.value.code == 1
+        # 初回試行 1 回のみ（リトライしない）
+        assert mock_lock.acquire.call_count == 1
+        # sleep も呼ばれない
+        mock_sleep.assert_not_called()
+        mock_lock.release.assert_not_called()
+
+        captured = capsys.readouterr()
+        parsed = _parse_error_json(captured.out)
+        assert parsed["code"] == "LOCK_CONFLICT"
+        details = parsed.get("details")
+        assert isinstance(details, dict)
+        assert details["lock_type"] == "rebuild"
+
+    def test_default_backoffs_match_spec(self) -> None:
+        """`_WRITE_LOCK_RETRY_BACKOFFS_SEC` の値変更時に意図的でない改変を検知する.
+
+        コード側 `_WRITE_LOCK_RETRY_BACKOFFS_SEC` が SSoT（仕様書 content-upload.md
+        は SSoT 方針により具体値を記載しない）。本テストはコード側 SSoT のうっかり
+        改変検知用として、現行値をハードコードで検証する。値変更時は本テストと
+        計画ファイル / PR description の合計待機時間記述を併せて更新すること。
+        """
+        from rag.cli import _WRITE_LOCK_RETRY_BACKOFFS_SEC
+        assert _WRITE_LOCK_RETRY_BACKOFFS_SEC == (0.1, 0.25, 0.5, 1.0)
