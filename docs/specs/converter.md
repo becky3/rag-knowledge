@@ -525,7 +525,7 @@ source_type が `local` のメディアファイル（画像・動画）は、�
 |--------|---------|
 | 未対応の拡張子のファイル | 変換をスキップし、警告ログを出力する。converted_store にはファイルを配置しない |
 | 0 バイトのファイル | 変換をスキップし、警告ログを出力する |
-| HTML ファイルの文字エンコーディングが UTF-8 以外 | charset_normalizer ベースのエンコーディング自動推定で元のエンコーディングを検出し、UTF-8 に変換する |
+| HTML ファイルの文字エンコーディングが UTF-8 以外 | charset_normalizer ベースのエンコーディング自動推定で元のエンコーディングを検出し、UTF-8 に変換する。ただし `source_type=aozora` の HTML は source_type 固有の前処理として XML 宣言 / meta タグの charset を優先採用し、抽出失敗時は `cp932` にフォールバックする（charset_normalizer の誤検出回避。詳細は [ingesters/aozora.md](ingesters/aozora.md) を参照） |
 | PDF のテキスト抽出結果が空 | 変換をスキップし、警告ログを出力する。converted_store にはファイルを配置しない |
 | MinerU が未インストールの環境で `rag_pdf_backend` が `auto` | auto 判定で MinerU が必要と判断された場合、pymupdf4llm にフォールバックし、警告ログを出力する |
 | MinerU が未インストールの環境で `rag_pdf_backend` が `mineru` | エラーログを出力し、当該ファイルの変換をスキップする |

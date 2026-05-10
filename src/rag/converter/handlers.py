@@ -7,6 +7,7 @@
 
 from __future__ import annotations
 
+import codecs
 import logging
 import re
 import shutil
@@ -15,6 +16,7 @@ from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
     from rag.media.analyzer import MediaAnalyzer
+    from rag.store.models import SourceType
 
 from bs4 import BeautifulSoup, Tag
 from charset_normalizer import from_bytes
@@ -22,6 +24,19 @@ from charset_normalizer import from_bytes
 from rag.markdown import RagMarkdownConverter
 
 logger = logging.getLogger(__name__)
+
+# aozora HTML の charset 抽出用（XML 宣言 / meta http-equiv の両方をカバー）
+_AOZORA_CHARSET_RE = re.compile(
+    rb'(?:<\?xml[^>]+encoding=|<meta[^>]+charset=)["\']?([\w\-]+)',
+    re.IGNORECASE,
+)
+# ハードリミット: aozora HTML の charset 抽出スキャン範囲（先頭バイト数）。
+# XML 宣言 + meta タグは HTML 先頭にあり、過剰なスキャンを防ぐ。
+_AOZORA_HEAD_SCAN_BYTES = 2048
+_AOZORA_FALLBACK_ENCODING = "cp932"
+_AOZORA_SHIFTJIS_ALIASES = frozenset({
+    "shift_jis", "shift-jis", "sjis", "x-sjis", "shift_jisx0213",
+})
 
 # --- HTML void 要素修正 ---
 
@@ -205,9 +220,34 @@ def _clean_content_area(
         tag.decompose()
 
 
+def _detect_aozora_encoding(raw_bytes: bytes) -> str:
+    """aozora HTML の charset を XML 宣言 / meta タグから抽出する.
+
+    aozora は GitHub aozorabunko リポジトリ由来で歴史的に Shift_JIS が標準だが、
+    将来別エンコーディングに切り替わる可能性に備えて meta タグを優先する。
+    抽出失敗・解釈不能な値の場合は cp932（Shift_JIS のスーパーセット）にフォールバックする。
+
+    Returns:
+        Python 標準の codec 名。aozora の Shift_JIS 系 alias または抽出失敗時は
+        ``"cp932"``。それ以外は ``codecs.lookup`` で正規化された codec 名を返す。
+    """
+    match = _AOZORA_CHARSET_RE.search(raw_bytes[:_AOZORA_HEAD_SCAN_BYTES])
+    if match is None:
+        return _AOZORA_FALLBACK_ENCODING
+    charset_raw = match.group(1).decode("ascii", errors="ignore").lower()
+    if charset_raw in _AOZORA_SHIFTJIS_ALIASES:
+        return _AOZORA_FALLBACK_ENCODING
+    try:
+        codec_info = codecs.lookup(charset_raw)
+    except LookupError:
+        return _AOZORA_FALLBACK_ENCODING
+    return codec_info.name
+
+
 def convert_html(
     source_path: Path,
     remove_class_re: re.Pattern[str],
+    source_type: SourceType | None = None,
 ) -> str | None:
     """HTML ファイルを Markdown に変換する.
 
@@ -216,6 +256,11 @@ def convert_html(
     Args:
         source_path: HTML ファイルの絶対パス
         remove_class_re: 除去対象 class トークンのコンパイル済み正規表現
+        source_type: source_store のトップレベルディレクトリから判定された source_type。
+            "aozora" の場合は charset_normalizer 自動推定をスキップし、
+            XML 宣言 / meta タグから charset を抽出する経路を通る（旧字旧仮名・特殊文字を
+            多く含む作品で charset_normalizer が誤検出するため）。
+            None の場合は従来どおり charset_normalizer で自動推定する。
 
     Returns:
         Markdown テキスト、または変換失敗時は None
@@ -226,12 +271,26 @@ def convert_html(
         logger.exception("Failed to read HTML file: %s", source_path)
         return None
 
-    # エンコーディング自動推定（charset_normalizer）
-    detection = from_bytes(raw_bytes).best()
-    if detection is None:
-        logger.warning("Failed to detect encoding: %s", source_path)
-        return None
-    html_text = str(detection)
+    if source_type == "aozora":
+        encoding = _detect_aozora_encoding(raw_bytes)
+        try:
+            html_text = raw_bytes.decode(encoding)
+        except UnicodeDecodeError:
+            # 検出 encoding で失敗した場合のフォールバック。
+            # encoding == cp932 で失敗するケース（破損データ等）でも errors="replace" で
+            # 部分的にでも本文を救済する（None 返却での全件破棄を避ける）。
+            logger.warning(
+                "Failed to decode aozora HTML with %s, retrying with %s and errors=replace: %s",
+                encoding, _AOZORA_FALLBACK_ENCODING, source_path,
+            )
+            html_text = raw_bytes.decode(_AOZORA_FALLBACK_ENCODING, errors="replace")
+    else:
+        # エンコーディング自動推定（charset_normalizer）
+        detection = from_bytes(raw_bytes).best()
+        if detection is None:
+            logger.warning("Failed to detect encoding: %s", source_path)
+            return None
+        html_text = str(detection)
 
     soup = BeautifulSoup(html_text, "html.parser")
 
