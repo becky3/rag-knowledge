@@ -2710,26 +2710,10 @@ async def run_ingest_youtube(args: argparse.Namespace) -> None:
     with _write_lock_or_exit(
         Path(controller.source_store.root_dir), json_out=json_out,
     ):
-        from .pipeline.ingesters._common import IngestErrorCategory, IngestErrorDetail
-        from .pipeline.ingesters._common import IngestResult as _IngestResult
-
-        results: "list[IngestResult]" = []
-        for url in video_urls:
-            try:
-                results.append(await youtube_ingester.ingest_video(url))
-            except Exception as e:
-                # bulk loop の partial result loss 防止のため、ループ内例外は per-item として
-                # IngestResult.errors に変換し処理継続。Exception 限定のため KeyboardInterrupt
-                # 等の BaseException 系（キャンセル）は捕捉せず正常に伝播する。
-                logger.error("ingest-youtube エラー (url=%s): %s", url, e)
-                err = _IngestResult()
-                err.errors = 1
-                err.error_details.append(IngestErrorDetail(
-                    category=IngestErrorCategory.METADATA_FETCH.value,
-                    target=url,
-                    message=f"取り込み失敗: {e}",
-                ))
-                results.append(err)
+        # ingest_videos は bulk 末尾で Whisper モデルを必ずアンロードし、
+        # 個別 URL の例外は per-item の IngestResult.errors に変換して処理継続する
+        # （`KeyboardInterrupt` 等の `BaseException` 系は伝播）。
+        results: "list[IngestResult]" = await youtube_ingester.ingest_videos(video_urls)
 
         ingest_result = _merge_ingest_results(results)
 

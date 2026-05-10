@@ -355,6 +355,51 @@ class YoutubeIngester(BaseIngester):
         )
         return result
 
+    async def ingest_videos(
+        self, video_urls: list[str],
+    ) -> list[IngestResult]:
+        """複数 URL を順次取り込む bulk メソッド.
+
+        Whisper モデルは bulk 全体で 1 度だけロード（先頭の Whisper 経路動画で遅延初期化）し、
+        bulk 末尾で `try/finally` を経て必ずアンロードする。
+        個別動画の例外は per-item の ``IngestResult.errors`` に変換し、bulk 全体は継続する
+        （`KeyboardInterrupt` 等の `BaseException` 系は伝播）。
+
+        Args:
+            video_urls: YouTube 動画 URL のリスト
+
+        Returns:
+            URL ごとの取り込み結果リスト（順序保証）
+        """
+        results: list[IngestResult] = []
+        try:
+            for url in video_urls:
+                try:
+                    results.append(await self.ingest_video(url))
+                except Exception as e:
+                    logger.error("ingest_videos エラー (url=%s): %s", url, e)
+                    err = IngestResult()
+                    err.errors = 1
+                    err.error_details.append(IngestErrorDetail(
+                        category=IngestErrorCategory.METADATA_FETCH.value,
+                        target=url,
+                        message=f"取り込み失敗: {e}",
+                    ))
+                    results.append(err)
+        finally:
+            self._fetcher.unload_whisper()
+        return results
+
+    def unload_whisper(self) -> None:
+        """fetcher の Whisper モデルをアンロードする.
+
+        bulk 取り込みの外部 caller（CLI / MCP / 他インジェスター）が
+        取り込み境界で明示呼び出しする用途。``ingest_videos`` / ``crawl_playlist``
+        は内部で `try/finally` から呼び出すため、それらの利用時は本メソッドの
+        二重呼び出しは不要（no-op として安全）。
+        """
+        self._fetcher.unload_whisper()
+
     async def crawl_playlist(
         self,
         playlist_url: str,
@@ -377,6 +422,23 @@ class YoutubeIngester(BaseIngester):
             playlist_url,
             max_videos if max_videos is not None else self._max_videos,
         )
+        try:
+            return await self._crawl_playlist_impl(
+                playlist_url,
+                max_videos=max_videos,
+                progress_callback=progress_callback,
+            )
+        finally:
+            self._fetcher.unload_whisper()
+
+    async def _crawl_playlist_impl(
+        self,
+        playlist_url: str,
+        *,
+        max_videos: int | None = None,
+        progress_callback: ProgressCallback | None = None,
+    ) -> IngestResult:
+        """``crawl_playlist`` の本体実装. Whisper アンロードは呼び出し側で `try/finally` 配置."""
         result = IngestResult()
 
         playlist_id = extract_playlist_id(playlist_url)

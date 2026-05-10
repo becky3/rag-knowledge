@@ -375,7 +375,7 @@ class TestIngestVideo:
         # no_subtitle で Whisper フォールバックを発動 → カスタム snippets を whisper でも返す
         fetcher = _fake(scenario="no_subtitle", metadata=metadata, snippets=snippets, language="ja")
         ingester = make_youtube_ingester(
-            source_store, fetcher=fetcher, whisper_model="base",
+            source_store, fetcher=fetcher, whisper_model="medium",
         )
 
         result = await ingester.ingest_video("https://www.youtube.com/watch?v=TestVideo01")
@@ -384,7 +384,7 @@ class TestIngestVideo:
         call_kwargs = source_store.place_file.call_args
         data = json.loads(call_kwargs.kwargs["data"].decode("utf-8"))
         assert data["transcript_source"] == "whisper"
-        assert data["whisper_model"] == "base"
+        assert data["whisper_model"] == "medium"
 
     @pytest.mark.asyncio()
     async def test_overwritten_count_on_reingest(self, source_store: Any) -> None:
@@ -660,3 +660,139 @@ class TestCrawlPlaylist:
         assert detail["category"] == "metadata_fetch"
         assert detail["target"] == "entry_0"
         assert "video_id missing" in detail["message"]
+
+
+class TestWhisperLifecycle:
+    """Whisper モデルの遅延ロード/明示アンロード機構を検証する.
+
+    仕様: docs/specs/ingesters/youtube.md「Whisper モデルライフサイクル」
+    """
+
+    @pytest.mark.asyncio()
+    async def test_ingest_videos_unloads_whisper_once(self, source_store: Any) -> None:
+        """ingest_videos の bulk 取り込み完了時に unload_whisper が 1 度だけ呼ばれることを検証する."""
+        fetcher = _fake()
+        fetcher.unload_whisper = MagicMock()  # type: ignore[method-assign]
+        ingester = make_youtube_ingester(
+            source_store, fetcher=fetcher, max_duration=14400,
+        )
+
+        single_result = IngestResult(placed=1)
+        with patch.object(
+            ingester,
+            "ingest_video",
+            new_callable=AsyncMock,
+            return_value=single_result,
+        ):
+            results = await ingester.ingest_videos([
+                "https://www.youtube.com/watch?v=TestVideo01",
+                "https://www.youtube.com/watch?v=TestVideo02",
+                "https://www.youtube.com/watch?v=TestVideo03",
+            ])
+
+        assert len(results) == 3
+        assert all(r.placed == 1 for r in results)
+        assert fetcher.unload_whisper.call_count == 1
+
+    @pytest.mark.asyncio()
+    async def test_ingest_videos_unloads_on_exception(self, source_store: Any) -> None:
+        """ingest_videos の途中で例外が発生しても unload_whisper が呼ばれることを検証する."""
+        fetcher = _fake()
+        fetcher.unload_whisper = MagicMock()  # type: ignore[method-assign]
+        ingester = make_youtube_ingester(
+            source_store, fetcher=fetcher, max_duration=14400,
+        )
+
+        # 2 本目で例外、3 本目は per-item エラーに変換されて継続する。
+        # AsyncMock の side_effect は Exception インスタンスを自動的に raise する。
+        with patch.object(
+            ingester,
+            "ingest_video",
+            new_callable=AsyncMock,
+            side_effect=[
+                IngestResult(placed=1),
+                RuntimeError("boom"),
+                IngestResult(placed=1),
+            ],
+        ):
+            results = await ingester.ingest_videos([
+                "https://www.youtube.com/watch?v=TestVideo01",
+                "https://www.youtube.com/watch?v=TestVideo02",
+                "https://www.youtube.com/watch?v=TestVideo03",
+            ])
+
+        assert len(results) == 3
+        assert results[0].placed == 1
+        assert results[1].errors == 1
+        assert "boom" in results[1].error_details[0]["message"]
+        assert results[2].placed == 1
+        assert fetcher.unload_whisper.call_count == 1
+
+    @pytest.mark.asyncio()
+    async def test_crawl_playlist_unloads_whisper(self, source_store: Any) -> None:
+        """crawl_playlist 完了時に unload_whisper が呼ばれることを検証する."""
+        entries = [
+            {"id": "video_id_01", "url": "video_id_01"},
+            {"id": "video_id_02", "url": "video_id_02"},
+        ]
+        fetcher = _fake(playlist_entries=entries)
+        fetcher.unload_whisper = MagicMock()  # type: ignore[method-assign]
+        ingester = make_youtube_ingester(
+            source_store, fetcher=fetcher, max_videos=3, request_interval=0.1,
+        )
+
+        single_result = IngestResult(placed=1)
+        with patch.object(
+            ingester,
+            "ingest_video",
+            new_callable=AsyncMock,
+            return_value=single_result,
+        ):
+            await ingester.crawl_playlist(
+                "https://www.youtube.com/playlist?list=PLtest123"
+            )
+
+        assert fetcher.unload_whisper.call_count == 1
+
+    @pytest.mark.asyncio()
+    async def test_crawl_playlist_unloads_on_expand_error(self, source_store: Any) -> None:
+        """crawl_playlist の playlist 展開失敗時も unload_whisper が呼ばれることを検証する."""
+        fetcher = _fake(scenario="playlist_expand_error")
+        fetcher.unload_whisper = MagicMock()  # type: ignore[method-assign]
+        ingester = make_youtube_ingester(source_store, fetcher=fetcher)
+
+        result = await ingester.crawl_playlist(
+            "https://www.youtube.com/playlist?list=PLtest123"
+        )
+
+        assert result.errors == 1
+        assert fetcher.unload_whisper.call_count == 1
+
+    def test_fake_unload_whisper_is_noop(self) -> None:
+        """FakeYoutubeFetcher の unload_whisper が例外を出さないことを検証する."""
+        fetcher = _fake()
+        # 2 回呼んでも安全（no-op）
+        fetcher.unload_whisper()
+        fetcher.unload_whisper()
+
+    def test_real_unload_whisper_is_idempotent(self) -> None:
+        """RealYoutubeFetcher の unload_whisper が未ロード状態でも安全に呼べることを検証する."""
+        from rag.pipeline.ingesters.youtube_fetcher import RealYoutubeFetcher
+
+        fetcher = RealYoutubeFetcher()
+        # _whisper_model_instance is None の状態で 2 回連続呼んでも例外なし
+        fetcher.unload_whisper()
+        fetcher.unload_whisper()
+        assert fetcher._whisper_model_instance is None
+
+    @pytest.mark.asyncio()
+    async def test_crawl_playlist_unloads_on_invalid_url(self, source_store: Any) -> None:
+        """crawl_playlist が不正 URL で ValueError を raise しても unload_whisper が呼ばれることを検証する."""
+        fetcher = _fake()
+        fetcher.unload_whisper = MagicMock()  # type: ignore[method-assign]
+        ingester = make_youtube_ingester(source_store, fetcher=fetcher)
+
+        with pytest.raises(ValueError, match="不正な YouTube プレイリスト URL"):
+            await ingester.crawl_playlist("https://example.com/playlist?list=test")
+
+        assert fetcher.unload_whisper.call_count == 1

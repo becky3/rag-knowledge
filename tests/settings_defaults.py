@@ -65,7 +65,7 @@ TEST_SETTINGS_DEFAULTS: dict[str, object] = {
     "rag_bluesky_include_reposts": True,
     "rag_bluesky_force_youtube_reingest": False,
     # YouTube インジェスター
-    "rag_youtube_whisper_model": "base",
+    "rag_youtube_whisper_model": "medium",
     "rag_youtube_whisper_device": "cpu",
     # YouTube Fake モード（テストでは fake デフォルト）
     "rag_youtube_fake_mode": True,

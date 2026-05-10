@@ -139,3 +139,7 @@ class FakeYoutubeFetcher:
             return list(self._custom_playlist_entries)[:max_videos]
         entries: list[dict[str, Any]] = self._load_json("playlist_happy.json")
         return entries[:max_videos]
+
+    def unload_whisper(self) -> None:
+        """Fake は Whisper モデルを保持しないため no-op."""
+        return

@@ -73,6 +73,18 @@ class YoutubeDelegator(Protocol):
         """
         ...
 
+    def unload_whisper(self) -> None:
+        """委譲先 YouTube インジェスターの Whisper モデルをアンロードする.
+
+        ※ 同期メソッド（GPU メモリ解放を確実に同期実行するため）。
+        `ingest_video` が `async` であるのに対し、本メソッドは sync で呼び出すこと。
+
+        BlueSky 等の他インジェスターが bulk 取り込み完了時に呼び出し、
+        delegation 経由で保持された Whisper モデルの VRAM を解放する。
+        Whisper モデル未ロード時は no-op（実装は委譲先側で判定）。
+        """
+        ...
+
 
 class RealYoutubeClassifier:
     """既存 ``rag.pipeline.ingesters.youtube.classify_youtube_url`` をラップする実装.
@@ -110,6 +122,9 @@ class RealYoutubeDelegator:
         return await self._ingester.ingest_video(
             video_url, playlist_id=playlist_id,
         )
+
+    def unload_whisper(self) -> None:
+        self._ingester.unload_whisper()
 
 
 def create_youtube_classifier() -> YoutubeClassifier:

@@ -113,29 +113,38 @@ async def follow_urls(
         youtube_urls = target_youtube_urls
 
     if youtube_urls:
-        for i, url in enumerate(youtube_urls):
+        # bluesky 投稿内 YouTube URL の bulk 取り込み境界。
+        # 末尾で必ず Whisper モデルをアンロードして VRAM を解放する
+        # （仕様: docs/specs/ingesters/youtube.md「Whisper モデルライフサイクル」）。
+        # youtube_urls が空 / youtube_delegator が None の場合は本ブロックに入らず、
+        # Whisper モデルがロードされないため unload_whisper は不要。
+        try:
+            for i, url in enumerate(youtube_urls):
+                if youtube_delegator is not None:
+                    try:
+                        yt_result = await youtube_delegator.ingest_video(url)
+                        stats["youtube_placed"] += yt_result.placed
+                        if yt_result.errors > 0:
+                            stats["errors"] += yt_result.errors
+                    except Exception as exc:
+                        logger.exception("YouTube URL の取り込みに失敗: %s", url)
+                        stats["errors"] += 1
+                        if result is not None:
+                            result.errors += 1
+                            result.error_details.append(IngestErrorDetail(
+                                category=IngestErrorCategory.DELEGATION.value,
+                                target=url,
+                                url=url,
+                                message=f"youtube delegation failed: {exc}",
+                            ))
+                    if i < len(youtube_urls) - 1:
+                        await asyncio.sleep(youtube_request_interval)
+                else:
+                    logger.warning("YouTube インジェスターが未指定: %s", url)
+                    stats["skipped"] += 1
+        finally:
             if youtube_delegator is not None:
-                try:
-                    yt_result = await youtube_delegator.ingest_video(url)
-                    stats["youtube_placed"] += yt_result.placed
-                    if yt_result.errors > 0:
-                        stats["errors"] += yt_result.errors
-                except Exception as exc:
-                    logger.exception("YouTube URL の取り込みに失敗: %s", url)
-                    stats["errors"] += 1
-                    if result is not None:
-                        result.errors += 1
-                        result.error_details.append(IngestErrorDetail(
-                            category=IngestErrorCategory.DELEGATION.value,
-                            target=url,
-                            url=url,
-                            message=f"youtube delegation failed: {exc}",
-                        ))
-                if i < len(youtube_urls) - 1:
-                    await asyncio.sleep(youtube_request_interval)
-            else:
-                logger.warning("YouTube インジェスターが未指定: %s", url)
-                stats["skipped"] += 1
+                youtube_delegator.unload_whisper()
 
     logger.info(
         "URL 取り込み完了: web=%d, youtube=%d, skipped=%d, errors=%d",
