@@ -226,7 +226,8 @@ class AozoraIngester(BaseIngester):
         """指定作品を取得し source_store に配置する.
 
         Args:
-            book_id: 青空文庫の作品 ID
+            book_id: 青空文庫の作品 ID。前後空白を除去し 6 桁未満はゼロ埋めして扱う
+                （6 桁以上の入力はそのままカタログ検索に使う）
 
         Returns:
             配置結果
@@ -274,22 +275,23 @@ class AozoraIngester(BaseIngester):
         """指定著者の著作権フリー作品を一括取り込みする.
 
         Args:
-            person_id: 著者の人物 ID
+            person_id: 著者の人物 ID。前後空白を除去し 6 桁未満はゼロ埋めして扱う
+                （6 桁以上の入力はそのままカタログ検索に使う）
             max_works: 最大取り込み数
             progress_callback: 進捗コールバック (processed, total, current)
 
         Returns:
             配置結果
         """
+        if not person_id or not person_id.strip():
+            raise ValueError("person_id が空です")
+        person_id = person_id.strip().zfill(6)
+
         logger.info(
             "Aozora author crawl started: person_id=%s, max_works=%s",
             person_id,
             max_works if max_works is not None else self._max_works,
         )
-
-        if not person_id or not person_id.strip():
-            raise ValueError("person_id が空です")
-        person_id = person_id.strip().zfill(6)
 
         effective_max = self._validate_max_works(
             max_works if max_works is not None else self._max_works
