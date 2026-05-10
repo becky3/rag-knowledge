@@ -377,6 +377,9 @@ class YoutubeIngester(BaseIngester):
                 try:
                     results.append(await self.ingest_video(url))
                 except Exception as e:
+                    # プログラミングエラーは伝播させる（ingest_video 内部の設計と整合）
+                    if isinstance(e, (TypeError, AttributeError, ImportError)):
+                        raise
                     logger.error("ingest_videos エラー (url=%s): %s", url, e)
                     err = IngestResult()
                     err.errors = 1

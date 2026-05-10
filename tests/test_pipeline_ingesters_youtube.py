@@ -729,6 +729,33 @@ class TestWhisperLifecycle:
         assert fetcher.unload_whisper.call_count == 1
 
     @pytest.mark.asyncio()
+    async def test_ingest_videos_propagates_programming_errors(self, source_store: Any) -> None:
+        """ingest_videos がプログラミングエラー（TypeError/AttributeError/ImportError）を per-item 変換せず伝播することを検証する.
+
+        ingest_video 内部の「プログラミングエラーは伝播させる」設計と整合させ、
+        バグをサイレントに成功扱いにしないことを保証する。
+        """
+        fetcher = _fake()
+        fetcher.unload_whisper = MagicMock()  # type: ignore[method-assign]
+        ingester = make_youtube_ingester(
+            source_store, fetcher=fetcher, max_duration=14400,
+        )
+
+        with patch.object(
+            ingester,
+            "ingest_video",
+            new_callable=AsyncMock,
+            side_effect=TypeError("programming error"),
+        ):
+            with pytest.raises(TypeError, match="programming error"):
+                await ingester.ingest_videos([
+                    "https://www.youtube.com/watch?v=TestVideo01",
+                ])
+
+        # 例外伝播時も bulk 末尾の unload_whisper は呼ばれる（try/finally 配置）
+        assert fetcher.unload_whisper.call_count == 1
+
+    @pytest.mark.asyncio()
     async def test_crawl_playlist_unloads_whisper(self, source_store: Any) -> None:
         """crawl_playlist 完了時に unload_whisper が呼ばれることを検証する."""
         entries = [
