@@ -235,10 +235,11 @@ CSV の URL: https://www.aozora.gr.jp/cards/{person_id}/files/{book_id}_{file_id
 これにより青空文庫公式ページ（カード URL `/cards/000148/card773.html` 等）から抽出した ID（`773` 等のゼロ埋めなし表現）をそのまま渡せる。
 `person_id` 側の正規化も API の対称性を保つために `book_id` と同等の挙動とする（外部から取得した `35` のような短桁 ID をそのまま `crawl_author` に渡せる）。
 6 桁未満はゼロ埋め、6 桁以上はそのまま検索に使う（数値検証や桁数上限チェックは行わない）。
-不正入力時の挙動は API ごとに異なる:
+不正入力時の挙動は `add_work` と `crawl_author` で対称化されている:
 
 - `add_work`: `book_id` がカタログ CSV の「作品ID」と一致しない場合、`ValueError`「作品 ID '...' がカタログに見つかりません」を送出する
-- `crawl_author`: `person_id` がカタログ CSV の「人物ID」と一致しない場合、例外を送出せず 0 件配置の `IngestResult` を返す（一括処理で「該当作品なし」と「不正な ID」を区別しない既存仕様）
+- `crawl_author`: `person_id` がカタログ CSV の「人物ID」と一致しない場合、`ValueError`「人物 ID '...' がカタログに見つかりません」を送出する（`add_work` と対称）
+- `crawl_author`: `person_id` はカタログに存在するが取り込み可能作品が 0 件の場合（全作品が著作権ありでフィルタされた等）は例外を送出せず 0 件配置の `IngestResult` を返す（「ID 不正」と「ID は正しいが対象作品なし」を区別する）
 
 ### .meta サイドカーファイル
 
@@ -436,7 +437,6 @@ flowchart TD
 | 作品 ID がカタログに存在しない | エラーメッセージを返す |
 | 著作権フラグが「なし」以外の作品を取り込み | エラーメッセージを返す（著作権ありの作品は取り込み不可） |
 | 著者名で検索して 0 件 | 0 件の結果を返す |
-| 著者の作品が 0 件（全て著作権あり） | 著作権フリー作品がない旨をメッセージで返す |
 | CSV の XHTML URL が欠落 | 該当作品をスキップし、エラーログを出力する |
 | GitHub Raw URL からの 404 / その他 HTTP エラー | 該当作品をスキップし、`errors` に `metadata_fetch` カテゴリで計上する（HTTP ステータス・URL を `status` / `url` に記録）。エラーログを出力して処理を続行する |
 | XHTML DL の連続失敗がサーキットブレーカー閾値を超えた場合 | 以降の作品取り込みを中断し、`aborted=True` / `abort_reason="consecutive failures"` を設定する。取得済みデータは配置する（閾値はコード SSoT: `src/rag/pipeline/ingesters/aozora.py`） |
@@ -453,7 +453,8 @@ flowchart TD
 | `book_id` / `person_id` に 7 桁以上の数字文字列を指定 | zfill 効果なしでそのままカタログ検索する（数値検証・桁数上限チェックなし） |
 | `book_id` / `person_id` に非数字文字（例: `abc`）を指定 | バリデーションは行わず、そのままカタログ検索する |
 | `add_work` で `book_id` がカタログに見つからない | `ValueError`「作品 ID '...' がカタログに見つかりません」を送出する |
-| `crawl_author` で `person_id` がカタログに見つからない | 例外を送出せず、0 件配置の `IngestResult` を返す（一括処理の既存仕様） |
+| `crawl_author` で `person_id` がカタログに見つからない | `ValueError`「人物 ID '...' がカタログに見つかりません」を送出する（`add_work` と対称） |
+| `crawl_author` で `person_id` は存在するが取り込み可能作品が 0 件 | 例外を送出せず、0 件配置の `IngestResult` を返す（「ID 不正」と「ID は正しいが対象作品なし」を区別） |
 | カタログ ZIP のダウンロードに失敗 | エラーメッセージを返す |
 | カタログ ZIP の展開に失敗（破損等） | エラーメッセージを返す |
 | .meta ファイルの書き込みに失敗した場合 | ファイル物理削除禁止制約により、配置済みデータファイルのロールバックは行わない。エラーログを出力して処理を続行する |

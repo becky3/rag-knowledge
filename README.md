@@ -335,6 +335,13 @@ uv run python -m rag.cli rebuild --mode incremental
 >   （`--skip-pipeline` / `skip_pipeline` に置き換え、同等の振る舞い）
 > - MCP `rag_add_youtube` / `rag_add_aozora` / `rag_delete` のパラメータは複数受付に変更
 >   （`video_url: str` → `video_urls: list[str]` / `book_id: str` → `book_ids: list[str]` / `source_id: str` → `source_ids: list[str]`）
+>
+> **破壊的変更（Issue #760）**:
+>
+> - MCP `rag_crawl_aozora` / CLI `ingest-aozora-author` で `person_id` がカタログに存在しない場合の挙動を変更
+>   （従来: 0 件配置の `IngestResult` を返す → 変更後: `ValueError`「人物 ID '...' がカタログに見つかりません」を送出）
+> - `add_work` 側（`rag_add_aozora` / `ingest-aozora`）の `book_id` 不一致時挙動と対称化。
+>   `person_id` がカタログに存在し取り込み可能作品が 0 件の場合（全作品が著作権あり等）は従来通り 0 件 `IngestResult` を返す
 
 ## Journal CLI
 
