@@ -440,7 +440,7 @@ flowchart TD
 | CSV の XHTML URL が欠落 | 該当作品をスキップし、エラーログを出力する |
 | GitHub Raw URL からの 404 / その他 HTTP エラー | 該当作品をスキップし、`errors` に `metadata_fetch` カテゴリで計上する（HTTP ステータス・URL を `status` / `url` に記録）。エラーログを出力して処理を続行する |
 | XHTML DL の連続失敗がサーキットブレーカー閾値を超えた場合 | 以降の作品取り込みを中断し、`aborted=True` / `abort_reason="consecutive failures"` を設定する。取得済みデータは配置する（閾値はコード SSoT: `src/rag/pipeline/ingesters/aozora.py`） |
-| XHTML の文字コード（Shift_JIS） | 生データのまま source_store に保存。エンコーディング変換はコンバーターが charset_normalizer で自動検出して実施する |
+| XHTML の文字コード（Shift_JIS） | 生データのまま source_store に保存。エンコーディング変換はコンバーターが aozora 専用経路で実施する。XML 宣言または meta タグ（`http-equiv="Content-Type"`）の charset を優先採用し、抽出失敗・解釈不能な値の場合は `cp932`（Shift_JIS のスーパーセット）にフォールバックする。旧字旧仮名・特殊文字を多く含む作品で `charset_normalizer` の自動検出が誤った別エンコーディング（cp1252 等）を返し文字化けする問題への対応 |
 | 同一作品の再取り込み | source_id（= ファイルパス）に該当するファイルが存在する場合はスキップする |
 | バジェット上限到達 | 取得済みデータを配置し、上限到達の旨をログ出力する |
 | サーキットブレーカー発動 | 操作を中断し、取得済みデータを配置する。`aborted=True` を設定する。エラーの詳細をログ出力する |

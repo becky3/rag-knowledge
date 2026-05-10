@@ -23,6 +23,8 @@ from rag.converter.converter import (
     get_converted_rel_path,
 )
 from rag.converter.handlers import (
+    _AOZORA_HEAD_SCAN_BYTES,
+    _detect_aozora_encoding,
     _fix_void_elements,
     compile_remove_class_re,
     convert_html,
@@ -484,6 +486,114 @@ class TestConvertHtml:
         result = convert_html(html_file, _TEST_REMOVE_CLASS_RE)
         assert result is not None
         assert "日本語テスト" in result
+
+    def test_aozora_shift_jis_with_meta_tag(self, tmp_path: Path) -> None:
+        """aozora 経路: meta タグで charset=Shift_JIS、Shift_JIS bytes → 正しく decode."""
+        html = (
+            '<?xml version="1.0" encoding="Shift_JIS"?>'
+            '<html><head>'
+            '<meta http-equiv="Content-Type" content="text/html;charset=Shift_JIS" />'
+            '<title>谷崎潤一郎 少年</title>'
+            '</head><body><p>旧字旧仮名の作品本文。傳統的な日本語。</p></body></html>'
+        )
+        html_file = tmp_path / "001383.html"
+        html_file.write_bytes(html.encode("shift_jis"))
+
+        result = convert_html(
+            html_file, _TEST_REMOVE_CLASS_RE, source_type="aozora",
+        )
+        assert result is not None
+        assert "旧字旧仮名の作品本文" in result
+        assert "傳統的な日本語" in result
+
+    def test_aozora_meta_tag_missing_fallback_cp932(self, tmp_path: Path) -> None:
+        """aozora 経路: meta タグなしの Shift_JIS bytes → cp932 fallback で正しく decode."""
+        html = "<html><body><p>メタタグなしの作品本文。</p></body></html>"
+        html_file = tmp_path / "no_meta.html"
+        html_file.write_bytes(html.encode("shift_jis"))
+
+        result = convert_html(
+            html_file, _TEST_REMOVE_CLASS_RE, source_type="aozora",
+        )
+        assert result is not None
+        assert "メタタグなしの作品本文" in result
+
+    def test_aozora_invalid_charset_fallback_cp932(self, tmp_path: Path) -> None:
+        """aozora 経路: meta タグの charset 値が不正 → cp932 fallback."""
+        html = (
+            '<html><head>'
+            '<meta http-equiv="Content-Type" content="text/html;charset=invalid-encoding" />'
+            '</head><body><p>不正 charset の作品本文。</p></body></html>'
+        )
+        html_file = tmp_path / "invalid_charset.html"
+        html_file.write_bytes(html.encode("shift_jis"))
+
+        result = convert_html(
+            html_file, _TEST_REMOVE_CLASS_RE, source_type="aozora",
+        )
+        assert result is not None
+        assert "不正 charset の作品本文" in result
+
+    def test_aozora_utf8_with_utf8_meta_tag(self, tmp_path: Path) -> None:
+        """aozora 経路: UTF-8 HTML + UTF-8 meta タグ → meta タグを尊重して UTF-8 decode.
+
+        将来 aozora が UTF-8 配信に切り替わるケースに備えた振る舞いの検証。
+        """
+        html = (
+            '<?xml version="1.0" encoding="UTF-8"?>'
+            '<html><head>'
+            '<meta http-equiv="Content-Type" content="text/html;charset=UTF-8" />'
+            '</head><body><p>UTF-8 配信の作品本文。</p></body></html>'
+        )
+        html_file = tmp_path / "utf8.html"
+        html_file.write_bytes(html.encode("utf-8"))
+
+        result = convert_html(
+            html_file, _TEST_REMOVE_CLASS_RE, source_type="aozora",
+        )
+        assert result is not None
+        assert "UTF-8 配信の作品本文" in result
+
+    def test_non_aozora_html_uses_charset_normalizer(self, tmp_path: Path) -> None:
+        """source_type=None の場合は従来どおり charset_normalizer 経路を通る (回帰確認)."""
+        html = "<html><body><p>UTF-8 default content.</p></body></html>"
+        html_file = tmp_path / "web.html"
+        html_file.write_text(html, encoding="utf-8")
+
+        result = convert_html(html_file, _TEST_REMOVE_CLASS_RE)
+        assert result is not None
+        assert "UTF-8 default content." in result
+
+
+class TestDetectAozoraEncoding:
+    """_detect_aozora_encoding の境界条件テスト."""
+
+    def test_meta_tag_shift_jis_returns_cp932(self) -> None:
+        raw = b'<meta http-equiv="Content-Type" content="text/html;charset=Shift_JIS" />'
+        assert _detect_aozora_encoding(raw) == "cp932"
+
+    def test_xml_declaration_shift_jis_returns_cp932(self) -> None:
+        raw = b'<?xml version="1.0" encoding="Shift_JIS"?>'
+        assert _detect_aozora_encoding(raw) == "cp932"
+
+    def test_meta_tag_utf8_returns_normalized_codec_name(self) -> None:
+        raw = b'<meta http-equiv="Content-Type" content="text/html;charset=UTF-8" />'
+        # codecs.lookup で正規化された Python 標準の codec 名を返す
+        assert _detect_aozora_encoding(raw) == "utf-8"
+
+    def test_no_meta_tag_returns_cp932_fallback(self) -> None:
+        raw = b'<html><body><p>plain bytes</p></body></html>'
+        assert _detect_aozora_encoding(raw) == "cp932"
+
+    def test_invalid_charset_value_returns_cp932_fallback(self) -> None:
+        raw = b'<meta charset="not-a-real-encoding" />'
+        assert _detect_aozora_encoding(raw) == "cp932"
+
+    def test_charset_outside_head_scan_window_ignored(self) -> None:
+        # _AOZORA_HEAD_SCAN_BYTES を超えた位置の charset 宣言は無視される
+        padding = b" " * (_AOZORA_HEAD_SCAN_BYTES + 100)
+        raw = padding + b'<meta charset="UTF-8" />'
+        assert _detect_aozora_encoding(raw) == "cp932"
 
     def test_table_conversion(self, tmp_path: Path) -> None:
         html = (

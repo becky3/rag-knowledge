@@ -397,7 +397,11 @@ class Converter:
             変換後テキスト、または失敗時は None
         """
         if ext in (".html", ".htm"):
-            return convert_html(source_path, self._html_remove_class_re)
+            return convert_html(
+                source_path,
+                self._html_remove_class_re,
+                source_type=detect_source_type(file_path),
+            )
 
         if ext == ".pdf":
             return extract_pdf(source_path, self._pdf_config)
