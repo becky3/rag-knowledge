@@ -770,6 +770,14 @@ def main() -> None:
     # ingest-aozora: 青空文庫作品取り込み
     ingest_aozora_parser = subparsers.add_parser("ingest-aozora", help="青空文庫の作品を取り込み")
     ingest_aozora_parser.add_argument("book_id", help="青空文庫の作品 ID")
+    ingest_aozora_parser.add_argument(
+        "--no-pipeline",
+        action="store_true",
+        help=(
+            "取り込み後のパイプライン処理（git commit + 変換 + index 更新）を行わない。"
+            "一括取り込み時の高速化用。後で `rebuild --mode incremental` を実行する必要がある"
+        ),
+    )
     _add_output_option(ingest_aozora_parser)
 
     # ingest-aozora-author: 青空文庫著者一括取り込み
@@ -3331,6 +3339,7 @@ async def run_ingest_aozora(args: argparse.Namespace) -> None:
 
     json_out = _is_json_output(args)
     progress_cb = _output_progress if json_out else None
+    no_pipeline = bool(getattr(args, "no_pipeline", False))
 
     controller, settings = _build_cli_pipeline_controller()
 
@@ -3351,12 +3360,20 @@ async def run_ingest_aozora(args: argparse.Namespace) -> None:
             logger.error("エラー: %s", e)
             sys.exit(1)
 
-        pipeline_summary = await controller.ingest_and_index(
-            f"ingest(aozora): book_id={args.book_id}",
-            progress_callback=progress_cb,
-        concurrency=settings.rag_embedding_concurrency,
-        )
+        if no_pipeline:
+            pipeline_summary = None
+        else:
+            pipeline_summary = await controller.ingest_and_index(
+                f"ingest(aozora): book_id={args.book_id}",
+                progress_callback=progress_cb,
+                concurrency=settings.rag_embedding_concurrency,
+            )
         _print_ingest_result(ingest_result, pipeline_summary, context=f"作品ID: {args.book_id}", json_output=json_out)
+        if no_pipeline and not json_out:
+            print(
+                "パイプライン未実行（--no-pipeline 指定）。"
+                "後で `uv run python -m rag.cli rebuild --mode incremental` を実行してください。"
+            )
 
 
 async def run_ingest_aozora_author(args: argparse.Namespace) -> None:
