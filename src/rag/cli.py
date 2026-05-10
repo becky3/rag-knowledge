@@ -184,6 +184,14 @@ def _output_error(
     sys.exit(1)
 
 
+# write_lock 取得失敗（kind=write）時の指数バックオフ間隔（秒）。
+# CLI 連続実行時の OS ファイルロック解放遅延を吸収する目的。
+# 4 回再試行 = 初回 + 4 回 = 最大 5 回試行。合計待機時間 ~1.85s。
+# kind=rebuild は秒〜分単位の処理が走っているケースのため対象外（即失敗）。
+# Issue #755
+_WRITE_LOCK_RETRY_BACKOFFS_SEC: tuple[float, ...] = (0.1, 0.25, 0.5, 1.0)
+
+
 @contextlib.contextmanager
 def _write_lock_or_exit(
     source_store_root: Path,
@@ -195,6 +203,10 @@ def _write_lock_or_exit(
     ロック取得に失敗した場合はロック種別に応じたメッセージで _output_error 経由で
     exit する。with 文を抜ける際にロックは自動解放される。
 
+    kind=write の競合に対しては短時間の指数バックオフでリトライする
+    （CLI 連続実行時の OS ロック解放遅延を吸収するため）。kind=rebuild の
+    競合はリトライせず即失敗する。
+
     仕様: docs/specs/infrastructure/content-upload.md の「rebuild との相互排他」
 
     使い方::
@@ -203,23 +215,39 @@ def _write_lock_or_exit(
             # ロック保持下の処理
             ...
     """
+    import time
+
     from .infrastructure.file_lock import LockAcquisitionError, write_lock
 
     lock = write_lock(source_store_root)
-    try:
-        lock.acquire()
-    except LockAcquisitionError as e:
-        if e.kind == "rebuild":
+    last_error: LockAcquisitionError | None = None
+    for backoff in (None, *_WRITE_LOCK_RETRY_BACKOFFS_SEC):
+        if backoff is not None:
+            time.sleep(backoff)
+        try:
+            lock.acquire()
+        except LockAcquisitionError as e:
+            last_error = e
+            # kind=rebuild はリトライ対象外（即失敗）。kind=write はループ継続
+            if e.kind == "rebuild":
+                break
+        else:
+            # 取得成功
+            last_error = None
+            break
+
+    if last_error is not None:
+        if last_error.kind == "rebuild":
             msg = "別の再構築が実行中です（ロック競合）"
         else:
             msg = "別の取り込みが実行中です（ロック競合）"
         if json_out:
             _output_error(
-                CliErrorCode.LOCK_CONFLICT, msg, lock_type=e.kind,
+                CliErrorCode.LOCK_CONFLICT, msg, lock_type=last_error.kind,
             )
         else:
             print(f"エラー: {msg}", file=sys.stderr)
-        raise SystemExit(1) from e
+        raise SystemExit(1) from last_error
     try:
         yield
     finally:

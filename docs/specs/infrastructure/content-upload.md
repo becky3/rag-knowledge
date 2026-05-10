@@ -59,10 +59,21 @@ MCP は JSON ベースのテキストプロトコルであるため、ツール�
   ロック取得処理の実施主体は CLI とし、MCP サーバー（`src/rag/server/`）からの書き込みも CLI サブプロセスを起動して同一のロック取得処理を利用する。
   サーバー側自身はロックファイルを直接操作しない
 - **ロックファイル**: source_store ディレクトリ直下に配置する。`write_lock`（書き込みロック、ファイル名 `.write.lock`）と `rebuild_lock`（再構築ロック、ファイル名 `.rebuild.lock`）でそれぞれ別のロックファイルを使用する
-- **ノンブロッキング**: CLI はロック取得を試み（`LOCK_NB` / `LK_NBLCK`）、取得できない場合は待機せず即座にエラーを返却する。
-  CLI はロック競合時に JSON Lines の error メッセージ（`type: "error"`）にロック競合コード（`LOCK_CONFLICT`）とロック種別（`write` / `rebuild`）を含め、exit code 1 で終了する。
-  サーバー側（`src/rag/server/cli_subprocess.py`）は CLI サブプロセスの error メッセージからロック競合を判定し、Upload HTTP API ではロック種別に応じた HTTP 応答（`write` 競合 = 429、`rebuild` 競合 = 503）+ `Retry-After` ヘッダ、MCP ツールではロック種別に応じたエラーメッセージとして返却する。
-  CLI 直接実行では標準エラー出力 + exit code 1 を返す
+- **ノンブロッキング primitive + helper レベルの短時間リトライ**:
+  低レベル `FileLock` / `PipelineLock` は常にノンブロッキング（`LOCK_NB` / `LK_NBLCK`）で動作する。
+  書き込み系 CLI helper (`_write_lock_or_exit`) は `kind="write"` の競合に限り短時間の指数バックオフでリトライし
+  （CLI 連続実行時の OS ロック解放遅延を吸収する目的）、
+  リトライ全失敗または `kind="rebuild"` の場合は即座にエラーを返却する。
+  rebuild コマンド側の lock helper（`rebuild_lock` を取得する処理）はリトライしない
+  （rebuild は秒〜分単位の長時間処理のため短時間リトライの意味が薄い）。
+  CLI はロック競合時に JSON Lines の error メッセージ（`type: "error"`）に
+  ロック競合コード（`LOCK_CONFLICT`）とロック種別（`write` / `rebuild`）を含め、exit code 1 で終了する。
+  サーバー側（`src/rag/server/cli_subprocess.py`）は CLI サブプロセスの error メッセージから
+  ロック競合を判定し、Upload HTTP API ではロック種別に応じた HTTP 応答
+  （`write` 競合 = 429、`rebuild` 競合 = 503）+ `Retry-After` ヘッダ、
+  MCP ツールではロック種別に応じたエラーメッセージとして返却する。
+  CLI 直接実行では標準エラー出力 + exit code 1 を返す。
+  リトライ間隔・回数の具体値は `src/rag/cli.py` の `_WRITE_LOCK_RETRY_BACKOFFS_SEC` を SSoT とする。
 - **ロック種別の伝搬**: CLI のロック競合エラーには種別識別子（`write` または `rebuild`）を含める。この識別子は Upload HTTP API の HTTP ステータスコード・`Retry-After` 値の選択と、MCP ツールのエラーメッセージの切替に使用する。識別子の意味は「取得失敗したロック」であり、外部プロセスの保持状態を示す
 - **lock_type 不明時のフォールバック**: CLI エラー応答に `details.lock_type` が含まれない
   （低レベル `FileLock` 直接利用で `kind=None` の場合、または旧バージョン CLI との後方互換）、
