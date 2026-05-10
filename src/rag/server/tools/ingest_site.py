@@ -24,7 +24,7 @@ async def rag_site_ingest(
     url_pattern: str = "",
     max_pages: int | None = None,
     force: bool = False,
-    download_only: bool = False,
+    defer_indexing: bool = False,
     ctx: MCPContext | None = None,
 ) -> str:
     """[rag-knowledge] RAG site ingest - Scrapy でサイトを一括取り込み.
@@ -43,8 +43,10 @@ async def rag_site_ingest(
         url_pattern: URL フィルタパターン（正規表現、クロールモードのみ）
         max_pages: ページ数上限（クロールモードのみ、未指定時は設定値を使用）
         force: True の場合、JOBDIR を削除して最初からクロール（クロールモードのみ）
-        download_only: True の場合、Scrapy クロール + Bridge まで実行し、
-            パイプライン処理（コンバート・インデックス構築）をスキップする
+        defer_indexing: True の場合、Scrapy クロール + Bridge まで実行し、
+            パイプライン処理（コンバート・インデックス構築）をスキップする。
+            CLI の --no-pipeline フラグと等価。共通仕様は
+            docs/specs/ingesters/common.md「--no-pipeline フラグ共通仕様」を参照
 
     Returns:
         取り込み結果のサマリー
@@ -106,8 +108,8 @@ async def rag_site_ingest(
             cli_args.extend(["--max-pages", str(max_pages)])
         if force:
             cli_args.append("--force")
-    if download_only:
-        cli_args.append("--download-only")
+    if defer_indexing:
+        cli_args.append("--no-pipeline")
 
     display_url = validated_urls[0] if not multi_url_mode else f"{len(validated_urls)} URLs"
 

@@ -163,8 +163,20 @@ source_store への配置は `place_file` API を経由せず、データファ�
 |---------|------|---------|
 | `update-aozora-catalog` | なし | `rag_update_aozora_catalog` と同等の処理を CLI から実行する |
 | `search-aozora` | `--author`（任意）、`--title`（任意）、`--limit`（任意） | `rag_search_aozora` と同等の処理を CLI から実行する |
-| `ingest-aozora` | `book_id` | `rag_add_aozora` と同等の処理を CLI から実行する |
-| `ingest-aozora-author` | `person_id`、`--max-works`（任意） | `rag_crawl_aozora` と同等の処理を CLI から実行する |
+| `ingest-aozora` | `book_id`（1 件以上、`nargs='+'`）、`--no-pipeline`（任意） | `rag_add_aozora` と同等の処理を CLI から実行する。複数 ID 指定時は逐次取り込み後、末尾 1 回だけ pipeline 実行 |
+| `ingest-aozora-author` | `person_id`、`--max-works`（任意）、`--no-pipeline`（任意） | `rag_crawl_aozora` と同等の処理を CLI から実行する |
+
+`--no-pipeline` の共通仕様は [common.md](common.md#--no-pipeline-フラグ共通仕様) を参照。
+
+#### `ingest-aozora` 複数 ID 入力時の重複検出
+
+`book_id` を `nargs='+'` で複数指定した際、以下のロジックで重複検出を行う:
+
+1. 各 `book_id` を [URL 変換規則](#url-変換規則) と同じ前処理で正規化（前後空白除去 + 6 桁未満ゼロ埋め）する
+2. 正規化後の値が同一の入力が含まれる場合、stderr に WARN ログを出力する（例: `重複入力を検出: '1234', '001234' は同じ作品 (001234)。1 回のみ処理します`）
+3. 正規化後の値で重複排除し、ingester には 1 件のみ渡す
+
+これは ingester 側の book_id ゼロ埋め自動補完（[URL 変換規則](#url-変換規則)）との整合性を保つための CLI 層の補助処理。重複検出は CLI 入力引数間のみ（同一コマンド内）が対象であり、source_store 上の既存ファイルとの重複は ingester 層の責務。
 
 ### 設定項目
 

@@ -70,32 +70,43 @@ async def rag_search_aozora(
 
 @mcp.tool()
 async def rag_add_aozora(
-    book_id: str,
+    book_ids: list[str],
+    defer_indexing: bool = False,
     ctx: MCPContext | None = None,
 ) -> str:
     """[rag-knowledge] RAG add Aozora - 青空文庫の作品を取り込み.
 
-    knowledge base, Aozora, aozora bunko, ingest, book, work.
+    knowledge base, Aozora, aozora bunko, ingest, book, work, bulk.
     指定作品の XHTML を取得し、ナレッジベースに取り込む。著作権フリーの作品のみ対応。
+    複数 book_id を 1 リクエストで処理可能。zfill(6) 後の重複入力は自動排除される。
 
     Args:
-        book_id: 青空文庫の作品 ID（カタログ検索で取得）
+        book_ids: 青空文庫の作品 ID リスト（1 件以上、カタログ検索で取得）
+        defer_indexing: True の場合、後段のパイプライン処理（converter + indexer）を
+            スキップする。CLI の `--no-pipeline` と等価
 
     Returns:
         取り込み結果のサマリーテキスト
     """
     label = _fake_mode_labels(_AOZORA_INGEST_FAKE_SOURCES)
+    if not book_ids:
+        return label + "エラー: book_ids が空です（1 件以上指定してください）"
+    cli_args: list[str] = list(book_ids)
+    if defer_indexing:
+        cli_args.append("--no-pipeline")
+    context = f"作品ID: {book_ids[0]}" if len(book_ids) == 1 else f"作品 {len(book_ids)} 件"
     try:
-        result = await cli_subprocess._run_cli_subprocess("ingest-aozora", [book_id], ctx=ctx)
-        return label + cli_subprocess._format_cli_ingest_result(result, context=f"作品ID: {book_id}")
+        result = await cli_subprocess._run_cli_subprocess("ingest-aozora", cli_args, ctx=ctx)
+        return label + cli_subprocess._format_cli_ingest_result(result, context=context)
     except CLISubprocessError as e:
-        return label + e.format_mcp_error(f"青空文庫作品の取り込みに失敗しました（作品ID: {book_id}）")
+        return label + e.format_mcp_error(f"青空文庫作品の取り込みに失敗しました（{context}）")
 
 
 @mcp.tool()
 async def rag_crawl_aozora(
     person_id: str,
     max_works: int | None = None,
+    defer_indexing: bool = False,
     ctx: MCPContext | None = None,
 ) -> str:
     """[rag-knowledge] RAG crawl Aozora - 青空文庫の著者作品を一括取り込み.
@@ -106,6 +117,8 @@ async def rag_crawl_aozora(
     Args:
         person_id: 著者の人物 ID（rag_search_aozora で確認可能）
         max_works: 取得する最大作品数（未指定時は設定値を使用、許容範囲: 1〜500）
+        defer_indexing: True の場合、後段のパイプライン処理（converter + indexer）を
+            スキップする。CLI の `--no-pipeline` と等価
 
     Returns:
         取り込み結果のサマリーテキスト
@@ -113,6 +126,8 @@ async def rag_crawl_aozora(
     args: list[str] = [person_id]
     if max_works is not None:
         args.extend(["--max-works", str(max_works)])
+    if defer_indexing:
+        args.append("--no-pipeline")
 
     label = _fake_mode_labels(_AOZORA_INGEST_FAKE_SOURCES)
     try:

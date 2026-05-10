@@ -286,6 +286,64 @@ CLI `--output json` 出力は MCP 応答経路および外部スケジューラ�
 
 インジェスター共通の追加設定はない。source_store のパスは [source-store.md](../source-store.md) の `SOURCE_STORE_DIR` を使用する。各媒体固有の設定は媒体別仕様書で定義する。
 
+### `--no-pipeline` フラグ共通仕様
+
+CLI および MCP / HTTP API で共通の **後段 pipeline 処理スキップ機構**。bulk 取り込み運用の高速化を目的とする。
+
+#### 振る舞い
+
+`--no-pipeline` 指定時 / `defer_indexing=True` 指定時に **スキップされる処理**:
+
+- パイプライン制御 (`controller.ingest_and_index`) による converter 実行
+- 同呼び出しによる indexer 実行（チャンキング・Embedding・ChromaDB 書込み・BM25 再構築）
+
+`--no-pipeline` 指定時にも **実行される処理**:
+
+- インジェスターによる source_store へのファイル配置
+- 配置後の git add + git commit（パイプライン制御の `commit` を介して実行）
+- 入力バリデーション・stdout / JSON 出力
+
+これにより、複数件の `--no-pipeline` 取り込みを連続実行しても、BM25 全体再構築（`fugashi` 初期化 + 全コーパス再構築）は走らない。最後にユーザーが `rebuild --mode incremental` を 1 回実行することでまとめて差分処理する運用パターンを想定する。
+
+**Why**: 1 件取り込みあたり BM25 全体再構築（数百万件規模で約 15 秒）が支配的な所要時間となる事象に対する現実的な改善策。bm25s 0.3.2.post1 は IDF が doc count に依存するため真の差分更新 API を持たず、再構築回数を減らす方針を採る。
+
+#### 対象コマンド・ツール
+
+| 経路 | フラグ / パラメータ | 対象 |
+|------|---------------------|------|
+| CLI | `--no-pipeline` | `ingest-youtube` / `ingest-youtube-playlist` / `crawl-bluesky` / `crawl-zenn` / `ingest-bluesky` / `ingest-zenn` / `crawl-documents` / `site-ingest` / `ingest-aozora` / `ingest-aozora-author` / `delete` |
+| MCP | `defer_indexing: bool = False` | 同等の `rag_*` ツール群（[rag-knowledge.md](../rag-knowledge.md) の MCP ツール一覧参照）|
+
+**対象外**:
+
+- `add-document` / `rag_add_document`、`add-journal` / `rag_add_journal`、HTTP `POST /upload/document` / `POST /upload/journal`:
+  外部 API 経由の単発取り込みが主用途であり、bulk 取り込みのニーズが低いため対象外。
+  複数件を取り込みたい場合は `crawl-documents` / `migrate-journal` を使う
+- `migrate-journal`: `controller.ingest_and_index` を呼ばないため対象外（ファイル配置のみ。後段 rebuild はユーザーが別途実行）
+
+#### stdout 案内文
+
+`--no-pipeline` 指定時かつ JSON 出力でない場合、stdout に以下の案内文を 1 行で出力する:
+
+```text
+パイプライン未実行（--no-pipeline 指定）。後で `uv run python -m rag.cli rebuild --mode incremental` を実行してください。
+```
+
+JSON 出力時は案内文を出力せず、`pipeline` フィールドは **省略**する（key 自体を含めない。後続のスケジューラはフィールドの有無で判定可能）。
+MCP / HTTP API 経由の場合、CLI subprocess の stdout / stderr がそのまま応答メッセージに含まれる。
+
+#### 後段 rebuild の運用
+
+`--no-pipeline` で複数件取り込んだ後、最後に 1 回 `rebuild --mode incremental` を実行することで一括 index 更新を行う。`rebuild --mode incremental` は最後の commit 以降の差分を検出して処理するため、`--no-pipeline` 取り込みで作成された commit 群がまとめて処理される。
+
+自動連鎖（取り込み末尾で自動 rebuild 実行）は本仕様の対象外。ユーザーが明示的に rebuild を呼び出す運用とする。
+
+#### 取り込み失敗との関係
+
+`--no-pipeline` の挙動はインジェスター段の成否とは独立。
+インジェスターが部分失敗 (`partial_failures`) や全件失敗（例外）したとしても、`--no-pipeline` の解釈は変わらず「pipeline をスキップする」の意味を持つ。
+ただし `is_empty()` で 0 件配置だった場合は pipeline 呼び出し自体が省略されるため、`--no-pipeline` 指定の有無で振る舞いに差はない。
+
 ## コンポーネント構成
 
 ### 新アーキテクチャでのインジェスターの位置付け

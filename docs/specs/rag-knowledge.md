@@ -297,6 +297,15 @@ MCP サーバーが公開するツール群。
 | `source_id` | str | Yes | — | ソース識別子（rag_search の Source 値） |
 | `format` | str | No | `"text"` | 取得形式。`"text"`（変換済みテキスト）または `"original"`（オリジナル） |
 
+#### rag_add_zenn
+
+Zenn 記事・スクラップを **URL 指定で 1 件以上** 取り込む。同一記事の再取り込み時は `source_id` の一致で検出し、既存の知識を最新に置き換える。
+
+| 引数 | 型 | 必須 | デフォルト | 説明 |
+|------|-----|------|-----------|------|
+| `urls` | list[str] | Yes | — | Zenn コンテンツの URL リスト（1 件以上） |
+| `defer_indexing` | bool | No | `false` | 後段のパイプライン処理（converter + indexer）をスキップする。CLI の `--no-pipeline` と等価。共通仕様は [ingesters/common.md](ingesters/common.md#--no-pipeline-フラグ共通仕様) を参照 |
+
 #### rag_crawl_zenn
 
 指定ユーザーの Zenn 記事・スクラップを API 経由で取得し、ナレッジベースに取り込む。同一記事の再取り込み時は `source_id`（source_store 内の相対パス）の一致で検出し、既存の知識を最新に置き換える。
@@ -307,6 +316,16 @@ MCP サーバーが公開するツール群。
 | `max_articles` | int \| None | No | None（設定値を使用） | 取得する最大コンテンツ数 |
 | `content_type` | str | No | `"all"` | 取得対象。`"articles"`（記事のみ）、`"scraps"`（スクラップのみ）、`"all"`（両方） |
 | `force` | bool | No | `false` | 既存ファイルを上書きするか |
+| `defer_indexing` | bool | No | `false` | 後段のパイプライン処理（converter + indexer）をスキップする。CLI の `--no-pipeline` と等価 |
+
+#### rag_add_bluesky
+
+BlueSky 投稿を **URL 指定で 1 件以上** 取り込む。同一投稿の再取り込み時は上書きする。
+
+| 引数 | 型 | 必須 | デフォルト | 説明 |
+|------|-----|------|-----------|------|
+| `urls` | list[str] | Yes | — | BlueSky 投稿の URL リスト（1 件以上） |
+| `defer_indexing` | bool | No | `false` | 後段のパイプライン処理（converter + indexer）をスキップする。CLI の `--no-pipeline` と等価 |
 
 #### rag_crawl_bluesky
 
@@ -317,14 +336,16 @@ MCP サーバーが公開するツール群。
 | `handle` | str | Yes | — | BlueSky ハンドル（例: user.bsky.social）。DID 形式は不可 |
 | `max_posts` | int \| None | No | None（設定値を使用） | 取得する最大投稿数 |
 | `include_reposts` | bool \| None | No | None（設定値を使用） | タイムラインにリポストを含めるか |
+| `defer_indexing` | bool | No | `false` | 後段のパイプライン処理（converter + indexer）をスキップする。CLI の `--no-pipeline` と等価 |
 
 #### rag_add_youtube
 
-単一 YouTube 動画の字幕/文字起こしを取得し、ナレッジベースに取り込む。詳細は [ingesters/youtube.md](ingesters/youtube.md) を参照。
+YouTube 動画の字幕/文字起こしを **URL 指定で 1 件以上** 取り込む。詳細は [ingesters/youtube.md](ingesters/youtube.md) を参照。
 
 | 引数 | 型 | 必須 | デフォルト | 説明 |
 |------|-----|------|-----------|------|
-| `video_url` | str | Yes | — | YouTube 動画 URL（`youtube.com/watch?v=` または `youtu.be/` 形式） |
+| `video_urls` | list[str] | Yes | — | YouTube 動画 URL リスト（1 件以上、`youtube.com/watch?v=` または `youtu.be/` 形式） |
+| `defer_indexing` | bool | No | `false` | 後段のパイプライン処理（converter + indexer）をスキップする。CLI の `--no-pipeline` と等価 |
 
 #### rag_crawl_youtube
 
@@ -334,6 +355,7 @@ YouTube プレイリスト内の動画を一括取り込みする。詳細は [i
 |------|-----|------|-----------|------|
 | `playlist_url` | str | Yes | — | YouTube プレイリスト URL（`youtube.com/playlist?list=` 形式） |
 | `max_videos` | int \| None | No | None（設定値を使用） | 取得する最大動画数 |
+| `defer_indexing` | bool | No | `false` | 後段のパイプライン処理（converter + indexer）をスキップする。CLI の `--no-pipeline` と等価 |
 
 #### rag_add_document
 
@@ -355,6 +377,7 @@ YouTube プレイリスト内の動画を一括取り込みする。詳細は [i
 | `dir_path` | str | Yes | — | 取り込み対象ディレクトリのパス |
 | `pattern` | str | No | `"**/*"` | glob パターン（再帰的に全対応ファイルを検索） |
 | `upload_mode` | str | No | `"fail"` | 同名ファイル存在時の動作。`"fail"`（スキップ）または `"replace"`（上書き） |
+| `defer_indexing` | bool | No | `false` | 後段のパイプライン処理（converter + indexer）をスキップする。CLI の `--no-pipeline` と等価 |
 
 #### rag_add_journal
 
@@ -379,15 +402,17 @@ Scrapy subprocess で対象サイトをクロールし、source_store に配置�
 | `url_pattern` | str | No | `""` | URL フィルタパターン（正規表現、クロールモードのみ） |
 | `max_pages` | int \| None | No | None（設定値を使用） | ページ数上限（クロールモードのみ） |
 | `force` | bool | No | `false` | JOBDIR を削除して最初からクロール（クロールモードのみ） |
-| `download_only` | bool | No | `false` | パイプライン処理をスキップし、Scrapy クロール + Bridge のみ実行 |
+| `defer_indexing` | bool | No | `false` | パイプライン処理をスキップし、Scrapy クロール + Bridge のみ実行（CLI の `--no-pipeline` と等価。共通仕様は [ingesters/common.md](ingesters/common.md#--no-pipeline-フラグ共通仕様)）|
 
 #### rag_delete
 
 ソース識別子指定で source_store からファイルを物理削除し、パイプライン経由でインデックス・metadata.db を更新する。git 管理下のため、削除後も git checkout で復旧可能。
+複数 `source_id` を 1 リクエストで処理可能（bulk 削除）。末尾 1 回だけパイプラインが走る。
 
 | 引数 | 型 | 必須 | デフォルト | 説明 |
 |------|-----|------|-----------|------|
-| `source_id` | str | Yes | — | 削除するソース識別子 |
+| `source_ids` | list[str] | Yes | — | 削除するソース識別子のリスト（1 件以上） |
+| `defer_indexing` | bool | No | `false` | 後段のパイプライン処理（converter + indexer）をスキップする。CLI の `--no-pipeline` と等価 |
 
 #### rag_rebuild
 
@@ -414,11 +439,12 @@ Scrapy subprocess で対象サイトをクロールし、source_store に配置�
 
 #### rag_add_aozora
 
-指定作品の XHTML を取得し、ナレッジベースに取り込む。著作権フリーの作品のみ対応。
+指定作品の XHTML を **作品 ID 1 件以上** 指定で取得し、ナレッジベースに取り込む。著作権フリーの作品のみ対応。zfill(6) 後の重複入力は自動排除される（詳細は [ingesters/aozora.md](ingesters/aozora.md#ingest-aozora-複数-id-入力時の重複検出) を参照）。
 
 | 引数 | 型 | 必須 | デフォルト | 説明 |
 |------|-----|------|-----------|------|
-| `book_id` | str | Yes | — | 青空文庫の作品 ID（カタログ検索で取得） |
+| `book_ids` | list[str] | Yes | — | 青空文庫の作品 ID リスト（1 件以上、カタログ検索で取得） |
+| `defer_indexing` | bool | No | `false` | 後段のパイプライン処理（converter + indexer）をスキップする。CLI の `--no-pipeline` と等価 |
 
 #### rag_crawl_aozora
 
@@ -428,6 +454,7 @@ Scrapy subprocess で対象サイトをクロールし、source_store に配置�
 |------|-----|------|-----------|------|
 | `person_id` | str | Yes | — | 著者の人物 ID（rag_search_aozora で確認可能） |
 | `max_works` | int \| None | No | None（設定値を使用） | 取得する最大作品数 |
+| `defer_indexing` | bool | No | `false` | 後段のパイプライン処理（converter + indexer）をスキップする。CLI の `--no-pipeline` と等価 |
 
 #### rag_list_recent
 
@@ -579,18 +606,20 @@ MCP サーバーの全ツールは CLI サブプロセスに委譲する。設�
 | `rag_stats` | `stats` | |
 | `rag_list_recent` | `list-recent` | |
 | `rag_search_aozora` | `search-aozora` | |
+| `rag_add_zenn` | `ingest-zenn` | bulk 対応 (`urls: list[str]`) |
 | `rag_crawl_zenn` | `crawl-zenn` | |
+| `rag_add_bluesky` | `ingest-bluesky` | bulk 対応 (`urls: list[str]`) |
 | `rag_crawl_bluesky` | `crawl-bluesky` | |
-| `rag_add_youtube` | `ingest-youtube` | |
+| `rag_add_youtube` | `ingest-youtube` | bulk 対応 (`video_urls: list[str]`) |
 | `rag_crawl_youtube` | `ingest-youtube-playlist` | |
 | `rag_add_document` | `add-document` | stdin 入力（後述） |
 | `rag_crawl_documents` | `crawl-documents` | |
 | `rag_add_journal` | `add-journal` | stdin 入力（後述） |
 | `rag_site_ingest` | `site-ingest` | |
-| `rag_add_aozora` | `ingest-aozora` | |
+| `rag_add_aozora` | `ingest-aozora` | bulk 対応 (`book_ids: list[str]`) |
 | `rag_crawl_aozora` | `ingest-aozora-author` | |
+| `rag_delete` | `delete` | bulk 対応 (`source_ids: list[str]`) |
 | `rag_update_aozora_catalog` | `update-aozora-catalog` | |
-| `rag_delete` | `delete` | |
 | `rag_rebuild` | `rebuild` | |
 | `/upload/document` | `add-document` | 一時ファイル経由 |
 | `/upload/journal` | `add-journal` | 一時ファイル経由 |
