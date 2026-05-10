@@ -354,6 +354,78 @@ class TestCatalogNotFound:
             await ingester.crawl_author("000035")
 
 
+# === ID 不一致テスト（add_work / crawl_author の対称性） ===
+
+
+class TestIdNotFoundInCatalog:
+    """ID 不一致時の ValueError 送出（add_work / crawl_author の対称性）.
+
+    本クラスは Issue #760 で対称化された API ペアの挙動を 1 箇所に集約する。
+    `add_work` 側の不一致挙動は元々存在する仕様だが、対称化の宣言として併置する。
+    """
+
+    @pytest.mark.asyncio()
+    async def test_add_work_book_id_not_in_catalog(
+        self, source_store: SourceStore
+    ) -> None:
+        """add_work で book_id がカタログに存在しない場合 ValueError."""
+        _write_catalog(source_store, [_make_record(book_id="001567")])
+        fetcher = StubAozoraFetcher(xhtml_default=b"<html><body>test</body></html>")
+        ingester = make_aozora_ingester(source_store, fetcher=fetcher)
+        with pytest.raises(ValueError, match="作品 ID '999999' がカタログに見つかりません"):
+            await ingester.add_work("999999")
+
+    @pytest.mark.asyncio()
+    async def test_crawl_author_person_id_not_in_catalog(
+        self, source_store: SourceStore
+    ) -> None:
+        """crawl_author で person_id がカタログに存在しない場合 ValueError（add_work と対称）."""
+        _write_catalog(source_store, [_make_record(person_id="000035")])
+        fetcher = StubAozoraFetcher(xhtml_default=b"<html><body>test</body></html>")
+        ingester = make_aozora_ingester(source_store, fetcher=fetcher)
+        with pytest.raises(ValueError, match="人物 ID '999999' がカタログに見つかりません"):
+            await ingester.crawl_author("999999")
+
+    @pytest.mark.asyncio()
+    async def test_crawl_author_person_id_zfill_then_not_in_catalog(
+        self, source_store: SourceStore
+    ) -> None:
+        """zfill 後の person_id がカタログに存在しない場合、正規化後の値でエラーメッセージを返す."""
+        _write_catalog(source_store, [_make_record(person_id="000035")])
+        fetcher = StubAozoraFetcher(xhtml_default=b"<html><body>test</body></html>")
+        ingester = make_aozora_ingester(source_store, fetcher=fetcher)
+        with pytest.raises(ValueError, match="人物 ID '000999' がカタログに見つかりません"):
+            await ingester.crawl_author("999")
+
+
+# === バリデーション順序テスト（カタログ操作 > max_works 検証） ===
+
+
+class TestCrawlAuthorValidationOrder:
+    """crawl_author のバリデーション順序: カタログ操作系のエラーを max_works 検証より先に伝える."""
+
+    @pytest.mark.asyncio()
+    async def test_no_catalog_takes_priority_over_invalid_max_works(
+        self, source_store: SourceStore
+    ) -> None:
+        """カタログ未ダウンロード + max_works 不正が同時に発生した場合、カタログエラーが先に出る."""
+        fetcher = StubAozoraFetcher(xhtml_default=b"<html><body>test</body></html>")
+        ingester = make_aozora_ingester(source_store, fetcher=fetcher)
+        with pytest.raises(ValueError, match="カタログが未ダウンロード"):
+            await ingester.crawl_author("000035", max_works=0)
+
+    @pytest.mark.asyncio()
+    async def test_person_id_not_found_takes_priority_over_invalid_max_works(
+        self, source_store: SourceStore
+    ) -> None:
+        """person_id 不一致 + max_works 不正が同時に発生した場合、person_id エラーが先に出る."""
+        _write_catalog(source_store, [_make_record(person_id="000035")])
+        fetcher = StubAozoraFetcher(xhtml_default=b"<html><body>test</body></html>")
+        ingester = make_aozora_ingester(source_store, fetcher=fetcher)
+        with pytest.raises(ValueError, match="人物 ID '999999' がカタログに見つかりません"):
+            await ingester.crawl_author("999999", max_works=0)
+
+
 # === 重複スキップテスト ===
 
 

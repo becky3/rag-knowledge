@@ -293,16 +293,26 @@ class AozoraIngester(BaseIngester):
             max_works if max_works is not None else self._max_works,
         )
 
-        effective_max = self._validate_max_works(
-            max_works if max_works is not None else self._max_works
-        )
-
+        # カタログ操作系のエラー（未ダウンロード / person_id 不一致）を
+        # max_works バリデーションより先に伝える（利用者の直感に合わせる）
         records = self._load_catalog()
         if records is None:
             raise ValueError(
                 "カタログが未ダウンロードです。"
                 "先に rag_update_aozora_catalog でカタログを更新してください"
             )
+
+        # person_id がカタログに存在するか検証（add_work と対称化）
+        if not any(
+            record.get(COL_PERSON_ID, "") == person_id for record in records
+        ):
+            raise ValueError(
+                f"人物 ID '{person_id}' がカタログに見つかりません"
+            )
+
+        effective_max = self._validate_max_works(
+            max_works if max_works is not None else self._max_works
+        )
 
         # 人物 ID で検索 + 著作権フリーフィルタ
         targets: list[dict[str, str]] = []
