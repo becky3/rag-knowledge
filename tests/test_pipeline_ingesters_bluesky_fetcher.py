@@ -72,13 +72,15 @@ class TestProtocolDefinitions:
         }
         assert names == {"classify"}
 
-    def test_youtube_delegator_protocol_has_ingest_video(self) -> None:
+    def test_youtube_delegator_protocol_has_expected_methods(self) -> None:
         names = {
             name
             for name, member in inspect.getmembers(YoutubeDelegator)
             if not name.startswith("_") and inspect.isfunction(member)
         }
-        assert names == {"ingest_video"}
+        # unload_whisper は Whisper モデルアンロード用の同期メソッド
+        # 仕様: docs/specs/ingesters/youtube.md「Whisper モデルライフサイクル」
+        assert names == {"ingest_video", "unload_whisper"}
 
     def test_web_delegator_protocol_has_run_for_urls(self) -> None:
         names = {

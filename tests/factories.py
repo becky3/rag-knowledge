@@ -414,7 +414,7 @@ def make_youtube_ingester(source_store: Any, **overrides: Any) -> Any:
         "max_videos": 100,
         "request_interval": 0.1,
         "request_timeout": 30,
-        "whisper_model": "base",
+        "whisper_model": "medium",
         "whisper_device": "cuda",
         "transcript_languages": None,
         "max_duration": 14400,

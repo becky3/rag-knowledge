@@ -96,6 +96,10 @@ class YoutubeFetcher(Protocol):
         """プレイリストを展開する."""
         ...
 
+    def unload_whisper(self) -> None:
+        """保持している Whisper モデルインスタンスを破棄し VRAM を解放する."""
+        ...
+
 
 class RealYoutubeFetcher:
     """yt-dlp / youtube-transcript-api / faster-whisper を使う実 Fetcher 実装.
@@ -108,6 +112,22 @@ class RealYoutubeFetcher:
         # threading.Lock で worker スレッド内の transcribe 全体を直列化（faster-whisper はスレッドセーフでないため）
         self._whisper_model_instance: Any = None
         self._whisper_lock = threading.Lock()
+        # CUDA 可用性は起動時に 1 度判定してキャッシュする。
+        # torch は optional 依存（uv sync --no-group with-mineru で除外可能）のため、
+        # 未導入環境では CPU フォールバックとして cuda_available=False を返す。
+        self._cuda_available = self._detect_cuda()
+
+    @staticmethod
+    def _detect_cuda() -> bool:
+        """torch.cuda.is_available() を 1 度だけ呼び出す静的判定.
+
+        torch 未導入の CPU 環境では ImportError をキャッチして False を返す。
+        """
+        try:
+            import torch  # safety:allowed
+        except ImportError:
+            return False
+        return bool(torch.cuda.is_available())
 
     async def fetch_metadata(
         self, video_id: str, request_timeout: int
@@ -233,6 +253,39 @@ class RealYoutubeFetcher:
                 return entries
 
         return await loop.run_in_executor(None, _expand)
+
+    def unload_whisper(self) -> None:
+        """保持している Whisper モデルインスタンスを破棄し VRAM を解放する.
+
+        取り込み境界（単発・bulk）で `YoutubeIngester` が `try/finally` から呼び出す前提。
+        Whisper モデルがロードされていない場合は no-op。
+
+        `transcribe_audio` 実行中の並行発火は VRAM 解放を中断するリスクがあるため、
+        ロックを非ブロッキング acquire し、取得失敗時は警告ログを出してアンロードを見送る。
+        """
+        import gc
+
+        acquired = self._whisper_lock.acquire(blocking=False)
+        if not acquired:
+            logger.warning(
+                "Whisper モデルアンロードを見送り: transcribe 実行中の並行発火を検出。"
+                "VRAM は解放されていません。次の取り込み境界で再試行されます。"
+                "取り込み境界で `try/finally` から呼ぶこと",
+            )
+            return
+        try:
+            if self._whisper_model_instance is None:
+                return
+            # 参照を切って GC 対象にし、CUDA 環境では VRAM キャッシュを解放する
+            self._whisper_model_instance = None
+            gc.collect()
+            if self._cuda_available:
+                import torch  # safety:allowed
+
+                torch.cuda.empty_cache()
+            logger.info("Whisper モデルをアンロードしました")
+        finally:
+            self._whisper_lock.release()
 
     async def _download_audio(
         self, video_id: str, tmpdir: str, request_timeout: int

@@ -165,7 +165,7 @@ def e2e_subprocess_env(
         # デバッグ・ログ
         "RAG_DEBUG_LOG_ENABLED": "false",
         # YouTube インジェスター（Whisper は Fake Fetcher 経由のため値は使われない）
-        "RAG_YOUTUBE_WHISPER_MODEL": "base",
+        "RAG_YOUTUBE_WHISPER_MODEL": "medium",
         "RAG_YOUTUBE_WHISPER_DEVICE": "cpu",
         # Fake Adapter 一括有効化
         "RAG_YOUTUBE_FAKE_MODE": "true",

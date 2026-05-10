@@ -167,7 +167,7 @@ YouTube インジェスターは以下の URL パターンを単一動画とし�
 | `rag_youtube_max_videos` | 共通設定値 | プレイリスト取得時の最大動画数。API 負荷を抑制 |
 | `rag_youtube_request_interval` | 共通設定値 | リクエスト間の最大待機時間（ランダムジッター付き）。固定間隔によるボット検知・IP ブロック回避 |
 | `rag_youtube_request_timeout` | 共通設定値 | リクエストタイムアウト |
-| `rag_youtube_whisper_model` | 環境依存値 | faster-whisper のモデル名。GPU メモリに応じて選択 |
+| `rag_youtube_whisper_model` | 環境依存値 | faster-whisper のモデル名。転写品質と VRAM 消費・モデルロード時間のトレードオフ。GPU メモリに応じて選択 |
 | `rag_youtube_whisper_device` | 環境依存値 | faster-whisper のデバイス。GPU 有無で切替 |
 | `rag_youtube_transcript_languages` | 共通設定値 | 字幕取得の優先言語 |
 | `rag_youtube_max_duration` | 共通設定値 | 動画長上限。長時間動画の処理負荷を制限 |
@@ -371,6 +371,42 @@ flowchart TD
     ABORT --> NOTIFY
     NOTIFY --> RESULT
 ```
+
+### Whisper モデルライフサイクル
+
+#### 動機
+
+Whisper モデルは VRAM を大きく占有する。サブプロセス（CLI / MCP サブプロセス）内で Whisper を一度でも使用するとサブプロセス終了まで VRAM を保持し続けるため、Embedding モデル等の他リソースと競合しないよう、取り込み境界でアンロードする運用とする。
+
+#### 振る舞い
+
+- ロード: 初回 transcribe 時に遅延初期化する
+- アンロード: 取り込み境界で明示的に解放する
+- 境界: 単発取り込み・bulk 取り込み（複数 URL / プレイリスト）・BlueSky 経由取り込み（投稿内 YouTube URL の自動取り込み）のいずれでも、取り込み処理終了時に必ず VRAM を解放する。bulk 取り込みではロードは bulk 全体で 1 回のみ発生し、末尾で 1 回アンロードする
+- 例外時の保証: 取り込み途中の例外発生時も VRAM 解放を保証する
+- 並行呼び出し制約: アンロードは transcribe 実行中に呼び出されてはならない。並行発火した場合は警告ログを出力してアンロードを見送る
+
+#### Protocol 拡張
+
+`YoutubeFetcher` Protocol に Whisper モデルアンロード用のメソッドを追加する。外部 caller（CLI / MCP / 他インジェスター）から取り込み境界で呼び出される。詳細な契約は [Fake Adapter 仕様](../infrastructure/fake-adapters/youtube.md) を参照。
+
+他インジェスター（BlueSky 等）からの delegation 経由のアンロード呼び出し用に、`YoutubeDelegator` Protocol にも同等のメソッドを追加する。`YoutubeDelegator` の `ingest_video` が `async` であるのに対し、アンロード用メソッドは sync で呼び出す。
+
+#### VRAM 占有期間
+
+| 状態 | VRAM 占有 |
+|------|-----------|
+| 取り込み未実行 | なし |
+| YouTube 取り込み実行中（字幕のみで完結） | なし |
+| YouTube 取り込み実行中（Whisper 経路発火） | あり |
+| YouTube 取り込み完了直後 | なし |
+| BlueSky 経由取り込み実行中（投稿内 YouTube URL が字幕のみで完結） | なし |
+| BlueSky 経由取り込み実行中（投稿内 YouTube URL で Whisper 経路発火） | あり |
+| BlueSky 取り込み完了直後 | なし |
+
+#### ロードオーバーヘッド
+
+ロードはモデルキャッシュからの VRAM 転送のため、モデルサイズに比例した時間を要する。bulk 取り込みでは先頭 1 回のみ発生するため、N 本連続取り込みでもオーバーヘッドはモデルロード 1 回分。
 
 ## エッジケース
 

@@ -35,14 +35,17 @@ Fake モード基盤の制約（[Fake モード基盤](../fake-mode.md)）はす
 
 YouTube インジェスターの外部アクセス処理を以下のメソッドに抽象化する:
 
-| メソッド | 引数 | 戻り値 | 振る舞い |
-|---|---|---|---|
-| `fetch_metadata` | `video_id: str`、`request_timeout: int` | `dict[str, Any]`（yt-dlp `extract_info` の info_dict 形式） | 動画メタデータ取得 |
-| `fetch_subtitle` | `video_id: str`、`languages: list[str]` | `tuple[list[dict[str, Any]], str]`（snippets, language） | 字幕取得 |
-| `transcribe_audio` | `video_id: str`、`languages: list[str]`、`whisper_model: str`、`whisper_device: str`、`request_timeout: int` | `tuple[list[dict[str, Any]], str]`（snippets, language） | 音声 DL + Whisper 文字起こし |
-| `expand_playlist` | `playlist_url: str`、`max_videos: int`、`request_timeout: int` | `list[dict[str, Any]]`（entries） | プレイリスト展開 |
+| メソッド | 同期/非同期 | 引数 | 戻り値 | 振る舞い |
+|---|---|---|---|---|
+| `fetch_metadata` | async | `video_id: str`、`request_timeout: int` | `dict[str, Any]`（yt-dlp `extract_info` の info_dict 形式） | 動画メタデータ取得 |
+| `fetch_subtitle` | async | `video_id: str`、`languages: list[str]` | `tuple[list[dict[str, Any]], str]`（snippets, language） | 字幕取得 |
+| `transcribe_audio` | async | `video_id: str`、`languages: list[str]`、`whisper_model: str`、`whisper_device: str`、`request_timeout: int` | `tuple[list[dict[str, Any]], str]`（snippets, language） | 音声 DL + Whisper 文字起こし |
+| `expand_playlist` | async | `playlist_url: str`、`max_videos: int`、`request_timeout: int` | `list[dict[str, Any]]`（entries） | プレイリスト展開 |
+| `unload_whisper` | sync | `None` | `None` | 保持している Whisper モデルインスタンスを破棄し VRAM を解放する。Real は GPU メモリを解放し、Fake は no-op |
 
-すべて `async` メソッド。Real / Fake で同じシグネチャを実装する。
+`unload_whisper` のみ同期メソッド（GPU メモリ解放を確実に同期実行するため）。Real / Fake で同じシグネチャを実装する。
+
+Whisper モデルライフサイクルの設計意図は [YouTube インジェスター仕様](../../ingesters/youtube.md) の「Whisper モデルライフサイクル」セクションを参照。
 
 戻り値の dict 構造の詳細フィールドは [YouTube インジェスター](../../ingesters/youtube.md) の「保存形式」セクション・既存実装の `_make_metadata()` テストヘルパーを参照（コード SSoT）。
 

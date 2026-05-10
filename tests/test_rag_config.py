@@ -444,7 +444,7 @@ key = "test-vision-model"
             "RAG_HTTP_PORT": "8081",
             "RAG_DNS_REBINDING_PROTECTION": "true",
             "RAG_DEBUG_LOG_ENABLED": "false",
-            "RAG_YOUTUBE_WHISPER_MODEL": "base",
+            "RAG_YOUTUBE_WHISPER_MODEL": "medium",
             "RAG_YOUTUBE_WHISPER_DEVICE": "cpu",
             "SITE_INGEST_TEMP_DIR": ".tmp/site_ingest",
         }

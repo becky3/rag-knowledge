@@ -87,7 +87,7 @@ class _EnvLoader(BaseSettings):
     rag_log_dir: str | None = None
 
     # YouTube インジェスター（Whisper）— GPU 有無で選択が変わるため .env 管理
-    rag_youtube_whisper_model: str = "base"
+    rag_youtube_whisper_model: str = "medium"
     rag_youtube_whisper_device: Literal["cuda", "cpu"] = "cuda"
 
     # YouTube Fake モード — テスト・QA で実 YouTube アクセスを排除する。デフォルトは安全側（fake 有効）
