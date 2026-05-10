@@ -330,7 +330,9 @@ CLI および MCP / HTTP API で共通の **後段 pipeline 処理スキップ�
 ```
 
 JSON 出力時は案内文を出力せず、`pipeline` フィールドは **省略**する（key 自体を含めない。後続のスケジューラはフィールドの有無で判定可能）。
-MCP / HTTP API 経由の場合、CLI subprocess は常に `--output json` で起動され、JSON Lines の `type=result` / `type=error` のみがパースされる。通常の stdout / stderr 行（`--skip-pipeline` 案内文等）は応答本文に含まれず、stderr は server 側のログに転送されるのみとなる。MCP / HTTP API 経由のクライアントが `--skip-pipeline` 相当（`skip_pipeline=True`）を使う場合、案内文を見るには CLI 直接実行か、サーバー側のログ確認が必要。
+MCP / HTTP API 経由の場合、CLI subprocess は常に `--output json` で起動され、JSON Lines の `type=result` / `type=error` のみがパースされる。
+通常の stdout / stderr 行（`--skip-pipeline` 案内文等）は応答本文に含まれず、stderr は server 側のログに転送されるのみとなる。
+MCP / HTTP API 経由のクライアントが `--skip-pipeline` 相当（`skip_pipeline=True`）を使う場合、案内文を見るには CLI 直接実行か、サーバー側のログ確認が必要。
 
 #### 後段 rebuild の運用
 
