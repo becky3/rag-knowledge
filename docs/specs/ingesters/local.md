@@ -148,9 +148,9 @@ source_store 内の相対パスを source_id として使用する。
 | コマンド | 引数 | 振る舞い |
 |---------|------|---------|
 | `add-document` | `--file` または `--stdin`（排他）、`--filename`（`--stdin` 使用時に必須）、`--encoding`（任意）、`--upload-mode`（任意） | `rag_add_document` と同等の処理を CLI から実行する。単一ファイル/コンテンツのみ対応（外部 API 経由の単発取り込みが主用途のため bulk 化対象外） |
-| `crawl-documents` | `dir_path`、`--pattern`（任意）、`--upload-mode`（任意）、`--no-pipeline`（任意） | `rag_crawl_documents` と同等の処理を CLI から実行する |
+| `crawl-documents` | `dir_path`、`--pattern`（任意）、`--upload-mode`（任意）、`--skip-pipeline`（任意） | `rag_crawl_documents` と同等の処理を CLI から実行する |
 
-`--no-pipeline` の共通仕様は [common.md](common.md#--no-pipeline-フラグ共通仕様) を参照。`add-document` は `--no-pipeline` 対象外（単発取り込みのため）。
+`--skip-pipeline` の共通仕様は [common.md](common.md#--skip-pipeline-フラグ共通仕様) を参照。`add-document` は `--skip-pipeline` 対象外（単発取り込みのため）。
 
 ### 設定項目
 

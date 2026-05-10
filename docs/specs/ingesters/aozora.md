@@ -163,10 +163,10 @@ source_store への配置は `place_file` API を経由せず、データファ�
 |---------|------|---------|
 | `update-aozora-catalog` | なし | `rag_update_aozora_catalog` と同等の処理を CLI から実行する |
 | `search-aozora` | `--author`（任意）、`--title`（任意）、`--limit`（任意） | `rag_search_aozora` と同等の処理を CLI から実行する |
-| `ingest-aozora` | `book_id`（1 件以上、`nargs='+'`）、`--no-pipeline`（任意） | `rag_add_aozora` と同等の処理を CLI から実行する。複数 ID 指定時は逐次取り込み後、末尾 1 回だけ pipeline 実行 |
-| `ingest-aozora-author` | `person_id`、`--max-works`（任意）、`--no-pipeline`（任意） | `rag_crawl_aozora` と同等の処理を CLI から実行する |
+| `ingest-aozora` | `book_id`（1 件以上、`nargs='+'`）、`--skip-pipeline`（任意） | `rag_add_aozora` と同等の処理を CLI から実行する。複数 ID 指定時は逐次取り込み後、末尾 1 回だけ pipeline 実行 |
+| `ingest-aozora-author` | `person_id`、`--max-works`（任意）、`--skip-pipeline`（任意） | `rag_crawl_aozora` と同等の処理を CLI から実行する |
 
-`--no-pipeline` の共通仕様は [common.md](common.md#--no-pipeline-フラグ共通仕様) を参照。
+`--skip-pipeline` の共通仕様は [common.md](common.md#--skip-pipeline-フラグ共通仕様) を参照。
 
 #### `ingest-aozora` 複数 ID 入力時の重複検出
 

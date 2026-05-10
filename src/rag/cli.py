@@ -358,13 +358,13 @@ def _add_output_option(parser: argparse.ArgumentParser) -> None:
     )
 
 
-def _add_no_pipeline_option(parser: argparse.ArgumentParser) -> None:
-    """サブコマンドパーサーに --no-pipeline オプションを追加する.
+def _add_skip_pipeline_option(parser: argparse.ArgumentParser) -> None:
+    """サブコマンドパーサーに --skip-pipeline オプションを追加する.
 
-    共通仕様は docs/specs/ingesters/common.md「`--no-pipeline` フラグ共通仕様」を参照。
+    共通仕様は docs/specs/ingesters/common.md「`--skip-pipeline` フラグ共通仕様」を参照。
     """
     parser.add_argument(
-        "--no-pipeline",
+        "--skip-pipeline",
         action="store_true",
         default=False,
         help=(
@@ -375,41 +375,41 @@ def _add_no_pipeline_option(parser: argparse.ArgumentParser) -> None:
     )
 
 
-def _is_no_pipeline(args: argparse.Namespace) -> bool:
-    """args から --no-pipeline 指定の有無を取得する.
+def _is_skip_pipeline(args: argparse.Namespace) -> bool:
+    """args から --skip-pipeline 指定の有無を取得する.
 
-    `getattr` でデフォルトを偽として扱うため、--no-pipeline 未対応のサブコマンドが
+    `getattr` でデフォルトを偽として扱うため、--skip-pipeline 未対応のサブコマンドが
     呼ばれた場合でも安全に False を返す。
     """
-    return bool(getattr(args, "no_pipeline", False))
+    return bool(getattr(args, "skip_pipeline", False))
 
 
-def _print_no_pipeline_notice(json_out: bool) -> None:
-    """--no-pipeline 指定時に stdout へ案内文を出力する.
+def _print_skip_pipeline_notice(json_out: bool) -> None:
+    """--skip-pipeline 指定時に stdout へ案内文を出力する.
 
     `json_out=True` で呼ばれた場合は早期 return し何も出力しない（JSON 構造への反映は
     呼び出し側で `pipeline` フィールドの省略等で行う前提）。
-    共通仕様は docs/specs/ingesters/common.md「`--no-pipeline` フラグ共通仕様」を参照。
+    共通仕様は docs/specs/ingesters/common.md「`--skip-pipeline` フラグ共通仕様」を参照。
     """
     if json_out:
         return
     print(
-        "パイプライン未実行（--no-pipeline 指定）。後で `uv run python -m rag.cli rebuild --mode incremental` を実行してください。",
+        "パイプライン未実行（--skip-pipeline 指定）。後で `uv run python -m rag.cli rebuild --mode incremental` を実行してください。",
     )
 
 
-def _commit_for_no_pipeline(
+def _commit_for_skip_pipeline(
     controller: "PipelineController",
     commit_message: str,
 ) -> None:
-    """`--no-pipeline` 経路の commit のみ実行（pipeline 処理はスキップ）.
+    """`--skip-pipeline` 経路の commit のみ実行（pipeline 処理はスキップ）.
 
     `controller.ingest_and_index()` 内では git commit + converter + indexer が一括実行されるが、
-    `--no-pipeline` 指定時は converter / indexer をスキップしつつ source_store の commit は
+    `--skip-pipeline` 指定時は converter / indexer をスキップしつつ source_store の commit は
     実行する必要がある（後段の `rebuild --mode incremental` が差分を検出できるようにするため）。
     本ヘルパーは commit のみ実行し pipeline は呼ばない。
 
-    仕様: docs/specs/ingesters/common.md「`--no-pipeline` フラグ共通仕様」
+    仕様: docs/specs/ingesters/common.md「`--skip-pipeline` フラグ共通仕様」
     """
     controller.commit(commit_message)
 
@@ -766,7 +766,7 @@ def _build_parser() -> "_JsonAwareArgumentParser":
     # delete サブコマンド
     delete_parser = subparsers.add_parser("delete", help="ソースをナレッジベースから論理削除")
     delete_parser.add_argument("source_id", nargs="+", help="削除するソース識別子（source_id、1 件以上）")
-    _add_no_pipeline_option(delete_parser)
+    _add_skip_pipeline_option(delete_parser)
     _add_output_option(delete_parser)
 
     # --- インジェスト系サブコマンド ---
@@ -774,14 +774,14 @@ def _build_parser() -> "_JsonAwareArgumentParser":
     # ingest-youtube: YouTube 単一動画取り込み
     yt_parser = subparsers.add_parser("ingest-youtube", help="YouTube 動画を取り込み")
     yt_parser.add_argument("video_url", nargs="+", help="YouTube 動画 URL（1 件以上）")
-    _add_no_pipeline_option(yt_parser)
+    _add_skip_pipeline_option(yt_parser)
     _add_output_option(yt_parser)
 
     # ingest-youtube-playlist: YouTube プレイリスト一括取り込み
     ytpl_parser = subparsers.add_parser("ingest-youtube-playlist", help="YouTube プレイリストを一括取り込み")
     ytpl_parser.add_argument("playlist_url", help="YouTube プレイリスト URL")
     ytpl_parser.add_argument("--max-videos", type=int, default=None, help="取得する最大動画数")
-    _add_no_pipeline_option(ytpl_parser)
+    _add_skip_pipeline_option(ytpl_parser)
     _add_output_option(ytpl_parser)
 
     # crawl-bluesky: BlueSky 取り込み
@@ -797,13 +797,13 @@ def _build_parser() -> "_JsonAwareArgumentParser":
         help="リポストを含めるか（--no-include-reposts で除外）",
     )
     bs_parser.add_argument("--force", action="store_true", default=False, help="上書き再取得モード（既存ファイルを上書き + メディア再DL）")
-    _add_no_pipeline_option(bs_parser)
+    _add_skip_pipeline_option(bs_parser)
     _add_output_option(bs_parser)
 
     # ingest-bluesky: BlueSky 単一投稿取り込み
     rbs_parser = subparsers.add_parser("ingest-bluesky", help="BlueSky 投稿を URL 指定で取り込み")
     rbs_parser.add_argument("url", nargs="+", help="BlueSky 投稿の URL（1 件以上）")
-    _add_no_pipeline_option(rbs_parser)
+    _add_skip_pipeline_option(rbs_parser)
     _add_output_option(rbs_parser)
 
     # crawl-zenn: Zenn 取り込み
@@ -812,13 +812,13 @@ def _build_parser() -> "_JsonAwareArgumentParser":
     zenn_parser.add_argument("--max-articles", type=int, default=None, help="取得する最大コンテンツ数")
     zenn_parser.add_argument("--content-type", choices=["articles", "scraps", "all"], default="all", help="取得対象")
     zenn_parser.add_argument("--force", action="store_true", default=False, help="既存ファイルを上書きする（デフォルト: スキップ）")
-    _add_no_pipeline_option(zenn_parser)
+    _add_skip_pipeline_option(zenn_parser)
     _add_output_option(zenn_parser)
 
     # ingest-zenn: Zenn 単一コンテンツ取り込み
     rzenn_parser = subparsers.add_parser("ingest-zenn", help="Zenn コンテンツを URL 指定で取り込み")
     rzenn_parser.add_argument("url", nargs="+", help="Zenn コンテンツの URL（1 件以上）")
-    _add_no_pipeline_option(rzenn_parser)
+    _add_skip_pipeline_option(rzenn_parser)
     _add_output_option(rzenn_parser)
 
     # add-document: 単一ドキュメント取り込み
@@ -836,7 +836,7 @@ def _build_parser() -> "_JsonAwareArgumentParser":
     crawldoc_parser.add_argument("dir_path", help="取り込み対象ディレクトリのパス")
     crawldoc_parser.add_argument("--pattern", default="**/*", help="glob パターン")
     crawldoc_parser.add_argument("--upload-mode", choices=["fail", "replace"], default="fail", help="同名ファイル存在時の動作")
-    _add_no_pipeline_option(crawldoc_parser)
+    _add_skip_pipeline_option(crawldoc_parser)
     _add_output_option(crawldoc_parser)
 
     # site-ingest: Scrapy によるサイト一括取り込み
@@ -845,7 +845,7 @@ def _build_parser() -> "_JsonAwareArgumentParser":
     siteingest_parser.add_argument("--url-pattern", default="", help="URL フィルタパターン（正規表現、クロールモードのみ）")
     siteingest_parser.add_argument("--max-pages", type=int, default=None, help="ページ数上限（クロールモードのみ）")
     siteingest_parser.add_argument("--force", action="store_true", help="JOBDIR を削除して再クロール（クロールモードのみ）")
-    _add_no_pipeline_option(siteingest_parser)
+    _add_skip_pipeline_option(siteingest_parser)
     _add_output_option(siteingest_parser)
 
     # update-aozora-catalog: 青空文庫カタログ更新
@@ -862,14 +862,14 @@ def _build_parser() -> "_JsonAwareArgumentParser":
     # ingest-aozora: 青空文庫作品取り込み（バルク対応）
     ingest_aozora_parser = subparsers.add_parser("ingest-aozora", help="青空文庫の作品を取り込み")
     ingest_aozora_parser.add_argument("book_id", nargs="+", help="青空文庫の作品 ID（1 件以上）")
-    _add_no_pipeline_option(ingest_aozora_parser)
+    _add_skip_pipeline_option(ingest_aozora_parser)
     _add_output_option(ingest_aozora_parser)
 
     # ingest-aozora-author: 青空文庫著者一括取り込み
     ingest_aozora_author_parser = subparsers.add_parser("ingest-aozora-author", help="青空文庫の著者作品を一括取り込み")
     ingest_aozora_author_parser.add_argument("person_id", help="著者の人物 ID（search-aozora で確認）")
     ingest_aozora_author_parser.add_argument("--max-works", type=int, default=None, help="取得する最大作品数")
-    _add_no_pipeline_option(ingest_aozora_author_parser)
+    _add_skip_pipeline_option(ingest_aozora_author_parser)
     _add_output_option(ingest_aozora_author_parser)
 
     # add-journal: 単一ジャーナルエントリの登録
@@ -2291,14 +2291,14 @@ async def run_delete(args: argparse.Namespace) -> None:
 
     MCP ツール rag_delete と同等の削除を CLI で実行する。
     ファイルを物理削除し、パイプライン経由でインデックス・metadata.db を更新する。
-    `--no-pipeline` 指定時は pipeline をスキップし git commit のみ実行する。
+    `--skip-pipeline` 指定時は pipeline をスキップし git commit のみ実行する。
 
     Args:
         args: コマンドライン引数
     """
     json_out = _is_json_output(args)
     progress_cb = _output_progress if json_out else None
-    no_pipeline = _is_no_pipeline(args)
+    skip_pipeline = _is_skip_pipeline(args)
 
     controller, settings = _build_cli_pipeline_controller()
     source_ids: list[str] = list(args.source_id)
@@ -2336,7 +2336,7 @@ async def run_delete(args: argparse.Namespace) -> None:
             else f"delete: {len(deleted)} 件"
         )
         summary = None
-        if no_pipeline:
+        if skip_pipeline:
             controller.commit(commit_message)
         else:
             try:
@@ -2362,7 +2362,7 @@ async def run_delete(args: argparse.Namespace) -> None:
                 "deleted_count": len(deleted),
                 "not_found_ids": not_found,
             }
-            # 共通仕様: --no-pipeline 時は pipeline フィールドを省略する
+            # 共通仕様: --skip-pipeline 時は pipeline フィールドを省略する
             # （docs/specs/ingesters/common.md「stdout 案内文」セクション）
             if summary is not None:
                 data["pipeline"] = _summary_to_dict(summary)
@@ -2394,8 +2394,8 @@ async def run_delete(args: argparse.Namespace) -> None:
             print(f"削除しました: {len(deleted)}件")
             for sid in deleted:
                 print(f"  - {sid}")
-        if no_pipeline:
-            _print_no_pipeline_notice(json_out)
+        if skip_pipeline:
+            _print_skip_pipeline_notice(json_out)
 
 
 async def run_add_journal(args: argparse.Namespace) -> None:
@@ -2686,7 +2686,7 @@ async def run_ingest_youtube(args: argparse.Namespace) -> None:
 
     json_out = _is_json_output(args)
     progress_cb = _output_progress if json_out else None
-    no_pipeline = _is_no_pipeline(args)
+    skip_pipeline = _is_skip_pipeline(args)
 
     controller, settings = _build_cli_pipeline_controller()
 
@@ -2717,7 +2717,10 @@ async def run_ingest_youtube(args: argparse.Namespace) -> None:
         for url in video_urls:
             try:
                 results.append(await youtube_ingester.ingest_video(url))
-            except (ValueError, TypeError) as e:
+            except Exception as e:
+                # bulk loop の partial result loss 防止のため、ループ内例外は per-item として
+                # IngestResult.errors に変換し処理継続。Exception 限定のため KeyboardInterrupt
+                # 等の BaseException 系（キャンセル）は捕捉せず正常に伝播する。
                 logger.error("ingest-youtube エラー (url=%s): %s", url, e)
                 err = _IngestResult()
                 err.errors = 1
@@ -2745,8 +2748,8 @@ async def run_ingest_youtube(args: argparse.Namespace) -> None:
             return
 
         commit_message = f"ingest(youtube): {len(video_urls)} 件"
-        if no_pipeline:
-            _commit_for_no_pipeline(controller, commit_message)
+        if skip_pipeline:
+            _commit_for_skip_pipeline(controller, commit_message)
             pipeline_summary = None
         else:
             pipeline_summary = await controller.ingest_and_index(
@@ -2755,8 +2758,8 @@ async def run_ingest_youtube(args: argparse.Namespace) -> None:
                 concurrency=settings.rag_embedding_concurrency,
             )
         _print_ingest_result(ingest_result, pipeline_summary, context=context, json_output=json_out)
-        if no_pipeline:
-            _print_no_pipeline_notice(json_out)
+        if skip_pipeline:
+            _print_skip_pipeline_notice(json_out)
 
 
 async def run_ingest_youtube_playlist(args: argparse.Namespace) -> None:
@@ -2804,10 +2807,10 @@ async def run_ingest_youtube_playlist(args: argparse.Namespace) -> None:
             _print_ingest_result(ingest_result, None, context=f"プレイリスト: {args.playlist_url}", json_output=json_out)
             return
 
-        no_pipeline = _is_no_pipeline(args)
+        skip_pipeline = _is_skip_pipeline(args)
         commit_message = f"ingest(youtube-playlist): {args.playlist_url}"
-        if no_pipeline:
-            _commit_for_no_pipeline(controller, commit_message)
+        if skip_pipeline:
+            _commit_for_skip_pipeline(controller, commit_message)
             pipeline_summary = None
         else:
             pipeline_summary = await controller.ingest_and_index(
@@ -2816,8 +2819,8 @@ async def run_ingest_youtube_playlist(args: argparse.Namespace) -> None:
                 concurrency=settings.rag_embedding_concurrency,
             )
         _print_ingest_result(ingest_result, pipeline_summary, context=f"プレイリスト: {args.playlist_url}", json_output=json_out)
-        if no_pipeline:
-            _print_no_pipeline_notice(json_out)
+        if skip_pipeline:
+            _print_skip_pipeline_notice(json_out)
 
 
 
@@ -2934,10 +2937,10 @@ async def run_crawl_bluesky(args: argparse.Namespace) -> None:
             logger.error("エラー: %s", e)
             sys.exit(1)
 
-        no_pipeline = _is_no_pipeline(args)
+        skip_pipeline = _is_skip_pipeline(args)
         commit_message = f"ingest(bluesky): {args.handle}"
-        if no_pipeline:
-            _commit_for_no_pipeline(controller, commit_message)
+        if skip_pipeline:
+            _commit_for_skip_pipeline(controller, commit_message)
             pipeline_summary = None
         else:
             pipeline_summary = await controller.ingest_and_index(
@@ -2952,8 +2955,8 @@ async def run_crawl_bluesky(args: argparse.Namespace) -> None:
             url_stats=url_stats,
             context=f"ハンドル: {args.handle}",
         )
-        if no_pipeline:
-            _print_no_pipeline_notice(json_out)
+        if skip_pipeline:
+            _print_skip_pipeline_notice(json_out)
 
 
 async def run_crawl_zenn(args: argparse.Namespace) -> None:
@@ -2999,10 +3002,10 @@ async def run_crawl_zenn(args: argparse.Namespace) -> None:
                 print("（上書きするには --force を指定してください）")
             return
 
-        no_pipeline = _is_no_pipeline(args)
+        skip_pipeline = _is_skip_pipeline(args)
         commit_message = f"ingest(zenn): {args.username}"
-        if no_pipeline:
-            _commit_for_no_pipeline(controller, commit_message)
+        if skip_pipeline:
+            _commit_for_skip_pipeline(controller, commit_message)
             pipeline_summary = None
         else:
             pipeline_summary = await controller.ingest_and_index(
@@ -3011,8 +3014,8 @@ async def run_crawl_zenn(args: argparse.Namespace) -> None:
                 concurrency=settings.rag_embedding_concurrency,
             )
         _print_ingest_result(ingest_result, pipeline_summary, context=f"ユーザー: {args.username}", json_output=json_out)
-        if no_pipeline:
-            _print_no_pipeline_notice(json_out)
+        if skip_pipeline:
+            _print_skip_pipeline_notice(json_out)
 
 
 async def run_ingest_bluesky(args: argparse.Namespace) -> None:
@@ -3062,10 +3065,10 @@ async def run_ingest_bluesky(args: argparse.Namespace) -> None:
             _print_ingest_result(ingest_result, None, context="BlueSky ingest", json_output=json_out)
             return
 
-        no_pipeline = _is_no_pipeline(args)
+        skip_pipeline = _is_skip_pipeline(args)
         commit_message = "ingest(bluesky/url)"
-        if no_pipeline:
-            _commit_for_no_pipeline(controller, commit_message)
+        if skip_pipeline:
+            _commit_for_skip_pipeline(controller, commit_message)
             pipeline_summary = None
         else:
             pipeline_summary = await controller.ingest_and_index(
@@ -3080,8 +3083,8 @@ async def run_ingest_bluesky(args: argparse.Namespace) -> None:
             url_stats=url_stats,
             context="BlueSky ingest",
         )
-        if no_pipeline:
-            _print_no_pipeline_notice(json_out)
+        if skip_pipeline:
+            _print_skip_pipeline_notice(json_out)
 
 
 async def run_ingest_zenn(args: argparse.Namespace) -> None:
@@ -3113,10 +3116,10 @@ async def run_ingest_zenn(args: argparse.Namespace) -> None:
             _print_ingest_result(ingest_result, None, context="Zenn ingest", json_output=json_out)
             return
 
-        no_pipeline = _is_no_pipeline(args)
+        skip_pipeline = _is_skip_pipeline(args)
         commit_message = "ingest(zenn/url)"
-        if no_pipeline:
-            _commit_for_no_pipeline(controller, commit_message)
+        if skip_pipeline:
+            _commit_for_skip_pipeline(controller, commit_message)
             pipeline_summary = None
         else:
             pipeline_summary = await controller.ingest_and_index(
@@ -3125,8 +3128,8 @@ async def run_ingest_zenn(args: argparse.Namespace) -> None:
                 concurrency=settings.rag_embedding_concurrency,
             )
         _print_ingest_result(ingest_result, pipeline_summary, context="Zenn ingest", json_output=json_out)
-        if no_pipeline:
-            _print_no_pipeline_notice(json_out)
+        if skip_pipeline:
+            _print_skip_pipeline_notice(json_out)
 
 
 async def run_add_document(args: argparse.Namespace) -> None:
@@ -3302,10 +3305,10 @@ async def run_crawl_documents(args: argparse.Namespace) -> None:
             print(f"エラー: {first_detail}", file=sys.stderr)
             raise SystemExit(1)
 
-        no_pipeline = _is_no_pipeline(args)
+        skip_pipeline = _is_skip_pipeline(args)
         commit_message = f"ingest(local): crawl {args.dir_path}"
-        if no_pipeline:
-            _commit_for_no_pipeline(controller, commit_message)
+        if skip_pipeline:
+            _commit_for_skip_pipeline(controller, commit_message)
             pipeline_summary = None
         else:
             pipeline_summary = await controller.ingest_and_index(
@@ -3314,8 +3317,8 @@ async def run_crawl_documents(args: argparse.Namespace) -> None:
                 concurrency=settings.rag_embedding_concurrency,
             )
         _print_ingest_result(ingest_result, pipeline_summary, context=f"ディレクトリ: {args.dir_path}", json_output=json_out)
-        if no_pipeline:
-            _print_no_pipeline_notice(json_out)
+        if skip_pipeline:
+            _print_skip_pipeline_notice(json_out)
 
 
 async def run_site_ingest(args: argparse.Namespace) -> None:
@@ -3412,17 +3415,17 @@ async def run_site_ingest(args: argparse.Namespace) -> None:
             return
 
         # パイプライン処理
-        no_pipeline = _is_no_pipeline(args)
+        skip_pipeline = _is_skip_pipeline(args)
         pipeline_summary = None
         has_changes = (execution.ingest.placed + execution.ingest.overwritten) > 0
-        if has_changes and not no_pipeline:
+        if has_changes and not skip_pipeline:
             pipeline_summary = await controller.ingest_and_index(
                 f"ingest(web): site-ingest {display_url}",
                 progress_callback=progress_cb,
                 concurrency=settings.rag_embedding_concurrency,
             )
-        elif has_changes and no_pipeline:
-            controller.commit(f"ingest(web): site-ingest {display_url} (no_pipeline)")
+        elif has_changes and skip_pipeline:
+            controller.commit(f"ingest(web): site-ingest {display_url} (skip_pipeline)")
 
         # 正常完了後のクリーンアップ（仕様: docs/specs/site-ingest.md）
         if execution.scrapy_success and execution.crawl_result is not None:
@@ -3436,7 +3439,7 @@ async def run_site_ingest(args: argparse.Namespace) -> None:
                 execution.ingest, pipeline_summary,
             )
             data["elapsed"] = round(elapsed, 1)
-            data["no_pipeline"] = no_pipeline
+            data["skip_pipeline"] = skip_pipeline
             if not execution.scrapy_success:
                 data["scrapy_exit_code"] = execution.scrapy_exit_code
             _output_result(data)
@@ -3448,8 +3451,8 @@ async def run_site_ingest(args: argparse.Namespace) -> None:
                 json_output=False,
             )
             print(f"所要時間: {elapsed:.1f}秒")
-            if no_pipeline:
-                _print_no_pipeline_notice(json_out=False)
+            if skip_pipeline:
+                _print_skip_pipeline_notice(json_out=False)
             if not execution.scrapy_success:
                 print(
                     f"Scrapy exit_code={execution.scrapy_exit_code}（部分的な結果）",
@@ -3570,7 +3573,7 @@ async def run_ingest_aozora(args: argparse.Namespace) -> None:
 
     json_out = _is_json_output(args)
     progress_cb = _output_progress if json_out else None
-    no_pipeline = _is_no_pipeline(args)
+    skip_pipeline = _is_skip_pipeline(args)
 
     controller, settings = _build_cli_pipeline_controller()
 
@@ -3618,7 +3621,10 @@ async def run_ingest_aozora(args: argparse.Namespace) -> None:
                 for bid in book_ids:
                     try:
                         results.append(await aozora_ingester.add_work(bid))
-                    except (ValueError, TypeError) as e:
+                    except Exception as e:
+                        # bulk loop の partial result loss 防止のため、ループ内例外は per-item として
+                        # IngestResult.errors に変換し処理継続。Exception 限定のため KeyboardInterrupt
+                        # 等の BaseException 系（キャンセル）は捕捉せず正常に伝播する。
                         logger.error("ingest-aozora エラー (book_id=%s): %s", bid, e)
                         err = _IngestResult()
                         err.errors = 1
@@ -3652,8 +3658,8 @@ async def run_ingest_aozora(args: argparse.Namespace) -> None:
             return
 
         commit_message = f"ingest(aozora): {len(book_ids)} 件"
-        if no_pipeline:
-            _commit_for_no_pipeline(controller, commit_message)
+        if skip_pipeline:
+            _commit_for_skip_pipeline(controller, commit_message)
             pipeline_summary = None
         else:
             pipeline_summary = await controller.ingest_and_index(
@@ -3662,8 +3668,8 @@ async def run_ingest_aozora(args: argparse.Namespace) -> None:
                 concurrency=settings.rag_embedding_concurrency,
             )
         _print_ingest_result(ingest_result, pipeline_summary, context=context, json_output=json_out)
-        if no_pipeline:
-            _print_no_pipeline_notice(json_out)
+        if skip_pipeline:
+            _print_skip_pipeline_notice(json_out)
 
 
 async def run_ingest_aozora_author(args: argparse.Namespace) -> None:
@@ -3671,7 +3677,7 @@ async def run_ingest_aozora_author(args: argparse.Namespace) -> None:
     from .pipeline.ingesters.aozora import AozoraIngester, create_aozora_fetcher
 
     json_out = _is_json_output(args)
-    no_pipeline = _is_no_pipeline(args)
+    skip_pipeline = _is_skip_pipeline(args)
 
     controller, settings = _build_cli_pipeline_controller()
 
@@ -3701,8 +3707,8 @@ async def run_ingest_aozora_author(args: argparse.Namespace) -> None:
             sys.exit(1)
 
         commit_message = f"ingest(aozora): person_id={args.person_id}"
-        if no_pipeline:
-            _commit_for_no_pipeline(controller, commit_message)
+        if skip_pipeline:
+            _commit_for_skip_pipeline(controller, commit_message)
             pipeline_summary = None
         else:
             pipeline_summary = await controller.ingest_and_index(
@@ -3711,8 +3717,8 @@ async def run_ingest_aozora_author(args: argparse.Namespace) -> None:
                 concurrency=settings.rag_embedding_concurrency,
             )
         _print_ingest_result(ingest_result, pipeline_summary, context=f"著者ID: {args.person_id}", json_output=json_out)
-        if no_pipeline:
-            _print_no_pipeline_notice(json_out)
+        if skip_pipeline:
+            _print_skip_pipeline_notice(json_out)
 
 
 if __name__ == "__main__":

@@ -14,7 +14,7 @@ from ...pipeline.models import format_pipeline_error as _format_pipeline_error
 @mcp.tool()
 async def rag_delete(
     source_ids: list[str],
-    defer_indexing: bool = False,
+    skip_pipeline: bool = False,
     ctx: MCPContext | None = None,
 ) -> str:
     """[rag-knowledge] RAG delete - ソース識別子指定でナレッジから削除（bulk 対応）.
@@ -27,17 +27,21 @@ async def rag_delete(
 
     Args:
         source_ids: 削除するソース識別子のリスト（1 件以上）
-        defer_indexing: True の場合、後段のパイプライン処理（converter + indexer）を
-            スキップする。CLI の `--no-pipeline` と等価。bulk 削除時の高速化用
+        skip_pipeline: True の場合、後段のパイプライン処理（converter + indexer）を
+            スキップする。CLI の `--skip-pipeline` と等価。bulk 削除時の高速化用
 
     Returns:
         削除結果のメッセージ
     """
     if not source_ids:
         return "エラー: source_ids が空です（1 件以上指定してください）"
-    cli_args: list[str] = list(source_ids)
-    if defer_indexing:
-        cli_args.append("--no-pipeline")
+    # オプション注入対策: ユーザー入力の positional 群（source_ids）は `--` 以降に置く。
+    # source_id が `-`/`--` で始まる場合に argparse がオプションとして誤解釈するのを防ぐ。
+    cli_args: list[str] = []
+    if skip_pipeline:
+        cli_args.append("--skip-pipeline")
+    cli_args.append("--")
+    cli_args.extend(source_ids)
     context = source_ids[0] if len(source_ids) == 1 else f"{len(source_ids)} 件"
     try:
         result = await cli_subprocess._run_cli_subprocess("delete", cli_args, ctx=ctx)

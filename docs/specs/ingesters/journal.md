@@ -81,7 +81,7 @@ Journal インジェスターは、開発ジャーナル（セッションごと
 | `--entry-id` | `-e` | いいえ | エントリ識別子（省略時は自動生成） |
 
 MCP ツール（`rag_add_journal`）経由では `content` パラメータに Markdown 文字列を直接渡す。CLI は `--file` で指定したファイルを読み込み、同じインジェスターインターフェースを呼び出す。
-`add-journal` は `--no-pipeline` 対象外（外部 API 経由の単発取り込みが主用途のため）。
+`add-journal` は `--skip-pipeline` 対象外（外部 API 経由の単発取り込みが主用途のため）。
 
 #### migrate-journal パラメータ
 

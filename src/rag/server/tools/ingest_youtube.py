@@ -14,7 +14,7 @@ from ..fake_labels import _YOUTUBE_INGEST_FAKE_SOURCES, _fake_mode_labels
 @mcp.tool()
 async def rag_add_youtube(
     video_urls: list[str],
-    defer_indexing: bool = False,
+    skip_pipeline: bool = False,
     ctx: MCPContext | None = None,
 ) -> str:
     """[rag-knowledge] RAG add YouTube - YouTube 動画の字幕/文字起こしを取り込む.
@@ -25,10 +25,10 @@ async def rag_add_youtube(
 
     Args:
         video_urls: YouTube 動画 URL リスト（1 件以上、youtube.com/watch?v= または youtu.be/ 形式）
-        defer_indexing: True の場合、後段のパイプライン処理（converter + indexer）を
-            スキップする。CLI の `--no-pipeline` と等価。bulk 取り込み時の高速化用。
+        skip_pipeline: True の場合、後段のパイプライン処理（converter + indexer）を
+            スキップする。CLI の `--skip-pipeline` と等価。bulk 取り込み時の高速化用。
             後で `rag_rebuild`（incremental）を呼ぶ必要がある。
-            共通仕様は docs/specs/ingesters/common.md「--no-pipeline フラグ共通仕様」を参照
+            共通仕様は docs/specs/ingesters/common.md「--skip-pipeline フラグ共通仕様」を参照
 
     Returns:
         取り込み結果のサマリーテキスト
@@ -36,9 +36,13 @@ async def rag_add_youtube(
     label = _fake_mode_labels(_YOUTUBE_INGEST_FAKE_SOURCES)
     if not video_urls:
         return label + "エラー: video_urls が空です（1 件以上指定してください）"
-    cli_args: list[str] = list(video_urls)
-    if defer_indexing:
-        cli_args.append("--no-pipeline")
+    # オプション注入対策: ユーザー入力の positional 群（video_urls）は `--` 以降に置く。
+    # URL が `-`/`--` で始まる場合に argparse がオプションとして誤解釈するのを防ぐ。
+    cli_args: list[str] = []
+    if skip_pipeline:
+        cli_args.append("--skip-pipeline")
+    cli_args.append("--")
+    cli_args.extend(video_urls)
     context = f"動画: {video_urls[0]}" if len(video_urls) == 1 else f"動画 {len(video_urls)} 件"
     try:
         result = await cli_subprocess._run_cli_subprocess("ingest-youtube", cli_args, ctx=ctx)
@@ -51,7 +55,7 @@ async def rag_add_youtube(
 async def rag_crawl_youtube(
     playlist_url: str,
     max_videos: int | None = None,
-    defer_indexing: bool = False,
+    skip_pipeline: bool = False,
     ctx: MCPContext | None = None,
 ) -> str:
     """[rag-knowledge] RAG crawl YouTube playlist - YouTube プレイリストの動画を一括取り込み.
@@ -62,8 +66,8 @@ async def rag_crawl_youtube(
     Args:
         playlist_url: YouTube プレイリスト URL（youtube.com/playlist?list= 形式）
         max_videos: 取得する最大動画数（未指定時は設定値を使用、許容範囲: 1〜500）
-        defer_indexing: True の場合、後段のパイプライン処理（converter + indexer）を
-            スキップする。CLI の `--no-pipeline` と等価
+        skip_pipeline: True の場合、後段のパイプライン処理（converter + indexer）を
+            スキップする。CLI の `--skip-pipeline` と等価
 
     Returns:
         取り込み結果のサマリーテキスト
@@ -71,8 +75,8 @@ async def rag_crawl_youtube(
     args: list[str] = [playlist_url]
     if max_videos is not None:
         args.extend(["--max-videos", str(max_videos)])
-    if defer_indexing:
-        args.append("--no-pipeline")
+    if skip_pipeline:
+        args.append("--skip-pipeline")
 
     label = _fake_mode_labels(_YOUTUBE_INGEST_FAKE_SOURCES)
     try:

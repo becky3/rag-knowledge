@@ -17,7 +17,7 @@ async def rag_crawl_bluesky(
     max_posts: int | None = None,
     include_reposts: bool | None = None,
     force: bool = False,
-    defer_indexing: bool = False,
+    skip_pipeline: bool = False,
     ctx: MCPContext | None = None,
 ) -> str:
     """[rag-knowledge] RAG crawl BlueSky - BlueSky 投稿を AT Protocol API 経由で取得し一括取り込み.
@@ -31,8 +31,8 @@ async def rag_crawl_bluesky(
         max_posts: 取得する最大投稿数（タイムライン全体に適用、未指定時は設定値を使用、許容範囲: 1〜1000）
         include_reposts: タイムラインにリポストを含めるか（未指定時は設定値を使用）
         force: 上書き再取得モード。既存ファイルを上書きし、メディアDLと投稿内URL先の再取得も実行する
-        defer_indexing: True の場合、後段のパイプライン処理（converter + indexer）を
-            スキップする。CLI の `--no-pipeline` と等価
+        skip_pipeline: True の場合、後段のパイプライン処理（converter + indexer）を
+            スキップする。CLI の `--skip-pipeline` と等価
 
     Returns:
         取り込み結果のサマリーテキスト
@@ -49,8 +49,8 @@ async def rag_crawl_bluesky(
         args.append("--no-include-reposts")
     if force:
         args.append("--force")
-    if defer_indexing:
-        args.append("--no-pipeline")
+    if skip_pipeline:
+        args.append("--skip-pipeline")
 
     label = _fake_mode_labels(_BLUESKY_INGEST_FAKE_SOURCES)
     try:
@@ -63,7 +63,7 @@ async def rag_crawl_bluesky(
 @mcp.tool()
 async def rag_add_bluesky(
     urls: list[str],
-    defer_indexing: bool = False,
+    skip_pipeline: bool = False,
     ctx: MCPContext | None = None,
 ) -> str:
     """[rag-knowledge] RAG add BlueSky - BlueSky 投稿を URL 指定で取り込み.
@@ -74,8 +74,8 @@ async def rag_add_bluesky(
 
     Args:
         urls: BlueSky 投稿の URL リスト（1 件以上、例: ["https://bsky.app/profile/user.bsky.social/post/abc123"]）
-        defer_indexing: True の場合、後段のパイプライン処理（converter + indexer）を
-            スキップする。CLI の `--no-pipeline` と等価
+        skip_pipeline: True の場合、後段のパイプライン処理（converter + indexer）を
+            スキップする。CLI の `--skip-pipeline` と等価
 
     Returns:
         取り込み結果のサマリーテキスト
@@ -83,9 +83,13 @@ async def rag_add_bluesky(
     label = _fake_mode_labels(_BLUESKY_INGEST_FAKE_SOURCES)
     if not urls:
         return label + "エラー: urls が空です（1 件以上指定してください）"
-    args: list[str] = list(urls)
-    if defer_indexing:
-        args.append("--no-pipeline")
+    # オプション注入対策: ユーザー入力の positional 群（urls）は `--` 以降に置く。
+    # URL が `-`/`--` で始まる場合に argparse がオプションとして誤解釈するのを防ぐ。
+    args: list[str] = []
+    if skip_pipeline:
+        args.append("--skip-pipeline")
+    args.append("--")
+    args.extend(urls)
 
     try:
         result = await cli_subprocess._run_cli_subprocess("ingest-bluesky", args, ctx=ctx)

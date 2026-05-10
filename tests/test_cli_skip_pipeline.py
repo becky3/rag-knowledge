@@ -1,12 +1,12 @@
-"""--no-pipeline フラグおよび bulk 受付の振る舞いテスト.
+"""--skip-pipeline フラグおよび bulk 受付の振る舞いテスト.
 
-Issue #757 / 仕様: docs/specs/ingesters/common.md「`--no-pipeline` フラグ共通仕様」
+Issue #757 / 仕様: docs/specs/ingesters/common.md「`--skip-pipeline` フラグ共通仕様」
                    docs/specs/ingesters/aozora.md「ingest-aozora 複数 ID 入力時の重複検出」
 
 テスト方針:
-- 12 CLI コマンドに --no-pipeline が argparse で受理されること
-- --no-pipeline 指定時に controller.ingest_and_index が呼ばれないこと
-- --no-pipeline 未指定時は呼ばれること（既存挙動維持）
+- 12 CLI コマンドに --skip-pipeline が argparse で受理されること
+- --skip-pipeline 指定時に controller.ingest_and_index が呼ばれないこと
+- --skip-pipeline 未指定時は呼ばれること（既存挙動維持）
 - 4 コマンドの複数引数受付（nargs='+' / action='append'）
 - aozora zfill 重複検出による WARN ログ + 1 回のみ ingest
 """
@@ -22,31 +22,31 @@ import pytest
 
 
 class TestNoPipelineParserRegistration:
-    """全 12 サブコマンドに --no-pipeline が argparse 上で受理されること."""
+    """全 12 サブコマンドに --skip-pipeline が argparse 上で受理されること."""
 
     @pytest.mark.parametrize(
         "argv",
         [
-            ["ingest-youtube", "https://youtu.be/aaa", "--no-pipeline"],
-            ["ingest-youtube-playlist", "https://example.com/pl", "--no-pipeline"],
-            ["crawl-bluesky", "user.bsky.social", "--no-pipeline"],
-            ["crawl-zenn", "username", "--no-pipeline"],
-            ["ingest-bluesky", "https://example.com/post", "--no-pipeline"],
-            ["ingest-zenn", "https://zenn.dev/u/articles/x", "--no-pipeline"],
-            ["crawl-documents", "/tmp/docs", "--no-pipeline"],
-            ["site-ingest", "https://example.com/", "--no-pipeline"],
-            ["ingest-aozora", "12345", "--no-pipeline"],
-            ["ingest-aozora-author", "00001", "--no-pipeline"],
-            ["delete", "local/.upload/2026/05/10/x.md", "--no-pipeline"],
+            ["ingest-youtube", "https://youtu.be/aaa", "--skip-pipeline"],
+            ["ingest-youtube-playlist", "https://example.com/pl", "--skip-pipeline"],
+            ["crawl-bluesky", "user.bsky.social", "--skip-pipeline"],
+            ["crawl-zenn", "username", "--skip-pipeline"],
+            ["ingest-bluesky", "https://example.com/post", "--skip-pipeline"],
+            ["ingest-zenn", "https://zenn.dev/u/articles/x", "--skip-pipeline"],
+            ["crawl-documents", "/tmp/docs", "--skip-pipeline"],
+            ["site-ingest", "https://example.com/", "--skip-pipeline"],
+            ["ingest-aozora", "12345", "--skip-pipeline"],
+            ["ingest-aozora-author", "00001", "--skip-pipeline"],
+            ["delete", "local/.upload/2026/05/10/x.md", "--skip-pipeline"],
         ],
     )
-    def test_no_pipeline_flag_accepted(self, argv: list[str]) -> None:
-        """--no-pipeline が argparse で True にパースされること."""
+    def test_skip_pipeline_flag_accepted(self, argv: list[str]) -> None:
+        """--skip-pipeline が argparse で True にパースされること."""
         from rag.cli import _build_parser
 
         parser = _build_parser()
         args = parser.parse_args(argv)
-        assert args.no_pipeline is True
+        assert args.skip_pipeline is True
 
     @pytest.mark.parametrize(
         "argv",
@@ -55,13 +55,13 @@ class TestNoPipelineParserRegistration:
             ["ingest-aozora", "12345"],
         ],
     )
-    def test_no_pipeline_default_false(self, argv: list[str]) -> None:
-        """--no-pipeline 未指定時は False がデフォルト."""
+    def test_skip_pipeline_default_false(self, argv: list[str]) -> None:
+        """--skip-pipeline 未指定時は False がデフォルト."""
         from rag.cli import _build_parser
 
         parser = _build_parser()
         args = parser.parse_args(argv)
-        assert args.no_pipeline is False
+        assert args.skip_pipeline is False
 
 
 class TestBulkInputRegistration:
@@ -92,7 +92,7 @@ class TestBulkInputRegistration:
 
 
 class TestNoPipelineHandlerSkipsIngestAndIndex:
-    """--no-pipeline 指定時に controller.ingest_and_index が呼ばれないこと."""
+    """--skip-pipeline 指定時に controller.ingest_and_index が呼ばれないこと."""
 
     def _make_ingest_result(
         self,
@@ -108,13 +108,13 @@ class TestNoPipelineHandlerSkipsIngestAndIndex:
         return result
 
     @pytest.mark.asyncio
-    async def test_ingest_aozora_with_no_pipeline_skips_index(
+    async def test_ingest_aozora_with_skip_pipeline_skips_index(
         self, tmp_path: Path,
     ) -> None:
-        """ingest-aozora --no-pipeline で controller.ingest_and_index が呼ばれない."""
+        """ingest-aozora --skip-pipeline で controller.ingest_and_index が呼ばれない."""
         args = argparse.Namespace(
             book_id=["00012345"],
-            no_pipeline=True,
+            skip_pipeline=True,
             output_format="text",
         )
 
@@ -154,19 +154,19 @@ class TestNoPipelineHandlerSkipsIngestAndIndex:
             await run_ingest_aozora(args)
 
             mock_controller.ingest_and_index.assert_not_called()
-            # --no-pipeline 指定時も controller.commit() が呼ばれる必要がある
+            # --skip-pipeline 指定時も controller.commit() が呼ばれる必要がある
             # (Critical #1: source_store の git commit は実行される)
             mock_controller.commit.assert_called_once()
             mock_ingester.add_work.assert_called_once()
 
     @pytest.mark.asyncio
-    async def test_ingest_aozora_without_no_pipeline_invokes_index(
+    async def test_ingest_aozora_without_skip_pipeline_invokes_index(
         self, tmp_path: Path,
     ) -> None:
         """ingest-aozora（既定）で controller.ingest_and_index が呼ばれる."""
         args = argparse.Namespace(
             book_id=["00012345"],
-            no_pipeline=False,
+            skip_pipeline=False,
             output_format="text",
         )
 
@@ -222,7 +222,7 @@ class TestAozoraZfillDuplicateDetection:
         # zfill(6) の正規化規則: '1234' → '001234'、'001234' → '001234'
         args = argparse.Namespace(
             book_id=["1234", "001234", "5678"],
-            no_pipeline=True,
+            skip_pipeline=True,
             output_format="text",
         )
 

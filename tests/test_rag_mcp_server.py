@@ -906,7 +906,8 @@ class TestRagDeleteTool:
         ) as mock_cli:
             result = await mod.rag_delete(["https://example.com/page"])
 
-        mock_cli.assert_called_once_with("delete", ["https://example.com/page"], ctx=None)
+        # `--` separator で positional 群を分離（オプション注入対策）
+        mock_cli.assert_called_once_with("delete", ["--", "https://example.com/page"], ctx=None)
         assert "削除しました" in result
 
     @pytest.mark.asyncio
@@ -939,8 +940,8 @@ class TestRagDeleteTool:
         assert "ロックを保持しています" in result
 
     @pytest.mark.asyncio
-    async def test_bulk_delete_with_defer_indexing(self) -> None:
-        """bulk 削除 + defer_indexing で CLI に複数 source_id + --no-pipeline が渡る."""
+    async def test_bulk_delete_with_skip_pipeline(self) -> None:
+        """bulk 削除 + skip_pipeline で CLI に複数 source_id + --skip-pipeline が渡る."""
         mod = import_module("rag.server")
         mock_result = {
             "deleted": True,
@@ -953,12 +954,12 @@ class TestRagDeleteTool:
             "rag.server.cli_subprocess._run_cli_subprocess",
             new_callable=AsyncMock, return_value=mock_result,
         ) as mock_cli:
-            await mod.rag_delete(["src/a.md", "src/b.md"], defer_indexing=True)
+            await mod.rag_delete(["src/a.md", "src/b.md"], skip_pipeline=True)
 
         cli_args = mock_cli.call_args[0][1]
         assert "src/a.md" in cli_args
         assert "src/b.md" in cli_args
-        assert "--no-pipeline" in cli_args
+        assert "--skip-pipeline" in cli_args
 
     @pytest.mark.asyncio
     async def test_empty_source_ids_returns_error(self) -> None:

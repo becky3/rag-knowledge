@@ -24,7 +24,7 @@ async def rag_site_ingest(
     url_pattern: str = "",
     max_pages: int | None = None,
     force: bool = False,
-    defer_indexing: bool = False,
+    skip_pipeline: bool = False,
     ctx: MCPContext | None = None,
 ) -> str:
     """[rag-knowledge] RAG site ingest - Scrapy でサイトを一括取り込み.
@@ -43,10 +43,10 @@ async def rag_site_ingest(
         url_pattern: URL フィルタパターン（正規表現、クロールモードのみ）
         max_pages: ページ数上限（クロールモードのみ、未指定時は設定値を使用）
         force: True の場合、JOBDIR を削除して最初からクロール（クロールモードのみ）
-        defer_indexing: True の場合、Scrapy クロール + Bridge まで実行し、
+        skip_pipeline: True の場合、Scrapy クロール + Bridge まで実行し、
             パイプライン処理（コンバート・インデックス構築）をスキップする。
-            CLI の --no-pipeline フラグと等価。共通仕様は
-            docs/specs/ingesters/common.md「--no-pipeline フラグ共通仕様」を参照
+            CLI の --skip-pipeline フラグと等価。共通仕様は
+            docs/specs/ingesters/common.md「--skip-pipeline フラグ共通仕様」を参照
 
     Returns:
         取り込み結果のサマリー
@@ -95,7 +95,9 @@ async def rag_site_ingest(
             return label + f"エラー: URL安全性チェックに失敗しました: {e}"
 
     # CLI subprocess に委譲
-    cli_args: list[str] = list(validated_urls)
+    # オプション注入対策: ユーザー入力の positional 群（validated_urls）は `--` 以降に置く。
+    # validate_url + check_ssrf を通過済みだが、一貫性とフォールバック安全性のため separator を入れる。
+    cli_args: list[str] = []
     if not multi_url_mode:
         if url_pattern:
             import re
@@ -108,8 +110,10 @@ async def rag_site_ingest(
             cli_args.extend(["--max-pages", str(max_pages)])
         if force:
             cli_args.append("--force")
-    if defer_indexing:
-        cli_args.append("--no-pipeline")
+    if skip_pipeline:
+        cli_args.append("--skip-pipeline")
+    cli_args.append("--")
+    cli_args.extend(validated_urls)
 
     display_url = validated_urls[0] if not multi_url_mode else f"{len(validated_urls)} URLs"
 

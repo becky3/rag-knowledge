@@ -155,10 +155,10 @@ YouTube インジェスターは以下の URL パターンを単一動画とし�
 
 | コマンド | 引数 | 振る舞い |
 |---------|------|---------|
-| `ingest-youtube` | `video_url`（1 件以上、`nargs='+'`）、`--no-pipeline`（任意） | `rag_add_youtube` と同等の処理を CLI から実行する。複数 URL 指定時は逐次取り込み後、末尾 1 回だけ pipeline 実行 |
-| `ingest-youtube-playlist` | `playlist_url`、`--max-videos`（任意）、`--no-pipeline`（任意） | `rag_crawl_youtube` と同等の処理を CLI から実行する |
+| `ingest-youtube` | `video_url`（1 件以上、`nargs='+'`）、`--skip-pipeline`（任意） | `rag_add_youtube` と同等の処理を CLI から実行する。複数 URL 指定時は逐次取り込み後、末尾 1 回だけ pipeline 実行 |
+| `ingest-youtube-playlist` | `playlist_url`、`--max-videos`（任意）、`--skip-pipeline`（任意） | `rag_crawl_youtube` と同等の処理を CLI から実行する |
 
-`--no-pipeline` の共通仕様は [common.md](common.md#--no-pipeline-フラグ共通仕様) を参照。MCP の `defer_indexing` パラメータと同等の振る舞いを CLI から指定可能。
+`--skip-pipeline` の共通仕様は [common.md](common.md#--skip-pipeline-フラグ共通仕様) を参照。MCP の `skip_pipeline` パラメータと同等の振る舞いを CLI から指定可能。
 
 ### 設定項目
 

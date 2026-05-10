@@ -304,7 +304,7 @@ Zenn 記事・スクラップを **URL 指定で 1 件以上** 取り込む。�
 | 引数 | 型 | 必須 | デフォルト | 説明 |
 |------|-----|------|-----------|------|
 | `urls` | list[str] | Yes | — | Zenn コンテンツの URL リスト（1 件以上） |
-| `defer_indexing` | bool | No | `false` | 後段のパイプライン処理（converter + indexer）をスキップする。CLI の `--no-pipeline` と等価。共通仕様は [ingesters/common.md](ingesters/common.md#--no-pipeline-フラグ共通仕様) を参照 |
+| `skip_pipeline` | bool | No | `false` | 後段のパイプライン処理（converter + indexer）をスキップする。CLI の `--skip-pipeline` と等価。共通仕様は [ingesters/common.md](ingesters/common.md#--skip-pipeline-フラグ共通仕様) を参照 |
 
 #### rag_crawl_zenn
 
@@ -316,7 +316,7 @@ Zenn 記事・スクラップを **URL 指定で 1 件以上** 取り込む。�
 | `max_articles` | int \| None | No | None（設定値を使用） | 取得する最大コンテンツ数 |
 | `content_type` | str | No | `"all"` | 取得対象。`"articles"`（記事のみ）、`"scraps"`（スクラップのみ）、`"all"`（両方） |
 | `force` | bool | No | `false` | 既存ファイルを上書きするか |
-| `defer_indexing` | bool | No | `false` | 後段のパイプライン処理（converter + indexer）をスキップする。CLI の `--no-pipeline` と等価 |
+| `skip_pipeline` | bool | No | `false` | 後段のパイプライン処理（converter + indexer）をスキップする。CLI の `--skip-pipeline` と等価 |
 
 #### rag_add_bluesky
 
@@ -325,7 +325,7 @@ BlueSky 投稿を **URL 指定で 1 件以上** 取り込む。同一投稿の�
 | 引数 | 型 | 必須 | デフォルト | 説明 |
 |------|-----|------|-----------|------|
 | `urls` | list[str] | Yes | — | BlueSky 投稿の URL リスト（1 件以上） |
-| `defer_indexing` | bool | No | `false` | 後段のパイプライン処理（converter + indexer）をスキップする。CLI の `--no-pipeline` と等価 |
+| `skip_pipeline` | bool | No | `false` | 後段のパイプライン処理（converter + indexer）をスキップする。CLI の `--skip-pipeline` と等価 |
 
 #### rag_crawl_bluesky
 
@@ -336,7 +336,7 @@ BlueSky 投稿を **URL 指定で 1 件以上** 取り込む。同一投稿の�
 | `handle` | str | Yes | — | BlueSky ハンドル（例: user.bsky.social）。DID 形式は不可 |
 | `max_posts` | int \| None | No | None（設定値を使用） | 取得する最大投稿数 |
 | `include_reposts` | bool \| None | No | None（設定値を使用） | タイムラインにリポストを含めるか |
-| `defer_indexing` | bool | No | `false` | 後段のパイプライン処理（converter + indexer）をスキップする。CLI の `--no-pipeline` と等価 |
+| `skip_pipeline` | bool | No | `false` | 後段のパイプライン処理（converter + indexer）をスキップする。CLI の `--skip-pipeline` と等価 |
 
 #### rag_add_youtube
 
@@ -345,7 +345,7 @@ YouTube 動画の字幕/文字起こしを **URL 指定で 1 件以上** 取り�
 | 引数 | 型 | 必須 | デフォルト | 説明 |
 |------|-----|------|-----------|------|
 | `video_urls` | list[str] | Yes | — | YouTube 動画 URL リスト（1 件以上、`youtube.com/watch?v=` または `youtu.be/` 形式） |
-| `defer_indexing` | bool | No | `false` | 後段のパイプライン処理（converter + indexer）をスキップする。CLI の `--no-pipeline` と等価 |
+| `skip_pipeline` | bool | No | `false` | 後段のパイプライン処理（converter + indexer）をスキップする。CLI の `--skip-pipeline` と等価 |
 
 #### rag_crawl_youtube
 
@@ -355,7 +355,7 @@ YouTube プレイリスト内の動画を一括取り込みする。詳細は [i
 |------|-----|------|-----------|------|
 | `playlist_url` | str | Yes | — | YouTube プレイリスト URL（`youtube.com/playlist?list=` 形式） |
 | `max_videos` | int \| None | No | None（設定値を使用） | 取得する最大動画数 |
-| `defer_indexing` | bool | No | `false` | 後段のパイプライン処理（converter + indexer）をスキップする。CLI の `--no-pipeline` と等価 |
+| `skip_pipeline` | bool | No | `false` | 後段のパイプライン処理（converter + indexer）をスキップする。CLI の `--skip-pipeline` と等価 |
 
 #### rag_add_document
 
@@ -377,7 +377,7 @@ YouTube プレイリスト内の動画を一括取り込みする。詳細は [i
 | `dir_path` | str | Yes | — | 取り込み対象ディレクトリのパス |
 | `pattern` | str | No | `"**/*"` | glob パターン（再帰的に全対応ファイルを検索） |
 | `upload_mode` | str | No | `"fail"` | 同名ファイル存在時の動作。`"fail"`（スキップ）または `"replace"`（上書き） |
-| `defer_indexing` | bool | No | `false` | 後段のパイプライン処理（converter + indexer）をスキップする。CLI の `--no-pipeline` と等価 |
+| `skip_pipeline` | bool | No | `false` | 後段のパイプライン処理（converter + indexer）をスキップする。CLI の `--skip-pipeline` と等価 |
 
 #### rag_add_journal
 
@@ -402,7 +402,7 @@ Scrapy subprocess で対象サイトをクロールし、source_store に配置�
 | `url_pattern` | str | No | `""` | URL フィルタパターン（正規表現、クロールモードのみ） |
 | `max_pages` | int \| None | No | None（設定値を使用） | ページ数上限（クロールモードのみ） |
 | `force` | bool | No | `false` | JOBDIR を削除して最初からクロール（クロールモードのみ） |
-| `defer_indexing` | bool | No | `false` | パイプライン処理をスキップし、Scrapy クロール + Bridge のみ実行（CLI の `--no-pipeline` と等価。共通仕様は [ingesters/common.md](ingesters/common.md#--no-pipeline-フラグ共通仕様)）|
+| `skip_pipeline` | bool | No | `false` | パイプライン処理をスキップし、Scrapy クロール + Bridge のみ実行（CLI の `--skip-pipeline` と等価。共通仕様は [ingesters/common.md](ingesters/common.md#--skip-pipeline-フラグ共通仕様)）|
 
 #### rag_delete
 
@@ -412,7 +412,7 @@ Scrapy subprocess で対象サイトをクロールし、source_store に配置�
 | 引数 | 型 | 必須 | デフォルト | 説明 |
 |------|-----|------|-----------|------|
 | `source_ids` | list[str] | Yes | — | 削除するソース識別子のリスト（1 件以上） |
-| `defer_indexing` | bool | No | `false` | 後段のパイプライン処理（converter + indexer）をスキップする。CLI の `--no-pipeline` と等価 |
+| `skip_pipeline` | bool | No | `false` | 後段のパイプライン処理（converter + indexer）をスキップする。CLI の `--skip-pipeline` と等価 |
 
 #### rag_rebuild
 
@@ -444,7 +444,7 @@ Scrapy subprocess で対象サイトをクロールし、source_store に配置�
 | 引数 | 型 | 必須 | デフォルト | 説明 |
 |------|-----|------|-----------|------|
 | `book_ids` | list[str] | Yes | — | 青空文庫の作品 ID リスト（1 件以上、カタログ検索で取得） |
-| `defer_indexing` | bool | No | `false` | 後段のパイプライン処理（converter + indexer）をスキップする。CLI の `--no-pipeline` と等価 |
+| `skip_pipeline` | bool | No | `false` | 後段のパイプライン処理（converter + indexer）をスキップする。CLI の `--skip-pipeline` と等価 |
 
 #### rag_crawl_aozora
 
@@ -454,7 +454,7 @@ Scrapy subprocess で対象サイトをクロールし、source_store に配置�
 |------|-----|------|-----------|------|
 | `person_id` | str | Yes | — | 著者の人物 ID（rag_search_aozora で確認可能） |
 | `max_works` | int \| None | No | None（設定値を使用） | 取得する最大作品数 |
-| `defer_indexing` | bool | No | `false` | 後段のパイプライン処理（converter + indexer）をスキップする。CLI の `--no-pipeline` と等価 |
+| `skip_pipeline` | bool | No | `false` | 後段のパイプライン処理（converter + indexer）をスキップする。CLI の `--skip-pipeline` と等価 |
 
 #### rag_list_recent
 

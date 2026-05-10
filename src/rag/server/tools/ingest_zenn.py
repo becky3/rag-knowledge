@@ -17,7 +17,7 @@ async def rag_crawl_zenn(
     max_articles: int | None = None,
     content_type: str = "all",
     force: bool = False,
-    defer_indexing: bool = False,
+    skip_pipeline: bool = False,
     ctx: MCPContext | None = None,
 ) -> str:
     """[rag-knowledge] RAG crawl Zenn - Zenn コンテンツを API 経由で取得し一括取り込み.
@@ -31,8 +31,8 @@ async def rag_crawl_zenn(
         max_articles: 取得する最大コンテンツ数（未指定時は設定値を使用、許容範囲: 1〜100）
         content_type: 取得対象（"articles": 記事のみ、"scraps": スクラップのみ、"all": 両方。デフォルト: "all"）
         force: 既存ファイルを上書きするか（デフォルト: false＝スキップモード）
-        defer_indexing: True の場合、後段のパイプライン処理（converter + indexer）を
-            スキップする。CLI の `--no-pipeline` と等価
+        skip_pipeline: True の場合、後段のパイプライン処理（converter + indexer）を
+            スキップする。CLI の `--skip-pipeline` と等価
 
     Returns:
         取り込み結果のサマリーテキスト
@@ -44,8 +44,8 @@ async def rag_crawl_zenn(
         args.extend(["--max-articles", str(max_articles)])
     if force:
         args.append("--force")
-    if defer_indexing:
-        args.append("--no-pipeline")
+    if skip_pipeline:
+        args.append("--skip-pipeline")
 
     label = _fake_mode_labels(_ZENN_INGEST_FAKE_SOURCES)
     try:
@@ -58,7 +58,7 @@ async def rag_crawl_zenn(
 @mcp.tool()
 async def rag_add_zenn(
     urls: list[str],
-    defer_indexing: bool = False,
+    skip_pipeline: bool = False,
     ctx: MCPContext | None = None,
 ) -> str:
     """[rag-knowledge] RAG add Zenn - Zenn コンテンツを URL 指定で取り込み.
@@ -69,8 +69,8 @@ async def rag_add_zenn(
 
     Args:
         urls: Zenn コンテンツの URL リスト（1 件以上、例: ["https://zenn.dev/alice/articles/my-post"]）
-        defer_indexing: True の場合、後段のパイプライン処理（converter + indexer）を
-            スキップする。CLI の `--no-pipeline` と等価
+        skip_pipeline: True の場合、後段のパイプライン処理（converter + indexer）を
+            スキップする。CLI の `--skip-pipeline` と等価
 
     Returns:
         取り込み結果のサマリーテキスト
@@ -78,9 +78,13 @@ async def rag_add_zenn(
     label = _fake_mode_labels(_ZENN_INGEST_FAKE_SOURCES)
     if not urls:
         return label + "エラー: urls が空です（1 件以上指定してください）"
-    args: list[str] = list(urls)
-    if defer_indexing:
-        args.append("--no-pipeline")
+    # オプション注入対策: ユーザー入力の positional 群（urls）は `--` 以降に置く。
+    # URL が `-`/`--` で始まる場合に argparse がオプションとして誤解釈するのを防ぐ。
+    args: list[str] = []
+    if skip_pipeline:
+        args.append("--skip-pipeline")
+    args.append("--")
+    args.extend(urls)
 
     try:
         result = await cli_subprocess._run_cli_subprocess("ingest-zenn", args, ctx=ctx)

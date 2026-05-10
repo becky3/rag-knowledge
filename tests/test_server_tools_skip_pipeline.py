@@ -1,11 +1,11 @@
-"""MCP tool への defer_indexing パラメータ + bulk 受付の振る舞いテスト.
+"""MCP tool への skip_pipeline パラメータ + bulk 受付の振る舞いテスト.
 
 Issue #757 / 仕様: docs/specs/rag-knowledge.md 各 rag_* tool セクション
-                   docs/specs/ingesters/common.md 「`--no-pipeline` フラグ共通仕様」
+                   docs/specs/ingesters/common.md 「`--skip-pipeline` フラグ共通仕様」
 
 検証観点:
-- 全 rag_add_* / rag_crawl_* / rag_crawl_documents で defer_indexing=True 時に
-  CLI subprocess の引数に `--no-pipeline` が含まれること
+- 全 rag_add_* / rag_crawl_* / rag_crawl_documents で skip_pipeline=True 時に
+  CLI subprocess の引数に `--skip-pipeline` が含まれること
 - bulk 化対象 (rag_add_youtube/aozora/bluesky/zenn) で list[str] 受付が動作
 - bulk 化対象で空 list がエラーメッセージを返すこと
 """
@@ -36,78 +36,78 @@ def _patch_cli_subprocess():
 
 
 class TestDeferIndexingFlag:
-    """全 add-/crawl- tool で defer_indexing=True が --no-pipeline に変換されること."""
+    """全 add-/crawl- tool で skip_pipeline=True が --skip-pipeline に変換されること."""
 
     @pytest.mark.asyncio
     async def test_rag_add_youtube_defer(self, _patch_cli_subprocess) -> None:
         mod = import_module("rag.server")
         await mod.rag_add_youtube(
-            video_urls=["https://youtu.be/aaa"], defer_indexing=True,
+            video_urls=["https://youtu.be/aaa"], skip_pipeline=True,
         )
         cli_args = _patch_cli_subprocess.call_args[0][1]
-        assert "--no-pipeline" in cli_args
+        assert "--skip-pipeline" in cli_args
 
     @pytest.mark.asyncio
     async def test_rag_add_youtube_default_no_flag(self, _patch_cli_subprocess) -> None:
         mod = import_module("rag.server")
         await mod.rag_add_youtube(video_urls=["https://youtu.be/aaa"])
         cli_args = _patch_cli_subprocess.call_args[0][1]
-        assert "--no-pipeline" not in cli_args
+        assert "--skip-pipeline" not in cli_args
 
     @pytest.mark.asyncio
     async def test_rag_crawl_youtube_defer(self, _patch_cli_subprocess) -> None:
         mod = import_module("rag.server")
         await mod.rag_crawl_youtube(
-            playlist_url="https://example.com/pl", defer_indexing=True,
+            playlist_url="https://example.com/pl", skip_pipeline=True,
         )
         cli_args = _patch_cli_subprocess.call_args[0][1]
-        assert "--no-pipeline" in cli_args
+        assert "--skip-pipeline" in cli_args
 
     @pytest.mark.asyncio
     async def test_rag_add_aozora_defer(self, _patch_cli_subprocess) -> None:
         mod = import_module("rag.server")
-        await mod.rag_add_aozora(book_ids=["12345"], defer_indexing=True)
+        await mod.rag_add_aozora(book_ids=["12345"], skip_pipeline=True)
         cli_args = _patch_cli_subprocess.call_args[0][1]
-        assert "--no-pipeline" in cli_args
+        assert "--skip-pipeline" in cli_args
 
     @pytest.mark.asyncio
     async def test_rag_crawl_aozora_defer(self, _patch_cli_subprocess) -> None:
         mod = import_module("rag.server")
-        await mod.rag_crawl_aozora(person_id="00001", defer_indexing=True)
+        await mod.rag_crawl_aozora(person_id="00001", skip_pipeline=True)
         cli_args = _patch_cli_subprocess.call_args[0][1]
-        assert "--no-pipeline" in cli_args
+        assert "--skip-pipeline" in cli_args
 
     @pytest.mark.asyncio
     async def test_rag_add_bluesky_defer(self, _patch_cli_subprocess) -> None:
         mod = import_module("rag.server")
         await mod.rag_add_bluesky(
-            urls=["https://bsky.app/profile/u/post/x"], defer_indexing=True,
+            urls=["https://bsky.app/profile/u/post/x"], skip_pipeline=True,
         )
         cli_args = _patch_cli_subprocess.call_args[0][1]
-        assert "--no-pipeline" in cli_args
+        assert "--skip-pipeline" in cli_args
 
     @pytest.mark.asyncio
     async def test_rag_crawl_bluesky_defer(self, _patch_cli_subprocess) -> None:
         mod = import_module("rag.server")
-        await mod.rag_crawl_bluesky(handle="u.bsky.social", defer_indexing=True)
+        await mod.rag_crawl_bluesky(handle="u.bsky.social", skip_pipeline=True)
         cli_args = _patch_cli_subprocess.call_args[0][1]
-        assert "--no-pipeline" in cli_args
+        assert "--skip-pipeline" in cli_args
 
     @pytest.mark.asyncio
     async def test_rag_add_zenn_defer(self, _patch_cli_subprocess) -> None:
         mod = import_module("rag.server")
         await mod.rag_add_zenn(
-            urls=["https://zenn.dev/u/articles/x"], defer_indexing=True,
+            urls=["https://zenn.dev/u/articles/x"], skip_pipeline=True,
         )
         cli_args = _patch_cli_subprocess.call_args[0][1]
-        assert "--no-pipeline" in cli_args
+        assert "--skip-pipeline" in cli_args
 
     @pytest.mark.asyncio
     async def test_rag_crawl_zenn_defer(self, _patch_cli_subprocess) -> None:
         mod = import_module("rag.server")
-        await mod.rag_crawl_zenn(username="u", defer_indexing=True)
+        await mod.rag_crawl_zenn(username="u", skip_pipeline=True)
         cli_args = _patch_cli_subprocess.call_args[0][1]
-        assert "--no-pipeline" in cli_args
+        assert "--skip-pipeline" in cli_args
 
 
 class TestBulkListExpansion:
