@@ -152,6 +152,91 @@ class TestValidation:
             ingester.search(author="test", limit=0)
 
 
+# === ID 正規化テスト（zfill 補完） ===
+
+
+class TestIdNormalization:
+    """book_id / person_id のゼロ埋めなし入力に対する zfill 正規化."""
+
+    @pytest.mark.asyncio()
+    async def test_add_work_zfill_short_book_id(
+        self, source_store: SourceStore
+    ) -> None:
+        """book_id='1567' をゼロ埋めなしで渡すと '001567' に正規化されカタログに到達する."""
+        _write_catalog(source_store, [_make_record(book_id="001567")])
+        fetcher = StubAozoraFetcher(xhtml_default=b"<html><body>test</body></html>")
+        ingester = make_aozora_ingester(source_store, fetcher=fetcher)
+        result = await ingester.add_work("1567")
+        assert result.placed == 1
+        assert result.errors == 0
+        assert (source_store.root_dir / "aozora" / "000035" / "001567.html").exists()
+
+    @pytest.mark.asyncio()
+    async def test_add_work_zfill_idempotent(
+        self, source_store: SourceStore
+    ) -> None:
+        """既ゼロ埋め入力 '001567' は zfill 適用後も同じで従来通り動作する（後方互換）."""
+        _write_catalog(source_store, [_make_record(book_id="001567")])
+        fetcher = StubAozoraFetcher(xhtml_default=b"<html><body>test</body></html>")
+        ingester = make_aozora_ingester(source_store, fetcher=fetcher)
+        result = await ingester.add_work("001567")
+        assert result.placed == 1
+        assert result.errors == 0
+        assert (source_store.root_dir / "aozora" / "000035" / "001567.html").exists()
+
+    @pytest.mark.asyncio()
+    async def test_add_work_strip_whitespace_then_zfill(
+        self, source_store: SourceStore
+    ) -> None:
+        """前後空白付きの ' 1567 ' は strip + zfill で '001567' に正規化される."""
+        _write_catalog(source_store, [_make_record(book_id="001567")])
+        fetcher = StubAozoraFetcher(xhtml_default=b"<html><body>test</body></html>")
+        ingester = make_aozora_ingester(source_store, fetcher=fetcher)
+        result = await ingester.add_work(" 1567 ")
+        assert result.placed == 1
+        assert result.errors == 0
+        assert (source_store.root_dir / "aozora" / "000035" / "001567.html").exists()
+
+    @pytest.mark.asyncio()
+    async def test_crawl_author_zfill_short_person_id(
+        self, source_store: SourceStore
+    ) -> None:
+        """person_id='35' をゼロ埋めなしで渡すと '000035' に正規化されカタログに到達する."""
+        _write_catalog(source_store, [_make_record(person_id="000035")])
+        fetcher = StubAozoraFetcher(xhtml_default=b"<html><body>test</body></html>")
+        ingester = make_aozora_ingester(source_store, fetcher=fetcher)
+        result = await ingester.crawl_author("35")
+        assert result.placed == 1
+        assert result.errors == 0
+        assert (source_store.root_dir / "aozora" / "000035" / "001567.html").exists()
+
+    @pytest.mark.asyncio()
+    async def test_crawl_author_zfill_idempotent(
+        self, source_store: SourceStore
+    ) -> None:
+        """既ゼロ埋め入力 '000035' は zfill 適用後も同じで従来通り動作する（後方互換）."""
+        _write_catalog(source_store, [_make_record(person_id="000035")])
+        fetcher = StubAozoraFetcher(xhtml_default=b"<html><body>test</body></html>")
+        ingester = make_aozora_ingester(source_store, fetcher=fetcher)
+        result = await ingester.crawl_author("000035")
+        assert result.placed == 1
+        assert result.errors == 0
+        assert (source_store.root_dir / "aozora" / "000035" / "001567.html").exists()
+
+    @pytest.mark.asyncio()
+    async def test_crawl_author_strip_whitespace_then_zfill(
+        self, source_store: SourceStore
+    ) -> None:
+        """前後空白付きの ' 35 ' は strip + zfill で '000035' に正規化される（book_id 側と対称）."""
+        _write_catalog(source_store, [_make_record(person_id="000035")])
+        fetcher = StubAozoraFetcher(xhtml_default=b"<html><body>test</body></html>")
+        ingester = make_aozora_ingester(source_store, fetcher=fetcher)
+        result = await ingester.crawl_author(" 35 ")
+        assert result.placed == 1
+        assert result.errors == 0
+        assert (source_store.root_dir / "aozora" / "000035" / "001567.html").exists()
+
+
 # === max_works クランプテスト ===
 
 

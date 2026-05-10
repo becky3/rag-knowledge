@@ -233,6 +233,7 @@ class AozoraIngester(BaseIngester):
         """
         if not book_id or not book_id.strip():
             raise ValueError("book_id が空です")
+        book_id = book_id.strip().zfill(6)
 
         records = self._load_catalog()
         if records is None:
@@ -288,6 +289,7 @@ class AozoraIngester(BaseIngester):
 
         if not person_id or not person_id.strip():
             raise ValueError("person_id が空です")
+        person_id = person_id.strip().zfill(6)
 
         effective_max = self._validate_max_works(
             max_works if max_works is not None else self._max_works
