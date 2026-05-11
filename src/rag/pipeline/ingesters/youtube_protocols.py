@@ -63,10 +63,10 @@ class YoutubeDelegator(Protocol):
         内部で `try/finally` を配置し、bulk 末尾で `unload_whisper` を呼び出す。
 
         Args:
-            video_urls: YouTube 動画 URL のリスト（長さ 1 以上）
+            video_urls: YouTube 動画 URL のリスト。空リストの場合は no-op で空リストを返す
 
         Returns:
-            URL ごとの配置結果リスト（順序保証）。委譲先での失敗は各要素の
+            URL ごとの配置結果リスト（順序保証、入力と同じ長さ）。委譲先での失敗は各要素の
             ``errors`` / ``error_details`` に計上される。
         """
         ...

@@ -207,7 +207,7 @@ class YoutubeIngester(BaseIngester):
 
         ※ private メソッド。VRAM 解放を保証しないため外部から直接呼ばないこと。
         公開 API は `ingest_videos(urls)` / `crawl_playlist(url)` を使う。
-        本メソッドはそれら公開 API の内部から `try/finally` の保護下でのみ呼ばれる。
+        本メソッドは原則として、それら公開 API の内部から `try/finally` の保護下で呼ばれる想定。
 
         Args:
             video_url: YouTube 動画 URL

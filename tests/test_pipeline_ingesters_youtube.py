@@ -305,7 +305,7 @@ class TestIngestVideo:
         fetcher = _fake(metadata=metadata, snippets=snippets, language="ja")
         ingester = make_youtube_ingester(source_store, fetcher=fetcher, max_duration=14400)
 
-        result = await ingester._ingest_one("https://www.youtube.com/watch?v=TestVideo01")
+        result = (await ingester.ingest_videos(["https://www.youtube.com/watch?v=TestVideo01"]))[0]
 
         assert result.placed == 1
         assert result.errors == 0
@@ -331,7 +331,7 @@ class TestIngestVideo:
         fetcher = _fake(metadata=metadata)
         ingester = make_youtube_ingester(source_store, fetcher=fetcher, max_duration=60)
 
-        result = await ingester._ingest_one("https://www.youtube.com/watch?v=TestVideo01")
+        result = (await ingester.ingest_videos(["https://www.youtube.com/watch?v=TestVideo01"]))[0]
 
         assert result.placed == 0
         assert result.skipped == 1
@@ -342,7 +342,7 @@ class TestIngestVideo:
         fetcher = _fake(scenario="metadata_error")
         ingester = make_youtube_ingester(source_store, fetcher=fetcher)
 
-        result = await ingester._ingest_one("https://www.youtube.com/watch?v=TestVideo01")
+        result = (await ingester.ingest_videos(["https://www.youtube.com/watch?v=TestVideo01"]))[0]
 
         assert result.errors == 1
         detail = result.error_details[0]
@@ -358,7 +358,7 @@ class TestIngestVideo:
         fetcher = _fake(metadata=metadata)
         ingester = make_youtube_ingester(source_store, fetcher=fetcher)
 
-        result = await ingester._ingest_one("https://www.youtube.com/watch?v=TestVideo01")
+        result = (await ingester.ingest_videos(["https://www.youtube.com/watch?v=TestVideo01"]))[0]
 
         assert result.placed == 0
         assert result.errors == 1
@@ -378,7 +378,7 @@ class TestIngestVideo:
             source_store, fetcher=fetcher, whisper_model="medium",
         )
 
-        result = await ingester._ingest_one("https://www.youtube.com/watch?v=TestVideo01")
+        result = (await ingester.ingest_videos(["https://www.youtube.com/watch?v=TestVideo01"]))[0]
 
         assert result.placed == 1
         call_kwargs = source_store.place_file.call_args
@@ -398,7 +398,7 @@ class TestIngestVideo:
         ingester = make_youtube_ingester(source_store, fetcher=fetcher, max_duration=14400)
 
         # 1 回目: dest.exists() が False → placed=1, overwritten=0
-        result1 = await ingester._ingest_one("https://www.youtube.com/watch?v=TestVideo01")
+        result1 = (await ingester.ingest_videos(["https://www.youtube.com/watch?v=TestVideo01"]))[0]
         assert result1.placed == 1
         assert result1.overwritten == 0
 
@@ -407,7 +407,7 @@ class TestIngestVideo:
         dest.parent.mkdir(parents=True, exist_ok=True)
         dest.write_text("{}", encoding="utf-8")
 
-        result2 = await ingester._ingest_one("https://www.youtube.com/watch?v=TestVideo01")
+        result2 = (await ingester.ingest_videos(["https://www.youtube.com/watch?v=TestVideo01"]))[0]
         # 排他計上: 既存ファイル上書き時は placed=0, overwritten=1
         assert result2.placed == 0
         assert result2.overwritten == 1
@@ -424,7 +424,7 @@ class TestIngestVideo:
         fetcher = _fake(scenario="ip_blocked", metadata=metadata)
         ingester = make_youtube_ingester(source_store, fetcher=fetcher, max_duration=14400)
 
-        result = await ingester._ingest_one("https://www.youtube.com/watch?v=TestVideo01")
+        result = (await ingester.ingest_videos(["https://www.youtube.com/watch?v=TestVideo01"]))[0]
 
         # Whisper フォールバックされず、エラーとして処理される
         assert result.errors == 1
@@ -444,7 +444,7 @@ class TestIngestVideo:
         )
         ingester = make_youtube_ingester(source_store, fetcher=fetcher, max_duration=14400)
 
-        result = await ingester._ingest_one("https://www.youtube.com/watch?v=TestVideo01")
+        result = (await ingester.ingest_videos(["https://www.youtube.com/watch?v=TestVideo01"]))[0]
 
         assert result.placed == 1
         assert result.errors == 0
