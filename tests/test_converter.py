@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import time
 from pathlib import Path
 from unittest.mock import MagicMock, patch
@@ -563,6 +564,110 @@ class TestConvertHtml:
         result = convert_html(html_file, _TEST_REMOVE_CLASS_RE)
         assert result is not None
         assert "UTF-8 default content." in result
+
+
+class TestAozoraConversionIntegrity:
+    """変換前後の plain text 同一性チェック（Issue #776）.
+
+    旧 QA AC「先頭 500 文字でひらがな比率 5% 以上」は katakana 主体作品で
+    false positive を出すため、shift_jis bytes の直接 decode 結果と
+    converter 出力の plain text を空白正規化後に比較する方式に改善する。
+    """
+
+    @staticmethod
+    def _normalize_whitespace(text: str) -> str:
+        return re.sub(r"\s+", " ", text).strip()
+
+    @classmethod
+    def _extract_plain_from_html(cls, raw_bytes: bytes, encoding: str) -> str:
+        # errors="strict" でデコードし、不正バイト列はテストを失敗させる方針。
+        html_text = raw_bytes.decode(encoding)
+        soup = BeautifulSoup(html_text, "html.parser")
+        for tag in soup(["script", "style", "head"]):
+            tag.decompose()
+        return cls._normalize_whitespace(soup.get_text(separator=" "))
+
+    @classmethod
+    def _extract_plain_from_markdown(cls, markdown: str) -> str:
+        # Markdown 記法の除去は最小限（synthetic fixture が <p> 段落中心の前提）。
+        # blockquote `>`、画像 `![alt](url)` の `!`、水平線 `---`、コードフェンス言語タグ等は
+        # 現 fixture では発生しないため未対応。将来 fixture 拡張時に追加正規化を検討する。
+        # `|` はテーブルセル境界として機能するため削除ではなく空白に置換する
+        # （削除すると左右セルの文字列が連結し plain text 比較が破綻するため）。
+        text = markdown
+        text = re.sub(r"\[([^\]]+)\]\([^)]+\)", r"\1", text)
+        text = re.sub(r"^#+\s*", "", text, flags=re.MULTILINE)
+        text = re.sub(r"^[-*+]\s+", "", text, flags=re.MULTILINE)
+        text = re.sub(r"^\d+\.\s+", "", text, flags=re.MULTILINE)
+        text = re.sub(r"\|+", " ", text)
+        text = re.sub(r"[*_`]+", "", text)
+        return cls._normalize_whitespace(text)
+
+    def test_shift_jis_conversion_preserves_plain_text(self, tmp_path: Path) -> None:
+        """正常系: shift_jis HTML が converter を通って plain text が空白正規化後に一致する."""
+        html = (
+            '<html><head>'
+            '<meta http-equiv="Content-Type" content="text/html;charset=Shift_JIS" />'
+            '</head><body>'
+            '<p>これは synthetic な検証用本文です。ひらがな・カタカナ・漢字を含みます。</p>'
+            '<p>サンプル段落 2 です。テスト用プレースホルダーで構成されています。</p>'
+            '</body></html>'
+        )
+        raw_bytes = html.encode("shift_jis")
+        html_file = tmp_path / "sample.html"
+        html_file.write_bytes(raw_bytes)
+
+        ground_truth = self._extract_plain_from_html(raw_bytes, encoding="shift_jis")
+
+        markdown = convert_html(
+            html_file, _TEST_REMOVE_CLASS_RE, source_type="aozora",
+        )
+        assert markdown is not None
+        converted_plain = self._extract_plain_from_markdown(markdown)
+
+        assert converted_plain == ground_truth, (
+            f"変換前後の plain text が不一致:\n"
+            f"  ground_truth: {ground_truth!r}\n"
+            f"  converted:    {converted_plain!r}"
+        )
+
+    def test_integrity_check_detects_one_character_corruption(
+        self, tmp_path: Path,
+    ) -> None:
+        """sensitivity: converter 出力（Markdown）を 1 文字改変すると判定が不一致になることを確認.
+
+        converter → Markdown 記法除去経路を経由した上で 1 文字差分も検出することを示し、
+        判定ロジック（plain text の完全一致）がザル判定ではない sensitivity を担保する。
+        ヘルパー (`_extract_plain_from_markdown`) を経由するため、将来 Markdown 正規化を
+        拡張しても sensitivity の検証経路が変わらない。
+        """
+        html = (
+            '<html><head>'
+            '<meta http-equiv="Content-Type" content="text/html;charset=Shift_JIS" />'
+            '</head><body>'
+            '<p>これは synthetic な検証用本文です。</p>'
+            '</body></html>'
+        )
+        raw_bytes = html.encode("shift_jis")
+        html_file = tmp_path / "sample.html"
+        html_file.write_bytes(raw_bytes)
+
+        ground_truth = self._extract_plain_from_html(raw_bytes, encoding="shift_jis")
+
+        markdown = convert_html(
+            html_file, _TEST_REMOVE_CLASS_RE, source_type="aozora",
+        )
+        assert markdown is not None
+
+        # converter 出力 Markdown の末尾空白を除去した上で 1 文字削る
+        # （末尾改行/空白を削っただけでは空白正規化後に同一になり差分が出ないため）
+        stripped = markdown.rstrip()
+        corrupted_markdown = stripped[:-1] if stripped else ""
+        corrupted_plain = self._extract_plain_from_markdown(corrupted_markdown)
+
+        assert corrupted_plain != ground_truth, (
+            "converter 出力の 1 文字差分を検出できない判定ロジックはザル判定の疑いあり"
+        )
 
 
 class TestDetectAozoraEncoding:
