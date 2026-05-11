@@ -185,6 +185,49 @@ class TestCLISubprocessStdoutReadLimit:
         assert mock_exec.await_args is not None
         assert mock_exec.await_args.kwargs.get("limit") == _STDOUT_LINE_BUFFER_LIMIT
 
+    async def test_wraps_readline_value_error_as_cli_subprocess_error(self) -> None:
+        """readline() の ValueError（行バッファ上限超過）を CLISubprocessError にラップする.
+
+        asyncio.StreamReader.readline() は 1 行が limit を超えると
+        `Separator is found, but chunk is longer than limit` の ValueError を投げる。
+        MCP ツール側のエラー整形経路に乗せるため、CLISubprocessError へラップし、
+        CLI `--output-file` での全文取得を案内するメッセージにする。
+        """
+        mock_proc = MagicMock()
+        mock_proc.returncode = 0
+
+        async def _readline_raises() -> bytes:
+            raise ValueError(
+                "Separator is found, but chunk is longer than limit",
+            )
+
+        mock_proc.stdout = MagicMock()
+        mock_proc.stdout.readline = _readline_raises
+
+        async def _stderr_read() -> bytes:
+            return b""
+
+        mock_proc.stderr = MagicMock()
+        mock_proc.stderr.read = _stderr_read
+
+        async def _wait() -> int:
+            return 0
+
+        mock_proc.wait = _wait
+        mock_proc.stdin = None
+
+        with patch(
+            "asyncio.create_subprocess_exec",
+            new_callable=AsyncMock,
+            return_value=mock_proc,
+        ):
+            with pytest.raises(CLISubprocessError) as exc_info:
+                await _run_cli_subprocess("get-document", ["some-id"])
+
+        message = str(exc_info.value)
+        assert "10MiB" in message
+        assert "--output-file" in message
+
 
 class TestCLISubprocessErrorFormatMcpError:
     """CLISubprocessError.format_mcp_error の lock_type 別メッセージテスト."""
