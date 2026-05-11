@@ -211,6 +211,16 @@ async def _run_cli_subprocess(
             with contextlib.suppress(asyncio.CancelledError):
                 await process.wait()
         raise
+    except CLISubprocessError:
+        # _read_stdout が ValueError をラップした CLISubprocessError を送出した場合、
+        # 子プロセスが残留・ゾンビ化しないよう kill()+wait() で後始末する
+        # （CancelledError 経路と同じパターン）。
+        if process.returncode is None:
+            with contextlib.suppress(ProcessLookupError):
+                process.kill()
+            with contextlib.suppress(asyncio.CancelledError):
+                await process.wait()
+        raise
 
     await process.wait()
 

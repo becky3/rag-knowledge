@@ -192,9 +192,12 @@ class TestCLISubprocessStdoutReadLimit:
         `Separator is found, but chunk is longer than limit` の ValueError を投げる。
         MCP ツール側のエラー整形経路に乗せるため、CLISubprocessError へラップし、
         CLI `--output-file` での全文取得を案内するメッセージにする。
+
+        例外経路でも子プロセスを kill()+wait() で確実に後始末することも検証する
+        （ゾンビ化防止）。
         """
         mock_proc = MagicMock()
-        mock_proc.returncode = 0
+        mock_proc.returncode = None  # 未終了状態 → kill()+wait() 経路を通る
 
         async def _readline_raises() -> bytes:
             raise ValueError(
@@ -210,7 +213,11 @@ class TestCLISubprocessStdoutReadLimit:
         mock_proc.stderr = MagicMock()
         mock_proc.stderr.read = _stderr_read
 
+        wait_called = False
+
         async def _wait() -> int:
+            nonlocal wait_called
+            wait_called = True
             return 0
 
         mock_proc.wait = _wait
@@ -224,9 +231,15 @@ class TestCLISubprocessStdoutReadLimit:
             with pytest.raises(CLISubprocessError) as exc_info:
                 await _run_cli_subprocess("get-document", ["some-id"])
 
+        # 期待メッセージは定数から算出して将来の上限変更に追従する
+        expected_mib = _STDOUT_LINE_BUFFER_LIMIT // (1024 * 1024)
         message = str(exc_info.value)
-        assert "10MiB" in message
+        assert f"{expected_mib}MiB" in message
         assert "--output-file" in message
+
+        # 子プロセスの後始末（ゾンビ化防止）が行われたこと
+        mock_proc.kill.assert_called_once()
+        assert wait_called is True
 
 
 class TestCLISubprocessErrorFormatMcpError:
