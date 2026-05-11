@@ -41,6 +41,12 @@ logger = logging.getLogger("rag.server")
 # Unix: SIGSEGV=11, shell: 128+11=139
 _SEGFAULT_EXIT_CODES: frozenset[int] = frozenset({-1073741819, 3221225477, -11, 139})
 
+# asyncio StreamReader の行バッファ上限。
+# デフォルト 64KiB では rag_get_document が 64KB 超のドキュメントで
+# `Separator is found, but chunk is longer than limit` で失敗するため、
+# 1 行あたり 10MiB まで許容する。
+_STDOUT_LINE_BUFFER_LIMIT = 10 * 1024 * 1024
+
 
 class CLISubprocessError(Exception):
     """CLI サブプロセスの実行エラー."""
@@ -127,6 +133,7 @@ async def _run_cli_subprocess(
         stdin=stdin_mode,
         stderr=asyncio.subprocess.PIPE,
         env=env,
+        limit=_STDOUT_LINE_BUFFER_LIMIT,
     )
 
     # stdin にデータを書き込んでクローズする

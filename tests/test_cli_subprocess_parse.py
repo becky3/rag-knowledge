@@ -20,7 +20,11 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from rag.server.cli_subprocess import CLISubprocessError, _run_cli_subprocess
+from rag.server.cli_subprocess import (
+    _STDOUT_LINE_BUFFER_LIMIT,
+    CLISubprocessError,
+    _run_cli_subprocess,
+)
 
 
 def _make_mock_process(stdout_lines: list[str], exit_code: int = 1) -> MagicMock:
@@ -152,6 +156,34 @@ class TestCLISubprocessParseLockType:
             with pytest.raises(CLISubprocessError) as exc_info:
                 await _run_cli_subprocess("add-journal", [])
         assert exc_info.value.lock_type is None
+
+
+@pytest.mark.asyncio
+class TestCLISubprocessStdoutReadLimit:
+    """_run_cli_subprocess が asyncio StreamReader の行バッファ上限を引き上げるテスト.
+
+    rag_get_document が 64KiB 超のドキュメントで asyncio のデフォルト
+    `_DEFAULT_LIMIT` (65536) を超え `ValueError: Separator is found, but chunk
+    is longer than limit` で失敗する問題 (Issue #777) の回避を保証する。
+    """
+
+    async def test_stdout_read_limit_is_at_least_10_mib(self) -> None:
+        """`_STDOUT_LINE_BUFFER_LIMIT` 定数が 10 MiB 以上に設定されている."""
+        assert _STDOUT_LINE_BUFFER_LIMIT >= 10 * 1024 * 1024
+
+    async def test_passes_stdout_read_limit_to_subprocess_exec(self) -> None:
+        """`create_subprocess_exec` に `limit=_STDOUT_LINE_BUFFER_LIMIT` を渡している."""
+        result_line = json.dumps({"type": "result", "placed": 0})
+        mock_proc = _make_mock_process([result_line], exit_code=0)
+        with patch(
+            "asyncio.create_subprocess_exec",
+            new_callable=AsyncMock,
+            return_value=mock_proc,
+        ) as mock_exec:
+            await _run_cli_subprocess("get-document", ["some-id"])
+        assert mock_exec.await_count == 1
+        assert mock_exec.await_args is not None
+        assert mock_exec.await_args.kwargs.get("limit") == _STDOUT_LINE_BUFFER_LIMIT
 
 
 class TestCLISubprocessErrorFormatMcpError:

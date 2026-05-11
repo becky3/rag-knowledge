@@ -87,8 +87,10 @@ async def rag_get_document(
 
     Returns:
         メタデータヘッダー + ドキュメント全文。
-        大規模ドキュメントはトランケーションされる場合がある。
-        その場合は CLI の --output オプションで全文取得可能。
+        2 段階の上限が適用される:
+        (1) CLI subprocess の 1 行 stdout バッファ上限（10MiB）を超えた場合は明示エラー
+        (2) `rag_max_response_chars` 設定時は超過分をトランケートし末尾に通知を付記（未設定時は全文返却）
+        上限を超える場合は CLI の get-document コマンド（--output-file オプション）で全文取得可能。
     """
     if format not in _VALID_DOCUMENT_FORMATS:
         valid = ", ".join(sorted(_VALID_DOCUMENT_FORMATS))

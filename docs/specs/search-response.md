@@ -30,7 +30,10 @@ rag_search のレスポンスをチャンク単位の返却に変更し、全文
 - **レスポンス形式**: MCP ツールのレスポンスはプレーンテキスト形式を維持する（JSON 等の構造化形式には変更しない）
 - **全文取得の論理削除対応**: `status` が `deleted` のソースも全文取得可能とする（[source-store.md](source-store.md) の「ファイル取得」インターフェースの設計意図を踏襲）
 - **MCP + CLI 両提供**: rag_get_document は MCP ツールと CLI サブコマンドの両方で提供する。内部ロジックは共通関数とする
-- **レスポンスサイズ制御**: rag_get_document は大規模ドキュメントに対して `rag_max_response_chars`（既存設定項目を継続利用）でトランケーションを行う。上限超過時は末尾にトランケート通知（CLI の `--output` オプションでの全文取得を案内）を付記し、CLI の `--output` オプションによるファイル出力ではトランケーションを適用しない（全文出力）
+- **レスポンスサイズ制御**: rag_get_document は 2 段階の上限が適用される。
+  (1) **subprocess 行バッファ上限（10MiB）**: MCP 経由の場合、CLI subprocess の stdout 1 行（result JSON 行）が `asyncio.StreamReader` の行バッファ上限（10MiB）を超えると `CLISubprocessError` として明示エラーを返す。トランケーションは行わない。
+  (2) **アプリ層トランケーション（`rag_max_response_chars`）**: 上記 (1) を通過した応答に対し、MCP 経由で `rag_max_response_chars`（既存設定項目を継続利用）が設定されている場合は超過分をトランケーションし、末尾にトランケート通知（CLI の `--output-file` オプションでの全文取得を案内）を付記する。
+  CLI 直接実行（`--output-file` 指定）ではいずれの上限も適用せず全文出力する
 
 本コンポーネントは外部 API 通信を行わないため、想定プロファイル・安全制約セクションは省略する。
 
@@ -227,8 +230,9 @@ uv run python -m rag.cli get-document <source_id> [--format text|original] [--ou
 | rag_get_document で converted_store にファイルが存在しない場合（format=text） | エラーメッセージを返す。source_store にオリジナルが存在する旨を通知し、`format=original` での取得を提案する |
 | rag_search で `total_chunks` が未設定または 0 のチャンク（レガシーデータ等） | Chunk 位置を `{chunk_index+1}/?` と表示する（現在位置は既知のため保持し、総数のみ不明とする） |
 | rag_get_document で format=original 指定時にバイナリファイル（PDF 等）の場合 | ファイルの MIME タイプとファイルサイズを返し、テキスト形式での取得（format=text）を提案する。バイナリデータ自体は返さない |
-| rag_get_document で大規模ドキュメントの場合（MCP 経由） | `rag_max_response_chars` でトランケーションし、末尾に「トランケートされました。CLI の `--output` オプションで全文取得できます」と付記する |
-| rag_get_document で大規模ドキュメントの場合（CLI `--output` 指定） | トランケーションを適用せず全文をファイルに出力する |
+| rag_get_document で大規模ドキュメントの場合（MCP 経由、`rag_max_response_chars` 超過） | `rag_max_response_chars` でトランケーションし、末尾に「トランケートされました。CLI の `--output-file` オプションで全文取得できます」と付記する |
+| rag_get_document で極端に大きいドキュメントの場合（MCP 経由、subprocess 行バッファ 10MiB 超過） | CLI subprocess 通信レイヤーで `CLISubprocessError` として明示エラーを返す。トランケーションは行わない。CLI の `--output-file` オプションでの全文取得を案内する |
+| rag_get_document で大規模ドキュメントの場合（CLI `--output-file` 指定） | 上記いずれの上限も適用せず全文をファイルに出力する |
 
 ## コンポーネント構成
 
