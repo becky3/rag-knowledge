@@ -150,6 +150,35 @@ MinerU + PyTorch を除外する。PDF 抽出は pymupdf4llm にフォールバ�
 uv sync --no-group with-mineru
 ```
 
+**CPU/AMD GPU 環境では `UV_NO_GROUP=with-mineru` の永続化が必須**:
+`uv sync --no-group with-mineru` 単発では除外できるが、その後の `uv run` が
+内部で `uv sync` を再実行する際に `pyproject.toml` の
+`tool.uv.default-groups = ["dev", "with-mineru"]` が再適用され、torch + MinerU が
+再インストールされる。これを構造的に防ぐため、OS ユーザー環境変数に
+`UV_NO_GROUP=with-mineru` を設定する。
+
+##### Windows
+
+```powershell
+setx UV_NO_GROUP with-mineru
+```
+
+設定後はターミナル・IDE を再起動して反映する。確認:
+
+```powershell
+echo $env:UV_NO_GROUP  # → with-mineru
+```
+
+##### Unix（macOS / Linux）
+
+shell の rc ファイル（`~/.bashrc` / `~/.zshrc` 等）に追記:
+
+```bash
+export UV_NO_GROUP=with-mineru
+```
+
+設定後はシェルを再起動するか `source ~/.bashrc` で反映する。
+
 ### 2. 環境設定
 
 ```bash

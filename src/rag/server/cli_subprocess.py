@@ -41,6 +41,12 @@ logger = logging.getLogger("rag.server")
 # Unix: SIGSEGV=11, shell: 128+11=139
 _SEGFAULT_EXIT_CODES: frozenset[int] = frozenset({-1073741819, 3221225477, -11, 139})
 
+# asyncio StreamReader の行バッファ上限。
+# デフォルト 64KiB では rag_get_document が 64KiB 超のドキュメントで
+# `Separator is found, but chunk is longer than limit` で失敗するため、
+# 1 行あたり 10MiB まで許容する。
+_STDOUT_LINE_BUFFER_LIMIT: int = 10 * 1024 * 1024
+
 
 class CLISubprocessError(Exception):
     """CLI サブプロセスの実行エラー."""
@@ -127,6 +133,7 @@ async def _run_cli_subprocess(
         stdin=stdin_mode,
         stderr=asyncio.subprocess.PIPE,
         env=env,
+        limit=_STDOUT_LINE_BUFFER_LIMIT,
     )
 
     # stdin にデータを書き込んでクローズする
@@ -145,7 +152,18 @@ async def _run_cli_subprocess(
         _error_line = ""
         assert process.stdout is not None  # noqa: S101
         while True:
-            raw = await process.stdout.readline()
+            try:
+                raw = await process.stdout.readline()
+            except ValueError as exc:
+                # _STDOUT_LINE_BUFFER_LIMIT を超える 1 行は asyncio.StreamReader が
+                # `Separator is found, but chunk is longer than limit` で
+                # ValueError を投げる。MCP ツール側で扱えるよう CLISubprocessError
+                # にラップする（仕様: docs/specs/search-response.md, rag-knowledge.md）。
+                limit_mib = _STDOUT_LINE_BUFFER_LIMIT // (1024 * 1024)
+                raise CLISubprocessError(
+                    f"応答が上限 ({limit_mib}MiB) を超えました。"
+                    f"CLI の get-document コマンド（--output-file オプション）で全文取得できます",
+                ) from exc
             if not raw:
                 break
             line = raw.decode("utf-8").strip()
@@ -187,6 +205,16 @@ async def _run_cli_subprocess(
             _drain_stderr(),
         )
     except asyncio.CancelledError:
+        if process.returncode is None:
+            with contextlib.suppress(ProcessLookupError):
+                process.kill()
+            with contextlib.suppress(asyncio.CancelledError):
+                await process.wait()
+        raise
+    except CLISubprocessError:
+        # _read_stdout が ValueError をラップした CLISubprocessError を送出した場合、
+        # 子プロセスが残留・ゾンビ化しないよう kill()+wait() で後始末する
+        # （CancelledError 経路と同じパターン）。
         if process.returncode is None:
             with contextlib.suppress(ProcessLookupError):
                 process.kill()

@@ -875,6 +875,7 @@ flowchart LR
 | `OPENAI_API_KEY` が未登録 | オンライン Embedding プロバイダーの初期化に失敗し、エラーを返す |
 | `GOOGLE_SAFE_BROWSING_API_KEY` が未登録・空・不正 | 設定エラー（`SafeBrowsingConfigError`）として即時中断する |
 | rag_get_document レスポンスサイズ超過 | MCP 経由で `rag_max_response_chars` 超過時はトランケーションし、末尾に CLI `--output-file` オプションでの全文取得を案内する。CLI の `--output-file` 指定時はトランケーションなし |
+| rag_get_document で極端に大きいドキュメント（subprocess 行バッファ 10MiB 超過） | MCP 経由で CLI subprocess の stdout 1 行が `asyncio.StreamReader` 行バッファ上限を超えると `CLISubprocessError` として明示エラーを返す。CLI 直接実行（`--output-file` 指定）では適用されない |
 | バジェット上限到達 | 取得済みデータを返し、上限到達の旨をログ出力する |
 | サーキットブレーカー発動 | 操作を中断し、取得済みデータを返す。エラーの詳細をログ出力する |
 | 操作全体タイムアウト | 操作を中断し、取得済みデータを返す |
