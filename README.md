@@ -150,34 +150,22 @@ MinerU + PyTorch を除外する。PDF 抽出は pymupdf4llm にフォールバ�
 uv sync --no-group with-mineru
 ```
 
-**CPU/AMD GPU 環境では `UV_NO_GROUP=with-mineru` の永続化が必須**:
-`uv sync --no-group with-mineru` 単発では除外できるが、その後の `uv run` が
-内部で `uv sync` を再実行する際に `pyproject.toml` の
-`tool.uv.default-groups = ["dev", "with-mineru"]` が再適用され、torch + MinerU が
-再インストールされる。これを構造的に防ぐため、OS ユーザー環境変数に
-`UV_NO_GROUP=with-mineru` を設定する。
+Claude Code 経由で `uv run` 系コマンドを実行する場合、本リポジトリの `.claude/settings.local.json` の `env` フィールドに `UV_NO_GROUP=with-mineru` を設定することで、Claude Code セッション内に限定して `with-mineru` グループを除外できる。OS ユーザー環境変数（`setx` / `export`）による永続化は他プロジェクトに副作用が及ぶため使用しない。
 
-##### Windows
+`.claude/settings.local.json` の例:
 
-```powershell
-setx UV_NO_GROUP with-mineru
+```json
+{
+  "env": {
+    "UV_NO_GROUP": "with-mineru"
+  }
+}
 ```
 
-設定後はターミナル・IDE を再起動して反映する。確認:
-
-```powershell
-echo $env:UV_NO_GROUP  # → with-mineru
-```
-
-##### Unix（macOS / Linux）
-
-shell の rc ファイル（`~/.bashrc` / `~/.zshrc` 等）に追記:
-
-```bash
-export UV_NO_GROUP=with-mineru
-```
-
-設定後はシェルを再起動するか `source ~/.bashrc` で反映する。
+設定後、サーバーを停止した状態で Claude Code セッション内から `uv sync` を 1 回実行すると（`UV_NO_GROUP` が自動適用される）、torch + MinerU を含む関連パッケージが除外される（サーバー稼働中はファイルロックで uninstall が失敗するため）。
+ターミナルから直接実行する場合は `uv sync --no-group with-mineru` を使用すること（`UV_NO_GROUP` が設定されていないため素の `uv sync` では `with-mineru` が再導入される）。
+Claude Code セッション内での以降の `uv run` では除外状態が維持される。
+ターミナルから直接 `uv run` を実行する場合は、`uv run --no-group with-mineru ...` を都度指定するか、シェルエイリアスを利用する。
 
 ### 2. 環境設定
 
