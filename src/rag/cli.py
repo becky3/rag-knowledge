@@ -187,9 +187,17 @@ def _output_error(
 # write_lock 取得失敗（kind=write）時の指数バックオフ間隔（秒）。
 # CLI 連続実行時の OS ファイルロック解放遅延を吸収する目的。
 # 4 回再試行 = 初回 + 4 回 = 最大 5 回試行。合計待機時間 ~1.85s。
-# kind=rebuild は秒〜分単位の処理が走っているケースのため対象外（即失敗）。
 # Issue #755
 _WRITE_LOCK_RETRY_BACKOFFS_SEC: tuple[float, ...] = (0.1, 0.25, 0.5, 1.0)
+
+# write 操作の rebuild_lock プリチェック失敗（kind=rebuild）時の指数バックオフ間隔（秒）。
+# rebuild プロセスの visible log 完了後も python interpreter shutdown 処理
+# （chroma client teardown / GC / file flush 等）の間は OS ファイルロックが
+# 保持され続け、その期間 write 操作が即失敗する事象（QA で 10〜15 秒観察）を
+# 吸収する目的。rebuild 本体処理の長時間 retry は意図しないが、shutdown 期間の
+# 短時間 retry は安全に吸収できる（Issue #779）。
+# 5 回再試行 = 初回 + 5 回 = 最大 6 回試行。合計待機時間 ~15.5s。
+_REBUILD_PROBE_RETRY_BACKOFFS_SEC: tuple[float, ...] = (0.5, 1.0, 2.0, 4.0, 8.0)
 
 
 @contextlib.contextmanager
@@ -203,9 +211,12 @@ def _write_lock_or_exit(
     ロック取得に失敗した場合はロック種別に応じたメッセージで _output_error 経由で
     exit する。with 文を抜ける際にロックは自動解放される。
 
-    kind=write の競合に対しては短時間の指数バックオフでリトライする
-    （CLI 連続実行時の OS ロック解放遅延を吸収するため）。kind=rebuild の
-    競合はリトライせず即失敗する。
+    kind=write の競合に対しては ``_WRITE_LOCK_RETRY_BACKOFFS_SEC`` の指数バック
+    オフでリトライする（CLI 連続実行時の OS ロック解放遅延を吸収するため）。
+    kind=rebuild の競合に対しては ``_REBUILD_PROBE_RETRY_BACKOFFS_SEC`` の
+    短時間バックオフでリトライする（rebuild プロセスの visible log 完了後も
+    続く python interpreter shutdown 期間の lock 保持を吸収するため）。
+    両者ともリトライ全失敗時は exit する。
 
     仕様: docs/specs/infrastructure/content-upload.md の「rebuild との相互排他」
 
@@ -221,18 +232,23 @@ def _write_lock_or_exit(
 
     lock = write_lock(source_store_root)
     last_error: LockAcquisitionError | None = None
-    for backoff in (None, *_WRITE_LOCK_RETRY_BACKOFFS_SEC):
-        if backoff is not None:
-            time.sleep(backoff)
+    write_iter = iter(_WRITE_LOCK_RETRY_BACKOFFS_SEC)
+    rebuild_iter = iter(_REBUILD_PROBE_RETRY_BACKOFFS_SEC)
+    next_backoff: float | None = None
+    while True:
+        if next_backoff is not None:
+            time.sleep(next_backoff)
         try:
             lock.acquire()
         except LockAcquisitionError as e:
             last_error = e
-            # kind=rebuild はリトライ対象外（即失敗）。kind=write はループ継続
             if e.kind == "rebuild":
+                next_backoff = next(rebuild_iter, None)
+            else:
+                next_backoff = next(write_iter, None)
+            if next_backoff is None:
                 break
         else:
-            # 取得成功
             last_error = None
             break
 
@@ -2686,7 +2702,9 @@ def _emit_bluesky_result(
         if url_stats:
             data["url_follow"] = {
                 "web_placed": url_stats.get("web_placed", 0),
+                "web_overwritten": url_stats.get("web_overwritten", 0),
                 "youtube_placed": url_stats.get("youtube_placed", 0),
+                "youtube_overwritten": url_stats.get("youtube_overwritten", 0),
                 "errors": url_stats.get("errors", 0),
             }
         _output_result(data)
@@ -2695,14 +2713,21 @@ def _emit_bluesky_result(
     _print_ingest_result(ingest_result, pipeline_summary, context=context)
     if not url_stats:
         return
-    if not any(url_stats.get(k, 0) > 0 for k in ("web_placed", "youtube_placed", "errors")):
+    web_placed = url_stats.get("web_placed", 0)
+    web_overwritten = url_stats.get("web_overwritten", 0)
+    yt_placed = url_stats.get("youtube_placed", 0)
+    yt_overwritten = url_stats.get("youtube_overwritten", 0)
+    err_n = url_stats.get("errors", 0)
+    web_total = web_placed + web_overwritten
+    yt_total = yt_placed + yt_overwritten
+    if web_total == 0 and yt_total == 0 and err_n == 0:
         return
     parts = ["URL 自動取り込み:"]
-    web_n = url_stats.get("web_placed", 0)
-    yt_n = url_stats.get("youtube_placed", 0)
-    err_n = url_stats.get("errors", 0)
-    if web_n > 0 or yt_n > 0:
-        parts.append(f"Web {web_n}件, YouTube {yt_n}件")
+    if web_total > 0 or yt_total > 0:
+        parts.append(
+            f"Web {web_total}件 (新規 {web_placed}, 上書き {web_overwritten}),"
+            f" YouTube {yt_total}件 (新規 {yt_placed}, 上書き {yt_overwritten})",
+        )
     if err_n > 0:
         parts.append(f"エラー {err_n}件")
     print(" ".join(parts))

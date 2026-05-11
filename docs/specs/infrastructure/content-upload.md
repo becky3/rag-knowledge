@@ -61,11 +61,18 @@ MCP は JSON ベースのテキストプロトコルであるため、ツール�
 - **ロックファイル**: source_store ディレクトリ直下に配置する。`write_lock`（書き込みロック、ファイル名 `.write.lock`）と `rebuild_lock`（再構築ロック、ファイル名 `.rebuild.lock`）でそれぞれ別のロックファイルを使用する
 - **ノンブロッキング primitive + helper レベルの短時間リトライ**:
   低レベル `FileLock` / `PipelineLock` は常にノンブロッキング（`LOCK_NB` / `LK_NBLCK`）で動作する。
-  書き込み系 CLI helper (`_write_lock_or_exit`) は `kind="write"` の競合に限り短時間の指数バックオフでリトライし
-  （CLI 連続実行時の OS ロック解放遅延を吸収する目的）、
-  リトライ全失敗または `kind="rebuild"` の場合は即座にエラーを返却する。
-  rebuild コマンド側の lock helper（`rebuild_lock` を取得する処理）はリトライしない
-  （rebuild は秒〜分単位の長時間処理のため短時間リトライの意味が薄い）。
+  リトライ責務は helper 種別ごとに分離する:
+  - **書き込み系 CLI helper（`_write_lock_or_exit`）**:
+    - `kind="write"` 競合（他の書き込み操作との競合）: 短時間の指数バックオフでリトライする
+      （CLI 連続実行時の OS ロック解放遅延を吸収する目的）
+    - `kind="rebuild"` 競合（rebuild との競合）: 短時間の指数バックオフでリトライする。
+      ただし「rebuild の本体処理を待つ」のではなく、「visible log 完了後も続く python interpreter
+      shutdown 期間（chroma client teardown / GC / file flush 等）の数〜十数秒の lock 保持を
+      吸収する」目的に限定される（Issue #779）
+    - いずれの kind もリトライ全失敗時はエラーを返却する
+  - **rebuild コマンド自身の lock helper（`rebuild_lock` を取得する処理）**:
+    - リトライしない（rebuild は秒〜分単位の長時間処理のため短時間リトライの意味が薄い）
+
   CLI はロック競合時に JSON Lines の error メッセージ（`type: "error"`）に
   ロック競合コード（`LOCK_CONFLICT`）とロック種別（`write` / `rebuild`）を含め、exit code 1 で終了する。
   サーバー側（`src/rag/server/cli_subprocess.py`）は CLI サブプロセスの error メッセージから
@@ -73,14 +80,20 @@ MCP は JSON ベースのテキストプロトコルであるため、ツール�
   （`write` 競合 = 429、`rebuild` 競合 = 503）+ `Retry-After` ヘッダ、
   MCP ツールではロック種別に応じたエラーメッセージとして返却する。
   CLI 直接実行では標準エラー出力 + exit code 1 を返す。
-  リトライ間隔・回数の具体値は `src/rag/cli.py` の `_WRITE_LOCK_RETRY_BACKOFFS_SEC` を SSoT とする。
+  リトライ間隔・回数の具体値は `src/rag/cli.py` の `_WRITE_LOCK_RETRY_BACKOFFS_SEC`（kind=write）と
+  `_REBUILD_PROBE_RETRY_BACKOFFS_SEC`（kind=rebuild）を SSoT とする。
 - **ロック種別の伝搬**: CLI のロック競合エラーには種別識別子（`write` または `rebuild`）を含める。この識別子は Upload HTTP API の HTTP ステータスコード・`Retry-After` 値の選択と、MCP ツールのエラーメッセージの切替に使用する。識別子の意味は「取得失敗したロック」であり、外部プロセスの保持状態を示す
 - **lock_type 不明時のフォールバック**: CLI エラー応答に `details.lock_type` が含まれない
   （低レベル `FileLock` 直接利用で `kind=None` の場合、または旧バージョン CLI との後方互換）、
   もしくは不正値（`write`/`rebuild` 以外）の場合、Upload HTTP API は `write` 相当として
   HTTP 429 + `rag_upload_retry_after_write_sec` を返す。
   短めの Retry-After を返すことで安全側に倒す（長時間待機を誤って強いるリスクを避ける）
-- **ステールロック対策**: OS ファイルロックはプロセス終了時（SEGFAULT 含む異常終了を含む）に OS が自動解放するため、明示的なステールロック対策は不要。OS クラッシュ・電源断の場合もロックはカーネルメモリ上のみに存在し、再起動後にクリーンな状態になる
+- **ステールロック対策**: OS ファイルロックはプロセス終了時（SEGFAULT 含む異常終了を含む）に OS が自動解放するため、明示的なステールロック対策は不要。
+  OS クラッシュ・電源断の場合もロックはカーネルメモリ上のみに存在し、再起動後にクリーンな状態になる
+  - **shutdown 期間の lock 保持**: 「プロセス終了時の自動解放」は OS の handle close 契機であり、python interpreter から見た
+    「visible log 出力完了」と「プロセス終了」の間には shutdown 処理（chroma client teardown / GC / file flush 等）の
+    数秒〜十数秒の差がある。この期間中は lock がまだ保持されているため、書き込み helper 側で
+    `_REBUILD_PROBE_RETRY_BACKOFFS_SEC` による短時間リトライで吸収する（Issue #779）
 - **Advisory lock の制約**: OS ファイルロックは advisory lock（協調ロック）であり、ロック取得のコードを経由しないアクセスは防げない。本システムでは全書き込み操作が CLI 経由（MCP サブプロセス + CLI 直接実行）のため問題ない
 - **rebuild との相互排他（非対称設計 + プリチェック）**: 書き込み操作（ingest / delete 等）と
   rebuild 操作は相互排他で動作する。ロック保持戦略は非対称で、書き込み系 CLI は `write_lock`

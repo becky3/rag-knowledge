@@ -39,13 +39,14 @@ def _item_with_urls(
 
 
 def _make_execution(
-    *, placed: int = 0, errors: int = 0,
+    *, placed: int = 0, overwritten: int = 0, errors: int = 0,
     error_details: list[dict[str, Any]] | None = None,
     parse_errors: int = 0,
 ) -> SiteIngestExecution:
     """WebIngester 実行結果オブジェクトを生成."""
     ingest = IngestResult()
     ingest.placed = placed
+    ingest.overwritten = overwritten
     ingest.errors = errors
     if error_details:
         ingest.error_details = list(error_details)
@@ -329,7 +330,9 @@ class TestFollowUrlsEmpty:
             youtube_request_interval=0.0,
         )
         assert stats == {
-            "web_placed": 0, "youtube_placed": 0, "skipped": 0, "errors": 0,
+            "web_placed": 0, "web_overwritten": 0,
+            "youtube_placed": 0, "youtube_overwritten": 0,
+            "skipped": 0, "errors": 0,
         }
 
     @pytest.mark.asyncio
@@ -342,5 +345,134 @@ class TestFollowUrlsEmpty:
             youtube_request_interval=0.0,
         )
         assert stats == {
-            "web_placed": 0, "youtube_placed": 0, "skipped": 0, "errors": 0,
+            "web_placed": 0, "web_overwritten": 0,
+            "youtube_placed": 0, "youtube_overwritten": 0,
+            "skipped": 0, "errors": 0,
         }
+
+
+class TestFollowUrlsOverwriteBreakdown:
+    """placed/overwritten 内訳の集計テスト（Issue #778）.
+
+    完了ログで上書き再取り込みが 0 件と誤認される問題を防ぐため、web/youtube
+    の両側で placed と overwritten を別カウントとして保持・出力することを検証する。
+    """
+
+    @pytest.mark.asyncio
+    async def test_web_overwritten_counted_separately(self) -> None:
+        """web の上書きのみのケースで web_overwritten が計上される."""
+        runner = AsyncMock()
+        runner.run_for_urls = AsyncMock(
+            return_value=_make_execution(placed=0, overwritten=1),
+        )
+        items = [_item_with_urls(["https://example.com/article"])]
+        stats = await follow_urls(
+            items,
+            classifier=RealYoutubeClassifier(),
+            youtube_delegator=None,
+            web_delegator=runner,
+            youtube_request_interval=0.0,
+        )
+        assert stats["web_placed"] == 0
+        assert stats["web_overwritten"] == 1
+
+    @pytest.mark.asyncio
+    async def test_youtube_overwritten_counted_separately(self) -> None:
+        """youtube の上書きのみのケースで youtube_overwritten が計上される.
+
+        Issue #778 のメイン回帰検出。BlueSky 経由で既存動画の URL を再取り込みする
+        と yt_result.placed=0 / yt_result.overwritten=1 となり、修正前は
+        youtube_placed=0 のみ集計されて完了ログが「youtube=0」と誤表示していた。
+        """
+        delegator = AsyncMock()
+        delegator.unload_whisper = MagicMock()
+        yt_result = IngestResult()
+        yt_result.placed = 0
+        yt_result.overwritten = 1
+        delegator.ingest_videos = AsyncMock(return_value=[yt_result])
+        runner = AsyncMock()
+        runner.run_for_urls = AsyncMock(return_value=_make_execution())
+        items = [_item_with_urls(["https://youtu.be/abcdEFG1234"])]
+        stats = await follow_urls(
+            items,
+            classifier=RealYoutubeClassifier(),
+            youtube_delegator=delegator,
+            web_delegator=runner,
+            youtube_request_interval=0.0,
+        )
+        assert stats["youtube_placed"] == 0
+        assert stats["youtube_overwritten"] == 1
+
+    @pytest.mark.asyncio
+    async def test_mixed_placed_and_overwritten(self) -> None:
+        """web/youtube 混在ケースで両側の placed/overwritten が独立に集計される."""
+        delegator = AsyncMock()
+        delegator.unload_whisper = MagicMock()
+        yt_a = IngestResult()
+        yt_a.placed = 1
+        yt_b = IngestResult()
+        yt_b.overwritten = 1
+        delegator.ingest_videos = AsyncMock(side_effect=[[yt_a], [yt_b]])
+        runner = AsyncMock()
+        runner.run_for_urls = AsyncMock(
+            return_value=_make_execution(placed=2, overwritten=1),
+        )
+        items = [_item_with_urls([
+            "https://example.com/a",
+            "https://example.com/b",
+            "https://example.com/c",
+            "https://youtu.be/abcdEFG1234",
+            "https://youtu.be/abcdEFG5678",
+        ])]
+        stats = await follow_urls(
+            items,
+            classifier=RealYoutubeClassifier(),
+            youtube_delegator=delegator,
+            web_delegator=runner,
+            youtube_request_interval=0.0,
+        )
+        assert stats["web_placed"] == 2
+        assert stats["web_overwritten"] == 1
+        assert stats["youtube_placed"] == 1
+        assert stats["youtube_overwritten"] == 1
+
+    @pytest.mark.asyncio
+    async def test_completion_log_shows_breakdown(
+        self, caplog: pytest.LogCaptureFixture,
+    ) -> None:
+        """完了ログ文字列に web/youtube 両側の placed/overwritten 内訳が含まれる."""
+        import logging
+
+        delegator = AsyncMock()
+        delegator.unload_whisper = MagicMock()
+        yt_result = IngestResult()
+        yt_result.overwritten = 1
+        delegator.ingest_videos = AsyncMock(return_value=[yt_result])
+        runner = AsyncMock()
+        runner.run_for_urls = AsyncMock(
+            return_value=_make_execution(placed=1, overwritten=2),
+        )
+        items = [_item_with_urls([
+            "https://example.com/x",
+            "https://youtu.be/abcdEFG1234",
+        ])]
+        with caplog.at_level(
+            logging.INFO,
+            logger="rag.pipeline.ingesters.bluesky.delegations",
+        ):
+            await follow_urls(
+                items,
+                classifier=RealYoutubeClassifier(),
+                youtube_delegator=delegator,
+                web_delegator=runner,
+                youtube_request_interval=0.0,
+            )
+        completion_logs = [
+            r.getMessage() for r in caplog.records
+            if r.getMessage().startswith("URL 取り込み完了:")
+        ]
+        assert len(completion_logs) == 1
+        log = completion_logs[0]
+        # web=3 (placed=1, overwritten=2) / youtube=1 (placed=0, overwritten=1)
+        assert "web=3 (placed=1, overwritten=2)" in log
+        assert "youtube=1 (placed=0, overwritten=1)" in log

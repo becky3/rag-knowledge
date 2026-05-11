@@ -327,11 +327,20 @@ def _format_ingest_response(
             )
             parts.append(f"パイプラインエラー: {len(pipeline_summary.errors)}件 ({details})")
     if url_follow:
-        web_n = url_follow.get("web_placed", 0)
-        yt_n = url_follow.get("youtube_placed", 0)
+        web_placed = url_follow.get("web_placed", 0)
+        web_overwritten = url_follow.get("web_overwritten", 0)
+        yt_placed = url_follow.get("youtube_placed", 0)
+        yt_overwritten = url_follow.get("youtube_overwritten", 0)
         err_n = url_follow.get("errors", 0)
-        if web_n > 0 or yt_n > 0 or err_n > 0:
-            seg = [f"URL 自動取り込み: Web {web_n}件, YouTube {yt_n}件"]
+        web_total = web_placed + web_overwritten
+        yt_total = yt_placed + yt_overwritten
+        if web_total > 0 or yt_total > 0 or err_n > 0:
+            seg = [
+                f"URL 自動取り込み: Web {web_total}件"
+                f" (新規 {web_placed}, 上書き {web_overwritten}),"
+                f" YouTube {yt_total}件"
+                f" (新規 {yt_placed}, 上書き {yt_overwritten})",
+            ]
             if err_n > 0:
                 seg.append(f"エラー {err_n}件")
             parts.append(" ".join(seg))
@@ -372,7 +381,11 @@ def _format_cli_ingest_result(
     if isinstance(url_follow_data, dict):
         url_follow = {
             "web_placed": int(url_follow_data.get("web_placed", 0)),
+            "web_overwritten": int(url_follow_data.get("web_overwritten", 0)),
             "youtube_placed": int(url_follow_data.get("youtube_placed", 0)),
+            "youtube_overwritten": int(
+                url_follow_data.get("youtube_overwritten", 0),
+            ),
             "errors": int(url_follow_data.get("errors", 0)),
         }
 
