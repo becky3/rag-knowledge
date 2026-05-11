@@ -197,13 +197,17 @@ class YoutubeIngester(BaseIngester):
         """リクエスト間隔（秒）."""
         return self._request_interval
 
-    async def ingest_video(
+    async def _ingest_one(
         self,
         video_url: str,
         *,
         playlist_id: str | None = None,
     ) -> IngestResult:
-        """単一 YouTube 動画を取得し source_store に配置する.
+        """単一 YouTube 動画を取得し source_store に配置する内部 helper.
+
+        ※ private メソッド。VRAM 解放を保証しないため外部から直接呼ばないこと。
+        公開 API は `ingest_videos(urls)` / `crawl_playlist(url)` を使う。
+        本メソッドは原則として、それら公開 API の内部から `try/finally` の保護下で呼ばれる想定。
 
         Args:
             video_url: YouTube 動画 URL
@@ -375,9 +379,9 @@ class YoutubeIngester(BaseIngester):
         try:
             for url in video_urls:
                 try:
-                    results.append(await self.ingest_video(url))
+                    results.append(await self._ingest_one(url))
                 except Exception as e:
-                    # プログラミングエラーは伝播させる（ingest_video 内部の設計と整合）
+                    # プログラミングエラーは伝播させる（_ingest_one 内部の設計と整合）
                     if isinstance(e, (TypeError, AttributeError, ImportError)):
                         raise
                     logger.error("ingest_videos エラー (url=%s): %s", url, e)
@@ -498,7 +502,7 @@ class YoutubeIngester(BaseIngester):
             video_url = f"https://www.youtube.com/watch?v={video_id}"
 
             try:
-                single_result = await self.ingest_video(
+                single_result = await self._ingest_one(
                     video_url, playlist_id=playlist_id
                 )
                 result.placed += single_result.placed

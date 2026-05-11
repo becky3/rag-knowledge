@@ -606,7 +606,7 @@ BlueSky 投稿内に含まれる URL を抽出し、URL の種別に応じて si
 
 | URL パターン | 委譲先 | 備考 |
 |-------------|--------|------|
-| YouTube 動画 URL（対応する具体パターンは [youtube.md](youtube.md) を参照） | YoutubeIngester.ingest_video | YouTube 動画の字幕・文字起こしを取り込む |
+| YouTube 動画 URL（対応する具体パターンは [youtube.md](youtube.md) を参照） | YoutubeDelegator.ingest_videos | YouTube 動画の字幕・文字起こしを取り込む |
 | 不正な YouTube 動画 URL（パターンには該当するが video_id 形式が不正） | エラー扱いでスキップ | site_ingest に流すと無駄な HTTP アクセスが発生し、リスクもあるため取り込まない。`errors` カウンタを増やし、`error_details` に記録する |
 | `bsky.app/profile/` | スキップ | BlueSky 投稿は既にインジェスト対象 |
 | 上記以外の HTTP/HTTPS URL | site_ingest（複数 URL モード） | Web ページをバッチ取得する。YouTube チャンネル URL（`/@handle`, `/c/`, `/channel/`）・プレイリスト URL（`/playlist?list=`）はこの分類に含まれる |
@@ -635,6 +635,8 @@ YouTube 動画 URL の判定は YouTube インジェスター側で SSoT とし�
    - 上書き投稿由来の YouTube URL は、呼び出し元から受け取った再取り込み許可フラグが `true` の場合のみ取得する
    - `rag_add_bluesky` 経由では全投稿が YouTube 抑制対象外として渡されるため、上記判定の結果として YouTube URL は常に取得対象となる
 6. YouTube インジェスターで動画を取り込む（個別処理、URL 間に `rag_youtube_request_interval` に基づくスリープを挿入）
+   - per-URL レート制限を維持するため、`YoutubeDelegator.ingest_videos` を URL ごとに長さ 1 のリストで呼び出す
+   - Whisper モデルのロード/アンロードは URL ごとに発生する（複数の字幕無効動画が含まれる投稿では bulk 効率は失われるが、安全性優先の判断）
 7. 全 URL の処理が完了した後、パイプライン制御に取り込み完了を通知する
 
 #### エラーハンドリング

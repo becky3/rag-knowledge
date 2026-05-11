@@ -45,7 +45,7 @@ async def follow_urls(
     """配置済み投稿から URL を抽出し、Web/YouTube 委譲先に取り込ませる.
 
     Web URL は ``WebDelegator.run_for_urls`` でバッチ取得（subprocess 直起動を
-    回避するため Python API 経由）。YouTube URL は ``YoutubeDelegator.ingest_video``
+    回避するため Python API 経由）。YouTube URL は ``YoutubeDelegator.ingest_videos``
     で個別取り込み（URL 間にレート制限スリープ）。
 
     各 placed_item の ``_suppress_youtube_reingest`` フラグにより YouTube 抑制対象
@@ -113,38 +113,35 @@ async def follow_urls(
         youtube_urls = target_youtube_urls
 
     if youtube_urls:
-        # bluesky 投稿内 YouTube URL の bulk 取り込み境界。
-        # 末尾で必ず Whisper モデルをアンロードして VRAM を解放する
-        # （仕様: docs/specs/ingesters/youtube.md「Whisper モデルライフサイクル」）。
-        # youtube_urls が空 / youtube_delegator が None の場合は本ブロックに入らず、
-        # Whisper モデルがロードされないため unload_whisper は不要。
-        try:
-            for i, url in enumerate(youtube_urls):
-                if youtube_delegator is not None:
-                    try:
-                        yt_result = await youtube_delegator.ingest_video(url)
-                        stats["youtube_placed"] += yt_result.placed
-                        if yt_result.errors > 0:
-                            stats["errors"] += yt_result.errors
-                    except Exception as exc:
-                        logger.exception("YouTube URL の取り込みに失敗: %s", url)
-                        stats["errors"] += 1
-                        if result is not None:
-                            result.errors += 1
-                            result.error_details.append(IngestErrorDetail(
-                                category=IngestErrorCategory.DELEGATION.value,
-                                target=url,
-                                url=url,
-                                message=f"youtube delegation failed: {exc}",
-                            ))
-                    if i < len(youtube_urls) - 1:
-                        await asyncio.sleep(youtube_request_interval)
-                else:
-                    logger.warning("YouTube インジェスターが未指定: %s", url)
-                    stats["skipped"] += 1
-        finally:
+        # bluesky 投稿内 YouTube URL の取り込み。
+        # 各 URL を ingest_videos([url]) で呼ぶことで、公開 API 内部の try/finally に
+        # よって Whisper モデルの VRAM 解放が保証される。
+        # （仕様: docs/specs/ingesters/youtube.md「Whisper モデルライフサイクル」）
+        # per-URL レート制限を維持するため bulk 一括ではなく URL ごとに呼び出す。
+        for i, url in enumerate(youtube_urls):
             if youtube_delegator is not None:
-                youtube_delegator.unload_whisper()
+                try:
+                    yt_results = await youtube_delegator.ingest_videos([url])
+                    yt_result = yt_results[0]
+                    stats["youtube_placed"] += yt_result.placed
+                    if yt_result.errors > 0:
+                        stats["errors"] += yt_result.errors
+                except Exception as exc:
+                    logger.exception("YouTube URL の取り込みに失敗: %s", url)
+                    stats["errors"] += 1
+                    if result is not None:
+                        result.errors += 1
+                        result.error_details.append(IngestErrorDetail(
+                            category=IngestErrorCategory.DELEGATION.value,
+                            target=url,
+                            url=url,
+                            message=f"youtube delegation failed: {exc}",
+                        ))
+                if i < len(youtube_urls) - 1:
+                    await asyncio.sleep(youtube_request_interval)
+            else:
+                logger.warning("YouTube インジェスターが未指定: %s", url)
+                stats["skipped"] += 1
 
     logger.info(
         "URL 取り込み完了: web=%d, youtube=%d, skipped=%d, errors=%d",

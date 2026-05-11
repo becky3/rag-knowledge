@@ -44,32 +44,36 @@ class TestRealYoutubeClassifier:
 
 class TestRealYoutubeDelegator:
     @pytest.mark.asyncio
-    async def test_ingest_video_delegates_to_ingester(self) -> None:
+    async def test_ingest_videos_delegates_to_ingester(self) -> None:
         ingester = AsyncMock()
-        expected = IngestResult()
-        ingester.ingest_video.return_value = expected
+        expected = [IngestResult()]
+        ingester.ingest_videos.return_value = expected
         delegator = RealYoutubeDelegator(ingester)
 
-        result = await delegator.ingest_video(
-            "https://youtu.be/test", playlist_id="PLtest",
-        )
+        result = await delegator.ingest_videos(["https://youtu.be/test"])
 
         assert result is expected
-        ingester.ingest_video.assert_awaited_once_with(
-            "https://youtu.be/test", playlist_id="PLtest",
+        ingester.ingest_videos.assert_awaited_once_with(
+            ["https://youtu.be/test"],
         )
 
     @pytest.mark.asyncio
-    async def test_ingest_video_default_playlist_id_is_none(self) -> None:
+    async def test_ingest_videos_supports_bulk_urls(self) -> None:
         ingester = AsyncMock()
-        ingester.ingest_video.return_value = IngestResult()
+        expected = [IngestResult(), IngestResult()]
+        ingester.ingest_videos.return_value = expected
         delegator = RealYoutubeDelegator(ingester)
 
-        await delegator.ingest_video("https://youtu.be/test")
+        result = await delegator.ingest_videos([
+            "https://youtu.be/test1",
+            "https://youtu.be/test2",
+        ])
 
-        ingester.ingest_video.assert_awaited_once_with(
-            "https://youtu.be/test", playlist_id=None,
-        )
+        assert result is expected
+        ingester.ingest_videos.assert_awaited_once_with([
+            "https://youtu.be/test1",
+            "https://youtu.be/test2",
+        ])
 
 
 class TestFactories:

@@ -10,10 +10,8 @@ Protocol 経由で利用するための型を集約する。
   ``rag.pipeline.ingesters.youtube.classify_youtube_url`` 関数を SSoT として
   ラップする）
 - ``YoutubeDelegator``: 動画取り込みの抽象化（既存
-  ``YoutubeIngester.ingest_video`` メソッドを SSoT としてラップする）
-
-本ファイルは U1 で Protocol のみを公開する。Real 実装（``RealYoutubeClassifier``
-/ ``RealYoutubeDelegator``）と factory 関数は U2 で追加される。
+  ``YoutubeIngester.ingest_videos`` メソッドを SSoT としてラップする。
+  bulk 取り込み境界で Whisper モデルの VRAM 解放を保証する公開 API）
 """
 
 from __future__ import annotations
@@ -52,24 +50,24 @@ class YoutubeDelegator(Protocol):
 
     呼び出し側（bluesky 等）は本 Protocol 経由でのみ YouTube インジェスターを
     利用する。実装は ``rag.pipeline.ingesters.youtube.YoutubeIngester`` を
-    ラップする ``RealYoutubeDelegator``（U2）または各テスト・QA 用の Fake。
+    ラップする ``RealYoutubeDelegator`` または各テスト・QA 用の Fake。
     """
 
-    async def ingest_video(
+    async def ingest_videos(
         self,
-        video_url: str,
-        *,
-        playlist_id: str | None = None,
-    ) -> IngestResult:
-        """単一 YouTube 動画を取り込む.
+        video_urls: list[str],
+    ) -> list[IngestResult]:
+        """YouTube 動画を bulk 取り込みする（単発取り込みは長さ 1 のリストで呼ぶ）.
+
+        本メソッドは取り込み境界として Whisper モデルの VRAM 解放を保証する公開 API。
+        内部で `try/finally` を配置し、bulk 末尾で `unload_whisper` を呼び出す。
 
         Args:
-            video_url: YouTube 動画 URL
-            playlist_id: プレイリスト経由の場合のプレイリスト ID
+            video_urls: YouTube 動画 URL のリスト。空リストの場合は no-op で空リストを返す
 
         Returns:
-            配置結果（``IngestResult``）。委譲先での失敗は ``errors`` /
-            ``error_details`` に計上される。
+            URL ごとの配置結果リスト（順序保証、入力と同じ長さ）。委譲先での失敗は各要素の
+            ``errors`` / ``error_details`` に計上される。
         """
         ...
 
@@ -77,10 +75,10 @@ class YoutubeDelegator(Protocol):
         """委譲先 YouTube インジェスターの Whisper モデルをアンロードする.
 
         ※ 同期メソッド（GPU メモリ解放を確実に同期実行するため）。
-        `ingest_video` が `async` であるのに対し、本メソッドは sync で呼び出すこと。
+        `ingest_videos` が `async` であるのに対し、本メソッドは sync で呼び出すこと。
 
-        BlueSky 等の他インジェスターが bulk 取り込み完了時に呼び出し、
-        delegation 経由で保持された Whisper モデルの VRAM を解放する。
+        通常は `ingest_videos` 内部の `try/finally` で自動的にアンロードされるため、
+        外部から明示呼び出しする必要はない。プロセス終了前の保険的な明示呼び出しのために残す。
         Whisper モデル未ロード時は no-op（実装は委譲先側で判定）。
         """
         ...
@@ -104,7 +102,7 @@ class RealYoutubeClassifier:
 
 
 class RealYoutubeDelegator:
-    """``YoutubeIngester.ingest_video`` をラップする実装.
+    """``YoutubeIngester.ingest_videos`` をラップする実装.
 
     bluesky の URL 自動取り込みなど、他インジェスターから YouTube への
     委譲を Protocol 経由に統一するための薄いブリッジ。
@@ -113,15 +111,11 @@ class RealYoutubeDelegator:
     def __init__(self, ingester: YoutubeIngester) -> None:
         self._ingester = ingester
 
-    async def ingest_video(
+    async def ingest_videos(
         self,
-        video_url: str,
-        *,
-        playlist_id: str | None = None,
-    ) -> IngestResult:
-        return await self._ingester.ingest_video(
-            video_url, playlist_id=playlist_id,
-        )
+        video_urls: list[str],
+    ) -> list[IngestResult]:
+        return await self._ingester.ingest_videos(video_urls)
 
     def unload_whisper(self) -> None:
         self._ingester.unload_whisper()
