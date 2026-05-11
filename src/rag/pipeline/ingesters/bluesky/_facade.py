@@ -333,7 +333,8 @@ class BlueskyIngester(BaseIngester):
             result: 委譲失敗の計上先 IngestResult（指定時は errors + delegation を計上）
 
         Returns:
-            ``{"web_placed": N, "youtube_placed": N, "skipped": N, "errors": N}``
+            ``{"web_placed": N, "web_overwritten": N, "youtube_placed": N,
+            "youtube_overwritten": N, "skipped": N, "errors": N}``
         """
         return await _follow_urls(
             placed_items,

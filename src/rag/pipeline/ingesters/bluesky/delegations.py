@@ -63,11 +63,16 @@ async def follow_urls(
             を追加する（従来の stats 返却は互換維持）
 
     Returns:
-        ``{"web_placed": N, "youtube_placed": N, "skipped": N, "errors": N}``
+        ``{"web_placed": N, "web_overwritten": N, "youtube_placed": N,
+        "youtube_overwritten": N, "skipped": N, "errors": N}``.
+        ``placed`` と ``overwritten`` は排他関係（``IngestResult`` 仕様）であり、
+        実際の取り込み件数を表示するときは両者を加算する。
     """
     stats: dict[str, int] = {
         "web_placed": 0,
+        "web_overwritten": 0,
         "youtube_placed": 0,
+        "youtube_overwritten": 0,
         "skipped": 0,
         "errors": 0,
     }
@@ -87,11 +92,14 @@ async def follow_urls(
     logger.info("投稿内から %d 件の URL を抽出しました", all_url_count)
 
     if web_urls:
-        web_placed, web_errors, web_error_details = await _fetch_web_urls(
-            web_urls,
-            web_delegator=web_delegator,
+        web_placed, web_overwritten, web_errors, web_error_details = (
+            await _fetch_web_urls(
+                web_urls,
+                web_delegator=web_delegator,
+            )
         )
         stats["web_placed"] = web_placed
+        stats["web_overwritten"] = web_overwritten
         stats["errors"] += web_errors
         if result is not None and web_error_details:
             result.errors += len(web_error_details)
@@ -124,6 +132,7 @@ async def follow_urls(
                     yt_results = await youtube_delegator.ingest_videos([url])
                     yt_result = yt_results[0]
                     stats["youtube_placed"] += yt_result.placed
+                    stats["youtube_overwritten"] += yt_result.overwritten
                     if yt_result.errors > 0:
                         stats["errors"] += yt_result.errors
                 except Exception as exc:
@@ -143,10 +152,17 @@ async def follow_urls(
                 logger.warning("YouTube インジェスターが未指定: %s", url)
                 stats["skipped"] += 1
 
+    web_total = stats["web_placed"] + stats["web_overwritten"]
+    youtube_total = stats["youtube_placed"] + stats["youtube_overwritten"]
     logger.info(
-        "URL 取り込み完了: web=%d, youtube=%d, skipped=%d, errors=%d",
+        "URL 取り込み完了: web=%d (placed=%d, overwritten=%d), "
+        "youtube=%d (placed=%d, overwritten=%d), skipped=%d, errors=%d",
+        web_total,
         stats["web_placed"],
+        stats["web_overwritten"],
+        youtube_total,
         stats["youtube_placed"],
+        stats["youtube_overwritten"],
         stats["skipped"],
         stats["errors"],
     )
@@ -211,7 +227,7 @@ async def _fetch_web_urls(
     urls: list[str],
     *,
     web_delegator: WebDelegator,
-) -> tuple[int, int, list[IngestErrorDetail]]:
+) -> tuple[int, int, int, list[IngestErrorDetail]]:
     """Web URL を WebDelegator（複数 URL モード）の Python API で取得する.
 
     親プロセスが既に write_lock を保持している前提で、subprocess を介さず同一
@@ -224,7 +240,9 @@ async def _fetch_web_urls(
     チェックは引き続き有効）。
 
     Returns:
-        (配置されたファイル数の合計, エラー件数, errors の dict リスト)。
+        (新規配置件数, 上書き件数, エラー件数, errors の dict リスト)。
+        ``placed`` と ``overwritten`` は排他関係（``IngestResult`` 仕様）であり、
+        完了ログ等で総件数を表示する場合は呼び出し側で両者を加算する。
         ``error_details`` の件数とエラー件数は常に一致する。
     """
     from rag.utils.url import check_ssrf, validate_url
@@ -252,7 +270,7 @@ async def _fetch_web_urls(
         validated_urls.append(validated)
 
     if not validated_urls:
-        return 0, len(validation_errors), validation_errors
+        return 0, 0, len(validation_errors), validation_errors
 
     try:
         execution = await web_delegator.run_for_urls(validated_urls)
@@ -268,9 +286,10 @@ async def _fetch_web_urls(
             for url in validated_urls
         ]
         all_errors = validation_errors + execute_errors
-        return 0, len(all_errors), all_errors
+        return 0, 0, len(all_errors), all_errors
 
-    placed = execution.ingest.placed + execution.ingest.overwritten
+    placed = execution.ingest.placed
+    overwritten = execution.ingest.overwritten
     error_details: list[IngestErrorDetail] = list(execution.ingest.error_details)
     if execution.parse_errors > 0:
         error_details.append(IngestErrorDetail(
@@ -284,9 +303,9 @@ async def _fetch_web_urls(
     all_error_details = validation_errors + error_details
     total_errors = len(all_error_details)
     logger.info(
-        "web 取り込み完了: 合計 %d 件配置, %d 件エラー",
-        placed, total_errors,
+        "web 取り込み完了: 配置 %d 件, 上書き %d 件, エラー %d 件",
+        placed, overwritten, total_errors,
     )
     if execution.scrapy_success and execution.crawl_result is not None:
         execution.crawl_result.cleanup()
-    return placed, total_errors, all_error_details
+    return placed, overwritten, total_errors, all_error_details

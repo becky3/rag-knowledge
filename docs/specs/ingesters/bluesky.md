@@ -628,7 +628,11 @@ YouTube 動画 URL の判定は YouTube インジェスター側で SSoT とし�
 4. Web URL を全てバッチ収集し、site-ingest（複数 URL モード）の Python API を直接呼び出して取り込む。
    - 子 CLI subprocess として起動しない理由: BlueSky 取り込みの呼び出し元 CLI が既に source_store の write_lock を保持しており、子プロセス側での再取得がロック競合で失敗するため
    - site-ingest 内部の Scrapy subprocess 起動は維持される（reactor 制約のため）
-   - bridge 結果の配置件数（新規配置と上書きの合算）とエラーを BlueSky 側の集計に反映する
+   - bridge 結果は新規配置（`placed`）と上書き（`overwritten`）を **内訳として分離** して BlueSky 側の集計に反映する（合算ではなく排他カウントを別キーで保持）
+     - 内部 logger（`rag.pipeline.ingesters.bluesky.delegations`）の完了ログは `URL 取り込み完了: web=N (placed=X, overwritten=Y), youtube=N (placed=X, overwritten=Y), skipped=N, errors=N` 形式で出力する
+     - ユーザー向け CLI/MCP 応答テキストは「`Web N件 (新規 X, 上書き Y), YouTube N件 (新規 X, 上書き Y)`」形式で内訳を表示する
+     - 上書き再取り込み時に「0 件」と誤表示される問題（Issue #778）を防ぐための分離設計
+     - YouTube 側も同じ規約で内訳を保持・表示する
    - 後続のインデックス処理は BlueSky 側で一括実行する
 5. YouTube URL の取得対象判定:
    - 新規投稿由来の YouTube URL は常に取得する
