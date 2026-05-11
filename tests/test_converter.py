@@ -592,12 +592,15 @@ class TestAozoraConversionIntegrity:
         # Markdown 記法の除去は最小限（synthetic fixture が <p> 段落中心の前提）。
         # blockquote `>`、画像 `![alt](url)` の `!`、水平線 `---`、コードフェンス言語タグ等は
         # 現 fixture では発生しないため未対応。将来 fixture 拡張時に追加正規化を検討する。
+        # `|` はテーブルセル境界として機能するため削除ではなく空白に置換する
+        # （削除すると左右セルの文字列が連結し plain text 比較が破綻するため）。
         text = markdown
         text = re.sub(r"\[([^\]]+)\]\([^)]+\)", r"\1", text)
         text = re.sub(r"^#+\s*", "", text, flags=re.MULTILINE)
         text = re.sub(r"^[-*+]\s+", "", text, flags=re.MULTILINE)
         text = re.sub(r"^\d+\.\s+", "", text, flags=re.MULTILINE)
-        text = re.sub(r"[*_`|]+", "", text)
+        text = re.sub(r"\|+", " ", text)
+        text = re.sub(r"[*_`]+", "", text)
         return cls._normalize_whitespace(text)
 
     def test_shift_jis_conversion_preserves_plain_text(self, tmp_path: Path) -> None:
@@ -628,24 +631,42 @@ class TestAozoraConversionIntegrity:
             f"  converted:    {converted_plain!r}"
         )
 
-    def test_integrity_check_detects_one_character_corruption(self) -> None:
-        """sensitivity: 同一 source HTML から得た ground truth と 1 文字改変した markdown を
-        比較すると不一致になることを確認.
+    def test_integrity_check_detects_one_character_corruption(
+        self, tmp_path: Path,
+    ) -> None:
+        """sensitivity: converter 出力（Markdown）を 1 文字改変すると判定が不一致になることを確認.
 
-        判定ロジック（plain text の完全一致）が「常に True を返すザル判定」ではなく、
-        変換結果のわずかな差分も検出する sensitivity を持つことを担保する。
+        converter → Markdown 記法除去経路を経由した上で 1 文字差分も検出することを示し、
+        判定ロジック（plain text の完全一致）がザル判定ではない sensitivity を担保する。
+        ヘルパー (`_extract_plain_from_markdown`) を経由するため、将来 Markdown 正規化を
+        拡張しても sensitivity の検証経路が変わらない。
         """
-        source_html_bytes = (
-            '<html><body><p>これは synthetic な検証用本文です。</p></body></html>'
-        ).encode("shift_jis")
-        ground_truth = self._extract_plain_from_html(source_html_bytes, encoding="shift_jis")
+        html = (
+            '<html><head>'
+            '<meta http-equiv="Content-Type" content="text/html;charset=Shift_JIS" />'
+            '</head><body>'
+            '<p>これは synthetic な検証用本文です。</p>'
+            '</body></html>'
+        )
+        raw_bytes = html.encode("shift_jis")
+        html_file = tmp_path / "sample.html"
+        html_file.write_bytes(raw_bytes)
 
-        # ground truth から最後の 1 文字を削った markdown を渡し、不一致になることを確認
-        corrupted_markdown = ground_truth[:-1]
+        ground_truth = self._extract_plain_from_html(raw_bytes, encoding="shift_jis")
+
+        markdown = convert_html(
+            html_file, _TEST_REMOVE_CLASS_RE, source_type="aozora",
+        )
+        assert markdown is not None
+
+        # converter 出力 Markdown の末尾空白を除去した上で 1 文字削る
+        # （末尾改行/空白を削っただけでは空白正規化後に同一になり差分が出ないため）
+        stripped = markdown.rstrip()
+        corrupted_markdown = stripped[:-1] if stripped else ""
         corrupted_plain = self._extract_plain_from_markdown(corrupted_markdown)
 
         assert corrupted_plain != ground_truth, (
-            "1 文字差分を検出できない判定ロジックはザル判定の疑いあり"
+            "converter 出力の 1 文字差分を検出できない判定ロジックはザル判定の疑いあり"
         )
 
 
