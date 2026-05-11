@@ -162,7 +162,7 @@ class TestFollowUrlsYoutubeDelegation:
         delegator.unload_whisper = MagicMock()
         yt_result = IngestResult()
         yt_result.placed = 1
-        delegator.ingest_video = AsyncMock(return_value=yt_result)
+        delegator.ingest_videos = AsyncMock(return_value=[yt_result])
         runner = AsyncMock()
         runner.run_for_urls = AsyncMock(return_value=_make_execution())
         items = [_item_with_urls(["https://youtu.be/abcdEFG1234"])]
@@ -174,7 +174,7 @@ class TestFollowUrlsYoutubeDelegation:
             youtube_request_interval=0.0,
         )
         assert stats["youtube_placed"] == 1
-        delegator.ingest_video.assert_awaited_once_with("https://youtu.be/abcdEFG1234")
+        delegator.ingest_videos.assert_awaited_once_with(["https://youtu.be/abcdEFG1234"])
 
     @pytest.mark.asyncio
     async def test_youtube_skipped_when_delegator_none(self) -> None:
@@ -208,7 +208,7 @@ class TestFollowUrlsYoutubeDelegation:
             youtube_request_interval=0.0,
             force_youtube_reingest=False,
         )
-        delegator.ingest_video.assert_not_called()
+        delegator.ingest_videos.assert_not_called()
         assert stats["skipped"] >= 1
 
     @pytest.mark.asyncio
@@ -217,7 +217,7 @@ class TestFollowUrlsYoutubeDelegation:
         delegator.unload_whisper = MagicMock()
         yt_result = IngestResult()
         yt_result.placed = 1
-        delegator.ingest_video = AsyncMock(return_value=yt_result)
+        delegator.ingest_videos = AsyncMock(return_value=[yt_result])
         runner = AsyncMock()
         runner.run_for_urls = AsyncMock(return_value=_make_execution())
         items = [_item_with_urls(
@@ -237,7 +237,7 @@ class TestFollowUrlsYoutubeDelegation:
     async def test_youtube_delegator_failure_recorded(self) -> None:
         delegator = AsyncMock()
         delegator.unload_whisper = MagicMock()
-        delegator.ingest_video = AsyncMock(
+        delegator.ingest_videos = AsyncMock(
             side_effect=RuntimeError("yt failed"),
         )
         runner = AsyncMock()
@@ -259,16 +259,19 @@ class TestFollowUrlsYoutubeDelegation:
         )
 
     @pytest.mark.asyncio
-    async def test_youtube_delegator_unload_whisper_called(self) -> None:
-        """BlueSky 経由 YouTube 取り込み完了時に unload_whisper が呼ばれることを検証する.
+    async def test_youtube_urls_call_ingest_videos_per_url(self) -> None:
+        """BlueSky 経由で各 YouTube URL ごとに ingest_videos([url]) が呼ばれることを検証する.
 
+        Whisper モデルのアンロードは ingest_videos 内部の try/finally で保証されるため、
+        BlueSky 側で外部 unload_whisper を呼ぶ必要はない。本テストでは「per-URL で
+        ingest_videos が呼ばれる」契約を検証することで、unload 保証経路が成立することを担保する。
         仕様: docs/specs/ingesters/youtube.md「Whisper モデルライフサイクル」
         """
         delegator = AsyncMock()
         delegator.unload_whisper = MagicMock()
         yt_result = IngestResult()
         yt_result.placed = 1
-        delegator.ingest_video = AsyncMock(return_value=yt_result)
+        delegator.ingest_videos = AsyncMock(return_value=[yt_result])
         runner = AsyncMock()
         runner.run_for_urls = AsyncMock(return_value=_make_execution())
         items = [_item_with_urls([
@@ -282,26 +285,10 @@ class TestFollowUrlsYoutubeDelegation:
             web_delegator=runner,
             youtube_request_interval=0.0,
         )
-        # bulk 末尾で 1 回だけアンロード
-        delegator.unload_whisper.assert_called_once()
-
-    @pytest.mark.asyncio
-    async def test_youtube_delegator_unload_whisper_called_on_exception(self) -> None:
-        """BlueSky 経由 YouTube 取り込みの途中で例外が発生しても unload_whisper が呼ばれることを検証する."""
-        delegator = AsyncMock()
-        delegator.ingest_video = AsyncMock(side_effect=RuntimeError("yt failed"))
-        delegator.unload_whisper = MagicMock()
-        runner = AsyncMock()
-        runner.run_for_urls = AsyncMock(return_value=_make_execution())
-        items = [_item_with_urls(["https://youtu.be/abcdEFG1234"])]
-        await follow_urls(
-            items,
-            classifier=RealYoutubeClassifier(),
-            youtube_delegator=delegator,
-            web_delegator=runner,
-            youtube_request_interval=0.0,
-        )
-        delegator.unload_whisper.assert_called_once()
+        # URL ごとに ingest_videos([url]) が呼ばれる
+        assert delegator.ingest_videos.await_count == 2
+        delegator.ingest_videos.assert_any_await(["https://youtu.be/abcdEFG1234"])
+        delegator.ingest_videos.assert_any_await(["https://youtu.be/abcdEFG5678"])
 
     @pytest.mark.asyncio
     async def test_dedup_across_suppress_and_unsuppress_safer_side(
@@ -312,7 +299,7 @@ class TestFollowUrlsYoutubeDelegation:
         delegator.unload_whisper = MagicMock()
         yt_result = IngestResult()
         yt_result.placed = 1
-        delegator.ingest_video = AsyncMock(return_value=yt_result)
+        delegator.ingest_videos = AsyncMock(return_value=[yt_result])
         runner = AsyncMock()
         runner.run_for_urls = AsyncMock(return_value=_make_execution())
         items = [
@@ -328,7 +315,7 @@ class TestFollowUrlsYoutubeDelegation:
             force_youtube_reingest=False,
         )
         # 1 回呼ばれる（安全側で suppress=False と扱われる）
-        delegator.ingest_video.assert_awaited_once()
+        delegator.ingest_videos.assert_awaited_once()
 
 
 class TestFollowUrlsEmpty:

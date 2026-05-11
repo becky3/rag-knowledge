@@ -147,7 +147,7 @@ JSON のフィールド構造は対応する Real Fetcher の戻り値と同じ�
 `YoutubeIngester.__init__` に `fetcher: YoutubeFetcher` パラメータを追加する。
 
 - 必須（required）: コーディング規約のフォールバック禁止に従い、デフォルト値を持たない
-- インジェスター本体（`ingest_video` / `crawl_playlist`）は `_fetch_metadata` 等の private メソッドを廃止し、Fetcher Protocol 経由で呼び出す
+- インジェスター本体（`ingest_videos` / `crawl_playlist`）は `_fetch_metadata` 等の private メソッドを廃止し、Fetcher Protocol 経由で呼び出す
 - 既存の `_fetch_metadata` / `_fetch_transcript` / `_fetch_subtitle` / `_transcribe_with_whisper` / `_download_audio` / `_expand_playlist` メソッドは `RealYoutubeFetcher` に移植する（既存ロジックの単純な再配置）
 - **ハードリミット定数の所属**: 既存の `MAX_VIDEOS_HARD_LIMIT` / `MIN_REQUEST_INTERVAL` / `MAX_AUDIO_FILE_SIZE_MB` / `JITTER_MIN_RATIO` / `CIRCUIT_BREAKER_THRESHOLD` 等の定数は、
   本プロジェクトの既存慣例（モジュールトップレベル定数 + `# ハードリミット` コメント）に従い、インジェスター本体モジュール（`youtube.py`）のトップレベルに残す。
@@ -179,7 +179,7 @@ CLI / MCP のインジェスター生成箇所（`src/rag/cli.py` / `src/rag/ser
 ```mermaid
 flowchart TB
     subgraph Ingester["YoutubeIngester (本体)"]
-        ING["ingest_video / crawl_playlist"]
+        ING["ingest_videos / crawl_playlist"]
     end
 
     subgraph Protocol["YoutubeFetcher Protocol"]

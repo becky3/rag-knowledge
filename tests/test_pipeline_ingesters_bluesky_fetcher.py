@@ -78,9 +78,9 @@ class TestProtocolDefinitions:
             for name, member in inspect.getmembers(YoutubeDelegator)
             if not name.startswith("_") and inspect.isfunction(member)
         }
-        # unload_whisper は Whisper モデルアンロード用の同期メソッド
+        # ingest_videos が VRAM 解放保証を含む公開 API、unload_whisper は保険的な明示呼び出し用
         # 仕様: docs/specs/ingesters/youtube.md「Whisper モデルライフサイクル」
-        assert names == {"ingest_video", "unload_whisper"}
+        assert names == {"ingest_videos", "unload_whisper"}
 
     def test_web_delegator_protocol_has_run_for_urls(self) -> None:
         names = {

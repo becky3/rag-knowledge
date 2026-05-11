@@ -381,16 +381,21 @@ Whisper モデルは VRAM を大きく占有する。サブプロセス（CLI / 
 #### 振る舞い
 
 - ロード: 初回 transcribe 時に遅延初期化する
-- アンロード: 取り込み境界で明示的に解放する
-- 境界: 単発取り込み・bulk 取り込み（複数 URL / プレイリスト）・BlueSky 経由取り込み（投稿内 YouTube URL の自動取り込み）のいずれでも、取り込み処理終了時に必ず VRAM を解放する。bulk 取り込みではロードは bulk 全体で 1 回のみ発生し、末尾で 1 回アンロードする
+- 境界: 公開 API である `ingest_videos`（単発 URL の場合は長さ 1 のリスト、bulk の場合は複数）と `crawl_playlist` のいずれでも、取り込み処理終了時に必ず VRAM を解放する。
+  - BlueSky 経由取り込み（投稿内 YouTube URL の自動取り込み）も `YoutubeDelegator.ingest_videos` 経由でこの保証を継承する
+  - bulk 取り込みではロードは bulk 全体で 1 回のみ発生し、末尾で 1 回アンロードする
+- 内部 helper: 単一動画取り込みの内部 helper（実装側で private 化済み）は VRAM 解放を保証しない。外部から直接呼び出してはならない
 - 例外時の保証: 取り込み途中の例外発生時も VRAM 解放を保証する
 - 並行呼び出し制約: アンロードは transcribe 実行中に呼び出されてはならない。並行発火した場合は警告ログを出力してアンロードを見送る
 
 #### Protocol 拡張
 
-`YoutubeFetcher` Protocol に Whisper モデルアンロード用のメソッドを追加する。外部 caller（CLI / MCP / 他インジェスター）から取り込み境界で呼び出される。詳細な契約は [Fake Adapter 仕様](../infrastructure/fake-adapters/youtube.md) を参照。
+`YoutubeFetcher` Protocol に Whisper モデルアンロード用のメソッドを追加する。`YoutubeIngester.ingest_videos` / `crawl_playlist` の `try/finally` 内部から呼び出される。
+詳細な契約は [Fake Adapter 仕様](../infrastructure/fake-adapters/youtube.md) を参照。
 
-他インジェスター（BlueSky 等）からの delegation 経由のアンロード呼び出し用に、`YoutubeDelegator` Protocol にも同等のメソッドを追加する。`YoutubeDelegator` の `ingest_video` が `async` であるのに対し、アンロード用メソッドは sync で呼び出す。
+他インジェスター（BlueSky 等）からの delegation 経由の取り込み用に、`YoutubeDelegator` Protocol は `ingest_videos(urls)` を公開する。これは内部で VRAM 解放を保証する公開 API であり、外部 caller は `unload_whisper` を明示呼び出しする必要はない。
+
+`YoutubeDelegator.unload_whisper` も保険的な明示呼び出し用として残すが、通常は使わない。
 
 #### VRAM 占有期間
 
