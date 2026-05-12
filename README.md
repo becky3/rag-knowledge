@@ -234,7 +234,7 @@ API キー（`UPLOAD_API_KEY`）の事前登録が必要（上記「API キー�
 |---|--------|---------|---------|
 | シークレット | OS セキュアストレージ (keyring) | 管理外 | 漏洩時に直接被害が発生する値（API キー、トークン、パスワード） |
 | 環境依存値 | `.env` | 管理外 | デプロイ先・マシンごとに異なる値（接続先 URL、ストレージパス、ネットワーク設定、デバッグフラグ） |
-| 共通設定値 | `config.toml` / `lmstudio.toml` | **管理する** | プロジェクトとして統一管理する値（チューニングパラメータ、ポリシー設定、モデル名、機能フラグ）。`lmstudio.toml` は LM Studio で読み込むモデル key の SSoT |
+| 共通設定値 | `config.toml` / `lmstudio.toml` / `site_rules.toml` | **管理する** | プロジェクトとして統一管理する値（チューニングパラメータ、ポリシー設定、モデル名、機能フラグ、カスタムルール）。`lmstudio.toml` は LM Studio で読み込むモデル key の SSoT。`site_rules.toml` は HTML 抽出ルール（コンテンツ領域 selector・除去 class トークン・サイト別追加 selector）の SSoT |
 
 新しい設定値を追加する際は、上記の判断基準に従って適切な層に配置すること。詳細は [設定管理仕様](docs/specs/rag-knowledge.md#設定管理) を参照。
 

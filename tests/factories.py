@@ -249,17 +249,37 @@ def make_scrapy_runner_args(**overrides: Any) -> dict[str, Any]:
 def make_converter_args(**overrides: Any) -> dict[str, Any]:
     """Converter のデフォルト引数を返す."""
     from rag.converter.pdf_extractor import PdfBackendConfig
+    from rag.converter.site_rules import (
+        DefaultRules,
+        SiteRulesConfig,
+        compile_site_rules,
+    )
 
+    site_rules = compile_site_rules(SiteRulesConfig(
+        default=DefaultRules(
+            content_id_patterns=[
+                "main-content", "main_content", "content-wrap", "content_wrap",
+                "page-container", "page_container", "main-body", "main_body",
+                "content", "main",
+            ],
+            content_class_patterns=[
+                "main-content", "main_content", "main_text", "main-text",
+                "content-wrap", "content_wrap", "page-container", "page_container",
+            ],
+            remove_class_tokens=[
+                "breadcrumb", "breadcrumbs", "topic-path", "nextprev", "pagination",
+                "toolbar", "footer-wrapper", "footer", "scrollToFeedback", "suggest",
+            ],
+        ),
+        hosts={},
+    ))
     defaults: dict[str, Any] = {
         "regen_option": "skip",
         "pdf_config": PdfBackendConfig(),
         "youtube_merge_gap_sec": 2.0,
         "youtube_merge_max_chars": 300,
         "media_analyzer": None,
-        "html_remove_class_tokens": [
-            "breadcrumb", "breadcrumbs", "topic-path", "nextprev", "pagination",
-            "toolbar", "footer-wrapper", "footer", "scrollToFeedback", "suggest",
-        ],
+        "site_rules": site_rules,
     }
     defaults.update(overrides)
     return defaults

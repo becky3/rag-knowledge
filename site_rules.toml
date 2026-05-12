@@ -1,0 +1,65 @@
+# HTML 抽出ルール設定ファイル
+#
+# 仕様: docs/specs/converter.md「サイト別抽出ルール設定ファイル」
+#
+# - [default] は共通フォールバックで使用するパターン群（SSoT）
+# - [hosts."<host>"] はホスト単位の抽出ルール（`web/https/{host}/...` の host と完全一致）
+# - ホスト識別は完全一致のみ。サブドメインの暗黙継承は行わない
+# - 設定変更後の既存 converted_store への反映は手動 `rebuild --mode full` で実施
+#
+# content_selectors の試行は BS4 `select_one()` で評価し、最初にヒットした要素を採用する。
+# 全 selector がミスした場合は [default] の優先順（<article> → <main> → role → id → class → ...）に
+# フォールバックする。
+
+[default]
+# id 部分一致（大文字小文字無視）。長いパターンを先に置き、短いパターン（content, main 等）は末尾。
+# ハイフン版とアンダースコア版を両方登録する（正規表現上別文字として扱われるため）。
+content_id_patterns = [
+    "main-content",
+    "main_content",
+    "content-wrap",
+    "content_wrap",
+    "page-container",
+    "page_container",
+    "main-body",
+    "main_body",
+    "content",
+    "main",
+]
+
+# class 部分一致（大文字小文字無視）
+content_class_patterns = [
+    "main-content",
+    "main_content",
+    "main_text",
+    "main-text",
+    "content-wrap",
+    "content_wrap",
+    "page-container",
+    "page_container",
+]
+
+# class トークン完全一致除去（大文字小文字無視）
+remove_class_tokens = [
+    "breadcrumb",        # パンくずリスト
+    "breadcrumbs",       # パンくずリスト（複数形: Foundation, Docusaurus 等）
+    "topic-path",        # パンくずリスト（日本語サイト）
+    "nextprev",          # ページ送りナビゲーション
+    "pagination",        # ページネーション
+    "toolbar",           # ツールバー
+    "footer-wrapper",    # サイトフッター（ラッパー要素）
+    "footer",            # サイトフッター
+    "scrollToFeedback",  # フィードバックリンク
+    "suggest",           # 変更提案フォーム
+]
+
+# 4Gamer: <div class="main_contents"> がページ全体ラッパー（本文+サイドバー+新着一覧）であり、
+# 共通 class パターン `main_content` の部分一致で誤マッチする。真の本文は
+# `<div class="maintxt">` 内の `<div class="entry-content">` にあるため、
+# site rule で優先指定する。
+[hosts."www.4gamer.net"]
+content_selectors = [
+    ".maintxt .entry-content",
+    ".maintxt",
+]
+remove_selectors = []

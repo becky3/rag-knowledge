@@ -10,9 +10,10 @@ import io
 from pathlib import Path
 
 from rag.bm25_index import BM25Index
-from rag.config import RAGSettings, get_settings
+from rag.config import PROJECT_ROOT, RAGSettings, get_settings
 from rag.converter import Converter
 from rag.converter.pdf_extractor import PdfBackendConfig
+from rag.converter.site_rules import load_site_rules
 from rag.embedding.factory import get_embedding_provider
 from rag.indexer import Indexer
 from rag.media.analyzer import MediaAnalyzer
@@ -59,13 +60,14 @@ def build_pipeline_controller(
         max_tokens=settings.rag_vision_max_tokens,
         api_timeout=settings.rag_vision_api_timeout,
     )
+    site_rules = load_site_rules(PROJECT_ROOT / "site_rules.toml")
     converter = Converter(
         regen_option="force",
         pdf_config=pdf_config,
         youtube_merge_gap_sec=settings.rag_youtube_merge_gap_sec,
         youtube_merge_max_chars=settings.rag_youtube_merge_max_chars,
         media_analyzer=media_analyzer,
-        html_remove_class_tokens=settings.rag_html_remove_class_tokens,
+        site_rules=site_rules,
     )
 
     embedding_provider = get_embedding_provider(settings, settings.embedding_provider)

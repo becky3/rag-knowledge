@@ -32,7 +32,7 @@ MCP サーバーとして独立動作し、ナレッジ操作用の MCP ツー�
 |---|--------|---------|---------|
 | シークレット | OS セキュアストレージ (keyring) | 管理外 | 漏洩時に直接被害が発生する値。py-common-lib の `get_secret` で取得 |
 | 環境依存値 | `.env` | 管理外 | デプロイ先・マシンごとに異なる値 |
-| 共通設定値 | `config.toml` / `lmstudio.toml` | **管理する** | プロジェクトとして統一管理する値（`lmstudio.toml` は LM Studio で読み込むモデル key の SSoT） |
+| 共通設定値 | `config.toml` / `lmstudio.toml` / `site_rules.toml` | **管理する** | プロジェクトとして統一管理する値（`lmstudio.toml` は LM Studio モデル key の SSoT、`site_rules.toml` は HTML 抽出ルールの SSoT） |
 
 #### `.env`（環境依存値）
 
@@ -81,6 +81,17 @@ MCP サーバーとして独立動作し、ナレッジ操作用の MCP ツー�
 
 - [infrastructure/lmstudio-reference.md](infrastructure/lmstudio-reference.md) — CLI 仕様参照
 - [infrastructure/lmstudio-operation.md](infrastructure/lmstudio-operation.md) — 運用手順
+
+#### `site_rules.toml`（HTML 抽出ルール）
+
+HTML → Markdown 変換時のコンテンツ領域 selector・除去 class トークン・サイト別追加 selector の SSoT。`config.toml` とは別ファイルで管理する（カスタムルールの性質を持つため）。詳細は [converter.md](converter.md)「サイト別抽出ルール設定ファイル」を参照。
+
+| セクション | 役割 |
+|---|---|
+| `[default]` | 共通フォールバックで使用する id/class パターン・除去 class トークン |
+| `[hosts."<host>"]` | ホスト単位の抽出ルール（`content_selectors` / `remove_selectors`） |
+
+#### 設定管理の補足事項
 
 - `hnsw_m` と `hnsw_construction_ef` はコレクション作成時のみ適用される（不変）。既存コレクションへの反映には `rebuild --mode full`（コレクション削除 → 再作成）が必要。`hnsw_search_ef` は起動時に `collection.modify()` で既存コレクションにも自動適用される
 - Embedding モデルを変更した場合、既存データとの類似度計算が不正確になるため、コレクション再構築が必要
