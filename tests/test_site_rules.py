@@ -118,6 +118,34 @@ class TestSiteRulesConfigValidation:
                 "unknown_section": {"foo": "bar"},
             })
 
+    def test_blank_string_in_pattern_rejected(self) -> None:
+        """空白のみの文字列は早期にバリデーションエラーで弾かれる."""
+        with pytest.raises(ValidationError):
+            SiteRulesConfig.model_validate({
+                "default": {
+                    "content_id_patterns": ["main", "   "],
+                    "content_class_patterns": ["main"],
+                    "remove_class_tokens": ["sidebar"],
+                },
+            })
+
+    def test_blank_string_in_host_rule_rejected(self) -> None:
+        """ホストルールの selector も空白のみ文字列を弾く."""
+        with pytest.raises(ValidationError):
+            SiteRulesConfig.model_validate({
+                "default": {
+                    "content_id_patterns": ["main"],
+                    "content_class_patterns": ["main"],
+                    "remove_class_tokens": ["sidebar"],
+                },
+                "hosts": {
+                    "example.com": {
+                        "content_selectors": ["\t  "],
+                        "remove_selectors": [],
+                    },
+                },
+            })
+
     def test_unknown_host_field_rejected(self) -> None:
         with pytest.raises(ValidationError):
             SiteRulesConfig.model_validate({

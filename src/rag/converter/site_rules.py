@@ -15,7 +15,30 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Annotated
 
-from pydantic import BaseModel, ConfigDict, Field, ValidationError
+from pydantic import (
+    BaseModel,
+    BeforeValidator,
+    ConfigDict,
+    Field,
+    ValidationError,
+)
+
+
+def _validate_non_blank(value: str) -> str:
+    """文字列が空白のみでないことを検証する.
+
+    `Field(min_length=1)` だけでは "  " 等の空白のみ文字列が通り、意図せず
+    マッチしない・除去できない設定ミスを招くため、strip 後の長さでチェックする。
+    """
+    if not isinstance(value, str) or not value.strip():
+        msg = "空白のみの文字列は許容されません"
+        raise ValueError(msg)
+    return value
+
+
+NonBlankStr = Annotated[
+    str, Field(min_length=1), BeforeValidator(_validate_non_blank),
+]
 
 
 class DefaultRules(BaseModel):
@@ -23,15 +46,9 @@ class DefaultRules(BaseModel):
 
     model_config = ConfigDict(extra="forbid", frozen=True)
 
-    content_id_patterns: list[Annotated[str, Field(min_length=1)]] = Field(
-        min_length=1,
-    )
-    content_class_patterns: list[Annotated[str, Field(min_length=1)]] = Field(
-        min_length=1,
-    )
-    remove_class_tokens: list[Annotated[str, Field(min_length=1)]] = Field(
-        min_length=1,
-    )
+    content_id_patterns: list[NonBlankStr] = Field(min_length=1)
+    content_class_patterns: list[NonBlankStr] = Field(min_length=1)
+    remove_class_tokens: list[NonBlankStr] = Field(min_length=1)
 
 
 class HostRule(BaseModel):
@@ -39,12 +56,8 @@ class HostRule(BaseModel):
 
     model_config = ConfigDict(extra="forbid", frozen=True)
 
-    content_selectors: list[Annotated[str, Field(min_length=1)]] = Field(
-        default_factory=list,
-    )
-    remove_selectors: list[Annotated[str, Field(min_length=1)]] = Field(
-        default_factory=list,
-    )
+    content_selectors: list[NonBlankStr] = Field(default_factory=list)
+    remove_selectors: list[NonBlankStr] = Field(default_factory=list)
 
 
 class SiteRulesConfig(BaseModel):
