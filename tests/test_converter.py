@@ -27,7 +27,6 @@ from rag.converter.handlers import (
     _AOZORA_HEAD_SCAN_BYTES,
     _detect_aozora_encoding,
     _fix_void_elements,
-    compile_remove_class_re,
     convert_html,
     convert_json_bluesky,
     convert_json_zenn_article,
@@ -35,11 +34,30 @@ from rag.converter.handlers import (
     passthrough_copy,
 )
 from rag.converter.normalize import normalize_text
+from rag.converter.site_rules import (
+    DefaultRules,
+    SiteRulesConfig,
+    compile_site_rules,
+)
 
-_TEST_REMOVE_CLASS_RE = compile_remove_class_re([
-    "breadcrumb", "breadcrumbs", "topic-path", "nextprev", "pagination",
-    "toolbar", "footer-wrapper", "footer", "scrollToFeedback", "suggest",
-])
+_TEST_SITE_RULES = compile_site_rules(SiteRulesConfig(
+    default=DefaultRules(
+        content_id_patterns=[
+            "main-content", "main_content", "content-wrap", "content_wrap",
+            "page-container", "page_container", "main-body", "main_body",
+            "content", "main",
+        ],
+        content_class_patterns=[
+            "main-content", "main_content", "main_text", "main-text",
+            "content-wrap", "content_wrap", "page-container", "page_container",
+        ],
+        remove_class_tokens=[
+            "breadcrumb", "breadcrumbs", "topic-path", "nextprev", "pagination",
+            "toolbar", "footer-wrapper", "footer", "scrollToFeedback", "suggest",
+        ],
+    ),
+    hosts={},
+))
 
 
 # ============================================================
@@ -90,7 +108,7 @@ class TestConvertHtml:
         html_file = tmp_path / "test.html"
         html_file.write_text(html, encoding="utf-8")
 
-        result = convert_html(html_file, _TEST_REMOVE_CLASS_RE)
+        result = convert_html(html_file, _TEST_SITE_RULES)
         assert result is not None
         assert "Title" in result
         assert "Content here." in result
@@ -106,7 +124,7 @@ class TestConvertHtml:
         html_file = tmp_path / "test.html"
         html_file.write_text(html, encoding="utf-8")
 
-        result = convert_html(html_file, _TEST_REMOVE_CLASS_RE)
+        result = convert_html(html_file, _TEST_SITE_RULES)
         assert result is not None
         assert "Article body." in result
         assert "Navigation" not in result
@@ -122,7 +140,7 @@ class TestConvertHtml:
         html_file = tmp_path / "test.html"
         html_file.write_text(html, encoding="utf-8")
 
-        result = convert_html(html_file, _TEST_REMOVE_CLASS_RE)
+        result = convert_html(html_file, _TEST_SITE_RULES)
         assert result is not None
         assert "Main body." in result
         assert "Navigation" not in result
@@ -143,7 +161,7 @@ class TestConvertHtml:
         html_file = tmp_path / "test.html"
         html_file.write_text(html, encoding="utf-8")
 
-        result = convert_html(html_file, _TEST_REMOVE_CLASS_RE)
+        result = convert_html(html_file, _TEST_SITE_RULES)
         assert result is not None
         assert "Content" in result
         assert "alert" not in result
@@ -164,7 +182,7 @@ class TestConvertHtml:
         html_file = tmp_path / "test.html"
         html_file.write_text(html, encoding="utf-8")
 
-        result = convert_html(html_file, _TEST_REMOVE_CLASS_RE)
+        result = convert_html(html_file, _TEST_SITE_RULES)
         assert result is not None
         assert "Main body." in result
         assert "Header Noise" not in result
@@ -182,7 +200,7 @@ class TestConvertHtml:
         html_file = tmp_path / "test.html"
         html_file.write_text(html, encoding="utf-8")
 
-        result = convert_html(html_file, _TEST_REMOVE_CLASS_RE)
+        result = convert_html(html_file, _TEST_SITE_RULES)
         assert result is not None
         assert "Content body." in result
         assert "Sidebar" not in result
@@ -199,7 +217,7 @@ class TestConvertHtml:
         html_file = tmp_path / "test.html"
         html_file.write_text(html, encoding="utf-8")
 
-        result = convert_html(html_file, _TEST_REMOVE_CLASS_RE)
+        result = convert_html(html_file, _TEST_SITE_RULES)
         assert result is not None
         assert "Main body." in result
         assert "Sidebar Noise" not in result
@@ -219,7 +237,7 @@ class TestConvertHtml:
         html_file = tmp_path / "test.html"
         html_file.write_text(html, encoding="utf-8")
 
-        result = convert_html(html_file, _TEST_REMOVE_CLASS_RE)
+        result = convert_html(html_file, _TEST_SITE_RULES)
         assert result is not None
         assert "Interview Title" in result
         assert "Interview body." in result
@@ -236,7 +254,7 @@ class TestConvertHtml:
         html_file = tmp_path / "test.html"
         html_file.write_text(html, encoding="utf-8")
 
-        result = convert_html(html_file, _TEST_REMOVE_CLASS_RE)
+        result = convert_html(html_file, _TEST_SITE_RULES)
         assert result is not None
         assert "Main content." in result
         assert "Nav" not in result
@@ -254,7 +272,7 @@ class TestConvertHtml:
         html_file = tmp_path / "test.html"
         html_file.write_text(html, encoding="utf-8")
 
-        result = convert_html(html_file, _TEST_REMOVE_CLASS_RE)
+        result = convert_html(html_file, _TEST_SITE_RULES)
         assert result is not None
         assert "Article Title" in result
         assert "Article body." in result
@@ -275,7 +293,7 @@ class TestConvertHtml:
         html_file = tmp_path / "test.html"
         html_file.write_text(html, encoding="utf-8")
 
-        result = convert_html(html_file, _TEST_REMOVE_CLASS_RE)
+        result = convert_html(html_file, _TEST_SITE_RULES)
         assert result is not None
         assert "Long content paragraph" in result
         assert "Nav Link" not in result
@@ -294,7 +312,7 @@ class TestConvertHtml:
         html_file = tmp_path / "test.html"
         html_file.write_text(html, encoding="utf-8")
 
-        result = convert_html(html_file, _TEST_REMOVE_CLASS_RE)
+        result = convert_html(html_file, _TEST_SITE_RULES)
         assert result is not None
         assert "Content here." in result
         assert "Home > Page" not in result
@@ -315,7 +333,7 @@ class TestConvertHtml:
         html_file = tmp_path / "test.html"
         html_file.write_text(html, encoding="utf-8")
 
-        result = convert_html(html_file, _TEST_REMOVE_CLASS_RE)
+        result = convert_html(html_file, _TEST_SITE_RULES)
         assert result is not None
         assert "Main content." in result
         assert "Copyright" not in result
@@ -336,7 +354,7 @@ class TestConvertHtml:
         html_file = tmp_path / "test.html"
         html_file.write_text(html, encoding="utf-8")
 
-        result = convert_html(html_file, _TEST_REMOVE_CLASS_RE)
+        result = convert_html(html_file, _TEST_SITE_RULES)
         assert result is not None
         assert "API description." in result
         assert "Leave feedback" not in result
@@ -356,7 +374,7 @@ class TestConvertHtml:
         html_file = tmp_path / "test.html"
         html_file.write_text(html, encoding="utf-8")
 
-        result = convert_html(html_file, _TEST_REMOVE_CLASS_RE)
+        result = convert_html(html_file, _TEST_SITE_RULES)
         assert result is not None
         assert "Main content." in result
         assert "Copyright" not in result
@@ -378,7 +396,7 @@ class TestConvertHtml:
         html_file = tmp_path / "test.html"
         html_file.write_text(html, encoding="utf-8")
 
-        result = convert_html(html_file, _TEST_REMOVE_CLASS_RE)
+        result = convert_html(html_file, _TEST_SITE_RULES)
         assert result is not None
         assert "Recommended articles." in result
         assert "User reviews here." in result
@@ -405,7 +423,7 @@ class TestConvertHtml:
         html_file = tmp_path / "test.html"
         html_file.write_text(html, encoding="utf-8")
 
-        result = convert_html(html_file, _TEST_REMOVE_CLASS_RE)
+        result = convert_html(html_file, _TEST_SITE_RULES)
         assert result is not None
         assert "AnimationClip" in result
         assert "Provides an asset." in result
@@ -427,7 +445,7 @@ class TestConvertHtml:
         html_file = tmp_path / "test.html"
         html_file.write_text(html, encoding="utf-8")
 
-        result = convert_html(html_file, _TEST_REMOVE_CLASS_RE)
+        result = convert_html(html_file, _TEST_SITE_RULES)
         assert result is not None
         assert "FAQ Question" in result
         assert "FAQ Answer" in result
@@ -443,7 +461,7 @@ class TestConvertHtml:
         html_file = tmp_path / "test.html"
         html_file.write_text(html, encoding="utf-8")
 
-        result = convert_html(html_file, _TEST_REMOVE_CLASS_RE)
+        result = convert_html(html_file, _TEST_SITE_RULES)
         assert result is not None
         assert "Article content." in result
         assert "Main div content." not in result
@@ -453,7 +471,7 @@ class TestConvertHtml:
         html_file = tmp_path / "test.html"
         html_file.write_text(html, encoding="utf-8")
 
-        result = convert_html(html_file, _TEST_REMOVE_CLASS_RE)
+        result = convert_html(html_file, _TEST_SITE_RULES)
         assert result is not None
         assert "# H1" in result
         assert "## H2" in result
@@ -464,7 +482,7 @@ class TestConvertHtml:
         html_file = tmp_path / "test.html"
         html_file.write_text(html, encoding="utf-8")
 
-        result = convert_html(html_file, _TEST_REMOVE_CLASS_RE)
+        result = convert_html(html_file, _TEST_SITE_RULES)
         assert result is not None
         assert "Link Text" in result
         assert "https://example.com" not in result
@@ -474,7 +492,7 @@ class TestConvertHtml:
         html_file = tmp_path / "test.html"
         html_file.write_text(html, encoding="utf-8")
 
-        result = convert_html(html_file, _TEST_REMOVE_CLASS_RE)
+        result = convert_html(html_file, _TEST_SITE_RULES)
         assert result is not None
         assert "Photo description" in result
         assert "img.png" not in result
@@ -484,7 +502,7 @@ class TestConvertHtml:
         html_file = tmp_path / "test.html"
         html_file.write_bytes(html.encode("shift_jis"))
 
-        result = convert_html(html_file, _TEST_REMOVE_CLASS_RE)
+        result = convert_html(html_file, _TEST_SITE_RULES)
         assert result is not None
         assert "日本語テスト" in result
 
@@ -501,7 +519,7 @@ class TestConvertHtml:
         html_file.write_bytes(html.encode("shift_jis"))
 
         result = convert_html(
-            html_file, _TEST_REMOVE_CLASS_RE, source_type="aozora",
+            html_file, _TEST_SITE_RULES, source_type="aozora",
         )
         assert result is not None
         assert "旧字旧仮名の作品本文" in result
@@ -514,7 +532,7 @@ class TestConvertHtml:
         html_file.write_bytes(html.encode("shift_jis"))
 
         result = convert_html(
-            html_file, _TEST_REMOVE_CLASS_RE, source_type="aozora",
+            html_file, _TEST_SITE_RULES, source_type="aozora",
         )
         assert result is not None
         assert "メタタグなしの作品本文" in result
@@ -530,7 +548,7 @@ class TestConvertHtml:
         html_file.write_bytes(html.encode("shift_jis"))
 
         result = convert_html(
-            html_file, _TEST_REMOVE_CLASS_RE, source_type="aozora",
+            html_file, _TEST_SITE_RULES, source_type="aozora",
         )
         assert result is not None
         assert "不正 charset の作品本文" in result
@@ -550,7 +568,7 @@ class TestConvertHtml:
         html_file.write_bytes(html.encode("utf-8"))
 
         result = convert_html(
-            html_file, _TEST_REMOVE_CLASS_RE, source_type="aozora",
+            html_file, _TEST_SITE_RULES, source_type="aozora",
         )
         assert result is not None
         assert "UTF-8 配信の作品本文" in result
@@ -561,7 +579,7 @@ class TestConvertHtml:
         html_file = tmp_path / "web.html"
         html_file.write_text(html, encoding="utf-8")
 
-        result = convert_html(html_file, _TEST_REMOVE_CLASS_RE)
+        result = convert_html(html_file, _TEST_SITE_RULES)
         assert result is not None
         assert "UTF-8 default content." in result
 
@@ -620,7 +638,7 @@ class TestAozoraConversionIntegrity:
         ground_truth = self._extract_plain_from_html(raw_bytes, encoding="shift_jis")
 
         markdown = convert_html(
-            html_file, _TEST_REMOVE_CLASS_RE, source_type="aozora",
+            html_file, _TEST_SITE_RULES, source_type="aozora",
         )
         assert markdown is not None
         converted_plain = self._extract_plain_from_markdown(markdown)
@@ -655,7 +673,7 @@ class TestAozoraConversionIntegrity:
         ground_truth = self._extract_plain_from_html(raw_bytes, encoding="shift_jis")
 
         markdown = convert_html(
-            html_file, _TEST_REMOVE_CLASS_RE, source_type="aozora",
+            html_file, _TEST_SITE_RULES, source_type="aozora",
         )
         assert markdown is not None
 
@@ -710,7 +728,7 @@ class TestDetectAozoraEncoding:
         html_file = tmp_path / "test.html"
         html_file.write_text(html, encoding="utf-8")
 
-        result = convert_html(html_file, _TEST_REMOVE_CLASS_RE)
+        result = convert_html(html_file, _TEST_SITE_RULES)
         assert result is not None
         assert "Name" in result
         assert "Value" in result
@@ -741,7 +759,7 @@ class TestDetectAozoraEncoding:
         html_file = tmp_path / "test.html"
         html_file.write_text(html, encoding="utf-8")
 
-        result = convert_html(html_file, _TEST_REMOVE_CLASS_RE)
+        result = convert_html(html_file, _TEST_SITE_RULES)
         assert result is not None
         assert "First paragraph" in result
         assert "Second paragraph" in result
@@ -758,7 +776,7 @@ class TestDetectAozoraEncoding:
         html_file = tmp_path / "test.html"
         html_file.write_text(html, encoding="utf-8")
 
-        result = convert_html(html_file, _TEST_REMOVE_CLASS_RE)
+        result = convert_html(html_file, _TEST_SITE_RULES)
         assert result is not None
         assert "Before break." in result
         assert "After break." in result
@@ -774,7 +792,7 @@ class TestDetectAozoraEncoding:
         html_file = tmp_path / "test.html"
         html_file.write_text(html, encoding="utf-8")
 
-        result = convert_html(html_file, _TEST_REMOVE_CLASS_RE)
+        result = convert_html(html_file, _TEST_SITE_RULES)
         assert result is not None
         assert "Content after self-closed img." in result
 
@@ -788,7 +806,7 @@ class TestDetectAozoraEncoding:
         html_file = tmp_path / "test.html"
         html_file.write_text(html, encoding="utf-8")
 
-        result = convert_html(html_file, _TEST_REMOVE_CLASS_RE)
+        result = convert_html(html_file, _TEST_SITE_RULES)
         assert result is not None
         assert "吾輩" in result
         assert "(わがはい)" in result
@@ -804,7 +822,7 @@ class TestDetectAozoraEncoding:
         html_file = tmp_path / "test.html"
         html_file.write_text(html, encoding="utf-8")
 
-        result = convert_html(html_file, _TEST_REMOVE_CLASS_RE)
+        result = convert_html(html_file, _TEST_SITE_RULES)
         assert result is not None
         assert "漢字" in result
         assert "(かんじ)" in result
@@ -822,7 +840,7 @@ class TestDetectAozoraEncoding:
         html_file = tmp_path / "test.html"
         html_file.write_text(html, encoding="utf-8")
 
-        result = convert_html(html_file, _TEST_REMOVE_CLASS_RE)
+        result = convert_html(html_file, _TEST_SITE_RULES)
         assert result is not None
         assert "青空" in result
         assert "文庫" in result

@@ -213,53 +213,45 @@ markdownify ベースの変換。RAG 用途に最適化したカスタマイズ�
 
 #### コンテンツ領域の特定
 
-HTML からナビゲーション・サイドバー・フッター等のボイラープレートを除外し、本文コンテンツを含む領域を特定する。以下の優先順で探索し、最初にヒットした要素をコンテンツ領域とする。
+HTML からナビゲーション・サイドバー・フッター等のボイラープレートを除外し、本文コンテンツを含む領域を特定する。サイト別抽出ルール（`site_rules.toml`）の有無で挙動が分岐する。
+
+##### サイト別ルールが定義されているホストの場合
+
+source_store のパス（`web/{scheme}/{host}/...`、scheme は `https` または `http`）から抽出した `host` が
+`site_rules.toml` の `[hosts."<host>"]` セクションに完全一致する場合、当該セクションの `content_selectors`
+（CSS selector のリスト）を先頭から順に `BeautifulSoup.select_one()` で試行する。
+最初にヒットした要素をコンテンツ領域として採用する。
+ヒットした要素のテキストが空の場合は次の selector を試行する。
+全 selector がミスした場合は下記「共通フォールバック」に降りる。
+
+CSS selector は標準の BS4 `select_one()` で評価する。タグ・id・class・属性・子孫指定が利用できる
+（例: `"article.post-body"`、`"div[data-role='main']"`）。
+
+selector の構文が不正な場合（`soupsieve.SelectorSyntaxError` 等）は当該 selector をスキップして次の
+selector を試行する。警告ログを出力する。
+
+##### 共通フォールバック（サイト別ルール未定義 or 全 selector ミス）
+
+`site_rules.toml` の `[default]` セクションを参照し、以下の優先順で探索する。最初にヒットした要素をコンテンツ領域とする。
 
 | 優先度 | 探索対象 | 根拠 |
 |--------|---------|------|
 | 1 | `<article>` タグ | HTML5 セマンティックタグ |
 | 2 | `<main>` タグ | HTML5 セマンティックタグ |
 | 3 | `role="main"` 属性を持つ要素 | WAI-ARIA ランドマーク |
-| 4 | id 属性がコンテンツパターンに一致する要素 | 慣習的な命名パターン |
-| 5 | class 属性がコンテンツパターンに一致する要素 | 慣習的な命名パターン |
+| 4 | id 属性が `[default].content_id_patterns` のいずれかに部分一致する要素 | 慣習的な命名パターン |
+| 5 | class 属性が `[default].content_class_patterns` のいずれかに部分一致する要素 | 慣習的な命名パターン |
 | 6 | `<body>` 直下でテキスト量が最大の子要素 | テキスト密度フォールバック |
 | 7 | `<body>` タグ | 最終フォールバック |
 
 id/class パターンの一致判定:
 
 - 部分一致（大文字小文字を区別しない）で判定する
-- id パターンは長いパターンから順に試行する（具体的なパターンを優先）
+- パターンは `site_rules.toml` の配列順（長いパターンから順に並べる前提）で試行する。具体的なパターンを優先するため、短いパターン（例: `content`）は配列末尾に置く
 - テキストが空の要素はスキップし、次の候補を試行する（空の `<div id="contents">` 等による誤検出を防止）
+- ハイフンとアンダースコアは正規表現上別文字として扱われるため、両方の変種を個別エントリとして登録する
 
-id パターン一覧（試行順）:
-
-部分一致判定のため、短いパターンが先に試行されると、より具体的な id を持つ要素が短いパターンで先にマッチしてしまう。これを防ぐため長いパターンから順に試行する。ハイフンとアンダースコアは正規表現上別文字として扱われるため、両方の変種を個別パターンとして登録する。
-
-| パターン | マッチ例 |
-|---------|---------|
-| `main-content` | `id="main-content"` |
-| `main_content` | `id="main_content"` |
-| `content-wrap` | `id="content-wrap"` |
-| `content_wrap` | `id="content_wrap"` |
-| `page-container` | `id="page-container"` |
-| `page_container` | `id="page_container"` |
-| `main-body` | `id="main-body"` |
-| `main_body` | `id="main_body"` |
-| `content` | `id="content"`, `id="content-area"` |
-| `main` | `id="main"` |
-
-class パターン一覧（試行順）:
-
-| パターン | マッチ例 |
-|---------|---------|
-| `main-content` | `class="main-content"` |
-| `main_content` | `class="main_content"` |
-| `main_text` | `class="main_text"`（青空文庫 XHTML 等） |
-| `main-text` | `class="main-text"` |
-| `content-wrap` | `class="content-wrap"` |
-| `content_wrap` | `class="content_wrap"` |
-| `page-container` | `class="page-container"` |
-| `page_container` | `class="page_container"` |
+パターン値の SSoT は `site_rules.toml` の `[default]` セクション。仕様書には具体値を転記しない。
 
 テキスト密度フォールバック:
 
@@ -268,6 +260,14 @@ class パターン一覧（試行順）:
   - 子 Tag を持たない末端要素（`<p>`, `<h1>` 等）を除外する（コンテンツラッパーではないため）
 - 残った候補のうち `get_text(strip=True)` のテキスト量が最大の要素を選択する
 - コンテンツ領域の外にある要素（サイドバー、ヘッダー、フッター等）は、多くのケースでテキスト密度の条件により候補から外れるが、ページ構造によっては選択される可能性もある
+
+##### サイト別ルールの設計意図
+
+特定サイトの HTML 構造ではページ全体ラッパー（記事本文 + サイドバー + 新着一覧）が共通の id/class パターンに
+偶然マッチし、本文と無関係なリスト情報が大量に混入することがある。
+共通の id/class パターンに対象サイト固有値を追加するグローバル変更は他サイトへの副作用が読めないため、
+サイト別ルール機構によりホスト単位で `content_selectors` を最優先試行する。
+ルール書きミス時の挙動破綻を避けるため、全 selector がミスした場合は共通フォールバックに降りる二段構えとする。
 
 #### コンテンツ領域内の非コンテンツ除去
 
@@ -284,9 +284,49 @@ class パターン一覧（試行順）:
 
 class トークン完全一致の除去（大文字小文字を区別しない）:
 
-除去対象の class トークンは `config.toml` の `rag_html_remove_class_tokens` で設定する。BS4 は各クラストークンに対して `regex.search()` を実行するため、`^(?:トークン1|トークン2|...)$` の正規表現で完全トークン一致を実現する。部分一致（`suggest` が `suggested-reading` にマッチする等）による誤除去を防ぐ。
+除去対象の class トークンは `site_rules.toml` の `[default].remove_class_tokens` で設定する。
+BS4 は各クラストークンに対して `regex.search()` を実行するため、
+`^(?:トークン1|トークン2|...)$` の正規表現で完全トークン一致を実現する。
+部分一致（`suggest` が `suggested-reading` にマッチする等）による誤除去を防ぐ。
+
+サイト別追加除去:
+
+`site_rules.toml` の `[hosts."<host>"]` セクションに `remove_selectors`（CSS selector のリスト）が定義されている場合、共通の class トークン除去に加えて当該 selector にマッチする要素も除去する。サイト固有の構造（広告ブロック・関連記事ブロック等）を狙い撃ちで除去するために使用する。
 
 `<nav>`, `<header>`, `<footer>`, `<aside>` タグはコンテンツ領域の特定により自動的に除外されるケースが多いため、コンテンツ領域内では一律除去しない。これにより、コンテンツ領域内の `<header>` タグ（インタビュータイトル等）が誤って除去される問題を回避する。
+
+#### サイト別抽出ルール設定ファイル
+
+`site_rules.toml`（プロジェクトルート直下）が HTML 抽出ルールの SSoT。`config.toml` とは別ファイルとして管理する（共通設定値ではなくカスタムルールの性質を持つため）。
+
+ファイル構造:
+
+```toml
+[default]
+content_id_patterns = ["main-content", "main_content", "...", "content", "main"]
+content_class_patterns = ["main-content", "main_content", "..."]
+remove_class_tokens = ["sidebar", "related-articles", "..."]
+
+[hosts."www.example.com"]
+content_selectors = ["#article-body", ".post-content"]
+remove_selectors = [".related-articles"]
+```
+
+| セクション | 必須 | 内容 |
+|---|---|---|
+| `[default]` | 必須 | 共通フォールバックで使用する id パターン・class パターン・除去 class トークン |
+| `[hosts."<host>"]` | 任意（複数可） | ホスト単位の抽出ルール。`<host>` はパスから抽出した文字列との完全一致 |
+
+設計意図:
+
+- ホスト識別は **完全一致のみ**（サブドメイン違いは別ルール扱い）。
+  サブドメイン暗黙継承による誤適用を防ぐ。
+  複数ホストで同じルールを共有したい場合はセクションを複数定義する
+- 設定変更後の既存 converted_store への反映は **手動** `rebuild --mode full` で行う
+  （自動再変換は対象外）。ルール変更は頻繁ではない前提
+- `[default]` への HTML 抽出ルール一式の集約（旧ハードコード id/class パターン + 旧
+  `rag_html_remove_class_tokens` を含む）により、HTML 抽出ロジックに関わる設定が 1 ファイルに揃い、
+  `config.toml` とロールが分離される。共通パターンの追加・調整がコード改修なしで可能になる
 
 #### Markdown 変換ルール
 
@@ -504,6 +544,9 @@ source_type が `local` のメディアファイル（画像・動画）は、�
 
 ### 設定項目
 
+本表は PDF / YouTube 等の他カテゴリの設定項目を列挙する。HTML 抽出ルールは
+<<#### サイト別抽出ルール設定ファイル@self>> を参照（SSoT は `site_rules.toml`）。
+
 | 設定項目 | 層 | 設計意図 |
 |---------|-----|---------|
 | `rag_pdf_backend` | 共通設定値 | PDF バックエンド選択。環境のGPU有無やPDF特性に応じて切り替える |
@@ -515,7 +558,6 @@ source_type が `local` のメディアファイル（画像・動画）は、�
 | `rag_pdf_quality_sample_pages` | 共通設定値 | 品質サンプリングページ数。判定の精度とコストのバランス |
 | `rag_youtube_merge_gap_sec` | 共通設定値 | YouTube スニペット結合の間隔閾値。段落分割の粒度を制御する |
 | `rag_youtube_merge_max_chars` | 共通設定値 | YouTube スニペット結合の最大文字数。段落サイズの上限 |
-| `rag_html_remove_class_tokens` | 共通設定値 | HTML 変換時のボイラープレート除去。完全トークン一致でサイト UI 要素を除外する |
 
 `CONVERTED_STORE_DIR` は [pipeline-controller.md](pipeline-controller.md) の設定項目で定義済み。
 
@@ -539,6 +581,8 @@ source_type が `local` のメディアファイル（画像・動画）は、�
 | メディア解析モジュールが利用不可（LM Studio 停止中） | メディアファイルの変換をスキップし、警告ログを出力する。BlueSky 投稿はテキストのみで変換する |
 | BlueSky 投稿に対応する media ディレクトリが存在しない | メディア解析テキストなしで変換する（`<image:N>` / `<video:N>` タグを出力しない） |
 | ffmpeg が未インストールの環境で動画ファイルを変換 | 動画解析をスキップし、警告ログを出力する |
+| site rule の `content_selectors` 内の selector が CSS 構文として不正な場合 | 当該 selector をスキップして次の selector を試行する。警告ログを出力する |
+| site rule の `remove_selectors` 内の selector が CSS 構文として不正な場合 | 当該 selector をスキップして除去をスキップする。警告ログを出力する |
 
 ## 関連ドキュメント
 

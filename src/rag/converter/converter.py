@@ -21,7 +21,6 @@ if TYPE_CHECKING:
     from rag.media.analyzer import MediaAnalyzer
 
 from rag.converter.handlers import (
-    compile_remove_class_re,
     convert_html,
     convert_json_bluesky,
     convert_json_youtube,
@@ -31,6 +30,7 @@ from rag.converter.handlers import (
 )
 from rag.converter.normalize import normalize_text
 from rag.converter.pdf_extractor import PdfBackendConfig, extract_pdf
+from rag.converter.site_rules import CompiledSiteRules, extract_web_host
 from rag.store.meta import read_meta
 from rag.store.models import SourceType
 from rag.store.source_store import detect_source_type
@@ -106,7 +106,7 @@ class Converter:
         youtube_merge_gap_sec: float,
         youtube_merge_max_chars: int,
         media_analyzer: MediaAnalyzer | None,
-        html_remove_class_tokens: list[str],
+        site_rules: CompiledSiteRules,
     ) -> None:
         """Converter を初期化する.
 
@@ -116,14 +116,14 @@ class Converter:
             youtube_merge_gap_sec: YouTube スニペット結合の間隔閾値（秒）
             youtube_merge_max_chars: YouTube スニペット結合の最大文字数
             media_analyzer: メディア解析モジュール（None の場合メディア解析スキップ）
-            html_remove_class_tokens: HTML 変換時に除去する class トークン
+            site_rules: HTML 抽出ルール（site_rules.toml をコンパイル済みのオブジェクト）
         """
         self._regen_option = regen_option
         self._pdf_config = pdf_config
         self._youtube_merge_gap_sec = youtube_merge_gap_sec
         self._youtube_merge_max_chars = youtube_merge_max_chars
         self._media_analyzer = media_analyzer
-        self._html_remove_class_re = compile_remove_class_re(html_remove_class_tokens)
+        self._site_rules = site_rules
 
     # --- ConverterProtocol 実装 ---
 
@@ -399,8 +399,9 @@ class Converter:
         if ext in (".html", ".htm"):
             return convert_html(
                 source_path,
-                self._html_remove_class_re,
+                self._site_rules,
                 source_type=detect_source_type(file_path),
+                host=extract_web_host(file_path),
             )
 
         if ext == ".pdf":

@@ -21,6 +21,7 @@ if TYPE_CHECKING:
 from bs4 import BeautifulSoup, Tag
 from charset_normalizer import from_bytes
 
+from rag.converter.site_rules import CompiledSiteRules
 from rag.markdown import RagMarkdownConverter
 
 logger = logging.getLogger(__name__)
@@ -68,32 +69,6 @@ def _fix_void_elements(soup: BeautifulSoup) -> None:
 # セマンティックタグ（優先順）
 _SEMANTIC_CONTENT_TAGS = ("article", "main")
 
-# id パターン（長いものから試行 = 具体的なパターン優先）
-_CONTENT_ID_PATTERNS = (
-    "main-content",
-    "main_content",
-    "content-wrap",
-    "content_wrap",
-    "page-container",
-    "page_container",
-    "main-body",
-    "main_body",
-    "content",
-    "main",
-)
-
-# class パターン
-_CONTENT_CLASS_PATTERNS = (
-    "main-content",
-    "main_content",
-    "main_text",
-    "main-text",
-    "content-wrap",
-    "content_wrap",
-    "page-container",
-    "page_container",
-)
-
 # --- コンテンツ領域内の非コンテンツ除去 ---
 
 # タグ名ベースの除去
@@ -103,30 +78,6 @@ _REMOVE_TAGS = ("script", "style", "noscript", "form")
 _TEXT_DENSITY_SKIP_TAGS = frozenset(
     ("script", "style", "nav", "noscript", "link"),
 )
-
-# 事前コンパイル済み正規表現
-_COMPILED_ID_PATTERNS = tuple(
-    re.compile(re.escape(p), re.IGNORECASE) for p in _CONTENT_ID_PATTERNS
-)
-_COMPILED_CLASS_PATTERNS = tuple(
-    re.compile(re.escape(p), re.IGNORECASE) for p in _CONTENT_CLASS_PATTERNS
-)
-
-
-def compile_remove_class_re(tokens: list[str]) -> re.Pattern[str]:
-    """class トークン除去用の正規表現をコンパイルする.
-
-    BS4 は各クラストークンに regex.search() するため ^...$ で完全一致にする。
-    空文字列トークンは除外される。
-    """
-    valid = [t.strip() for t in tokens if t.strip()]
-    if not valid:
-        msg = "rag_html_remove_class_tokens に有効なトークンがありません"
-        raise ValueError(msg)
-    return re.compile(
-        "^(?:" + "|".join(re.escape(t) for t in valid) + ")$",
-        re.IGNORECASE,
-    )
 
 
 def _create_md_converter() -> RagMarkdownConverter:
@@ -139,44 +90,65 @@ def _create_md_converter() -> RagMarkdownConverter:
     )
 
 
-def _find_content_area(soup: BeautifulSoup) -> Tag | BeautifulSoup:
+def _find_content_area(
+    soup: BeautifulSoup,
+    site_rules: CompiledSiteRules,
+    host: str | None,
+) -> Tag | BeautifulSoup:
     """HTML からコンテンツ領域を特定する.
 
     仕様: docs/specs/converter.md「コンテンツ領域の特定」
 
-    優先順（仕様書と同一）:
-    1. <article> タグ
-    2. <main> タグ
-    3. role="main" 属性
-    4. id パターンマッチ
-    5. class パターンマッチ
-    6. テキスト密度フォールバック（body 直下で最大テキスト量のコンテナ要素）
-    7. <body> タグ（最終フォールバック。body もなければ soup を返す）
+    優先順:
+    1. サイト別ルールの content_selectors（host にルールがある場合）
+    2. <article> タグ
+    3. <main> タグ
+    4. role="main" 属性
+    5. id パターンマッチ（site_rules.default.content_id_patterns）
+    6. class パターンマッチ（site_rules.default.content_class_patterns）
+    7. テキスト密度フォールバック（body 直下で最大テキスト量のコンテナ要素）
+    8. <body> タグ（最終フォールバック。body もなければ soup を返す）
     """
-    # 1. セマンティックタグ
+    # 1. サイト別ルールの content_selectors
+    host_rule = site_rules.get_host_rule(host)
+    if host_rule is not None:
+        for selector in host_rule.content_selectors:
+            try:
+                found = soup.select_one(selector)
+            except Exception:  # noqa: BLE001 — soupsieve.SelectorSyntaxError 等を含む
+                # SoupSieve が解釈不能な selector を渡された場合のフォールバック
+                logger.warning(
+                    "Invalid CSS selector for host=%s: %r", host, selector,
+                )
+                continue
+            if isinstance(found, Tag) and found.get_text(strip=True):
+                return found
+        # 全 selector がミスした場合は共通フォールバックに降りる
+
+    # 2. セマンティックタグ
     for tag_name in _SEMANTIC_CONTENT_TAGS:
         found = soup.find(tag_name)
         if isinstance(found, Tag):
             return found
 
-    # 2. role="main"
+    # 3. role="main"
     found = soup.find(attrs={"role": "main"})
     if isinstance(found, Tag):
         return found
 
-    # 3. id パターンマッチ（長いパターンから = 具体的なパターン優先）
-    for regex in _COMPILED_ID_PATTERNS:
+    # 4. id パターンマッチ（長いパターンから = 具体的なパターン優先）
+    for regex in site_rules.default_id_patterns:
         found = soup.find(id=regex)
         if isinstance(found, Tag) and found.get_text(strip=True):
             return found
 
-    # 4. class パターンマッチ
-    for regex in _COMPILED_CLASS_PATTERNS:
+    # 5. class パターンマッチ
+    for regex in site_rules.default_class_patterns:
         found = soup.find(class_=regex)
         if isinstance(found, Tag) and found.get_text(strip=True):
             return found
 
-    # 5-6. テキスト密度フォールバック → body 最終フォールバック
+    # 6-7. テキスト密度フォールバック → body 最終フォールバック
     body = soup.find("body")
     if isinstance(body, Tag):
         # body 直下の子要素のうち、子 Tag を持つコンテナ要素に限定して
@@ -204,7 +176,8 @@ def _find_content_area(soup: BeautifulSoup) -> Tag | BeautifulSoup:
 
 def _clean_content_area(
     content: Tag | BeautifulSoup,
-    remove_class_re: re.Pattern[str],
+    site_rules: CompiledSiteRules,
+    host: str | None,
 ) -> None:
     """コンテンツ領域内の非コンテンツ要素を除去する.
 
@@ -216,8 +189,23 @@ def _clean_content_area(
             tag.decompose()
 
     # class トークン完全一致の除去（1つの結合済み正規表現で1パス走査）
-    for tag in content.find_all(class_=remove_class_re):
+    for tag in content.find_all(class_=site_rules.default_remove_class_re):
         tag.decompose()
+
+    # サイト別追加除去 selector
+    host_rule = site_rules.get_host_rule(host)
+    if host_rule is not None:
+        for selector in host_rule.remove_selectors:
+            try:
+                matched = content.select(selector)
+            except Exception:  # noqa: BLE001 — soupsieve.SelectorSyntaxError 等を含む
+                logger.warning(
+                    "Invalid CSS selector in remove_selectors for host=%s: %r",
+                    host, selector,
+                )
+                continue
+            for tag in matched:
+                tag.decompose()
 
 
 def _detect_aozora_encoding(raw_bytes: bytes) -> str:
@@ -246,8 +234,9 @@ def _detect_aozora_encoding(raw_bytes: bytes) -> str:
 
 def convert_html(
     source_path: Path,
-    remove_class_re: re.Pattern[str],
+    site_rules: CompiledSiteRules,
     source_type: SourceType | None = None,
+    host: str | None = None,
 ) -> str | None:
     """HTML ファイルを Markdown に変換する.
 
@@ -255,12 +244,14 @@ def convert_html(
 
     Args:
         source_path: HTML ファイルの絶対パス
-        remove_class_re: 除去対象 class トークンのコンパイル済み正規表現
+        site_rules: 事前コンパイル済みのサイトルール（共通フォールバックパターン + ホスト別ルール）
         source_type: source_store のトップレベルディレクトリから判定された source_type。
             "aozora" の場合は charset_normalizer 自動推定をスキップし、
             XML 宣言 / meta タグから charset を抽出する経路を通る（旧字旧仮名・特殊文字を
             多く含む作品で charset_normalizer が誤検出するため）。
             None の場合は従来どおり charset_normalizer で自動推定する。
+        host: source_store のパスから抽出した web ホスト（web 以外は None）。
+            site_rules の [hosts."<host>"] セクションを引くキーになる。
 
     Returns:
         Markdown テキスト、または変換失敗時は None
@@ -298,10 +289,10 @@ def convert_html(
     _fix_void_elements(soup)
 
     # コンテンツ領域の特定
-    content_area = _find_content_area(soup)
+    content_area = _find_content_area(soup, site_rules, host)
 
     # コンテンツ領域内の非コンテンツ除去
-    _clean_content_area(content_area, remove_class_re)
+    _clean_content_area(content_area, site_rules, host)
 
     # HTML → Markdown 変換
     md_converter = _create_md_converter()

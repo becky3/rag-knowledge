@@ -64,19 +64,9 @@ rag_upload_max_file_size_mb = 500
 rag_upload_retry_after_write_sec = 30
 rag_upload_retry_after_rebuild_sec = 300
 
-# HTML → Markdown 変換時に除去する class トークン（完全一致、大文字小文字無視）
-rag_html_remove_class_tokens = [
-    "breadcrumb",   # パンくずリスト
-    "breadcrumbs",  # パンくずリスト（複数形: Foundation, Docusaurus 等）
-    "topic-path",   # パンくずリスト（日本語サイト）
-    "nextprev",     # ページ送りナビゲーション
-    "pagination",   # ページネーション
-    "toolbar",      # ツールバー
-    "footer-wrapper", # サイトフッター（ラッパー要素）
-    "footer",       # サイトフッター
-    "scrollToFeedback", # フィードバックリンク
-    "suggest",      # 変更提案フォーム
-]
+# HTML 抽出ルール（content_id_patterns / content_class_patterns / remove_class_tokens /
+# サイト別 content_selectors / remove_selectors）は site_rules.toml（プロジェクトルート直下）が SSoT。
+# 仕様: docs/specs/converter.md「サイト別抽出ルール設定ファイル」
 
 # PDF バックエンド (auto / mineru / pymupdf4llm)
 rag_pdf_backend = "auto"
