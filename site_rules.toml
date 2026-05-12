@@ -63,3 +63,13 @@ content_selectors = [
     ".maintxt",
 ]
 remove_selectors = []
+
+# 4Gamer Business: <article class="main_contents"> 配下に
+# `<div class="article_news">`（ヘッダ）+ `<div class="maintxt">`（本文）+
+# `<aside class="article_related">`（関連記事ノイズ）が並ぶ構造。
+# 本文 div `.maintxt` を直接指定する。
+[hosts."business.4gamer.net"]
+content_selectors = [
+    ".maintxt",
+]
+remove_selectors = []
