@@ -318,7 +318,7 @@ flowchart TD
 
 | ケース | 振る舞い |
 |--------|---------|
-| 範囲内のソースが 0 件 | `date_range: {date_from}〜{date_to} ({source_type or "all"}, 0件 / 全0件)` を返す |
+| 範囲内のソースが 0 件 | `date_range: {date_from}〜{date_to}（{source_type or "all"}, 0件 / 全0件）` を返す |
 | `date_from` / `date_to` が `YYYY-MM-DD` 形式でない | エラーメッセージを返す |
 | `date_from > date_to` | エラーメッセージを返す |
 | `source_type` 未指定 | 全 source_type を横断して取得する |
