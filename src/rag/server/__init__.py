@@ -90,7 +90,11 @@ from .tools.ingest_aozora import (  # noqa: E402, F401
 from .tools.ingest_site import rag_site_ingest  # noqa: E402, F401
 from .tools.delete import rag_delete  # noqa: E402, F401
 from .tools.rebuild import rag_rebuild  # noqa: E402, F401
-from .tools.listing import rag_list_recent, rag_stats  # noqa: E402, F401
+from .tools.listing import (  # noqa: E402, F401
+    rag_list_by_date_range,
+    rag_list_recent,
+    rag_stats,
+)
 
 
 def __getattr__(name: str):  # type: ignore[no-untyped-def]

@@ -12,6 +12,7 @@ import json
 import logging
 import re
 import sqlite3
+from datetime import UTC, datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
 
@@ -28,6 +29,38 @@ logger = logging.getLogger(__name__)
 
 # json_extract の JSON パスに埋め込むキー名の許容パターン
 _VALID_FILTER_KEY_RE = re.compile(r"^[a-zA-Z_][a-zA-Z0-9_]*$")
+
+# naive datetime（TZ 情報なし）の published_at は JST として解釈する。
+# YouTube の upload_date 由来など、TZ 不在の値が混在することを想定。
+_JST_TZ = timezone(timedelta(hours=9))
+
+
+def normalize_published_at(value: str) -> str:
+    """published_at を UTC マイクロ秒 6 桁固定の ISO 8601 文字列に正規化する.
+
+    範囲フィルタを文字列比較で実装するため、表記揺れを吸収する。
+    冪等: 正規化済み出力（UTC マイクロ秒 6 桁固定）を再入力しても同じ値を返す。
+
+    入力例 → 出力例:
+        ""                                  → ""（空文字はそのまま）
+        "2026-01-15T00:00:00+09:00"         → "2026-01-14T15:00:00.000000+00:00"
+        "2026-01-15T00:00:00Z"              → "2026-01-15T00:00:00.000000+00:00"
+        "2026-01-15T00:00:00.123Z"          → "2026-01-15T00:00:00.123000+00:00"
+        "2026-01-15T00:00:00"               → "2026-01-14T15:00:00.000000+00:00"
+                                              （naive は JST 解釈）
+        "2026-01-14T15:00:00.000000+00:00"  → "2026-01-14T15:00:00.000000+00:00"
+                                              （正規化済み入力の冪等性）
+
+    Raises:
+        ValueError: ISO 8601 として解析できない場合
+    """
+    if not value:
+        return value
+    dt = datetime.fromisoformat(value)
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=_JST_TZ)
+    return dt.astimezone(UTC).isoformat(timespec="microseconds")
+
 
 # SQL 内の status リテラルは SourceStatus Enum の value から導出する。
 # 値定義の SSoT は _schema/enums.yml の source_status カテゴリ。
@@ -211,7 +244,71 @@ class MetadataDB:
                 "sources に meta 列を追加しました（%d 件充填）", filled,
             )
 
+        # published_at を UTC マイクロ秒 6 桁固定 ISO 8601 に正規化する。
+        # rag_list_by_date_range の範囲フィルタが文字列比較で時系列順と
+        # 一致するようにするため、書き込み入口（register_source/update_source）
+        # と既存データの書式を揃える。冪等性は「正規化後と一致する行はスキップ」
+        # で確保する（migrate を再実行しても二重書き込みは発生しない）。
+        normalized_count, skipped_count, error_count = self._normalize_published_at_column()
+        if normalized_count > 0:
+            applied.append(
+                f"sources の published_at を UTC マイクロ秒 6 桁固定 ISO 8601"
+                f" に正規化（{normalized_count} 件更新, {skipped_count} 件スキップ,"
+                f" {error_count} 件パース失敗）"
+            )
+        elif error_count > 0:
+            # 更新は発生しなかったがパース失敗があった場合も applied に残す
+            # （冪等な再実行で失敗が握り潰されないようにするため）
+            applied.append(
+                f"sources の published_at 正規化中にパース失敗 {error_count} 件"
+                "（詳細はログ参照、対象行は元値のまま）"
+            )
+
         return applied
+
+    def _normalize_published_at_column(self) -> tuple[int, int, int]:
+        """sources.published_at を UTC マイクロ秒 6 桁固定 ISO 8601 に正規化する.
+
+        既に正規化済み（normalize_published_at の出力と一致）の行は UPDATE しない。
+        パース不能な値はログ警告のみで UPDATE せず、`error_count` でカウントする。
+
+        Returns:
+            (更新件数, 既に正規化済みでスキップした件数, パース失敗でスキップした件数)
+        """
+        rows = self._connection.execute(
+            "SELECT source_id, published_at FROM sources"
+            " WHERE published_at != ''"
+        ).fetchall()
+        normalized_count = 0
+        skipped_count = 0
+        error_count = 0
+        for row in rows:
+            src_id = row["source_id"]
+            raw = row["published_at"]
+            try:
+                normalized = normalize_published_at(raw)
+            except ValueError as e:
+                logger.warning(
+                    "published_at 正規化失敗: source_id=%s, value=%r, error=%s",
+                    src_id, raw, e,
+                )
+                error_count += 1
+                continue
+            if normalized == raw:
+                skipped_count += 1
+                continue
+            self._connection.execute(
+                "UPDATE sources SET published_at = ? WHERE source_id = ?",
+                (normalized, src_id),
+            )
+            normalized_count += 1
+        if normalized_count > 0:
+            self._connection.commit()
+            logger.info(
+                "published_at を正規化しました: 更新=%d, スキップ=%d, 失敗=%d",
+                normalized_count, skipped_count, error_count,
+            )
+        return normalized_count, skipped_count, error_count
 
     def _fill_meta_from_files(
         self, source_store_dir: Path | None,
@@ -302,6 +399,19 @@ class MetadataDB:
         if not published_at:
             published_at = collected_at
 
+        # published_at を UTC マイクロ秒 6 桁固定 ISO 8601 に正規化する。
+        # 範囲フィルタ（list_sources_by_date_range）の文字列比較で表記揺れを吸収するため。
+        # 不正値は migrate 側と挙動を揃えてログ警告のみ（元値そのまま保持）とし、
+        # rebuild ループの途中で 1 件の不正値が残り全ソースの処理を止めないようにする。
+        try:
+            published_at = normalize_published_at(published_at)
+        except ValueError as e:
+            logger.warning(
+                "register_source: published_at の正規化に失敗（元値のまま保存）"
+                ": source_id=%s, value=%r, error=%s",
+                source_id, published_at, e,
+            )
+
         self._connection.execute(
             """\
             INSERT INTO sources
@@ -363,6 +473,20 @@ class MetadataDB:
         if invalid:
             msg = f"不正なフィールド: {invalid}"
             raise ValueError(msg)
+
+        # published_at は書き込み入口で UTC マイクロ秒 6 桁固定 ISO 8601 に正規化する
+        # （範囲フィルタの文字列比較で表記揺れを吸収するため）。不正値は migrate 側と
+        # 挙動を揃えてログ警告のみ（元値そのまま保持）とし、書き込み入口の fail-fast
+        # で連鎖停止しないようにする。
+        if "published_at" in fields:
+            try:
+                fields["published_at"] = normalize_published_at(fields["published_at"])
+            except ValueError as e:
+                logger.warning(
+                    "update_source: published_at の正規化に失敗（元値のまま保存）"
+                    ": source_id=%s, value=%r, error=%s",
+                    source_id, fields["published_at"], e,
+                )
 
         set_clause = ", ".join(f"{k} = ?" for k in fields)
         values = list(fields.values())
@@ -671,6 +795,90 @@ class MetadataDB:
         if filters:
             self._build_meta_filter_conditions(filters, conditions, params)
 
+        where = " AND ".join(conditions)
+        row = self._connection.execute(
+            f"SELECT COUNT(*) as cnt FROM sources WHERE {where}",  # noqa: S608
+            params,
+        ).fetchone()
+        return int(row["cnt"]) if row else 0
+
+    def _build_date_range_conditions(
+        self,
+        *,
+        date_from_iso: str,
+        date_to_iso: str,
+        source_type: SourceType | None,
+        filters: dict[str, str] | None,
+    ) -> tuple[list[str], list[Any]]:
+        """published_at 範囲 + 任意の source_type + filters の WHERE 条件を構築する."""
+        conditions = ["status = ?", "published_at >= ?", "published_at <= ?"]
+        params: list[Any] = [_STATUS_ACTIVE, date_from_iso, date_to_iso]
+        if source_type is not None:
+            conditions.append("source_type = ?")
+            params.append(source_type)
+        if filters:
+            self._build_meta_filter_conditions(filters, conditions, params)
+        return conditions, params
+
+    def list_sources_by_date_range(
+        self,
+        *,
+        date_from_iso: str,
+        date_to_iso: str,
+        source_type: SourceType | None = None,
+        limit: int,
+        ascending: bool = False,
+        filters: dict[str, str] | None = None,
+    ) -> list[SourceRecord]:
+        """published_at 範囲で active ソースを取得する.
+
+        Args:
+            date_from_iso: 範囲下端の ISO 8601 文字列（inclusive）
+            date_to_iso: 範囲上端の ISO 8601 文字列（inclusive）
+            source_type: ソース種別（None で全種別横断）
+            limit: 取得件数
+            ascending: True で古い順、False で新しい順
+            filters: メタデータフィルタ（key=value 形式）
+
+        Raises:
+            ValueError: filters のキー名に不正な文字が含まれる場合
+        """
+        direction = "ASC" if ascending else "DESC"
+        conditions, params = self._build_date_range_conditions(
+            date_from_iso=date_from_iso,
+            date_to_iso=date_to_iso,
+            source_type=source_type,
+            filters=filters,
+        )
+        where = " AND ".join(conditions)
+        params.append(limit)
+        rows = self._connection.execute(
+            f"SELECT * FROM sources WHERE {where}"  # noqa: S608
+            f" ORDER BY published_at {direction}"
+            " LIMIT ?",
+            params,
+        ).fetchall()
+        return [_row_to_source_record(r) for r in rows]
+
+    def count_sources_by_date_range(
+        self,
+        *,
+        date_from_iso: str,
+        date_to_iso: str,
+        source_type: SourceType | None = None,
+        filters: dict[str, str] | None = None,
+    ) -> int:
+        """published_at 範囲の active ソース件数を返す.
+
+        Raises:
+            ValueError: filters のキー名に不正な文字が含まれる場合
+        """
+        conditions, params = self._build_date_range_conditions(
+            date_from_iso=date_from_iso,
+            date_to_iso=date_to_iso,
+            source_type=source_type,
+            filters=filters,
+        )
         where = " AND ".join(conditions)
         row = self._connection.execute(
             f"SELECT COUNT(*) as cnt FROM sources WHERE {where}",  # noqa: S608

@@ -106,9 +106,10 @@ class TestMigrateExplicit:
         db.initialize()
         applied = db.migrate()
 
-        # 6件のマイグレーションが適用される
-        # (mode + filter_source_type + filter_path + published_at + file_path 移行 + meta)
-        assert len(applied) == 6
+        # 7件のマイグレーションが適用される
+        # (mode + filter_source_type + filter_path + published_at 列追加 + file_path 移行 + meta
+        #  + published_at の UTC 正規化)
+        assert len(applied) == 7
 
         # file_path カラムが削除されている
         cursor = db._connection.execute("PRAGMA table_info(sources)")
@@ -119,7 +120,8 @@ class TestMigrateExplicit:
         # source_id が file_path ベースに移行されている
         record = db.get_source("web/s1.html")
         assert record is not None
-        assert record.published_at == "2026-01-15T10:00:00Z"
+        # published_at が UTC マイクロ秒 6 桁固定 ISO 8601 に正規化されている
+        assert record.published_at == "2026-01-15T10:00:00.000000+00:00"
 
         # pipeline_history に mode / filter_source_type / filter_path 列が追加されている
         cursor = db._connection.execute("PRAGMA table_info(pipeline_history)")
@@ -166,7 +168,7 @@ class TestMigrateExplicit:
         db.initialize()
 
         first = db.migrate()
-        assert len(first) == 6
+        assert len(first) == 7
 
         second = db.migrate()
         assert len(second) == 0
@@ -224,13 +226,15 @@ class TestMigrateExplicit:
         db.initialize()
         applied = db.migrate()
 
-        # filter_source_type + filter_path + published_at + file_path 移行 + meta の 5 件
-        assert len(applied) == 5
+        # filter_source_type + filter_path + published_at 列追加 + file_path 移行 + meta
+        # + published_at UTC 正規化 = 6 件
+        assert len(applied) == 6
 
         for i in range(3):
             record = db.get_source(f"web/s{i}.html")
             assert record is not None
-            assert record.published_at == f"2026-01-{i+1:02d}T00:00:00Z"
+            # published_at が UTC マイクロ秒 6 桁固定 ISO 8601 に正規化されている
+            assert record.published_at == f"2026-01-{i+1:02d}T00:00:00.000000+00:00"
 
         db.close()
 
@@ -316,8 +320,8 @@ class TestMetaMigration:
         db.initialize()
         applied = db.migrate(source_store_dir=source_store)
 
-        # filter_source_type + filter_path + meta の 3 件
-        assert len(applied) == 3
+        # filter_source_type + filter_path + meta + published_at UTC 正規化 の 4 件
+        assert len(applied) == 4
         assert any("1 件" in m for m in applied)
 
         record = db.get_source("journal/repo-a/entry.md")
@@ -346,8 +350,8 @@ class TestMetaMigration:
         db.initialize()
         applied = db.migrate()
 
-        # filter_source_type + filter_path + meta の 3 件
-        assert len(applied) == 3
+        # filter_source_type + filter_path + meta + published_at UTC 正規化 の 4 件
+        assert len(applied) == 4
         assert any("0 件" in m for m in applied)
 
         record = db.get_source("local/test.md")

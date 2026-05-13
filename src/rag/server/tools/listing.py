@@ -68,6 +68,64 @@ async def rag_list_recent(
 
 
 @mcp.tool()
+async def rag_list_by_date_range(
+    date_from: str,
+    date_to: str,
+    source_type: str | None = None,
+    limit: int | None = None,
+    order: str = "desc",
+    filters: str | None = None,
+) -> str:
+    """[rag-knowledge] List sources by date range - 指定日付範囲のソースを横断取得する.
+
+    content listing, date range, published_at filter, cross source_type.
+    `published_at` の日付範囲（JST 解釈、両端 inclusive）で取り込み済みソースを
+    取得する。`source_type` 未指定時は全種別を横断する。特定日の作業内容を
+    journal / bluesky / zenn 等から一括取得するユースケースに使用する。
+
+    Args:
+        date_from: 開始日（YYYY-MM-DD、JST 起点で inclusive）
+        date_to: 終了日（YYYY-MM-DD、JST 起点で inclusive）
+        source_type: ソース種別（任意）。
+            指定時はそのタイプのみ。値は "web", "bluesky", "zenn", "youtube",
+            "aozora", "local", "journal"。未指定で全種別横断
+        limit: 取得件数（1〜100、未指定時は設定値を使用）
+        order: ソート順（"desc": 新しい順（デフォルト）, "asc": 古い順）
+        filters: メタデータフィルタ（key=value 形式、カンマ区切りで複数指定可）。
+            完全一致。未指定時はフィルタなし。
+
+    Returns:
+        ソース一覧テキスト（日付範囲ヘッダー + 各エントリに source_type を含む）
+    """
+    if source_type is not None and source_type not in _VALID_LISTING_SOURCE_TYPES:
+        valid = ", ".join(sorted(_VALID_LISTING_SOURCE_TYPES))
+        return f"無効な source_type: {source_type!r}（有効値: {valid}）"
+
+    if limit is not None and (limit < 1 or limit > 100):
+        return "エラー: limit は 1〜100 の範囲で指定してください"
+
+    if order not in ("asc", "desc"):
+        return f"エラー: order は 'asc' または 'desc' を指定してください（指定値: {order!r}）"
+
+    args: list[str] = ["--date-from", date_from, "--date-to", date_to]
+    if source_type is not None:
+        args.extend(["--source-type", source_type])
+    if limit is not None:
+        args.extend(["--limit", str(limit)])
+    args.extend(["--order", order])
+    if filters is not None:
+        args.extend(["--filters", filters])
+
+    try:
+        result = await cli_subprocess._run_cli_subprocess(
+            "list-by-date-range", args,
+        )
+        return _format_cli_list_by_date_range_result(result)
+    except CLISubprocessError as e:
+        return e.format_mcp_error("ソース一覧の取得に失敗しました")
+
+
+@mcp.tool()
 async def rag_stats() -> str:
     """[rag-knowledge] RAG stats - ナレッジベースの統計情報と蓄積データ概要を表示.
 
@@ -117,6 +175,46 @@ def _format_cli_list_recent_result(result: dict[str, Any]) -> str:
         lines.append(line)
         lines.append(f"  {source_id}")
 
+    return "\n".join(lines)
+
+
+def _format_cli_list_by_date_range_result(result: dict[str, Any]) -> str:
+    """CLI list-by-date-range の JSON 結果を MCP レスポンス文字列に変換する."""
+    sources = result.get("sources", [])
+    date_from = result.get("date_from", "")
+    date_to = result.get("date_to", "")
+    source_type = result.get("source_type") or "all"
+    count = result.get("count", len(sources))
+    total = result.get("total", count)
+    order = result.get("order", "desc")
+    order_label = "古い順" if order == "asc" else "新しい順"
+
+    if not sources:
+        return (
+            f"date_range: {date_from}〜{date_to}"
+            f"（{source_type}, 0件 / 全0件）"
+        )
+
+    lines = [
+        f"date_range: {date_from}〜{date_to}"
+        f"（{source_type}, {count}件 / 全{total}件, {order_label}）",
+    ]
+    for i, s in enumerate(sources, 1):
+        title = s.get("title", "(無題)")
+        s_type = s.get("source_type", "")
+        source_id = s.get("source_id", "")
+        published_at = s.get("published_at", "")
+        file_size = s.get("file_size", 0)
+        size_str = format_file_size(file_size) if file_size else ""
+        lines.append("")
+        lines.append(f"{i}. {title}")
+        if s_type:
+            lines.append(f"   Type: {s_type}")
+        lines.append(f"   Source: {source_id}")
+        if published_at:
+            lines.append(f"   Published: {published_at}")
+        if size_str:
+            lines.append(f"   Size: {size_str}")
     return "\n".join(lines)
 
 
