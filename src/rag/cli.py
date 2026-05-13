@@ -18,7 +18,7 @@ import sys
 from collections.abc import Iterator
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, TypedDict
+from typing import TYPE_CHECKING, Any, TypedDict, cast
 from urllib.parse import urldefrag
 
 from .errors import CliErrorCode
@@ -779,6 +779,46 @@ def _build_parser() -> "_JsonAwareArgumentParser":
     )
     _add_output_option(list_recent_parser)
 
+    # list-by-date-range サブコマンド
+    list_by_date_range_parser = subparsers.add_parser(
+        "list-by-date-range",
+        help="指定日付範囲（published_at, JST 解釈, 両端 inclusive）でソースを取得",
+    )
+    list_by_date_range_parser.add_argument(
+        "--date-from",
+        required=True,
+        help="開始日（YYYY-MM-DD、JST 起点で inclusive）",
+    )
+    list_by_date_range_parser.add_argument(
+        "--date-to",
+        required=True,
+        help="終了日（YYYY-MM-DD、JST 起点で inclusive）",
+    )
+    list_by_date_range_parser.add_argument(
+        "--source-type",
+        default=None,
+        choices=["web", "bluesky", "zenn", "youtube", "aozora", "local", "journal"],
+        help="ソース種別（任意、未指定で全種別横断）",
+    )
+    list_by_date_range_parser.add_argument(
+        "--limit",
+        type=_validate_list_recent_limit,
+        default=None,
+        help="取得件数（1〜100、未指定時は設定値を使用）",
+    )
+    list_by_date_range_parser.add_argument(
+        "--order",
+        choices=["asc", "desc"],
+        default="desc",
+        help="ソート順（asc: 古い順, desc: 新しい順。デフォルト: desc）",
+    )
+    list_by_date_range_parser.add_argument(
+        "--filters",
+        default=None,
+        help="メタデータフィルタ（key=value 形式、例: 'repository=rag-knowledge'）",
+    )
+    _add_output_option(list_by_date_range_parser)
+
     # search サブコマンド
     search_parser = subparsers.add_parser("search", help="ナレッジベースを検索")
     search_parser.add_argument("--query", required=True, help="検索クエリ")
@@ -980,6 +1020,7 @@ def main() -> None:
         "get-document": run_get_document,
         "stats": run_stats,
         "list-recent": run_list_recent,
+        "list-by-date-range": run_list_by_date_range,
         "search": run_search,
         "search-aozora": run_search_aozora,
         "migrate-journal": run_migrate_journal,
@@ -2226,6 +2267,143 @@ def run_list_recent(args: argparse.Namespace) -> None:
         from .admin.stats_port import list_recent_sources
         print(list_recent_sources(
             settings.source_store_dir, args.source_type, limit, ascending=ascending,
+            filters=parsed_filters,
+        ))
+
+
+def run_list_by_date_range(args: argparse.Namespace) -> None:
+    """published_at の日付範囲でソースを一覧取得する.
+
+    MCP ツール rag_list_by_date_range と同等の一覧取得を CLI で実行する。
+    """
+    from .admin.stats_port import to_jst_range_iso
+    from .config import get_settings
+
+    json_out = _is_json_output(args)
+    settings = get_settings()
+    limit: int = args.limit if args.limit is not None else settings.rag_list_recent_limit
+    ascending = args.order == "asc"
+
+    parsed_filters: dict[str, str] | None = None
+    if args.filters is not None:
+        try:
+            parsed_filters = parse_filters(args.filters)
+        except ValueError as e:
+            if json_out:
+                _output_error(CliErrorCode.VALIDATION_ERROR, str(e))
+                return
+            logger.error("エラー: %s", e)
+            sys.exit(1)
+
+    try:
+        date_from_iso, date_to_iso = to_jst_range_iso(args.date_from, args.date_to)
+    except ValueError as e:
+        if json_out:
+            _output_error(CliErrorCode.VALIDATION_ERROR, str(e))
+            return
+        logger.error("エラー: %s", e)
+        sys.exit(1)
+
+    source_type = args.source_type  # None で全種別
+
+    if json_out:
+        from .store.metadata_db import MetadataDB
+        from .store.models import SourceType
+
+        if not settings.source_store_dir:
+            _output_result({
+                "date_from": args.date_from,
+                "date_to": args.date_to,
+                "source_type": source_type,
+                "sources": [],
+                "count": 0,
+                "total": 0,
+                "order": args.order,
+            })
+            return
+        db_path = Path(settings.source_store_dir) / "metadata.db"
+        if not db_path.exists():
+            _output_result({
+                "date_from": args.date_from,
+                "date_to": args.date_to,
+                "source_type": source_type,
+                "sources": [],
+                "count": 0,
+                "total": 0,
+                "order": args.order,
+            })
+            return
+        db = MetadataDB(db_path)
+        try:
+            db.initialize()
+            st = cast(SourceType, source_type) if source_type else None
+            try:
+                sources = db.list_sources_by_date_range(
+                    date_from_iso=date_from_iso,
+                    date_to_iso=date_to_iso,
+                    source_type=st,
+                    limit=limit,
+                    ascending=ascending,
+                    filters=parsed_filters,
+                )
+                total = db.count_sources_by_date_range(
+                    date_from_iso=date_from_iso,
+                    date_to_iso=date_to_iso,
+                    source_type=st,
+                    filters=parsed_filters,
+                )
+            except ValueError as e:
+                _output_error(CliErrorCode.VALIDATION_ERROR, str(e))
+                return
+        finally:
+            db.close()
+        for i, s in enumerate(sources, 1):
+            logger.info(
+                "list-by-date-range result %d: source_id=%s, title=%r",
+                i, s.source_id, s.title,
+            )
+        _output_result_logged(
+            {
+                "date_from": args.date_from,
+                "date_to": args.date_to,
+                "source_type": source_type,
+                "sources": [
+                    {
+                        "source_id": s.source_id,
+                        "source_type": s.source_type,
+                        "title": s.title,
+                        "published_at": s.published_at,
+                        "file_size": s.file_size,
+                    }
+                    for s in sources
+                ],
+                "count": len(sources),
+                "total": total,
+                "order": args.order,
+            },
+            "list-by-date-range: date_from=%s, date_to=%s, source_type=%s,"
+            " total=%d, returned=%d",
+            args.date_from,
+            args.date_to,
+            source_type or "all",
+            total,
+            len(sources),
+        )
+    else:
+        from .admin.stats_port import list_sources_by_date_range
+        if not settings.source_store_dir:
+            print(
+                f"date_range: {args.date_from}〜{args.date_to}"
+                f"（{source_type or 'all'}, 0件 / 全0件）"
+            )
+            return
+        print(list_sources_by_date_range(
+            settings.source_store_dir,
+            args.date_from,
+            args.date_to,
+            source_type,
+            limit,
+            ascending=ascending,
             filters=parsed_filters,
         ))
 

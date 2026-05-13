@@ -107,11 +107,13 @@ class TestListSources:
         assert result[1].source_id == "early_pub_late_collect"
 
     def test_published_at_fallback_to_collected_at(self, db: MetadataDB) -> None:
-        """published_at 未指定時は collected_at が使われる."""
+        """published_at 未指定時は collected_at が使われる（UTC マイクロ秒 6 桁固定 ISO 8601 に正規化される）."""
         _register(db, "no_pub", collected_at="2026-02-01T00:00:00Z")
 
         result = db.list_sources(source_type="web", limit=10)
-        assert result[0].published_at == "2026-02-01T00:00:00Z"
+        # register_source が published_at を normalize_published_at で正規化するため
+        # `Z` 終端は `+00:00` に統一され、マイクロ秒 6 桁が付与される
+        assert result[0].published_at == "2026-02-01T00:00:00.000000+00:00"
 
     def test_limit(self, db: MetadataDB) -> None:
         """limit で取得件数が制限される."""
@@ -227,7 +229,9 @@ class TestListRecentSources:
         assert "source_type: web（1件 / 全1件" in result
         assert "1. Sample Page" in result
         assert "Source: https://example.com/page" in result
-        assert "Published: 2026-06-15T10:30:00+09:00" in result
+        # published_at は register_source で UTC マイクロ秒 6 桁固定 ISO 8601 に正規化される
+        # JST 2026-06-15T10:30:00 → UTC 2026-06-15T01:30:00.000000+00:00
+        assert "Published: 2026-06-15T01:30:00.000000+00:00" in result
         assert "Size: 45.2 KB" in result
 
     def test_format_output_ascending(self, tmp_path: Path) -> None:

@@ -15,5 +15,5 @@ EXPECTED_MCP_TOOL_NAMES: frozenset[str] = frozenset({
     "rag_update_aozora_catalog", "rag_search_aozora",
     "rag_add_aozora", "rag_crawl_aozora",
     "rag_delete", "rag_rebuild", "rag_stats",
-    "rag_list_recent",
+    "rag_list_recent", "rag_list_by_date_range",
 })
