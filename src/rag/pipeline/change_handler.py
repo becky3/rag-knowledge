@@ -19,6 +19,7 @@ from typing import TYPE_CHECKING, Protocol
 from rag.pipeline.models import ChangeEntry, ChangeStatus
 from rag.store.meta import meta_path_for, read_meta
 from rag.store.models import SourceStatus
+from rag.store.resolve import resolve_published_at
 from rag.store.source_store import NO_META_TYPES, detect_source_type
 
 if TYPE_CHECKING:
@@ -139,7 +140,18 @@ class RealChangeHandler:
         self._metadata_builder.register_in_db(entry.file_path)
 
     async def _handle_meta_only(self, entry: ChangeEntry) -> None:
-        """.meta のみ変更を処理する."""
+        """.meta のみ変更を処理する.
+
+        title・meta JSON に加え、`.meta` に `collected_at` が含まれていれば
+        `collected_at` / `published_at` も DB に反映する。
+        `published_at` は resolve_published_at で source_type ごとの
+        フィールド優先順位に従って導出する。
+        `.meta` に `collected_at` が無い場合は kwargs から除外して既存 DB 値を温存する
+        （`.meta` 手動編集等で一時的に欠落した場合に DB 上の正本を破壊しないため）。
+
+        `NO_META_TYPES`（local 等、`.meta` を持たない source_type）では DB 更新を
+        スキップし、インデクサーのメタデータ更新のみ実行する。
+        """
         source_id = self._metadata_builder.resolve_source_id(entry.file_path)
         source_type = detect_source_type(entry.file_path)
 
@@ -155,13 +167,19 @@ class RealChangeHandler:
                     meta_json = json.dumps(
                         meta_data, ensure_ascii=False, default=str,
                     )
-                    try:
-                        self._db.update_source(
-                            source_id,
-                            title=title,
-                            updated_at=now,
-                            meta=meta_json,
+                    update_kwargs: dict[str, str] = {
+                        "title": title,
+                        "updated_at": now,
+                        "meta": meta_json,
+                    }
+                    if "collected_at" in meta_data:
+                        collected_at = str(meta_data["collected_at"])
+                        update_kwargs["collected_at"] = collected_at
+                        update_kwargs["published_at"] = resolve_published_at(
+                            source_type, meta_data, collected_at,
                         )
+                    try:
+                        self._db.update_source(source_id, **update_kwargs)
                     except KeyError:
                         logger.warning(
                             "meta_only 更新対象が metadata.db にありません: %s",

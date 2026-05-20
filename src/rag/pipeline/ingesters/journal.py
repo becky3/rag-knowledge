@@ -8,7 +8,7 @@ from __future__ import annotations
 import logging
 import re
 import unicodedata
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -27,6 +27,9 @@ logger = logging.getLogger(__name__)
 MAX_FILES_HARD_LIMIT = 500
 _ENTRY_ID_PATTERN = re.compile(r"^\d{8}-\d{6}-")
 _TOPIC_MAX_LENGTH = 50
+# ジャーナルファイル名の YYYYMMDD-HHMMSS プレフィックスは JST 時刻として解釈する。
+# 外部由来（手動命名）の既存ジャーナルが JST 想定で命名されているため。
+_JST_TZ = timezone(timedelta(hours=9))
 
 
 class JournalIngester(BaseIngester):
@@ -262,14 +265,16 @@ class JournalIngester(BaseIngester):
 def _parse_datetime_from_entry_id(entry_id: str) -> str | None:
     """ファイル名の YYYYMMDD-HHMMSS プレフィックスから ISO 8601 日時を生成する.
 
+    プレフィックスは JST 時刻として解釈し、UTC に変換した ISO 8601 文字列を返す。
+
     Returns:
-        ISO 8601 形式の日時文字列。パースできない場合は None。
+        UTC ISO 8601 形式の日時文字列。パースできない場合は None。
     """
     if not _ENTRY_ID_PATTERN.match(entry_id):
         return None
     try:
         dt = datetime.strptime(entry_id[:15], "%Y%m%d-%H%M%S")  # noqa: DTZ007
-        dt = dt.replace(tzinfo=timezone.utc)
+        dt = dt.replace(tzinfo=_JST_TZ).astimezone(timezone.utc)
         return dt.isoformat()
     except ValueError:
         return None

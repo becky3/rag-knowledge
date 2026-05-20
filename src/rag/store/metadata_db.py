@@ -8,7 +8,6 @@ WAL モードで運用し、source_store のファイルと .meta から再構�
 
 from __future__ import annotations
 
-import json
 import logging
 import re
 import sqlite3
@@ -60,6 +59,111 @@ def normalize_published_at(value: str) -> str:
     if dt.tzinfo is None:
         dt = dt.replace(tzinfo=_JST_TZ)
     return dt.astimezone(UTC).isoformat(timespec="microseconds")
+
+
+# journal の YYYYMMDD-HHMMSS プレフィックスを検出する正規表現。
+_JOURNAL_ENTRY_TS_RE = re.compile(r"^(\d{4})(\d{2})(\d{2})-(\d{2})(\d{2})(\d{2})")
+
+
+def _fix_journal_collected_at(
+    source_store_dir: Path,
+) -> tuple[int, int, int]:
+    """journal の .meta の collected_at を JST→UTC に補正する.
+
+    旧 ``migrate-journal`` CLI が ``datetime.strptime`` の naive 値に
+    ``replace(tzinfo=timezone.utc)`` でタグ付けしていたため、JST 値が
+    ``+00:00`` で保存されていた行を再計算する。
+
+    検出条件（誤検出を排除するため厳密にマッチさせる）:
+
+    - ファイル名プレフィックス ``YYYYMMDD-HHMMSS`` と ``collected_at`` の
+      先頭 19 文字（``YYYY-MM-DDTHH:MM:SS``）が完全一致
+    - ``collected_at`` がマイクロ秒部を含まない（小数点なし）
+    - ``collected_at`` の末尾が ``+00:00``
+
+    ``add-journal`` 経路の正規データは ``datetime.now(timezone.utc).isoformat()``
+    でマイクロ秒を含むため、この条件で誤検出しない。
+
+    Args:
+        source_store_dir: source_store のルートディレクトリ
+
+    Returns:
+        (補正件数, 既に正しい/対象外でスキップした件数, エラー件数)
+    """
+    from rag.store.meta import read_meta, write_meta
+
+    journal_dir = source_store_dir / "journal"
+    if not journal_dir.is_dir():
+        return (0, 0, 0)
+
+    fixed = 0
+    skipped = 0
+    errors = 0
+    # rglob の結果順序は OS 依存のためソートしてログ・テストの再現性を担保する
+    for meta_path in sorted(journal_dir.rglob("*.md.meta")):
+        # `.md.meta` → `.md` の対応データファイルパスを得る
+        data_path = meta_path.with_name(meta_path.name[: -len(".meta")])
+        entry_id = data_path.stem
+        m = _JOURNAL_ENTRY_TS_RE.match(entry_id)
+        if m is None:
+            skipped += 1
+            continue
+        # 1 件の .meta 異常で全件停止しないよう broad に捕捉してログ警告 + 件数集計に倒す。
+        # 想定例外は OSError / yaml.YAMLError / ValueError 系だが、想定外の例外も
+        # 握り潰さずスタックトレースを残すため exc_info=True とする。
+        try:
+            meta_dict = read_meta(data_path)
+        except Exception:  # noqa: BLE001
+            logger.warning(
+                ".meta ファイルの読み取りに失敗: %s", meta_path,
+                exc_info=True,
+            )
+            errors += 1
+            continue
+        raw = meta_dict.get("collected_at")
+        if not isinstance(raw, str):
+            skipped += 1
+            continue
+        # 検出条件: 19 文字数値一致 + マイクロ秒なし + +00:00 終端
+        y, mo, d, h, mi, s = m.groups()
+        expected_prefix = f"{y}-{mo}-{d}T{h}:{mi}:{s}"
+        if (
+            len(raw) != 25
+            or not raw.startswith(expected_prefix)
+            or "." in raw
+            or not raw.endswith("+00:00")
+        ):
+            skipped += 1
+            continue
+        # JST→UTC 変換: 数値部を JST として解釈し UTC に変換
+        try:
+            dt = datetime.strptime(  # noqa: DTZ007
+                expected_prefix, "%Y-%m-%dT%H:%M:%S",
+            ).replace(tzinfo=_JST_TZ).astimezone(UTC)
+        except ValueError:
+            logger.warning(
+                "collected_at のパースに失敗: %s value=%r", meta_path, raw,
+            )
+            errors += 1
+            continue
+        meta_dict["collected_at"] = dt.isoformat()
+        # write_meta の失敗も読み取り側と同様に broad 捕捉（理由は read_meta 側を参照）。
+        try:
+            write_meta(data_path, meta_dict)
+        except Exception:  # noqa: BLE001
+            logger.warning(
+                ".meta ファイルの書き込みに失敗: %s", meta_path,
+                exc_info=True,
+            )
+            errors += 1
+            continue
+        fixed += 1
+    if fixed > 0:
+        logger.info(
+            "journal の collected_at を JST→UTC 補正: 補正=%d, スキップ=%d, エラー=%d",
+            fixed, skipped, errors,
+        )
+    return (fixed, skipped, errors)
 
 
 # SQL 内の status リテラルは SourceStatus Enum の value から導出する。
@@ -127,238 +231,45 @@ class MetadataDB:
     def migrate(
         self, *, source_store_dir: Path | None = None,
     ) -> list[str]:
-        """既存テーブルのスキーマをマイグレーションする.
+        """source_store のデータ補正を実行する.
 
-        CLI の migrate コマンドから明示的に呼び出す。
-        initialize() からは呼び出されない。
-        各種機能は最新スキーマを前提とし、旧スキーマへのフォールバックは行わない。
+        CLI の migrate コマンドから明示的に呼び出す。initialize() からは呼び出されない。
+        DB スキーマは ``_SCHEMA_SQL`` で常に最新形に初期化される前提で、
+        旧スキーマからの移行コードは保持しない。
+
+        本実装は journal の `.meta` の `collected_at` を JST→UTC に補正する。
+        旧 `migrate-journal` CLI が naive datetime を UTC タグ付けで保存していた
+        バグデータを再計算する。DB 更新は本関数では行わず、後続の
+        `rag rebuild --mode incremental` が `.meta` 変更を検知して反映する。
 
         Args:
             source_store_dir: source_store のルートディレクトリ。
-                meta カラムマイグレーションで .meta ファイルを読み取るために必要。
+                journal の .meta を補正するために必要。None の場合は補正をスキップする。
 
         Returns:
-            適用されたマイグレーションの説明リスト（適用なしなら空リスト）
+            適用された処理の説明リスト（適用なしなら空リスト）
         """
         applied: list[str] = []
 
-        # pipeline_history に mode 列を追加（既存レコードは incremental 扱い）
-        cursor = self._connection.execute("PRAGMA table_info(pipeline_history)")
-        ph_columns = {row["name"] for row in cursor.fetchall()}
-        if "mode" not in ph_columns:
-            self._connection.execute(
-                "ALTER TABLE pipeline_history"
-                " ADD COLUMN mode TEXT NOT NULL DEFAULT 'incremental'"
+        if source_store_dir is None:
+            logger.warning(
+                "source_store_dir が未指定のため migrate の処理をスキップします"
             )
-            self._connection.commit()
-            applied.append("pipeline_history に mode 列を追加")
-            logger.info("pipeline_history に mode 列を追加しました")
+            return applied
 
-        # pipeline_history に filter_source_type / filter_path 列を追加
-        # （既存レコードは「未フィルタ」扱いで空文字列がデフォルト）
-        if "filter_source_type" not in ph_columns:
-            self._connection.execute(
-                "ALTER TABLE pipeline_history"
-                " ADD COLUMN filter_source_type TEXT NOT NULL DEFAULT ''"
-            )
-            self._connection.commit()
-            applied.append("pipeline_history に filter_source_type 列を追加")
-            logger.info(
-                "pipeline_history に filter_source_type 列を追加しました",
-            )
-        if "filter_path" not in ph_columns:
-            self._connection.execute(
-                "ALTER TABLE pipeline_history"
-                " ADD COLUMN filter_path TEXT NOT NULL DEFAULT ''"
-            )
-            self._connection.commit()
-            applied.append("pipeline_history に filter_path 列を追加")
-            logger.info(
-                "pipeline_history に filter_path 列を追加しました",
-            )
-
-        # sources に published_at 列を追加（既存レコードは collected_at で埋める）
-        cursor = self._connection.execute("PRAGMA table_info(sources)")
-        src_columns = {row["name"] for row in cursor.fetchall()}
-        if "published_at" not in src_columns:
-            self._connection.execute(
-                "ALTER TABLE sources"
-                " ADD COLUMN published_at TEXT NOT NULL DEFAULT ''"
-            )
-            self._connection.execute(
-                "UPDATE sources SET published_at = collected_at"
-                " WHERE published_at = ''"
-            )
-            self._connection.commit()
-            applied.append("sources に published_at 列を追加")
-            logger.info("sources に published_at 列を追加しました")
-
-        # source_id = file_path 統合: file_path カラムが残っている旧スキーマを移行
-        if "file_path" in src_columns:
-            # file_path を新 source_id として直接 INSERT（UPDATE での PK 衝突を回避）
-            self._connection.executescript(f"""\
-                DROP TABLE IF EXISTS sources_new;
-                CREATE TABLE sources_new (
-                    source_id    TEXT PRIMARY KEY,
-                    source_type  TEXT NOT NULL,
-                    title        TEXT NOT NULL,
-                    status       TEXT NOT NULL DEFAULT '{_STATUS_ACTIVE}',
-                    content_hash TEXT NOT NULL,
-                    file_size    INTEGER NOT NULL,
-                    collected_at TEXT NOT NULL,
-                    updated_at   TEXT NOT NULL,
-                    published_at TEXT NOT NULL DEFAULT ''
-                );
-                INSERT OR REPLACE INTO sources_new
-                    (source_id, source_type, title, status,
-                     content_hash, file_size, collected_at, updated_at, published_at)
-                    SELECT file_path, source_type, title, status,
-                           content_hash, file_size, collected_at, updated_at, published_at
-                    FROM sources;
-                DROP TABLE sources;
-                ALTER TABLE sources_new RENAME TO sources;
-            """)
-            self._connection.commit()
-            applied.append("sources の source_id を file_path ベースに移行")
-            logger.info(
-                "sources テーブルから file_path カラムを削除し"
-                " source_id を file_path ベースに移行しました"
-            )
-            # 再取得（テーブル再作成後のカラム情報を反映）
-            cursor = self._connection.execute("PRAGMA table_info(sources)")
-            src_columns = {row["name"] for row in cursor.fetchall()}
-
-        # sources に meta 列を追加し、.meta ファイルからデータを充填
-        if "meta" not in src_columns:
-            self._connection.execute(
-                "ALTER TABLE sources"
-                " ADD COLUMN meta TEXT NOT NULL DEFAULT '{}'"
-            )
-            self._connection.commit()
-
-            filled = self._fill_meta_from_files(source_store_dir)
+        fixed, skipped, errors = _fix_journal_collected_at(source_store_dir)
+        if fixed > 0:
             applied.append(
-                f"sources に meta 列を追加（{filled} 件の .meta データを充填）"
+                f"journal の .meta の collected_at を JST→UTC に補正"
+                f"（{fixed} 件補正, {skipped} 件スキップ, {errors} 件エラー）"
             )
-            logger.info(
-                "sources に meta 列を追加しました（%d 件充填）", filled,
-            )
-
-        # published_at を UTC マイクロ秒 6 桁固定 ISO 8601 に正規化する。
-        # rag_list_by_date_range の範囲フィルタが文字列比較で時系列順と
-        # 一致するようにするため、書き込み入口（register_source/update_source）
-        # と既存データの書式を揃える。冪等性は「正規化後と一致する行はスキップ」
-        # で確保する（migrate を再実行しても二重書き込みは発生しない）。
-        normalized_count, skipped_count, error_count = self._normalize_published_at_column()
-        if normalized_count > 0:
+        elif errors > 0:
             applied.append(
-                f"sources の published_at を UTC マイクロ秒 6 桁固定 ISO 8601"
-                f" に正規化（{normalized_count} 件更新, {skipped_count} 件スキップ,"
-                f" {error_count} 件パース失敗）"
-            )
-        elif error_count > 0:
-            # 更新は発生しなかったがパース失敗があった場合も applied に残す
-            # （冪等な再実行で失敗が握り潰されないようにするため）
-            applied.append(
-                f"sources の published_at 正規化中にパース失敗 {error_count} 件"
-                "（詳細はログ参照、対象行は元値のまま）"
+                f"journal の .meta 補正中にエラー {errors} 件"
+                "（詳細はログ参照、対象ファイルは元値のまま）"
             )
 
         return applied
-
-    def _normalize_published_at_column(self) -> tuple[int, int, int]:
-        """sources.published_at を UTC マイクロ秒 6 桁固定 ISO 8601 に正規化する.
-
-        既に正規化済み（normalize_published_at の出力と一致）の行は UPDATE しない。
-        パース不能な値はログ警告のみで UPDATE せず、`error_count` でカウントする。
-
-        Returns:
-            (更新件数, 既に正規化済みでスキップした件数, パース失敗でスキップした件数)
-        """
-        rows = self._connection.execute(
-            "SELECT source_id, published_at FROM sources"
-            " WHERE published_at != ''"
-        ).fetchall()
-        normalized_count = 0
-        skipped_count = 0
-        error_count = 0
-        for row in rows:
-            src_id = row["source_id"]
-            raw = row["published_at"]
-            try:
-                normalized = normalize_published_at(raw)
-            except ValueError as e:
-                logger.warning(
-                    "published_at 正規化失敗: source_id=%s, value=%r, error=%s",
-                    src_id, raw, e,
-                )
-                error_count += 1
-                continue
-            if normalized == raw:
-                skipped_count += 1
-                continue
-            self._connection.execute(
-                "UPDATE sources SET published_at = ? WHERE source_id = ?",
-                (normalized, src_id),
-            )
-            normalized_count += 1
-        if normalized_count > 0:
-            self._connection.commit()
-            logger.info(
-                "published_at を正規化しました: 更新=%d, スキップ=%d, 失敗=%d",
-                normalized_count, skipped_count, error_count,
-            )
-        return normalized_count, skipped_count, error_count
-
-    def _fill_meta_from_files(
-        self, source_store_dir: Path | None,
-    ) -> int:
-        """source_store の .meta ファイルを読み取り meta カラムに充填する.
-
-        Args:
-            source_store_dir: source_store のルートディレクトリ。
-                None の場合は充填をスキップする。
-
-        Returns:
-            充填した件数
-        """
-        if source_store_dir is None:
-            logger.warning(
-                "source_store_dir が未指定のため"
-                " meta カラムのデータ充填をスキップします"
-            )
-            return 0
-
-        from rag.store.meta import meta_path_for, read_meta
-
-        rows = self._connection.execute(
-            "SELECT source_id FROM sources WHERE meta = '{}'"
-        ).fetchall()
-
-        filled = 0
-        for row in rows:
-            source_id = row["source_id"]
-            file_path = source_store_dir / source_id
-            meta_file = meta_path_for(file_path)
-            if meta_file.exists():
-                try:
-                    meta_dict = read_meta(file_path)
-                    meta_json = json.dumps(
-                        meta_dict, ensure_ascii=False, default=str,
-                    )
-                    self._connection.execute(
-                        "UPDATE sources SET meta = ? WHERE source_id = ?",
-                        (meta_json, source_id),
-                    )
-                    filled += 1
-                except Exception:
-                    logger.warning(
-                        ".meta ファイルの読み取りに失敗: %s", source_id,
-                        exc_info=True,
-                    )
-
-        self._connection.commit()
-        return filled
 
     def __enter__(self) -> MetadataDB:
         return self

@@ -152,7 +152,6 @@ source_type: web（5件 / 全80件, 新しい順）
   - 例: `date_from=2026-01-15` → `2026-01-14T15:00:00.000000+00:00`
   - 例: `date_to=2026-01-15` → `2026-01-15T14:59:59.999999+00:00`
 - 表記揺れ（マイクロ秒の有無、`Z` vs `+09:00` 等の TZ オフセット表記差）は書き込み入口で吸収されるため、辞書順比較が時系列順比較と一致する
-- 既存データは `uv run python -m rag.cli migrate` を 1 回実行することで一括正規化される（初回適用後は冪等）
 - 範囲の両端は inclusive（`>=` / `<=`）
 
 出力:
@@ -326,7 +325,7 @@ flowchart TD
 | `published_at` が UTC（`Z` 終端）のソース | 書き込み入口で UTC マイクロ秒 6 桁固定 ISO 8601 に正規化済みのため、範囲境界との文字列比較が時系列順と一致する |
 | `published_at` が空文字列のソース | 書き込み入口で `collected_at` を fallback として適用するため通常は発生しない。万一空文字列が残った場合は範囲条件で除外される |
 | `published_at` が同一の複数ソース | ソート順序は不定 |
-| 同一 `source_id` の再取り込み | `register_source` の ON CONFLICT で `published_at` は **更新されない**（初回 INSERT 時の値が保持される）。再取り込みで `published_at` を更新したい場合は `update_source` で明示的に渡すか、`uv run python -m rag.cli migrate` を再実行する |
+| 同一 `source_id` の再取り込み | `register_source` の ON CONFLICT で `published_at` は **更新されない**（初回 INSERT 時の値が保持される）。再取り込みで `published_at` を更新したい場合は `update_source` で明示的に渡すか、`.meta` を書き換えて `rebuild --mode incremental` を実行する（META_ONLY 経路で `_handle_meta_only` が `update_source` を呼ぶ） |
 | 論理削除済みソース | 一覧に含めない（`status = 'active'` のみ対象） |
 | `filters` のキー名が不正 | エラーメッセージを返す |
 

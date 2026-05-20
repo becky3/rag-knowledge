@@ -1,15 +1,21 @@
 """metadata.db マイグレーションのテスト.
 
 テスト方針:
-- migrate() を明示的に呼び出してスキーマ変更を適用
-- initialize() ではマイグレーションが走らないことを確認
-- published_at 列の追加、file_path → source_id 移行、meta 列追加を検証
+- migrate() の新ステップ「journal の .meta の collected_at JST→UTC 補正」を検証
+- 旧バグデータ（マイクロ秒なし + 数値完全一致 + +00:00 終端）のみ補正対象
+- マイクロ秒あり・数値不一致・他 TZ オフセット・非 journal は補正されない
+- 冪等: 再実行で 0 件
+- source_store_dir 未指定時は処理スキップ（applied 空）
+
+前提:
+- ヘルパー `_write_meta` は `yaml.safe_dump` で書き込み、`read_meta` 側の
+  `_normalize_timestamps` 経由で PyYAML が timestamp タグへ自動変換した datetime/date
+  を ISO 8601 文字列に再正規化する経路に依存する。テストはこの再正規化を前提に
+  collected_at の値を文字列として検証する。
 """
 
 from __future__ import annotations
 
-import json
-import sqlite3
 from pathlib import Path
 
 import yaml
@@ -17,345 +23,309 @@ import yaml
 from rag.store.metadata_db import MetadataDB
 
 
-class TestMigrateExplicit:
-    """明示的な migrate() 呼び出しのテスト."""
+def _write_meta(meta_path: Path, content: dict) -> None:
+    meta_path.parent.mkdir(parents=True, exist_ok=True)
+    meta_path.write_text(
+        yaml.safe_dump(content, allow_unicode=True, sort_keys=False),
+        encoding="utf-8",
+    )
 
-    def test_initialize_does_not_run_migration(self, tmp_path: Path) -> None:
-        """initialize() だけではマイグレーションが走らない."""
-        db_path = tmp_path / "metadata.db"
 
-        # published_at なし + file_path ありの旧スキーマで DB を手動作成
-        conn = sqlite3.connect(str(db_path))
-        conn.executescript("""\
-            CREATE TABLE sources (
-                source_id    TEXT PRIMARY KEY,
-                source_type  TEXT NOT NULL,
-                file_path    TEXT NOT NULL UNIQUE,
-                title        TEXT NOT NULL,
-                status       TEXT NOT NULL DEFAULT 'active',
-                content_hash TEXT NOT NULL,
-                file_size    INTEGER NOT NULL,
-                collected_at TEXT NOT NULL,
-                updated_at   TEXT NOT NULL
-            );
-            CREATE TABLE pipeline_history (
-                id             INTEGER PRIMARY KEY AUTOINCREMENT,
-                from_commit_id TEXT NOT NULL,
-                to_commit_id   TEXT NOT NULL,
-                processed_at   TEXT NOT NULL
-            );
-        """)
-        conn.execute(
-            "INSERT INTO sources VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
-            ("s1", "web", "web/s1.html", "Title", "active",
-             "hash", 100, "2026-01-15T10:00:00Z", "2026-01-15T10:00:00Z"),
-        )
-        conn.commit()
-        conn.close()
+def _read_collected_at(meta_path: Path) -> str:
+    return yaml.safe_load(meta_path.read_text(encoding="utf-8"))["collected_at"]
 
-        db = MetadataDB(db_path)
-        db.initialize()
 
-        # file_path カラムがまだ残っている（マイグレーション未適用）
-        cursor = db._connection.execute("PRAGMA table_info(sources)")
-        columns = {row["name"] for row in cursor.fetchall()}
-        assert "file_path" in columns
+class TestMigrateNoOp:
+    """無処理ケースのテスト."""
 
-        # source_id は旧値のまま（SQL で直接確認。get_source は旧スキーマでは動作しない）
-        row = db._connection.execute(
-            "SELECT source_id FROM sources WHERE source_id = ?", ("s1",)
-        ).fetchone()
-        assert row is not None
-
-        db.close()
-
-    def test_migrate_applies_all_migrations(self, tmp_path: Path) -> None:
-        """migrate() で全マイグレーションが適用される."""
-        db_path = tmp_path / "metadata.db"
-
-        # published_at なし + mode なし + file_path ありの最古スキーマ
-        conn = sqlite3.connect(str(db_path))
-        conn.executescript("""\
-            CREATE TABLE sources (
-                source_id    TEXT PRIMARY KEY,
-                source_type  TEXT NOT NULL,
-                file_path    TEXT NOT NULL UNIQUE,
-                title        TEXT NOT NULL,
-                status       TEXT NOT NULL DEFAULT 'active',
-                content_hash TEXT NOT NULL,
-                file_size    INTEGER NOT NULL,
-                collected_at TEXT NOT NULL,
-                updated_at   TEXT NOT NULL
-            );
-            CREATE TABLE pipeline_history (
-                id             INTEGER PRIMARY KEY AUTOINCREMENT,
-                from_commit_id TEXT NOT NULL,
-                to_commit_id   TEXT NOT NULL,
-                processed_at   TEXT NOT NULL
-            );
-        """)
-        conn.execute(
-            "INSERT INTO sources VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
-            ("s1", "web", "web/s1.html", "Title", "active",
-             "hash", 100, "2026-01-15T10:00:00Z", "2026-01-15T10:00:00Z"),
-        )
-        conn.commit()
-        conn.close()
-
-        db = MetadataDB(db_path)
+    def test_migrate_without_source_store_dir_returns_empty(
+        self, tmp_path: Path,
+    ) -> None:
+        """source_store_dir なしの場合は applied 空."""
+        db = MetadataDB(tmp_path / "metadata.db")
         db.initialize()
         applied = db.migrate()
-
-        # 7件のマイグレーションが適用される
-        # (mode + filter_source_type + filter_path + published_at 列追加 + file_path 移行 + meta
-        #  + published_at の UTC 正規化)
-        assert len(applied) == 7
-
-        # file_path カラムが削除されている
-        cursor = db._connection.execute("PRAGMA table_info(sources)")
-        columns = {row["name"] for row in cursor.fetchall()}
-        assert "file_path" not in columns
-        assert "published_at" in columns
-
-        # source_id が file_path ベースに移行されている
-        record = db.get_source("web/s1.html")
-        assert record is not None
-        # published_at が UTC マイクロ秒 6 桁固定 ISO 8601 に正規化されている
-        assert record.published_at == "2026-01-15T10:00:00.000000+00:00"
-
-        # pipeline_history に mode / filter_source_type / filter_path 列が追加されている
-        cursor = db._connection.execute("PRAGMA table_info(pipeline_history)")
-        ph_columns = {row["name"] for row in cursor.fetchall()}
-        assert "mode" in ph_columns
-        assert "filter_source_type" in ph_columns
-        assert "filter_path" in ph_columns
-
+        assert applied == []
         db.close()
 
-    def test_migrate_is_idempotent(self, tmp_path: Path) -> None:
-        """migrate() を2回呼んでも2回目は何もしない."""
-        db_path = tmp_path / "metadata.db"
-
-        conn = sqlite3.connect(str(db_path))
-        conn.executescript("""\
-            CREATE TABLE sources (
-                source_id    TEXT PRIMARY KEY,
-                source_type  TEXT NOT NULL,
-                file_path    TEXT NOT NULL UNIQUE,
-                title        TEXT NOT NULL,
-                status       TEXT NOT NULL DEFAULT 'active',
-                content_hash TEXT NOT NULL,
-                file_size    INTEGER NOT NULL,
-                collected_at TEXT NOT NULL,
-                updated_at   TEXT NOT NULL
-            );
-            CREATE TABLE pipeline_history (
-                id             INTEGER PRIMARY KEY AUTOINCREMENT,
-                from_commit_id TEXT NOT NULL,
-                to_commit_id   TEXT NOT NULL,
-                processed_at   TEXT NOT NULL
-            );
-        """)
-        conn.execute(
-            "INSERT INTO sources VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
-            ("s1", "web", "web/s1.html", "Title", "active",
-             "hash", 100, "2026-01-15T10:00:00Z", "2026-01-15T10:00:00Z"),
-        )
-        conn.commit()
-        conn.close()
-
-        db = MetadataDB(db_path)
-        db.initialize()
-
-        first = db.migrate()
-        assert len(first) == 7
-
-        second = db.migrate()
-        assert len(second) == 0
-
-        db.close()
-
-    def test_migrate_on_latest_schema(self, tmp_path: Path) -> None:
-        """最新スキーマの DB に対して migrate() は何もしない."""
-        db_path = tmp_path / "metadata.db"
-
-        db = MetadataDB(db_path)
-        db.initialize()
-
-        applied = db.migrate()
-        assert len(applied) == 0
-
-        db.close()
-
-    def test_migrate_multiple_records(self, tmp_path: Path) -> None:
-        """複数レコードの published_at が collected_at で埋まる."""
-        db_path = tmp_path / "metadata.db"
-
-        conn = sqlite3.connect(str(db_path))
-        conn.executescript("""\
-            CREATE TABLE sources (
-                source_id    TEXT PRIMARY KEY,
-                source_type  TEXT NOT NULL,
-                file_path    TEXT NOT NULL UNIQUE,
-                title        TEXT NOT NULL,
-                status       TEXT NOT NULL DEFAULT 'active',
-                content_hash TEXT NOT NULL,
-                file_size    INTEGER NOT NULL,
-                collected_at TEXT NOT NULL,
-                updated_at   TEXT NOT NULL
-            );
-            CREATE TABLE pipeline_history (
-                id             INTEGER PRIMARY KEY AUTOINCREMENT,
-                from_commit_id TEXT NOT NULL,
-                to_commit_id   TEXT NOT NULL,
-                processed_at   TEXT NOT NULL,
-                mode           TEXT NOT NULL DEFAULT 'incremental'
-            );
-        """)
-        for i in range(3):
-            conn.execute(
-                "INSERT INTO sources VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
-                (f"s{i}", "web", f"web/s{i}.html", f"Title {i}", "active",
-                 "hash", 100, f"2026-01-{i+1:02d}T00:00:00Z",
-                 f"2026-01-{i+1:02d}T00:00:00Z"),
-            )
-        conn.commit()
-        conn.close()
-
-        db = MetadataDB(db_path)
-        db.initialize()
-        applied = db.migrate()
-
-        # filter_source_type + filter_path + published_at 列追加 + file_path 移行 + meta
-        # + published_at UTC 正規化 = 6 件
-        assert len(applied) == 6
-
-        for i in range(3):
-            record = db.get_source(f"web/s{i}.html")
-            assert record is not None
-            # published_at が UTC マイクロ秒 6 桁固定 ISO 8601 に正規化されている
-            assert record.published_at == f"2026-01-{i+1:02d}T00:00:00.000000+00:00"
-
-        db.close()
-
-
-class TestMetaMigration:
-    """meta カラムマイグレーションのテスト."""
-
-    def _create_pre_meta_db(self, db_path: Path) -> None:
-        """meta カラムなしの DB を作成する."""
-        conn = sqlite3.connect(str(db_path))
-        conn.executescript("""\
-            CREATE TABLE sources (
-                source_id    TEXT PRIMARY KEY,
-                source_type  TEXT NOT NULL,
-                title        TEXT NOT NULL,
-                status       TEXT NOT NULL DEFAULT 'active',
-                content_hash TEXT NOT NULL,
-                file_size    INTEGER NOT NULL,
-                collected_at TEXT NOT NULL,
-                updated_at   TEXT NOT NULL,
-                published_at TEXT NOT NULL DEFAULT ''
-            );
-            CREATE TABLE pipeline_history (
-                id             INTEGER PRIMARY KEY AUTOINCREMENT,
-                from_commit_id TEXT NOT NULL,
-                to_commit_id   TEXT NOT NULL,
-                processed_at   TEXT NOT NULL,
-                mode           TEXT NOT NULL DEFAULT 'incremental'
-            );
-        """)
-        conn.close()
-
-    def test_migrate_adds_meta_column(self, tmp_path: Path) -> None:
-        """migrate() で meta カラムが追加される."""
-        db_path = tmp_path / "metadata.db"
-        self._create_pre_meta_db(db_path)
-
-        db = MetadataDB(db_path)
-        db.initialize()
-        applied = db.migrate()
-
-        # filter_source_type + filter_path + meta の 3 件
-        assert len(applied) == 3
-        assert any("meta" in m for m in applied)
-
-        cursor = db._connection.execute("PRAGMA table_info(sources)")
-        columns = {row["name"] for row in cursor.fetchall()}
-        assert "meta" in columns
-
-        db.close()
-
-    def test_migrate_fills_meta_from_files(self, tmp_path: Path) -> None:
-        """migrate() が .meta ファイルからデータを充填する."""
+    def test_migrate_with_no_journal_dir_returns_empty(
+        self, tmp_path: Path,
+    ) -> None:
+        """journal ディレクトリが存在しない場合は applied 空."""
         source_store = tmp_path / "source_store"
         source_store.mkdir()
-        db_path = source_store / "metadata.db"
-        self._create_pre_meta_db(db_path)
+        db = MetadataDB(source_store / "metadata.db")
+        db.initialize()
+        applied = db.migrate(source_store_dir=source_store)
+        assert applied == []
+        db.close()
 
-        # ソースレコードを事前登録
-        conn = sqlite3.connect(str(db_path))
-        conn.execute(
-            "INSERT INTO sources VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
-            ("journal/repo-a/entry.md", "journal", "Entry", "active",
-             "hash", 100, "2026-01-01T00:00:00Z", "2026-01-01T00:00:00Z",
-             "2026-01-01T00:00:00Z"),
+    def test_migrate_on_clean_journal_returns_empty(
+        self, tmp_path: Path,
+    ) -> None:
+        """補正対象がない（全て正常データ）の場合は applied 空."""
+        source_store = tmp_path / "source_store"
+        journal = source_store / "journal" / "repo-a"
+        journal.mkdir(parents=True)
+        (journal / "20260101-000000-entry.md").write_text("content")
+        # マイクロ秒あり = 正規データ → 補正対象外
+        _write_meta(
+            journal / "20260101-000000-entry.md.meta",
+            {
+                "title": "Entry",
+                "collected_at": "2026-01-01T00:00:00.123456+00:00",
+                "repository": "repo-a",
+            },
         )
-        conn.commit()
-        conn.close()
 
-        # .meta ファイルを作成
-        journal_dir = source_store / "journal" / "repo-a"
-        journal_dir.mkdir(parents=True)
-        (journal_dir / "entry.md").write_text("content")
-        meta_content = {
-            "title": "Entry",
-            "repository": "repo-a",
-            "collected_at": "2026-01-01T00:00:00Z",
-        }
-        with open(journal_dir / "entry.md.meta", "w", encoding="utf-8") as f:
-            yaml.safe_dump(meta_content, f)
+        db = MetadataDB(source_store / "metadata.db")
+        db.initialize()
+        applied = db.migrate(source_store_dir=source_store)
+        assert applied == []
+        db.close()
 
-        db = MetadataDB(db_path)
+
+class TestMigrateJSTtoUTC:
+    """JST→UTC 補正の本処理テスト."""
+
+    def test_buggy_meta_is_fixed(self, tmp_path: Path) -> None:
+        """検出条件マッチの .meta は JST→UTC に補正される."""
+        source_store = tmp_path / "source_store"
+        journal = source_store / "journal" / "repo-a"
+        journal.mkdir(parents=True)
+        (journal / "20260209-160629-retro.md").write_text("content")
+        # JST 16:06:29 を UTC タグで保存（旧バグ）
+        _write_meta(
+            journal / "20260209-160629-retro.md.meta",
+            {
+                "title": "retro",
+                "collected_at": "2026-02-09T16:06:29+00:00",
+                "repository": "repo-a",
+            },
+        )
+
+        db = MetadataDB(source_store / "metadata.db")
         db.initialize()
         applied = db.migrate(source_store_dir=source_store)
 
-        # filter_source_type + filter_path + meta + published_at UTC 正規化 の 4 件
-        assert len(applied) == 4
-        assert any("1 件" in m for m in applied)
+        assert len(applied) == 1
+        assert "1 件補正" in applied[0]
 
-        record = db.get_source("journal/repo-a/entry.md")
-        assert record is not None
-        meta = json.loads(record.meta)
-        assert meta["repository"] == "repo-a"
-
+        # JST 16:06:29 → UTC 07:06:29
+        fixed = _read_collected_at(journal / "20260209-160629-retro.md.meta")
+        assert fixed == "2026-02-09T07:06:29+00:00"
         db.close()
 
-    def test_migrate_without_source_store_dir(self, tmp_path: Path) -> None:
-        """source_store_dir なしでもカラム追加は行われる（データ充填はスキップ）."""
-        db_path = tmp_path / "metadata.db"
-        self._create_pre_meta_db(db_path)
-
-        conn = sqlite3.connect(str(db_path))
-        conn.execute(
-            "INSERT INTO sources VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
-            ("local/test.md", "local", "Test", "active",
-             "hash", 10, "2026-01-01T00:00:00Z", "2026-01-01T00:00:00Z",
-             "2026-01-01T00:00:00Z"),
+    def test_with_microseconds_is_not_fixed(self, tmp_path: Path) -> None:
+        """マイクロ秒ありは正規データ扱いで補正されない."""
+        source_store = tmp_path / "source_store"
+        journal = source_store / "journal" / "repo-a"
+        journal.mkdir(parents=True)
+        (journal / "20260513-202146-entry.md").write_text("content")
+        _write_meta(
+            journal / "20260513-202146-entry.md.meta",
+            {
+                "title": "entry",
+                "collected_at": "2026-05-13T11:22:58.466305+00:00",
+                "repository": "repo-a",
+            },
         )
-        conn.commit()
-        conn.close()
 
-        db = MetadataDB(db_path)
+        db = MetadataDB(source_store / "metadata.db")
         db.initialize()
-        applied = db.migrate()
+        applied = db.migrate(source_store_dir=source_store)
 
-        # filter_source_type + filter_path + meta + published_at UTC 正規化 の 4 件
-        assert len(applied) == 4
-        assert any("0 件" in m for m in applied)
+        assert applied == []
+        original = _read_collected_at(journal / "20260513-202146-entry.md.meta")
+        assert original == "2026-05-13T11:22:58.466305+00:00"
+        db.close()
 
-        record = db.get_source("local/test.md")
-        assert record is not None
-        assert record.meta == "{}"
+    def test_numeric_mismatch_is_not_fixed(self, tmp_path: Path) -> None:
+        """ファイル名と collected_at の数値が一致しないものは補正されない."""
+        source_store = tmp_path / "source_store"
+        journal = source_store / "journal" / "repo-a"
+        journal.mkdir(parents=True)
+        (journal / "20260219-115900session2-late-import.md").write_text("x")
+        _write_meta(
+            journal / "20260219-115900session2-late-import.md.meta",
+            {
+                "title": "late",
+                "collected_at": "2026-04-15T22:36:42+00:00",
+                "repository": "repo-a",
+            },
+        )
 
+        db = MetadataDB(source_store / "metadata.db")
+        db.initialize()
+        applied = db.migrate(source_store_dir=source_store)
+
+        assert applied == []
+        db.close()
+
+    def test_non_utc_offset_is_not_fixed(self, tmp_path: Path) -> None:
+        """+00:00 以外の TZ オフセットは補正されない."""
+        source_store = tmp_path / "source_store"
+        journal = source_store / "journal" / "repo-a"
+        journal.mkdir(parents=True)
+        (journal / "20260209-160629-entry.md").write_text("x")
+        # 数値一致だが既に JST タグなら補正されない（既に正しい）
+        _write_meta(
+            journal / "20260209-160629-entry.md.meta",
+            {
+                "title": "e",
+                "collected_at": "2026-02-09T16:06:29+09:00",
+                "repository": "repo-a",
+            },
+        )
+
+        db = MetadataDB(source_store / "metadata.db")
+        db.initialize()
+        applied = db.migrate(source_store_dir=source_store)
+
+        assert applied == []
+        db.close()
+
+    def test_migrate_is_idempotent(self, tmp_path: Path) -> None:
+        """補正後に再実行すると 0 件（冪等性）."""
+        source_store = tmp_path / "source_store"
+        journal = source_store / "journal" / "repo-a"
+        journal.mkdir(parents=True)
+        (journal / "20260101-000000-entry.md").write_text("x")
+        _write_meta(
+            journal / "20260101-000000-entry.md.meta",
+            {
+                "title": "e",
+                "collected_at": "2026-01-01T00:00:00+00:00",
+                "repository": "repo-a",
+            },
+        )
+
+        db = MetadataDB(source_store / "metadata.db")
+        db.initialize()
+
+        first = db.migrate(source_store_dir=source_store)
+        assert len(first) == 1
+
+        second = db.migrate(source_store_dir=source_store)
+        assert second == []
+        db.close()
+
+    def test_non_journal_dir_is_not_touched(self, tmp_path: Path) -> None:
+        """非 journal ディレクトリの .meta は走査対象外で補正されない."""
+        source_store = tmp_path / "source_store"
+        # journal ディレクトリには補正対象を 1 件配置
+        journal = source_store / "journal" / "repo-a"
+        journal.mkdir(parents=True)
+        (journal / "20260101-000000-entry.md").write_text("x")
+        _write_meta(
+            journal / "20260101-000000-entry.md.meta",
+            {
+                "title": "e",
+                "collected_at": "2026-01-01T00:00:00+00:00",
+                "repository": "repo-a",
+            },
+        )
+        # web ディレクトリには検出条件にマッチする「ように見える」値を配置（補正されないこと）
+        web = source_store / "web" / "example.com"
+        web.mkdir(parents=True)
+        (web / "20260101-000000.html").write_text("<html/>")
+        _write_meta(
+            web / "20260101-000000.html.meta",
+            {
+                "title": "page",
+                "collected_at": "2026-01-01T00:00:00+00:00",
+            },
+        )
+
+        db = MetadataDB(source_store / "metadata.db")
+        db.initialize()
+        applied = db.migrate(source_store_dir=source_store)
+
+        assert len(applied) == 1
+        assert "1 件補正" in applied[0]
+        # journal 配下は補正される
+        assert _read_collected_at(
+            journal / "20260101-000000-entry.md.meta"
+        ) == "2025-12-31T15:00:00+00:00"
+        # web 配下は不変
+        assert _read_collected_at(
+            web / "20260101-000000.html.meta"
+        ) == "2026-01-01T00:00:00+00:00"
+        db.close()
+
+    def test_invalid_date_value_counts_as_error(self, tmp_path: Path) -> None:
+        """ファイル名は数値形式だが datetime としてパース不能な値はエラーに計上される."""
+        source_store = tmp_path / "source_store"
+        journal = source_store / "journal" / "repo-a"
+        journal.mkdir(parents=True)
+        # 2026 年は閏年ではないが 02-29 のファイル名で配置
+        (journal / "20260229-000000-leap.md").write_text("x")
+        _write_meta(
+            journal / "20260229-000000-leap.md.meta",
+            {
+                "title": "leap",
+                # 検出条件を満たすが datetime としては不正な値（2026-02-29 は存在しない）
+                "collected_at": "2026-02-29T00:00:00+00:00",
+                "repository": "repo-a",
+            },
+        )
+
+        db = MetadataDB(source_store / "metadata.db")
+        db.initialize()
+        applied = db.migrate(source_store_dir=source_store)
+
+        # 補正 0 + エラー 1 → applied にエラーメッセージのみ
+        assert len(applied) == 1
+        assert "エラー 1 件" in applied[0]
+        # 元値は保持される
+        assert _read_collected_at(
+            journal / "20260229-000000-leap.md.meta"
+        ) == "2026-02-29T00:00:00+00:00"
+        db.close()
+
+    def test_multiple_files_mixed(self, tmp_path: Path) -> None:
+        """複数ファイルの混在（補正対象 + 対象外）が正しく分類される."""
+        source_store = tmp_path / "source_store"
+        journal = source_store / "journal" / "repo-a"
+        journal.mkdir(parents=True)
+
+        # 補正対象 2 件
+        for stem, ca in [
+            ("20260101-000000-a", "2026-01-01T00:00:00+00:00"),
+            ("20260202-120000-b", "2026-02-02T12:00:00+00:00"),
+        ]:
+            (journal / f"{stem}.md").write_text("x")
+            _write_meta(
+                journal / f"{stem}.md.meta",
+                {"title": stem, "collected_at": ca, "repository": "repo-a"},
+            )
+        # 対象外 1 件（マイクロ秒あり）
+        (journal / "20260303-090000-c.md").write_text("x")
+        _write_meta(
+            journal / "20260303-090000-c.md.meta",
+            {
+                "title": "c",
+                "collected_at": "2026-03-03T00:00:00.000000+00:00",
+                "repository": "repo-a",
+            },
+        )
+
+        db = MetadataDB(source_store / "metadata.db")
+        db.initialize()
+        applied = db.migrate(source_store_dir=source_store)
+
+        assert len(applied) == 1
+        assert "2 件補正" in applied[0]
+
+        # 補正対象は JST→UTC 変換
+        assert _read_collected_at(
+            journal / "20260101-000000-a.md.meta"
+        ) == "2025-12-31T15:00:00+00:00"
+        assert _read_collected_at(
+            journal / "20260202-120000-b.md.meta"
+        ) == "2026-02-02T03:00:00+00:00"
+        # 対象外は不変
+        assert _read_collected_at(
+            journal / "20260303-090000-c.md.meta"
+        ) == "2026-03-03T00:00:00.000000+00:00"
         db.close()
