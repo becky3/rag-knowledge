@@ -20,6 +20,7 @@ from pathlib import Path
 
 import yaml
 
+from rag.store.meta import read_meta
 from rag.store.metadata_db import MetadataDB
 
 
@@ -32,7 +33,10 @@ def _write_meta(meta_path: Path, content: dict) -> None:
 
 
 def _read_collected_at(meta_path: Path) -> str:
-    return yaml.safe_load(meta_path.read_text(encoding="utf-8"))["collected_at"]
+    # 本番経路と同じ `read_meta` を使い、PyYAML の timestamp 自動変換を
+    # `_normalize_timestamps` で ISO 8601 文字列に再正規化した値で検証する
+    data_path = meta_path.with_name(meta_path.name[: -len(".meta")])
+    return str(read_meta(data_path)["collected_at"])
 
 
 class TestMigrateNoOp:
