@@ -135,6 +135,23 @@ entry_id の決定権は本インジェスターに集約する（[content-uploa
 - 入力: `dir_path=/path/to/journal/`, `repository="rag-knowledge"`
 - `20260323-143000-session-summary.md` → `source_store/journal/rag-knowledge/20260323-143000-session-summary.md`
 
+### ファイル名の `YYYYMMDD-HHMMSS` プレフィックスの解釈
+
+外部由来（手動命名）のジャーナルファイル名に含まれる `YYYYMMDD-HHMMSS` プレフィックスは **JST 時刻として解釈** し、`collected_at` に保存する際は UTC に変換した ISO 8601 文字列とする。
+
+- 入力: ファイル名 `20260209-160629-retro.md`
+- 解釈: JST 2026-02-09 16:06:29 → UTC 2026-02-09 07:06:29
+- 保存: `collected_at: "2026-02-09T07:06:29+00:00"`
+- 境界例: ファイル名 `20260520-090000-noon.md` は JST 09:00:00 ちょうどとして解釈され、UTC 2026-05-20 00:00:00 に変換される（日付境界をまたぐが特別扱いなし）
+
+この JST→UTC 変換は、検索（`rag_list_by_date_range` 等）の JST 範囲フィルタが
+`published_at`（UTC マイクロ秒正規化済み）を JST に再換算する整合性を担保する。
+
+`migrate` CLI コマンドは、既存の `.meta` ファイルのうち JST 値が UTC タグ付けで
+保存されている行（数値完全一致 + マイクロ秒なし + `+00:00` 終端）を
+JST→UTC に再計算する補正処理を実行する。検出条件は `add-journal` 経路の
+正規データ（`datetime.now(UTC).isoformat()` 由来、マイクロ秒を含む）と構造的に区別される。
+
 ### .meta サイドカーファイル
 
 #### フィールド定義

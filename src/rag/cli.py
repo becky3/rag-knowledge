@@ -736,7 +736,10 @@ def _build_parser() -> "_JsonAwareArgumentParser":
     # migrate サブコマンド
     subparsers.add_parser(
         "migrate",
-        help="metadata.db のスキーマをマイグレーションする",
+        help=(
+            "source_store のデータ補正を実行する"
+            "（現在: journal の collected_at JST→UTC, Issue #795）"
+        ),
     )
 
     # stats サブコマンド

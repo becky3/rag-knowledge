@@ -80,7 +80,11 @@ metadata.db、converted_store、検索インデックスは全て source_store �
 - SQLite WAL モードで運用する
 - metadata.db が破損した場合、source_store のファイルと `.meta` からの再構築が可能であること
 - バックアップ時は metadata.db の WAL をフラッシュするため、事前に `PRAGMA wal_checkpoint(TRUNCATE)` を実行すること
-- スキーマ変更（マイグレーション）は CLI `migrate` コマンドで明示的に実行する。`initialize()` はテーブル作成（`CREATE TABLE IF NOT EXISTS`）のみ行い、スキーマ変更は行わない
+- スキーマは `initialize()` のテーブル作成（`CREATE TABLE IF NOT EXISTS`）で最新形に揃える。旧スキーマからの移行コードは保持しない（単独運用前提・マイグレーション履歴の保全より最新スキーマへの追従を優先する運用方針）
+- CLI `migrate` コマンドは source_store の `.meta` データ補正に使用する。
+  `.meta` を書き換えた後、後続の `rebuild --mode incremental` が変更を検知して DB に反映する
+  （migrate 自体は DB を直接更新しない）。
+  現在の補正対象は journal の `collected_at` JST→UTC 変換のみ（Issue #795）
 
 本コンポーネントは外部 API 通信を行わないため、想定プロファイル・安全制約セクションは省略する。
 

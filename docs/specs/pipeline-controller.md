@@ -401,7 +401,7 @@ sequenceDiagram
 | コンバーターが予期しない例外を発生させたファイル | 該当ファイルのインデックス追加をスキップし、処理結果サマリの `errors` に `PipelineErrorEntry`（`{path, size_bytes, message, phase}`）として記録する。`ConversionFailedError`（JSON パースエラー等、ファイルが壊れている可能性がある失敗）は同じ `errors` 経路で捕捉するが、スタックトレース不要の想定される業務的失敗として `logger.error` で記録する（予期しない `Exception` は `logger.exception` でスタックトレース付き）。例外メッセージには `path` を含めず、`PipelineErrorEntry.path` フィールドと重複させない |
 | 大量のファイルが一度に変更された場合 | 全件を順次処理する。バッチサイズ制限は設けない |
 | source_store の git リポジトリが未初期化 | パイプライン初回実行時に `git init` を自動実行する |
-| .meta ファイルのみが変更された場合 | 拡張子 `.meta` で .meta ファイルを判定する。metadata.db のメタデータを更新する。コンバーターの再処理は行わない（データ本体に変更がないため）。インデックス側にメタデータ（title 等）を保持している場合は、インデクサーにメタデータ更新を指示する（チャンクの再生成は不要、メタデータのみ upsert） |
+| .meta ファイルのみが変更された場合 | 拡張子 `.meta` で .meta ファイルを判定する。metadata.db のメタデータ（`title` / `collected_at` / `published_at` / `meta` JSON / `updated_at`）を `.meta` の値で更新する。`published_at` は `resolve_published_at` で source_type ごとの優先順位に従って導出する。コンバーターの再処理は行わない（データ本体に変更がないため）。インデックス側にメタデータ（title 等）を保持している場合は、インデクサーにメタデータ更新を指示する（チャンクの再生成は不要、メタデータのみ upsert） |
 | metadata.db の `status` が `deleted` のファイルが git diff に含まれる場合 | ファイルの変更種別に応じた処理を行う。`deleted` ステータスのファイルはインデックスに追加しない |
 | 再構築操作（全再構築・コンバートのみ・インデックスのみ）時に source_store に未コミットの変更がある場合 | エラーとして再構築を拒否する |
 | 差分更新時に source_store に未コミットの変更がある場合 | 自動コミットを実行してから差分更新を続行する |

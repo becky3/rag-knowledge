@@ -466,6 +466,12 @@ class TestRunIncremental:
         assert converter.converted == []
         # インデクサーはメタデータ更新のみ
         assert "web/example.com/page.html" in indexer.upserted
+        # DB の collected_at / published_at が .meta の値で更新される（Issue #795）
+        record = ctrl.db.get_source("web/example.com/page.html")
+        assert record is not None
+        assert record.collected_at == "2026-01-01T00:00:00+00:00"
+        # published_at は normalize_published_at でマイクロ秒 6 桁固定 UTC に正規化される
+        assert record.published_at == "2026-01-01T00:00:00.000000+00:00"
 
     async def test_error_skips_file_no_history(
         self,
