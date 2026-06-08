@@ -311,7 +311,8 @@ HTTP モード（`/mcp` パスが必要）:
 | `ingest-youtube-playlist` | YouTube プレイリストを一括取り込み |
 | `add-document` | ドキュメントファイルを取り込み |
 | `crawl-documents` | ディレクトリ内ドキュメントを一括取り込み |
-| `site-ingest` | Scrapy でサイトを一括取り込み（大規模サイト向け） |
+| `site-crawl` | Scrapy で単一 URL 起点にサイトをクロール（リンク辿りあり、大規模サイト向け） |
+| `site-ingest` | 指定 URL の Web ページを取得（リンク辿りなし、複数 URL 可） |
 | `update-aozora-catalog` | 青空文庫カタログを更新 |
 | `search-aozora` | 青空文庫カタログを検索 |
 | `ingest-aozora` | 青空文庫の作品を取り込み |
@@ -359,6 +360,20 @@ uv run python -m rag.cli rebuild --mode incremental
 >   （従来: 0 件配置の `IngestResult` を返す → 変更後: `ValueError`「人物 ID '...' がカタログに見つかりません」を送出）
 > - `add_work` 側（`rag_add_aozora` / `ingest-aozora`）の `book_id` 不一致時挙動と対称化。
 >   `person_id` がカタログに存在し取り込み可能作品が 0 件の場合（全作品が著作権あり等）は従来通り 0 件 `IngestResult` を返す
+>
+> **破壊的変更（Issue #797）**:
+>
+> - `site-ingest` の **入口分離**: クロール（リンク辿り）専用に CLI `site-crawl` / MCP `rag_site_crawl` を新設し、
+>   既存の `site-ingest` / `rag_site_ingest` は **指定 URL 取得（リンク辿りなし）** に再定義
+>   （単一 URL 投入で意図しないサイト全体クロールが発動する巻き込みバグの構造的解消）
+> - CLI: 旧 `--force` を `--restart` にリネーム（JOBDIR レジュームを使わず最初から再実行する意味を明示）
+> - CLI: 旧 `site-ingest <単一URL> --max-pages N` は `site-crawl <URL> --max-pages N` に書き換え必要。
+>   `--url-pattern` / `--max-pages` / `--restart`（旧 `--force`）は `site-ingest` 側から消滅し `site-crawl` 専用に
+> - MCP: 旧 `rag_site_ingest(url=..., url_pattern=..., max_pages=..., force=...)` 単一 URL クロール呼び出しは廃止。
+>   `rag_site_crawl(url=..., url_pattern=..., max_pages=..., restart=...)` に置換（`force` → `restart` も同時リネーム）
+> - MCP: `rag_site_ingest` は `urls: list[str]` のみを受け付け、`url` / クロール固有パラメータを **持たない**
+> - BlueSky 投稿内 URL の自動取り込みは取得入口（`WebDelegator.fetch_urls`）に固定され、
+>   投稿内 web URL が 1 本だけの場合でもクロール巻き込みは発生しない
 
 ## Journal CLI
 

@@ -6,7 +6,7 @@
 - subprocess ラッパーのモックテスト（Scrapy プロセスの起動・終了・エラーハンドリング）
 - _build_spider_script の設定値埋め込み（JSON ファイル経由）
 - ディレクトリ構造の準備（crawl_dir, html_dir, jobdir）
-- --force オプションによるクロールディレクトリ削除
+- --restart オプションによるクロールディレクトリ削除（旧 --force、Issue #797 でリネーム）
 - クロールキーによる JOBDIR 分離
 """
 
@@ -355,8 +355,8 @@ class TestRealScrapyRunnerRun:
         assert result.output_dir.parent.parent.name == "docs.example.com"
 
     @pytest.mark.asyncio()
-    async def test_force_deletes_crawl_dir(self, tmp_path: Path) -> None:
-        """--force でクロールディレクトリが削除されること."""
+    async def test_restart_deletes_crawl_dir(self, tmp_path: Path) -> None:
+        """--restart でクロールディレクトリが削除されること（旧 --force）."""
         runner = RealScrapyRunner(**make_scrapy_runner_args(temp_dir=tmp_path))
 
         crawl_dir = _expected_crawl_dir(tmp_path, "https://example.com")
@@ -378,7 +378,7 @@ class TestRealScrapyRunnerRun:
         mock_process.stderr = _async_lines_iter([])
 
         with patch("asyncio.create_subprocess_exec", return_value=mock_process):
-            await runner.run(start_url="https://example.com", force=True)
+            await runner.run(start_url="https://example.com", restart=True)
 
         # 旧ファイルが全て削除されている（run 内で mkdir されるのでディレクトリ自体は再作成される）
         assert not (jobdir / "requests.seen").exists()
@@ -705,8 +705,8 @@ class TestJobdirIsolation:
         assert result_1.jsonl_path == result_2.jsonl_path
 
     @pytest.mark.asyncio()
-    async def test_force_does_not_affect_other_crawl(self, tmp_path: Path) -> None:
-        """--force は対象クロールのディレクトリのみ削除し、他のクロールに影響しない."""
+    async def test_restart_does_not_affect_other_crawl(self, tmp_path: Path) -> None:
+        """--restart は対象クロールのディレクトリのみ削除し、他のクロールに影響しない."""
         runner = RealScrapyRunner(**make_scrapy_runner_args(temp_dir=tmp_path))
 
         mock_process = AsyncMock()
@@ -723,13 +723,86 @@ class TestJobdirIsolation:
         marker_file = result_a.output_dir / "marker.html"
         marker_file.write_text("data", encoding="utf-8")
 
-        # 2回目のクロール（b.html）を --force で実行
+        # 2回目のクロール（b.html）を --restart で実行
         with patch("asyncio.create_subprocess_exec", return_value=mock_process):
             await runner.run(
                 start_url="https://example.com/b.html",
                 url_pattern="b",
-                force=True,
+                restart=True,
             )
 
         # a のマーカーファイルは影響を受けていない
         assert marker_file.exists()
+
+
+# --- 入口分離（Issue #797 回帰防止）テスト ---
+
+
+class TestEntryPointSeparation:
+    """`start_url` / `start_urls` の入口分離を検証する（Issue #797）.
+
+    旧 runner は ``start_urls`` が 1 件のときクロールモードに自動切替する
+    件数ヒューリスティックを持っており、BlueSky 経路で「投稿内 web URL が
+    たまたま 1 本」のときサイト全体クロールに化ける巻き込みバグが発生していた。
+    本テストはこの動作が再発しないことを保証する。
+    """
+
+    @pytest.mark.asyncio()
+    async def test_start_urls_single_url_does_not_trigger_crawl(
+        self, tmp_path: Path,
+    ) -> None:
+        """start_urls に 1 件だけ渡しても no_follow=True（リンク辿りなし）になること."""
+        runner = RealScrapyRunner(**make_scrapy_runner_args(temp_dir=tmp_path))
+
+        mock_process = AsyncMock()
+        mock_process.wait.return_value = 0
+        mock_process.stderr = _async_lines_iter([])
+
+        with patch("asyncio.create_subprocess_exec", return_value=mock_process):
+            result = await runner.run(start_urls=["https://example.com/page"])
+
+        params_path = result.output_dir.parent / "spider_params.json"
+        params = json.loads(params_path.read_text(encoding="utf-8"))
+        # 取得モード: no_follow=True、url_pattern は無効化、max_pages は無制限（0）
+        assert params["no_follow"] is True
+        assert params["url_pattern"] == ""
+        assert params["max_pages"] == 0
+        # ドメインは _multi_（複数 URL 経路の共通配置）
+        assert result.output_dir.parent.parent.name == "_multi_"
+
+    @pytest.mark.asyncio()
+    async def test_start_url_triggers_crawl_mode(self, tmp_path: Path) -> None:
+        """start_url を明示指定したときは no_follow=False（クロール）になること."""
+        runner = RealScrapyRunner(**make_scrapy_runner_args(temp_dir=tmp_path))
+
+        mock_process = AsyncMock()
+        mock_process.wait.return_value = 0
+        mock_process.stderr = _async_lines_iter([])
+
+        with patch("asyncio.create_subprocess_exec", return_value=mock_process):
+            result = await runner.run(start_url="https://example.com/docs/")
+
+        params_path = result.output_dir.parent / "spider_params.json"
+        params = json.loads(params_path.read_text(encoding="utf-8"))
+        assert params["no_follow"] is False
+        # ドメインは実ホスト
+        assert result.output_dir.parent.parent.name == "example.com"
+
+    @pytest.mark.asyncio()
+    async def test_start_url_and_start_urls_both_raises(self, tmp_path: Path) -> None:
+        """start_url と start_urls の同時指定は ValueError を送出する."""
+        runner = RealScrapyRunner(**make_scrapy_runner_args(temp_dir=tmp_path))
+        with pytest.raises(ValueError, match="排他"):
+            await runner.run(
+                start_url="https://example.com/",
+                start_urls=["https://example.com/p1"],
+            )
+
+    @pytest.mark.asyncio()
+    async def test_neither_start_url_nor_start_urls_raises(
+        self, tmp_path: Path,
+    ) -> None:
+        """start_url / start_urls 両方未指定は ValueError を送出する."""
+        runner = RealScrapyRunner(**make_scrapy_runner_args(temp_dir=tmp_path))
+        with pytest.raises(ValueError, match="必須"):
+            await runner.run()

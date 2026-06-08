@@ -72,28 +72,61 @@ class WebIngester(BaseIngester):
         super().__init__(source_store)
         self._scrapy_runner = scrapy_runner
 
-    async def crawl_urls(
+    async def crawl_url(
         self,
-        urls: list[str],
+        url: str,
         *,
         url_pattern: str | None = None,
         max_pages: int | None = None,
-        force: bool = False,
+        restart: bool = False,
     ) -> SiteIngestExecution:
-        """指定 URL 群を Scrapy 経由でクロールし source_store に配置する.
+        """単一 URL を起点にリンク辿りクロールを実行し source_store に配置する.
 
-        URL 値のバリデーション（スキーム、SSRF 等）は呼び出し元で実施済み
-        である前提。本メソッドでは空リストのみプログラミング契約として弾く。
+        URL バリデーション（スキーム、SSRF 等）は呼び出し元で実施済みである前提。
 
         Args:
-            urls: 取得対象 URL のリスト。**1 件以上必須**（空リストは不可）
-            url_pattern: URL フィルタ正規表現（クロールモードのみ有効）
-            max_pages: ページ数上限（クロールモードのみ有効）
-            force: クロールディレクトリを削除して再実行する
+            url: クロール開始 URL
+            url_pattern: URL フィルタ正規表現
+            max_pages: ページ数上限
+            restart: JOBDIR + 一時 HTML/JSONL を削除して最初から再実行する
 
         Returns:
             実行結果。``ingest`` は配置結果、``scrapy_*`` は Scrapy の終了状態、
             ``no_output`` は JSONL が出力されなかった場合に True。
+
+        Raises:
+            ValueError: ``url`` が空文字列の場合（呼び出し元の契約違反）
+        """
+        if not url:
+            raise ValueError("url is required")
+
+        allowed_domains = urlparse(url).hostname or ""
+
+        crawl_result = await self._scrapy_runner.run(
+            start_url=url,
+            allowed_domains=allowed_domains,
+            url_pattern=url_pattern or "",
+            max_pages=max_pages,
+            restart=restart,
+        )
+
+        return self._finalize_execution(crawl_result)
+
+    async def fetch_urls(
+        self,
+        urls: list[str],
+    ) -> SiteIngestExecution:
+        """指定 URL リストを取得（リンク辿りなし）し source_store に配置する.
+
+        URL バリデーション（スキーム、SSRF 等）は呼び出し元で実施済みである前提。
+        リンク辿りを行わないため、Issue #797 の単一 URL での意図しないクロール
+        巻き込みは構造的に発生しない。
+
+        Args:
+            urls: 取得対象 URL のリスト。**1 件以上必須**
+
+        Returns:
+            実行結果。
 
         Raises:
             ValueError: ``urls`` が空リストの場合（呼び出し元の契約違反）
@@ -101,33 +134,22 @@ class WebIngester(BaseIngester):
         if not urls:
             raise ValueError("urls must contain at least one URL")
 
-        multi_url_mode = len(urls) >= 2
+        domains: list[str] = []
+        for u in urls:
+            hostname = urlparse(u).hostname
+            if hostname and hostname not in domains:
+                domains.append(hostname)
+        allowed_domains = ",".join(domains)
 
-        if multi_url_mode:
-            domains: list[str] = []
-            for u in urls:
-                hostname = urlparse(u).hostname
-                if hostname and hostname not in domains:
-                    domains.append(hostname)
-            allowed_domains = ",".join(domains)
-        else:
-            parsed = urlparse(urls[0])
-            allowed_domains = parsed.hostname or ""
+        crawl_result = await self._scrapy_runner.run(
+            start_urls=urls,
+            allowed_domains=allowed_domains,
+        )
 
-        if multi_url_mode:
-            crawl_result = await self._scrapy_runner.run(
-                start_urls=urls,
-                allowed_domains=allowed_domains,
-            )
-        else:
-            crawl_result = await self._scrapy_runner.run(
-                start_url=urls[0],
-                allowed_domains=allowed_domains,
-                url_pattern=url_pattern or "",
-                max_pages=max_pages,
-                force=force,
-            )
+        return self._finalize_execution(crawl_result)
 
+    def _finalize_execution(self, crawl_result: CrawlResult) -> SiteIngestExecution:
+        """Scrapy 完了結果を SiteIngestExecution にまとめ、bridge 処理を行う."""
         execution = SiteIngestExecution(
             scrapy_exit_code=crawl_result.exit_code,
             scrapy_success=crawl_result.success,

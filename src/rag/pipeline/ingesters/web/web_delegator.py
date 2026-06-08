@@ -24,21 +24,21 @@ class WebDelegator(Protocol):
 
     仕様: docs/specs/architecture.md §3.3
 
-    bluesky 等の他 Ingester からの委譲経路として用いる。Real 実装は
-    ``WebIngester.crawl_urls`` をそのまま呼び出す薄いブリッジ。
+    bluesky 等の他 Ingester から WebIngester を越境直 import せずに利用するための
+    抽象。**リンク辿りを発動させない取得経路のみ** を公開する（Issue #797 の単一
+    URL 巻き込みクロール問題を構造的に防ぐため、クロール委譲は提供しない）。
 
-    ``source_store`` は実装時にバインド済み（factory 経由で WebIngester
-    に注入される）のため、呼び出しごとに渡す必要はない。
+    ``source_store`` は実装時にバインド済み（factory 経由で WebIngester に注入される）
+    のため、呼び出しごとに渡す必要はない。
     """
 
-    async def run_for_urls(
+    async def fetch_urls(
         self,
         urls: list[str],
     ) -> SiteIngestExecution:
-        """指定 URL 群に対して WebIngester による取り込みを実行する.
+        """指定 URL リストを取得（リンク辿りなし）し source_store に配置する.
 
-        URL 値のバリデーション（スキーム、SSRF 等）は呼び出し元で実施済み
-        である前提。
+        URL バリデーション（スキーム、SSRF 等）は呼び出し元で実施済みである前提。
 
         Args:
             urls: 取得対象 URL のリスト（1 件以上必須）
@@ -62,11 +62,11 @@ class RealWebDelegator:
     def __init__(self, *, web_ingester: WebIngester) -> None:
         self._web_ingester = web_ingester
 
-    async def run_for_urls(
+    async def fetch_urls(
         self,
         urls: list[str],
     ) -> SiteIngestExecution:
-        return await self._web_ingester.crawl_urls(urls=urls)
+        return await self._web_ingester.fetch_urls(urls=urls)
 
 
 def create_web_delegator(

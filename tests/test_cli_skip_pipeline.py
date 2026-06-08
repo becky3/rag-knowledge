@@ -35,6 +35,7 @@ class TestNoPipelineParserRegistration:
             ["ingest-zenn", "https://zenn.dev/u/articles/x", "--skip-pipeline"],
             ["crawl-documents", "/tmp/docs", "--skip-pipeline"],
             ["site-ingest", "https://example.com/", "--skip-pipeline"],
+            ["site-crawl", "https://example.com/", "--skip-pipeline"],
             ["ingest-aozora", "12345", "--skip-pipeline"],
             ["ingest-aozora-author", "00001", "--skip-pipeline"],
             ["delete", "local/.upload/2026/05/10/x.md", "--skip-pipeline"],

@@ -1045,8 +1045,8 @@ class TestRagRebuildTool:
         assert "エラー" in result
 
 
-class TestRagSiteIngestSafeBrowsing:
-    """rag_site_ingest の Safe Browsing チェックテスト（#481）."""
+class TestRagSiteCrawlSafeBrowsing:
+    """rag_site_crawl の Safe Browsing チェックテスト（#481 / Issue #797 で rag_site_crawl に移動）."""
 
     @pytest.mark.asyncio
     async def test_unsafe_url_returns_error(self) -> None:
@@ -1077,7 +1077,7 @@ class TestRagSiteIngestSafeBrowsing:
             patch("rag.config.get_settings", return_value=mock_settings),
             patch("rag.utils.url.check_ssrf"),
         ):
-            result = await mod.rag_site_ingest("https://malicious.example.com")
+            result = await mod.rag_site_crawl("https://malicious.example.com")
 
         assert "エラー" in result
         assert "安全でない" in result
@@ -1095,7 +1095,7 @@ class TestRagSiteIngestSafeBrowsing:
             patch("rag.server.cli_subprocess._run_cli_subprocess", new_callable=AsyncMock, return_value=mock_cli_result) as mock_run,
             patch("rag.server.cli_subprocess._format_cli_ingest_result", return_value="取り込み完了"),
         ):
-            result = await mod.rag_site_ingest(url="https://example.com")
+            result = await mod.rag_site_crawl(url="https://example.com")
 
         # Safe Browsing でブロックされず、CLI 委譲まで到達していること
         mock_run.assert_called_once()

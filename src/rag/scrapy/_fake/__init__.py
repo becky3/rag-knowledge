@@ -59,23 +59,27 @@ class FakeScrapyRunner:
         allowed_domains: str = "",
         url_pattern: str = "",
         max_pages: int | None = None,
-        force: bool = False,
+        restart: bool = False,
     ) -> CrawlResult:
         """Fake クロールを実行する.
 
         Real と同じディレクトリ構造（``<domain>/<crawl_key>/{html, metadata.jsonl}``）
         を tmp_dir に作成し、fixture の内容を展開する。
         """
-        del allowed_domains, force  # Fake では使わない（呼び出し契約のため受け付け）
+        del allowed_domains, restart, max_pages  # Fake では使わない（呼び出し契約のため受け付け）
 
-        urls = list(start_urls or ([start_url] if start_url else []))
-        if not urls:
+        _urls = start_urls or []
+        if start_url and _urls:
+            raise ValueError("start_url と start_urls は排他です")
+        if not start_url and not _urls:
             raise ValueError("start_url または start_urls は必須です")
+
+        fetch_mode = bool(_urls)
+        urls = _urls if fetch_mode else [start_url]
 
         # Real と整合する一時ディレクトリ構造を生成
         # （_crawl_key は url_pattern も key 算出に使うため、Real と同じく url_pattern を渡す）
-        multi_url_mode = len(urls) >= 2
-        if multi_url_mode:
+        if fetch_mode:
             domain = "_multi_"
             key = _multi_url_key(urls)
         else:

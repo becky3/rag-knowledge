@@ -82,13 +82,14 @@ class TestProtocolDefinitions:
         # 仕様: docs/specs/ingesters/youtube.md「Whisper モデルライフサイクル」
         assert names == {"ingest_videos", "unload_whisper"}
 
-    def test_web_delegator_protocol_has_run_for_urls(self) -> None:
+    def test_web_delegator_protocol_has_only_fetch_urls(self) -> None:
+        """WebDelegator は fetch_urls のみを公開する（Issue #797: クロール委譲を提供しない）."""
         names = {
             name
             for name, member in inspect.getmembers(WebDelegator)
             if not name.startswith("_") and inspect.isfunction(member)
         }
-        assert names == {"run_for_urls"}
+        assert names == {"fetch_urls"}
 
 
 class TestBlueskyFakeModeSettings:

@@ -44,9 +44,10 @@ async def follow_urls(
 ) -> dict[str, int]:
     """配置済み投稿から URL を抽出し、Web/YouTube 委譲先に取り込ませる.
 
-    Web URL は ``WebDelegator.run_for_urls`` でバッチ取得（subprocess 直起動を
-    回避するため Python API 経由）。YouTube URL は ``YoutubeDelegator.ingest_videos``
-    で個別取り込み（URL 間にレート制限スリープ）。
+    Web URL は ``WebDelegator.fetch_urls`` でバッチ取得（リンク辿りなしの取得
+    経路に固定。Issue #797 で件数ヒューリスティック起因のクロール巻き込みを
+    構造的に防止）。YouTube URL は ``YoutubeDelegator.ingest_videos`` で個別
+    取り込み（URL 間にレート制限スリープ）。
 
     各 placed_item の ``_suppress_youtube_reingest`` フラグにより YouTube 抑制対象
     判定を行う。抑制対象（True）の URL は ``force_youtube_reingest`` が True の場合
@@ -228,10 +229,14 @@ async def _fetch_web_urls(
     *,
     web_delegator: WebDelegator,
 ) -> tuple[int, int, int, list[IngestErrorDetail]]:
-    """Web URL を WebDelegator（複数 URL モード）の Python API で取得する.
+    """Web URL を WebDelegator の取得経路（リンク辿りなし）で取り込む.
 
     親プロセスが既に write_lock を保持している前提で、subprocess を介さず同一
     プロセス内で WebIngester のコア処理を呼び出す（#686）。
+
+    取得経路（``fetch_urls``）に固定するため、投稿内 web URL がいくつであっても
+    リンク辿りクロールは発動しない（Issue #797: 件数ヒューリスティックによる
+    単一 URL クロール巻き込み事故の構造的解消）。
 
     URL バリデーション (validate_url) と SSRF チェック (check_ssrf) を冒頭で
     実施する。subprocess 経由から Python API 直呼出しに変更したことで、従来
@@ -248,7 +253,7 @@ async def _fetch_web_urls(
     from rag.utils.url import check_ssrf, validate_url
 
     logger.info(
-        "site-ingest（複数 URL モード）で %d 件の Web URL を取り込みます",
+        "site-ingest（取得モード）で %d 件の Web URL を取り込みます",
         len(urls),
     )
 
@@ -273,7 +278,7 @@ async def _fetch_web_urls(
         return 0, 0, len(validation_errors), validation_errors
 
     try:
-        execution = await web_delegator.run_for_urls(validated_urls)
+        execution = await web_delegator.fetch_urls(validated_urls)
     except Exception as exc:
         logger.exception("web 取り込みの実行に失敗: %d 件", len(validated_urls))
         execute_errors: list[IngestErrorDetail] = [

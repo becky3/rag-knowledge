@@ -38,7 +38,7 @@ _FAKE_PAGE_URL = "https://example.com/page1"
 
 
 class TestMcpSiteIngest:
-    """MCP 経由の site-ingest 動作確認."""
+    """MCP 経由の site-ingest（取得入口）動作確認."""
 
     async def test_ingest_then_search_returns_chunk(
         self,
@@ -54,7 +54,7 @@ class TestMcpSiteIngest:
         ingest_response = await call_mcp_tool(
             e2e_mcp_server,
             "rag_site_ingest",
-            {"url": _FAKE_PAGE_URL},
+            {"urls": [_FAKE_PAGE_URL]},
         )
         assert "完了" in ingest_response or "placed" in ingest_response.lower(), (
             f"取り込み完了を示すテキストが応答に含まれていない: {ingest_response}"
@@ -81,17 +81,17 @@ class TestMcpSiteIngest:
         response = await call_mcp_tool(
             e2e_mcp_server,
             "rag_site_ingest",
-            {"url": _FAKE_PAGE_URL},
+            {"urls": [_FAKE_PAGE_URL]},
         )
         assert "[FAKE MODE: web]" in response, (
             f"fake モードラベルが応答に含まれていない: {response[:500]}"
         )
 
-    async def test_multi_url_mode(
+    async def test_multi_url(
         self,
         e2e_mcp_server: str,
     ) -> None:
-        """複数 URL モード（urls 引数）でも取り込みが完了する."""
+        """複数 URL の取得入口でも取り込みが完了する."""
         response = await call_mcp_tool(
             e2e_mcp_server,
             "rag_site_ingest",
@@ -103,12 +103,30 @@ class TestMcpSiteIngest:
             },
         )
         assert "完了" in response or "placed" in response.lower(), (
-            f"複数 URL モード取り込みが完了していない: {response[:500]}"
+            f"複数 URL 取り込みが完了していない: {response[:500]}"
+        )
+
+
+class TestMcpSiteCrawl:
+    """MCP 経由の site-crawl（クロール入口）動作確認."""
+
+    async def test_crawl_completes(
+        self,
+        e2e_mcp_server: str,
+    ) -> None:
+        """rag_site_crawl で単一 URL 起点のクロールが完了する."""
+        response = await call_mcp_tool(
+            e2e_mcp_server,
+            "rag_site_crawl",
+            {"url": _FAKE_PAGE_URL},
+        )
+        assert "完了" in response or "placed" in response.lower(), (
+            f"クロール完了を示すテキストが応答に含まれていない: {response}"
         )
 
 
 class TestCliSiteIngest:
-    """CLI 経由の site-ingest 動作確認."""
+    """CLI 経由の site-ingest（取得入口）動作確認."""
 
     def test_cli_site_ingest_succeeds(
         self,
@@ -123,6 +141,30 @@ class TestCliSiteIngest:
         """
         result: subprocess.CompletedProcess[str] = run_cli(
             ["site-ingest", _FAKE_PAGE_URL],
+            env=e2e_subprocess_env,
+            timeout=120.0,
+        )
+        assert result.returncode == 0, (
+            f"CLI が非ゼロ終了: returncode={result.returncode}\n"
+            f"stdout:\n{result.stdout}\nstderr:\n{result.stderr}"
+        )
+        combined = result.stdout + result.stderr
+        assert "完了" in combined or "placed" in combined.lower(), (
+            f"CLI 出力に取り込み完了の証跡なし:\n{combined[:1000]}"
+        )
+
+
+class TestCliSiteCrawl:
+    """CLI 経由の site-crawl（クロール入口）動作確認."""
+
+    def test_cli_site_crawl_succeeds(
+        self,
+        e2e_subprocess_env: dict[str, str],
+        e2e_mcp_server: str,  # noqa: ARG002 - ChromaDB を auto_start させるため依存
+    ) -> None:
+        """CLI から site-crawl を実行できる（subprocess 越境）."""
+        result: subprocess.CompletedProcess[str] = run_cli(
+            ["site-crawl", _FAKE_PAGE_URL],
             env=e2e_subprocess_env,
             timeout=120.0,
         )

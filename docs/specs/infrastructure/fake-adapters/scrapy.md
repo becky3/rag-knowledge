@@ -188,24 +188,25 @@ flowchart TB
 
 | ケース | 振る舞い |
 |---|---|
-| Fake Runner で `failure` シナリオ指定時 | `CrawlResult.success=False` / `exit_code=1` を返却。`WebIngester.crawl_urls` は Bridge を呼ばずに `no_output=True` で早期 return（jsonl_path が空のため） |
+| Fake Runner で `failure` シナリオ指定時 | `CrawlResult.success=False` / `exit_code=1` を返却。`WebIngester.crawl_url` / `WebIngester.fetch_urls` のどちらの入口でも Bridge を呼ばずに `no_output=True` で早期 return（jsonl_path が空のため） |
 | Fake Runner で `empty` シナリオ指定時 | JSONL が空のため Bridge が呼ばれても 0 件処理。`SiteIngestExecution.no_output=False`（jsonl は存在する）+ `ingest.placed=0` |
 | Fake Runner で `partial` シナリオ指定時 | Bridge が JSONL の invalid 行を `parse_errors` でカウント。`SiteIngestExecution.parse_errors > 0` |
 | 入力 URL が `test.invalid`（DNS 解決不可） | `validate_url` / `check_ssrf` で拒否される（DNS 解決失敗）。Fake テストでは `example.com` 等の実在ドメインを使うこと |
 | Fake モードで運用環境（本番）起動 | `_fake/` ディレクトリが production パッケージに含まれるため動作する。WARNING ログで `[FAKE MODE: web]` を明示 |
 | `RAG_SCRAPY_FAKE_FIXTURE_DIR` で指定したパスが存在しない | 起動時に `FileNotFoundError` で fail-fast |
-| MCP 応答ラベル | fake モード時、`rag_site_ingest` 応答冒頭に `[FAKE MODE: web]` を付与。Embedding fake も同時有効なら `[FAKE MODE: embedding]` も並列出力 |
+| MCP 応答ラベル | fake モード時、`rag_site_ingest` / `rag_site_crawl` 応答冒頭に `[FAKE MODE: web]` を付与。Embedding fake も同時有効なら `[FAKE MODE: embedding]` も並列出力 |
 | `RAG_WEB_FAKE_MODE` と `RAG_SCRAPY_FAKE_MODE` の両方が `.env` で明示 | `RAG_SCRAPY_FAKE_MODE` が優先（`_EnvLoader.model_validator` の派生は None の場合のみ）。**ただし `RAG_SCRAPY_FAKE_MODE` env は本 Issue では未公開**（必要になった時点で追加可能） |
 
 ## QA シナリオ（fake モード）
 
 QA スキルで実 Web アクセスなしで通すべき検証項目:
 
-1. **rag_site_ingest** の単一 URL モード（クロールモード）で取り込み完了
-2. **rag_site_ingest** の複数 URL モード（`urls` パラメータ）で取り込み完了
-3. **rag_crawl_bluesky** で web URL を含む投稿を取り込み → site-ingest 委譲経由で fake が動作（Bluesky 投稿内 URL 自動取り込みの結合 QA）
-4. MCP 応答冒頭に `[FAKE MODE: web]` ラベルが付与されていること（Embedding fake も同時有効なら `[FAKE MODE: embedding]` も並列出力）
-5. 起動ログに `[FAKE MODE: web] Web (scrapy) は FAKE モードで起動中` が出力されていること
+1. **rag_site_crawl**（クロール入口、リンク辿りあり）で取り込み完了
+2. **rag_site_ingest**（取得入口、リンク辿りなし）で複数 URL の取り込み完了
+3. **rag_site_ingest** に単一 URL を指定してもリンク辿りクロールが発動しないこと（Issue #797 回帰確認）
+4. **rag_crawl_bluesky** で web URL を含む投稿を取り込み → site-ingest 取得入口委譲経由（`WebDelegator.fetch_urls`、リンク辿りなし）で fake が動作。投稿内 web URL が 1 本だけでもサイト全体クロールが発生しないこと
+5. MCP 応答冒頭に `[FAKE MODE: web]` ラベルが付与されていること（Embedding fake も同時有効なら `[FAKE MODE: embedding]` も並列出力）
+6. 起動ログに `[FAKE MODE: web] Web (scrapy) は FAKE モードで起動中` が出力されていること
 
 QA 結果はジャーナル または Issue コメントに記録する。
 

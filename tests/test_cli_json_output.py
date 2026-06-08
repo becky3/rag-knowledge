@@ -333,19 +333,22 @@ class TestCommandsHaveOutputOption:
         "delete",
         "rebuild",
         "site-ingest",
+        "site-crawl",
     ]
 
-    def test_all_13_commands_have_output_option(self) -> None:
-        """cli.py のソースに 13 コマンド分の _add_output_option 呼び出しがある."""
+    def test_all_commands_have_output_option(self) -> None:
+        """cli.py のソースに _add_output_option 呼び出しが対象コマンド分以上ある."""
         import inspect
         import rag.cli as cli_module
 
         source = inspect.getsource(cli_module)
         count = source.count("_add_output_option(")
         # ヘルパー関数の定義 (def _add_output_option) は除外して呼び出しだけ数える
-        # 定義は 1 つ、呼び出しが 13 個で合計 14 回出現
-        assert count >= 13 + 1, (
-            f"_add_output_option の出現回数が {count} 回（期待: 定義1 + 呼び出し13 = 14）"
+        # 定義 1 + 呼び出しが対象コマンド分以上
+        expected_min = len(self.TARGET_COMMANDS) + 1
+        assert count >= expected_min, (
+            f"_add_output_option の出現回数が {count} 回（期待: 定義1 + 呼び出し >= "
+            f"{len(self.TARGET_COMMANDS)} = {expected_min}）"
         )
 
     @pytest.mark.parametrize("command", TARGET_COMMANDS)
@@ -369,6 +372,7 @@ class TestCommandsHaveOutputOption:
             "delete": "run_delete",
             "rebuild": "run_rebuild",
             "site-ingest": "run_site_ingest",
+            "site-crawl": "run_site_crawl",
         }
 
         func_name = func_names[command]

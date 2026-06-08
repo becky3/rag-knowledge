@@ -926,14 +926,38 @@ def _build_parser() -> "_JsonAwareArgumentParser":
     _add_skip_pipeline_option(crawldoc_parser)
     _add_output_option(crawldoc_parser)
 
-    # site-ingest: Scrapy によるサイト一括取り込み
-    siteingest_parser = subparsers.add_parser("site-ingest", help="Scrapy でサイトを一括取り込み（大規模サイト向け）")
-    siteingest_parser.add_argument("url", nargs="+", help="取得対象 URL（1件: クロールモード、2件以上: 複数URLモード）")
-    siteingest_parser.add_argument("--url-pattern", default="", help="URL フィルタパターン（正規表現、クロールモードのみ）")
-    siteingest_parser.add_argument("--max-pages", type=int, default=None, help="ページ数上限（クロールモードのみ）")
-    siteingest_parser.add_argument("--force", action="store_true", help="JOBDIR を削除して再クロール（クロールモードのみ）")
+    # site-ingest: 指定 URL のページ取得（リンク辿りなし、複数 URL OK）
+    siteingest_parser = subparsers.add_parser(
+        "site-ingest",
+        help="指定 URL の Web ページを取得（リンク辿りなし、複数 URL 可）",
+    )
+    siteingest_parser.add_argument(
+        "url",
+        nargs="+",
+        help="取得対象 URL（1 件以上）。リンク辿りは行わない",
+    )
     _add_skip_pipeline_option(siteingest_parser)
     _add_output_option(siteingest_parser)
+
+    # site-crawl: Scrapy による単一 URL 起点のサイトクロール（リンク辿りあり）
+    sitecrawl_parser = subparsers.add_parser(
+        "site-crawl",
+        help="単一 URL を起点に Scrapy でサイトをクロール（リンク辿りあり）",
+    )
+    sitecrawl_parser.add_argument("url", help="クロール開始 URL（単一）")
+    sitecrawl_parser.add_argument(
+        "--url-pattern", default="", help="URL フィルタパターン（正規表現）",
+    )
+    sitecrawl_parser.add_argument(
+        "--max-pages", type=int, default=None, help="ページ数上限",
+    )
+    sitecrawl_parser.add_argument(
+        "--restart",
+        action="store_true",
+        help="JOBDIR + 一時 HTML/JSONL を削除して最初から再クロール",
+    )
+    _add_skip_pipeline_option(sitecrawl_parser)
+    _add_output_option(sitecrawl_parser)
 
     # update-aozora-catalog: 青空文庫カタログ更新
     update_aozora_parser = subparsers.add_parser("update-aozora-catalog", help="青空文庫カタログを更新")
@@ -1012,6 +1036,7 @@ def main() -> None:
         "add-document": run_add_document,
         "crawl-documents": run_crawl_documents,
         "site-ingest": run_site_ingest,
+        "site-crawl": run_site_crawl,
         "update-aozora-catalog": run_update_aozora_catalog,
         "ingest-aozora": run_ingest_aozora,
         "ingest-aozora-author": run_ingest_aozora_author,
@@ -3540,8 +3565,11 @@ async def run_crawl_documents(args: argparse.Namespace) -> None:
 
 
 async def run_site_ingest(args: argparse.Namespace) -> None:
-    """Scrapy によるサイト一括取り込み."""
-    import re
+    """指定 URL リストを取得（リンク辿りなし）して source_store に配置する.
+
+    Issue #797: クロールモード（リンク辿り）は `site-crawl` サブコマンドに分離済み。
+    本コマンドはリンク辿りを発動しない（取得対象 URL = 配置 URL）。
+    """
     import time as time_mod
 
     from .pipeline.ingesters.web import WebIngester
@@ -3552,7 +3580,6 @@ async def run_site_ingest(args: argparse.Namespace) -> None:
     progress_cb = _output_progress if json_out else None
 
     urls: list[str] = args.url  # nargs='+' なのでリスト
-    multi_url_mode = len(urls) >= 2
 
     # 全 URL バリデーション
     validated_urls: list[str] = []
@@ -3567,49 +3594,22 @@ async def run_site_ingest(args: argparse.Namespace) -> None:
             logger.error("エラー: %s", e)
             sys.exit(1)
 
-    # クロールモード固有のバリデーション
-    if not multi_url_mode and args.url_pattern:
-        try:
-            re.compile(args.url_pattern)
-        except re.error as e:
-            if json_out:
-                _output_error(CliErrorCode.VALIDATION_ERROR, f"無効な正規表現パターン: {e}")
-            logger.error("無効な正規表現パターン: %s", e)
-            sys.exit(1)
-
     controller, settings = _build_cli_pipeline_controller()
 
     with _write_lock_or_exit(
         Path(controller.source_store.root_dir), json_out=json_out,
     ):
-        # max_pages のクランプ（クロールモードのみ）
-        effective_max_pages: int | None = None
-        if not multi_url_mode:
-            effective_max_pages = (
-                args.max_pages if args.max_pages is not None
-                else settings.site_ingest_max_pages
-            )
-            if effective_max_pages < 1:
-                effective_max_pages = 1
-                logger.warning("max_pages を 1 にクランプしました")
-            elif effective_max_pages > 1000:
-                effective_max_pages = 1000
-                logger.warning("max_pages を 1000 にクランプしました")
-
         outer_start = time_mod.monotonic()
         web_ingester = WebIngester(
             controller.source_store,
             scrapy_runner=create_scrapy_runner(settings),
         )
-        execution = await web_ingester.crawl_urls(
-            urls=validated_urls,
-            url_pattern=args.url_pattern if not multi_url_mode else None,
-            max_pages=effective_max_pages,
-            force=args.force if not multi_url_mode else False,
-        )
+        execution = await web_ingester.fetch_urls(urls=validated_urls)
 
         display_url = (
-            validated_urls[0] if not multi_url_mode else f"{len(validated_urls)} URLs"
+            validated_urls[0]
+            if len(validated_urls) == 1
+            else f"{len(validated_urls)} URLs"
         )
 
         if execution.no_output:
@@ -3650,6 +3650,136 @@ async def run_site_ingest(args: argparse.Namespace) -> None:
             execution.crawl_result.cleanup()
 
         # 操作全体の所要時間（クロール + Bridge + パイプライン）
+        elapsed = time_mod.monotonic() - outer_start
+
+        if json_out:
+            data: dict[str, object] = _ingest_result_to_dict(
+                execution.ingest, pipeline_summary,
+            )
+            data["elapsed"] = round(elapsed, 1)
+            data["skip_pipeline"] = skip_pipeline
+            if not execution.scrapy_success:
+                data["scrapy_exit_code"] = execution.scrapy_exit_code
+            _output_result(data)
+        else:
+            _print_ingest_result(
+                execution.ingest,
+                pipeline_summary,
+                context=f"サイト: {display_url}",
+                json_output=False,
+            )
+            print(f"所要時間: {elapsed:.1f}秒")
+            if skip_pipeline:
+                _print_skip_pipeline_notice(json_out=False)
+            if not execution.scrapy_success:
+                print(
+                    f"Scrapy exit_code={execution.scrapy_exit_code}（部分的な結果）",
+                )
+
+
+async def run_site_crawl(args: argparse.Namespace) -> None:
+    """Scrapy による単一 URL 起点のサイトクロール（リンク辿りあり）."""
+    import re
+    import time as time_mod
+
+    from .pipeline.ingesters.web import WebIngester
+    from .scrapy.runner import create_scrapy_runner
+    from .utils.url import check_ssrf, validate_url
+
+    json_out = _is_json_output(args)
+    progress_cb = _output_progress if json_out else None
+
+    url: str = args.url
+    try:
+        validated_url = validate_url(url)
+        check_ssrf(validated_url)
+    except ValueError as e:
+        if json_out:
+            _output_error(CliErrorCode.VALIDATION_ERROR, str(e))
+        logger.error("エラー: %s", e)
+        sys.exit(1)
+
+    if args.url_pattern:
+        try:
+            re.compile(args.url_pattern)
+        except re.error as e:
+            if json_out:
+                _output_error(
+                    CliErrorCode.VALIDATION_ERROR, f"無効な正規表現パターン: {e}",
+                )
+            logger.error("無効な正規表現パターン: %s", e)
+            sys.exit(1)
+
+    controller, settings = _build_cli_pipeline_controller()
+
+    with _write_lock_or_exit(
+        Path(controller.source_store.root_dir), json_out=json_out,
+    ):
+        # max_pages のクランプ
+        effective_max_pages = (
+            args.max_pages if args.max_pages is not None
+            else settings.site_ingest_max_pages
+        )
+        if effective_max_pages < 1:
+            effective_max_pages = 1
+            logger.warning("max_pages を 1 にクランプしました")
+        elif effective_max_pages > 1000:
+            effective_max_pages = 1000
+            logger.warning("max_pages を 1000 にクランプしました")
+
+        outer_start = time_mod.monotonic()
+        web_ingester = WebIngester(
+            controller.source_store,
+            scrapy_runner=create_scrapy_runner(settings),
+        )
+        execution = await web_ingester.crawl_url(
+            url=validated_url,
+            url_pattern=args.url_pattern,
+            max_pages=effective_max_pages,
+            restart=args.restart,
+        )
+
+        display_url = validated_url
+
+        if execution.no_output:
+            elapsed = time_mod.monotonic() - outer_start
+            if json_out:
+                _output_result({
+                    "placed": 0,
+                    "overwritten": 0,
+                    "skipped": 0,
+                    "errors": 0,
+                    "elapsed": round(elapsed, 1),
+                    "scrapy_exit_code": execution.scrapy_exit_code,
+                    "no_output": True,
+                })
+            else:
+                print(
+                    f"クロールが完了しましたが、メタデータが出力されませんでした。"
+                    f" exit_code={execution.scrapy_exit_code},"
+                    f" 所要時間={elapsed:.1f}秒",
+                )
+            return
+
+        # パイプライン処理
+        skip_pipeline = _is_skip_pipeline(args)
+        pipeline_summary = None
+        has_changes = (execution.ingest.placed + execution.ingest.overwritten) > 0
+        if has_changes and not skip_pipeline:
+            pipeline_summary = await controller.ingest_and_index(
+                f"ingest(web): site-crawl {display_url}",
+                progress_callback=progress_cb,
+                concurrency=settings.rag_embedding_concurrency,
+            )
+        elif has_changes and skip_pipeline:
+            controller.commit(
+                f"ingest(web): site-crawl {display_url} (skip_pipeline)",
+            )
+
+        # 正常完了後のクリーンアップ（仕様: docs/specs/site-ingest.md）
+        if execution.scrapy_success and execution.crawl_result is not None:
+            execution.crawl_result.cleanup()
+
         elapsed = time_mod.monotonic() - outer_start
 
         if json_out:
