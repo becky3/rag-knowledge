@@ -3626,7 +3626,7 @@ async def run_site_ingest(args: argparse.Namespace) -> None:
                 })
             else:
                 print(
-                    f"クロールが完了しましたが、メタデータが出力されませんでした。"
+                    f"取得が完了しましたが、メタデータが出力されませんでした。"
                     f" exit_code={execution.scrapy_exit_code},"
                     f" 所要時間={elapsed:.1f}秒",
                 )

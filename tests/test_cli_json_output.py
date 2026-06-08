@@ -347,8 +347,9 @@ class TestCommandsHaveOutputOption:
         # 定義 1 + 呼び出しが対象コマンド分以上
         expected_min = len(self.TARGET_COMMANDS) + 1
         assert count >= expected_min, (
-            f"_add_output_option の出現回数が {count} 回（期待: 定義1 + 呼び出し >= "
-            f"{len(self.TARGET_COMMANDS)} = {expected_min}）"
+            f"_add_output_option の出現回数が {count} 回"
+            f"（期待: 定義1 + 呼び出し {len(self.TARGET_COMMANDS)} 件以上 = "
+            f"合計 {expected_min} 件以上）"
         )
 
     @pytest.mark.parametrize("command", TARGET_COMMANDS)
