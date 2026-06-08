@@ -29,11 +29,11 @@ class SiteSpider(scrapy.Spider):  # type: ignore[misc]
 
     パラメータ（Spider 引数）で動作をカスタマイズする:
     - start_url: クロール開始 URL（クロールモード、start_urls_json と排他）
-    - start_urls_json: 取得対象 URL の JSON 配列文字列（複数 URL モード）
+    - start_urls_json: 取得対象 URL の JSON 配列文字列（取得モード、start_url と排他）
     - allowed_domains: ドメイン制約（カンマ区切り）
     - url_pattern: URL フィルタ正規表現（任意、クロールモードのみ）
     - output_dir: HTML ファイルの保存先ディレクトリ
-    - no_follow: リンク辿りを無効化（複数 URL モード時に true）
+    - no_follow: リンク辿りを無効化（取得モード時に true）
     """
 
     name = "site_spider"

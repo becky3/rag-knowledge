@@ -63,7 +63,7 @@ class TestFollowUrlsClassification:
     @pytest.mark.asyncio
     async def test_skips_bluesky_urls(self) -> None:
         runner = AsyncMock()
-        runner.run_for_urls = AsyncMock(return_value=_make_execution())
+        runner.fetch_urls = AsyncMock(return_value=_make_execution())
         items = [_item_with_urls([
             "https://bsky.app/profile/x.bsky.social/post/r1",
         ])]
@@ -75,7 +75,7 @@ class TestFollowUrlsClassification:
             youtube_request_interval=0.0,
         )
         assert stats["skipped"] == 1
-        runner.run_for_urls.assert_not_called()
+        runner.fetch_urls.assert_not_called()
 
     @pytest.mark.asyncio
     async def test_invalid_youtube_url_recorded_as_error(self) -> None:
@@ -98,7 +98,7 @@ class TestFollowUrlsWebDelegation:
     @pytest.mark.asyncio
     async def test_web_url_passed_to_runner(self) -> None:
         runner = AsyncMock()
-        runner.run_for_urls = AsyncMock(
+        runner.fetch_urls = AsyncMock(
             return_value=_make_execution(placed=1),
         )
         items = [_item_with_urls(["https://example.com/article"])]
@@ -110,12 +110,50 @@ class TestFollowUrlsWebDelegation:
             youtube_request_interval=0.0,
         )
         assert stats["web_placed"] == 1
-        runner.run_for_urls.assert_awaited_once()
+        runner.fetch_urls.assert_awaited_once()
+
+    @pytest.mark.asyncio
+    async def test_single_web_url_uses_fetch_not_crawl(self) -> None:
+        """**Issue #797 回帰防止**: 投稿内 web URL が 1 本だけのときも fetch_urls を使う.
+
+        旧実装では「web URL が 1 本のとき crawl_urls で start_url=...（クロール
+        モード）にフォールバック → サイト全体クロールに化ける」事故が発生していた。
+        本テストは web_delegator がリンク辿りクロールに分岐しないことを担保する
+        ため、`crawl_*` 系メソッドが呼ばれていないことも合わせて確認する。
+        """
+        runner = AsyncMock()
+        runner.fetch_urls = AsyncMock(
+            return_value=_make_execution(placed=1),
+        )
+        # クロール経路が誤って呼ばれないことを保証するため、属性を意図的に
+        # AsyncMock として並べておく（呼ばれたら最後の assert_not_called で検出）
+        runner.crawl_url = AsyncMock()
+        runner.crawl_urls = AsyncMock()
+        runner.run_for_urls = AsyncMock()  # 旧 Protocol 名
+
+        # 投稿内に web URL が 1 本だけ存在するケース
+        items = [_item_with_urls(["https://example.com/single-page"])]
+        stats = await follow_urls(
+            items,
+            classifier=RealYoutubeClassifier(),
+            youtube_delegator=None,
+            web_delegator=runner,
+            youtube_request_interval=0.0,
+        )
+
+        assert stats["web_placed"] == 1
+        runner.fetch_urls.assert_awaited_once()
+        called_urls = runner.fetch_urls.await_args[0][0]
+        assert called_urls == ["https://example.com/single-page"]
+        # クロール経路はいずれも呼ばれていない
+        runner.crawl_url.assert_not_called()
+        runner.crawl_urls.assert_not_called()
+        runner.run_for_urls.assert_not_called()
 
     @pytest.mark.asyncio
     async def test_web_dedup_across_items(self) -> None:
         runner = AsyncMock()
-        runner.run_for_urls = AsyncMock(
+        runner.fetch_urls = AsyncMock(
             return_value=_make_execution(placed=1),
         )
         items = [
@@ -129,14 +167,14 @@ class TestFollowUrlsWebDelegation:
             web_delegator=runner,
             youtube_request_interval=0.0,
         )
-        # run_for_urls には 1 件だけ
-        called_urls = runner.run_for_urls.await_args[0][0]
+        # fetch_urls には 1 件だけ
+        called_urls = runner.fetch_urls.await_args[0][0]
         assert called_urls == ["https://example.com/dup"]
 
     @pytest.mark.asyncio
     async def test_runner_failure_recorded(self) -> None:
         runner = AsyncMock()
-        runner.run_for_urls = AsyncMock(
+        runner.fetch_urls = AsyncMock(
             side_effect=RuntimeError("scrapy failed"),
         )
         result = IngestResult()
@@ -165,7 +203,7 @@ class TestFollowUrlsYoutubeDelegation:
         yt_result.placed = 1
         delegator.ingest_videos = AsyncMock(return_value=[yt_result])
         runner = AsyncMock()
-        runner.run_for_urls = AsyncMock(return_value=_make_execution())
+        runner.fetch_urls = AsyncMock(return_value=_make_execution())
         items = [_item_with_urls(["https://youtu.be/abcdEFG1234"])]
         stats = await follow_urls(
             items,
@@ -180,7 +218,7 @@ class TestFollowUrlsYoutubeDelegation:
     @pytest.mark.asyncio
     async def test_youtube_skipped_when_delegator_none(self) -> None:
         runner = AsyncMock()
-        runner.run_for_urls = AsyncMock(return_value=_make_execution())
+        runner.fetch_urls = AsyncMock(return_value=_make_execution())
         items = [_item_with_urls(["https://youtu.be/abcdEFG1234"])]
         stats = await follow_urls(
             items,
@@ -197,7 +235,7 @@ class TestFollowUrlsYoutubeDelegation:
         delegator = AsyncMock()
         delegator.unload_whisper = MagicMock()
         runner = AsyncMock()
-        runner.run_for_urls = AsyncMock(return_value=_make_execution())
+        runner.fetch_urls = AsyncMock(return_value=_make_execution())
         items = [_item_with_urls(
             ["https://youtu.be/abcdEFG1234"], suppress=True,
         )]
@@ -220,7 +258,7 @@ class TestFollowUrlsYoutubeDelegation:
         yt_result.placed = 1
         delegator.ingest_videos = AsyncMock(return_value=[yt_result])
         runner = AsyncMock()
-        runner.run_for_urls = AsyncMock(return_value=_make_execution())
+        runner.fetch_urls = AsyncMock(return_value=_make_execution())
         items = [_item_with_urls(
             ["https://youtu.be/abcdEFG1234"], suppress=True,
         )]
@@ -242,7 +280,7 @@ class TestFollowUrlsYoutubeDelegation:
             side_effect=RuntimeError("yt failed"),
         )
         runner = AsyncMock()
-        runner.run_for_urls = AsyncMock(return_value=_make_execution())
+        runner.fetch_urls = AsyncMock(return_value=_make_execution())
         result = IngestResult()
         items = [_item_with_urls(["https://youtu.be/abcdEFG1234"])]
         stats = await follow_urls(
@@ -274,7 +312,7 @@ class TestFollowUrlsYoutubeDelegation:
         yt_result.placed = 1
         delegator.ingest_videos = AsyncMock(return_value=[yt_result])
         runner = AsyncMock()
-        runner.run_for_urls = AsyncMock(return_value=_make_execution())
+        runner.fetch_urls = AsyncMock(return_value=_make_execution())
         items = [_item_with_urls([
             "https://youtu.be/abcdEFG1234",
             "https://youtu.be/abcdEFG5678",
@@ -302,7 +340,7 @@ class TestFollowUrlsYoutubeDelegation:
         yt_result.placed = 1
         delegator.ingest_videos = AsyncMock(return_value=[yt_result])
         runner = AsyncMock()
-        runner.run_for_urls = AsyncMock(return_value=_make_execution())
+        runner.fetch_urls = AsyncMock(return_value=_make_execution())
         items = [
             _item_with_urls(["https://youtu.be/abcdEFG1234"], suppress=True),
             _item_with_urls(["https://youtu.be/abcdEFG1234"], suppress=False),
@@ -362,7 +400,7 @@ class TestFollowUrlsOverwriteBreakdown:
     async def test_web_overwritten_counted_separately(self) -> None:
         """web の上書きのみのケースで web_overwritten が計上される."""
         runner = AsyncMock()
-        runner.run_for_urls = AsyncMock(
+        runner.fetch_urls = AsyncMock(
             return_value=_make_execution(placed=0, overwritten=1),
         )
         items = [_item_with_urls(["https://example.com/article"])]
@@ -391,7 +429,7 @@ class TestFollowUrlsOverwriteBreakdown:
         yt_result.overwritten = 1
         delegator.ingest_videos = AsyncMock(return_value=[yt_result])
         runner = AsyncMock()
-        runner.run_for_urls = AsyncMock(return_value=_make_execution())
+        runner.fetch_urls = AsyncMock(return_value=_make_execution())
         items = [_item_with_urls(["https://youtu.be/abcdEFG1234"])]
         stats = await follow_urls(
             items,
@@ -414,7 +452,7 @@ class TestFollowUrlsOverwriteBreakdown:
         yt_b.overwritten = 1
         delegator.ingest_videos = AsyncMock(side_effect=[[yt_a], [yt_b]])
         runner = AsyncMock()
-        runner.run_for_urls = AsyncMock(
+        runner.fetch_urls = AsyncMock(
             return_value=_make_execution(placed=2, overwritten=1),
         )
         items = [_item_with_urls([
@@ -449,7 +487,7 @@ class TestFollowUrlsOverwriteBreakdown:
         yt_result.overwritten = 1
         delegator.ingest_videos = AsyncMock(return_value=[yt_result])
         runner = AsyncMock()
-        runner.run_for_urls = AsyncMock(
+        runner.fetch_urls = AsyncMock(
             return_value=_make_execution(placed=1, overwritten=2),
         )
         items = [_item_with_urls([

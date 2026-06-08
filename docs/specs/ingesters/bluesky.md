@@ -609,7 +609,7 @@ BlueSky 投稿内に含まれる URL を抽出し、URL の種別に応じて si
 | YouTube 動画 URL（対応する具体パターンは [youtube.md](youtube.md) を参照） | YoutubeDelegator.ingest_videos | YouTube 動画の字幕・文字起こしを取り込む |
 | 不正な YouTube 動画 URL（パターンには該当するが video_id 形式が不正） | エラー扱いでスキップ | site_ingest に流すと無駄な HTTP アクセスが発生し、リスクもあるため取り込まない。`errors` カウンタを増やし、`error_details` に記録する |
 | `bsky.app/profile/` | スキップ | BlueSky 投稿は既にインジェスト対象 |
-| 上記以外の HTTP/HTTPS URL | site_ingest（複数 URL モード） | Web ページをバッチ取得する。YouTube チャンネル URL（`/@handle`, `/c/`, `/channel/`）・プレイリスト URL（`/playlist?list=`）はこの分類に含まれる |
+| 上記以外の HTTP/HTTPS URL | site_ingest（取得入口、リンク辿りなし） | Web ページをバッチ取得する。`WebDelegator.fetch_urls` 経由で固定（Issue #797: リンク辿りクロールは絶対に発動させない）。YouTube チャンネル URL（`/@handle`, `/c/`, `/channel/`）・プレイリスト URL（`/playlist?list=`）はこの分類に含まれる |
 
 YouTube 動画 URL の判定は YouTube インジェスター側で SSoT として定義された判定関数を使用する。ここに URL パターンを直接列挙すると分類器（BlueSky 側）と抽出器（YouTube 側）で drift する恐れがあるため、参照リンクで一元化する。
 
@@ -625,7 +625,8 @@ YouTube 動画 URL の判定は YouTube インジェスター側で SSoT とし�
 1. 受け取った配置済み投稿の JSON から URL を一括抽出する
 2. 抽出した URL を重複排除する（同一 URL が複数投稿に出現する場合）
 3. URL 種別を判定し、Web / YouTube / スキップに分類する
-4. Web URL を全てバッチ収集し、site-ingest（複数 URL モード）の Python API を直接呼び出して取り込む。
+4. Web URL を全てバッチ収集し、`WebDelegator.fetch_urls`（site-ingest 取得入口、リンク辿りなし）の Python API を直接呼び出して取り込む。
+   - **クロール経路は使用しない**（Issue #797）。投稿内 web URL の件数によらず、リンク辿り（サイト配下の意図しない巻き込み）は構造的に発生しない
    - 子 CLI subprocess として起動しない理由: BlueSky 取り込みの呼び出し元 CLI が既に source_store の write_lock を保持しており、子プロセス側での再取得がロック競合で失敗するため
    - site-ingest 内部の Scrapy subprocess 起動は維持される（reactor 制約のため）
    - bridge 結果は新規配置（`placed`）と上書き（`overwritten`）を **内訳として分離** して BlueSky 側の集計に反映する（合算ではなく排他カウントを別キーで保持）
@@ -833,7 +834,7 @@ AppView のベース URL は設定可能とし、デフォルトは `https://pub
 | 投稿内の URL が既に source_store に存在する | Web/YouTube インジェスターの既存の重複検出でスキップされる |
 | 投稿内の URL 先の取り込みに失敗 | エラーをログに記録してスキップする。BlueSky 投稿の取り込みには影響しない |
 | 同一 URL が複数投稿に出現 | URL 抽出時に重複排除し、1 回のみ取り込む |
-| URL 先が Safe Browsing で危険判定 | 複数 URL モードでは Safe Browsing チェックは実行されない（大量 URL への API 呼び出しは非現実的なため）。SSRF チェック（プライベート IP 拒否）のみ実行される |
+| URL 先が Safe Browsing で危険判定 | site_ingest 取得入口では Safe Browsing チェックは実行されない（大量 URL への API 呼び出しは非現実的なため）。SSRF チェック（プライベート IP 拒否）のみ実行される |
 | YouTube URL の字幕取得に失敗 | YouTube インジェスターの既存のエラーハンドリングでスキップされる |
 | 投稿内の URL が「不正な YouTube 動画 URL」（パターン該当・video_id 形式不正） | 警告ログを出力し、いずれのインジェスターにも委譲しない。詳細は「URL 種別判定と委譲先」を参照 |
 | Web URL が 0 件の場合 | site_ingest 呼び出しをスキップする |
@@ -846,7 +847,7 @@ AppView のベース URL は設定可能とし、デフォルトは `https://pub
 | `rag_add_bluesky` に指定された URL の投稿が未取り込み | 新規配置として扱う（`placed` に計上） |
 | `rag_add_bluesky` で `resolveHandle` が失敗 | エラーメッセージを返す（DID 解決なしには `getPosts` を呼べない） |
 | `rag_add_bluesky` で対象投稿に YouTube URL が含まれる | YouTube インジェスターに委譲して再取得する（振る舞いの詳細は [投稿取得フロー（rag_add_bluesky）](#投稿取得フローrag_add_bluesky) のステップ 8 を参照） |
-| `rag_add_bluesky` で対象投稿に Web URL が含まれる | site_ingest（複数 URL モード）に委譲して取得する。site_ingest の Bridge は既存ファイルを上書きするため、URL 先データの修復経路として機能する |
+| `rag_add_bluesky` で対象投稿に Web URL が含まれる | site_ingest（取得入口、リンク辿りなし）に委譲して取得する。site_ingest の Bridge は既存ファイルを上書きするため、URL 先データの修復経路として機能する |
 
 以下の `media_download` 系失敗はすべて `partial_failures` に計上する。投稿 JSON 自体の取り込みには影響しない（親成功）:
 

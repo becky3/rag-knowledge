@@ -2,23 +2,23 @@
 
 ## 概要
 
-Scrapy を subprocess 方式で起動し、Web ページを一括取り込みする機能。2 つの動作モードを提供する:
+Scrapy を subprocess 方式で起動し、Web ページを一括取り込みする機能。**入口を 2 つに物理分離** して提供する（Issue #797 で件数ヒューリスティック起因の意図しないクロール巻き込みを構造的に排除）:
 
-- **クロールモード**（単一 URL）: 開始 URL からリンクを辿り、数千ページ規模の大規模サイトを一括取り込みする
-- **複数 URL モード**（複数 URL）: 指定された URL のみを取得する（リンク辿りなし）。BlueSky インジェスターの URL 先取り込み等、バッチ取得に使用する
+- **クロール入口**: CLI `site-crawl` / MCP `rag_site_crawl` — 単一 URL を起点にリンクを辿り、数千ページ規模の大規模サイトを一括取り込みする。クロール固有オプション（`--url-pattern` / `--max-pages` / `--restart`）を持つ
+- **取得入口**: CLI `site-ingest` / MCP `rag_site_ingest` — 指定された URL リストのみを取得する（リンク辿りなし）。複数 URL OK。BlueSky インジェスターの URL 先取り込み等、バッチ取得に使用する。クロール固有オプションは持たない
 
-Scrapy の汎用 Spider でページを取得し、HTML ファイルとメタデータ JSONL をブリッジ層で source_store に変換した後、パイプライン制御で converter → indexer を実行する。
+両入口とも内部では同じ Scrapy Spider / Runner / Bridge を共有するが、引数の系統が物理的に分かれているため、件数や曖昧なヒューリスティックでモードが切り替わることはない。BlueSky 投稿内 URL の自動取り込みは取得入口に固定する。
 
-MCP ツール `rag_site_ingest` と CLI コマンド `site-ingest` の 2 つのインターフェースを提供する。
+**用語**: 本仕様では「**入口**」を CLI / MCP の外部公開コマンド/ツール名の文脈で使い、「**モード**」を Runner 内部の引数判定（`start_url` / `start_urls`）の文脈で使う。両者は 1:1 対応する（クロール入口 ⇔ クロールモード、取得入口 ⇔ 取得モード）。
 
 スコープ:
 
-- Scrapy subprocess によるサイトクロール / 複数 URL 一括取得
+- Scrapy subprocess によるサイトクロール（単一 URL 起点） / 複数 URL 一括取得
 - 汎用 Spider のパラメータ化（URL、ドメイン制約、URL パターン）
 - JSONL メタデータ + HTML ファイルの一時保存
 - ブリッジ層による一時保存データから source_store への変換・配置
-- JOBDIR による中断再開（クロールモードのみ）
-- MCP ツール `rag_site_ingest` と CLI コマンド `site-ingest` の提供
+- JOBDIR による中断再開（クロール入口のみ）
+- MCP ツール `rag_site_crawl` / `rag_site_ingest` と CLI コマンド `site-crawl` / `site-ingest` の提供
 
 スコープ外:
 
@@ -53,20 +53,17 @@ MCP ツール `rag_site_ingest` と CLI コマンド `site-ingest` の 2 つの�
 
 ### ドメイン制約
 
-- **クロールモード**: Scrapy の `allowed_domains` により、クロール対象を開始 URL と同一ドメインに制限する。リンク辿りで発見された URL は同一ドメイン制約で自動的に制限される
-- **複数 URL モード**: 全 URL のドメインの和集合を `allowed_domains` に設定する。リンク辿りは行わないため、指定 URL 以外のページは取得されない
+- **クロール入口（`site-crawl` / `rag_site_crawl`）**: Scrapy の `allowed_domains` により、クロール対象を開始 URL と同一ドメインに制限する。リンク辿りで発見された URL は同一ドメイン制約で自動的に制限される
+- **取得入口（`site-ingest` / `rag_site_ingest`）**: 全 URL のドメインの和集合を `allowed_domains` に設定する。リンク辿りは行わないため、指定 URL 以外のページは取得されない
 
-### 複数 URL モード
+### モード判定（入口分離による物理切替）
 
-- `urls` パラメータで 2 つ以上の URL を指定した場合、複数 URL モードで動作する
-- 指定された URL のみを取得し、リンク辿り（クロール）は行わない
-- `url_pattern` は無視される（パターンフィルタ不要）
-- `max_pages` は無視される（取得ページ数 = 指定 URL 数）
-- JOBDIR によるレジュームは使用しない（指定 URL を毎回取得する）
-- `--force` は無効（JOBDIR が存在しないため）
-- 単一 URL 指定時（`url` パラメータ、または `urls` が 1 件のみ）は既存のクロール動作を維持する
+モードは **入口（コマンド／ツール）の物理分離** で切り替える。Runner 内部の引数も `start_url`（クロール）と `start_urls`（取得）の 2 系統に明示分離され、同時指定は ValueError。Issue #797 以前の「件数で自動判定（URL 1 件 → クロール、2 件以上 → 取得）」は廃止済み。
 
-### パスプレフィックス制約
+- **クロール入口**: 単一 URL を必須引数とする。`--url-pattern` / `--max-pages` / `--restart` を受け付ける
+- **取得入口**: 1 件以上の URL リストを必須引数とする。クロール固有オプションは存在しない（引数として受け付けない）。リンク辿りは行わず、JOBDIR は使用しない（取得対象 URL = 配置 URL）
+
+### パスプレフィックス制約（クロール入口のみ）
 
 - `url_pattern` が未指定の場合、開始 URL のパスプレフィックスから正規表現パターンを自動生成する
 - 例: `https://example.com/docs/` → `^https://example\.com/docs(?:/|$)`
@@ -82,7 +79,8 @@ MCP ツール `rag_site_ingest` と CLI コマンド `site-ingest` の 2 つの�
 
 ### Safe Browsing チェック
 
-- 数千件規模の URL に対する Google Safe Browsing API 呼び出しは非現実的なためスキップする
+- クロール入口（`rag_site_crawl`）の起点 URL に対してのみ Google Safe Browsing API を呼び出す
+- 取得入口（`rag_site_ingest`）では数十〜数百件の URL を受ける可能性があるため、Safe Browsing 呼び出しはスキップする
 - SSRF チェックは 2 層で実施する:
   1. **初回 URL チェック**: ユーザー入力の開始 URL に対して、クロール開始前に `check_ssrf` で検証する
   2. **per-request チェック**: Scrapy Downloader Middleware で、各リクエストの送信前に DNS 解決 → IP 検証を実行する。DNS リバインディング攻撃（初回解決時はパブリック IP、実際のリクエスト時にプライベート IP に切り替わる手法）に対応する
@@ -142,42 +140,51 @@ MCP ツール `rag_site_ingest` と CLI コマンド `site-ingest` の 2 つの�
 
 | ツール | 入力 | 振る舞い |
 |--------|------|---------|
-| `rag_site_ingest` | `url` または `urls`（排他）、`url_pattern`（任意）、`max_pages`（任意）、`force`（任意）、`skip_pipeline`（任意） | Scrapy subprocess でページを取得し、HTML を source_store に配置後、パイプライン処理を実行する（`skip_pipeline=true` 時はパイプライン処理をスキップ）。結果サマリー（取得ページ数、エラー数、所要時間）を返す |
+| `rag_site_crawl` | `url`、`url_pattern`（任意）、`max_pages`（任意）、`restart`（任意）、`skip_pipeline`（任意） | Scrapy subprocess で開始 URL からリンクを辿ってクロールし、HTML を source_store に配置後、パイプライン処理を実行する |
+| `rag_site_ingest` | `urls`、`skip_pipeline`（任意） | 指定 URL のページを取得（リンク辿りなし）し、source_store に配置後、パイプライン処理を実行する |
+
+#### `rag_site_crawl` パラメータ
+
+| パラメータ | 型 | デフォルト | 説明 |
+|-----------|-----|-----------|------|
+| `url` | str | — | クロール開始 URL（必須、単一） |
+| `url_pattern` | str | なし | クロール対象 URL のフィルタパターン（正規表現）。未指定時は開始 URL のパスプレフィックスから自動生成する（例: `https://example.com/docs/` → `^https://example\.com/docs/`）。パスが `/` のみの場合はパターンなし（ドメイン全体が対象）。明示的に指定した場合はその値を優先する |
+| `max_pages` | int | `site_ingest_max_pages` | ページ数上限。config.toml の値を上書き可能 |
+| `restart` | bool | `false` | `true` の場合、クロールディレクトリ全体（JOBDIR、HTML、JSONL）を削除して最初からクロールする |
+| `skip_pipeline` | bool | `false` | `true` の場合、Scrapy クロール + Bridge（source_store 配置 + git commit）まで実行し、パイプライン処理（converter + indexer）をスキップする。共通仕様は [ingesters/common.md](ingesters/common.md#--skip-pipeline-フラグ共通仕様) を参照 |
 
 #### `rag_site_ingest` パラメータ
 
 | パラメータ | 型 | デフォルト | 説明 |
 |-----------|-----|-----------|------|
-| `url` | str | `""` | クロール開始 URL（クロールモード）。`urls` と排他 |
-| `urls` | list[str] | `[]` | 取得対象 URL のリスト（複数 URL モード）。`url` と排他。2 件以上でクロール無効 |
-| `url_pattern` | str | なし | クロール対象 URL のフィルタパターン（正規表現）。クロールモードのみ有効。未指定時は開始 URL のパスプレフィックスから自動生成する（例: `https://example.com/docs/` → `^https://example\.com/docs/`）。パスが `/` のみの場合はパターンなし（ドメイン全体が対象）。明示的に指定した場合はその値を優先する |
-| `max_pages` | int | `site_ingest_max_pages` | ページ数上限。クロールモードのみ有効。config.toml の値を上書き可能 |
-| `force` | bool | `false` | `true` の場合、クロールディレクトリ全体（JOBDIR、HTML、JSONL）を削除して最初からクロールする。クロールモードのみ有効 |
-| `skip_pipeline` | bool | `false` | `true` の場合、Scrapy クロール + Bridge（source_store 配置 + git commit）まで実行し、パイプライン処理（converter + indexer）をスキップする。source_store への commit は実行されるため、後から `rag_rebuild`（incremental）で差分処理可能。共通仕様は [ingesters/common.md](ingesters/common.md#--skip-pipeline-フラグ共通仕様) を参照 |
+| `urls` | list[str] | — | 取得対象 URL のリスト（必須、1 件以上）。**リンク辿りは行わない** |
+| `skip_pipeline` | bool | `false` | `true` の場合、Scrapy 取得 + Bridge まで実行し、パイプライン処理（converter + indexer）をスキップする |
 
-`url` と `urls` の入力規則:
-
-- `url` のみ指定: クロールモード（既存動作）
-- `urls` のみ指定（2 件以上）: 複数 URL モード（リンク辿りなし）
-- `urls` が 1 件のみ: クロールモード（`url` 指定と同等）
-- 両方指定: バリデーションエラー
-- 両方未指定: バリデーションエラー
+`rag_site_ingest` は `url`（単数 str）/ `url_pattern` / `max_pages` / `restart` / `force` パラメータを **持たない**。リンク辿りクロールが必要な場合は `rag_site_crawl` を使用する。
 
 ### CLI コマンド
 
 | コマンド | 振る舞い |
 |---------|---------|
+| `site-crawl` | MCP ツール `rag_site_crawl` と同等の機能を CLI で提供する |
 | `site-ingest` | MCP ツール `rag_site_ingest` と同等の機能を CLI で提供する |
+
+#### `site-crawl` オプション
+
+| オプション | 型 | デフォルト | 説明 |
+|-----------|-----|-----------|------|
+| `url`（位置引数） | str（単数） | — | クロール開始 URL |
+| `--url-pattern` | str | なし | URL フィルタパターン |
+| `--max-pages` | int | `site_ingest_max_pages` | ページ数上限 |
+| `--restart` | フラグ | `false` | クロールディレクトリ全体を削除して再クロール |
+| `--skip-pipeline` | フラグ | `false` | Scrapy クロール + Bridge までで停止。共通仕様は [ingesters/common.md](ingesters/common.md#--skip-pipeline-フラグ共通仕様) を参照 |
 
 #### `site-ingest` オプション
 
 | オプション | 型 | デフォルト | 説明 |
 |-----------|-----|-----------|------|
-| `url`（位置引数） | str（1 つ以上） | — | 取得対象 URL。1 件: クロールモード、2 件以上: 複数 URL モード |
-| `--url-pattern` | str | なし | URL フィルタパターン（クロールモードのみ） |
-| `--max-pages` | int | `site_ingest_max_pages` | ページ数上限（クロールモードのみ） |
-| `--force` | フラグ | `false` | クロールディレクトリ全体を削除して再クロール（クロールモードのみ） |
-| `--skip-pipeline` | フラグ | `false` | Scrapy クロール + Bridge（source_store 配置 + git commit）まで実行し、パイプライン処理（converter + indexer）をスキップする。共通仕様は [ingesters/common.md](ingesters/common.md#--skip-pipeline-フラグ共通仕様) を参照 |
+| `url`（位置引数） | str（1 つ以上） | — | 取得対象 URL。リンク辿りなし |
+| `--skip-pipeline` | フラグ | `false` | Scrapy 取得 + Bridge までで停止 |
 
 ### 取り込み結果の出力形式
 
@@ -208,7 +215,7 @@ flowchart TD
     IDX["インデクサー"]
     RESULT["結果サマリー"]
 
-    USER -->|"rag_site_ingest(url, ...)"| CMD
+    USER -->|"rag_site_crawl(url, ...) or rag_site_ingest(urls)"| CMD
     CMD --> VALID
     VALID --> SPIDER
     SPIDER -->|"HTML ファイル + JSONL"| TMPDIR
@@ -237,20 +244,20 @@ flowchart TD
 
 | パラメータ | 用途 |
 |-----------|------|
-| `start_url` | クロール開始 URL（クロールモード時。`start_urls` と排他） |
-| `start_urls` | 取得対象 URL のリスト（複数 URL モード時。JSON 配列文字列。`start_url` と排他） |
+| `start_url` | クロール開始 URL（クロール入口経由。`start_urls_json` と排他） |
+| `start_urls_json` | 取得対象 URL の JSON 配列文字列（取得入口経由。`start_url` と排他。Spider 引数として subprocess 経由で渡すため文字列化する） |
 | `allowed_domains` | ドメイン制約（URL から自動導出） |
-| `url_pattern` | URL フィルタ（正規表現、任意。クロールモードのみ） |
+| `url_pattern` | URL フィルタ（正規表現、任意。クロール入口のみ） |
 | `output_dir` | HTML ファイルの保存先ディレクトリ |
 | `max_pages` | ページ数上限（200 OK カウント）。外部インターフェースでは pydantic Field の許容範囲でクランプされる（CLI で明示的にクランプ処理を実施）。Spider 内部では 0 を無制限として扱うが、CLI/MCP からは入力されない |
-| `no_follow` | リンク辿りを無効化するフラグ（複数 URL モード時に `true`） |
+| `no_follow` | リンク辿りを無効化するフラグ（取得入口経由時に `true`） |
 
 Spider の振る舞い:
 
-- **クロールモード**（`no_follow` が `false`）: `start_url` からクロールを開始し、ページ内のリンクを辿る。リンク辿り時はクエリ文字列を除去して canonical URL に正規化する（静的サイトを主要ユースケースとする設計判断。`?page=2` 等のクエリでページが区別されるサイトでは一部ページが欠落する可能性がある）
-- **複数 URL モード**（`no_follow` が `true`）: `start_urls` の全 URL を取得するが、ページ内のリンクは辿らない
+- **クロール入口経由**（`no_follow` が `false`）: `start_url` からクロールを開始し、ページ内のリンクを辿る。リンク辿り時はクエリ文字列を除去して canonical URL に正規化する（静的サイトを主要ユースケースとする設計判断。`?page=2` 等のクエリでページが区別されるサイトでは一部ページが欠落する可能性がある）
+- **取得入口経由**（`no_follow` が `true`）: `start_urls_json` の全 URL を取得するが、ページ内のリンクは辿らない
 - `allowed_domains` に含まれないドメインへのリクエストは自動的にフィルタされる
-- `url_pattern` が指定されている場合、パターンに一致する URL のみ取得・保存する（クロールモードのみ）
+- `url_pattern` が指定されている場合、パターンに一致する URL のみ取得・保存する（クロール入口のみ）
 - 取得した HTML をファイルとして `output_dir` に保存する。URL パスのディレクトリ構造を維持する（例: `https://example.com/docs/api/auth.html` → `output_dir/docs/api/auth.html`）
 - URL パスが `.html`, `.htm` 等の Web 系拡張子で終わっている場合は `.html` を付加しない。拡張子がないパス（`/docs/api/` 等）のみ `.html` を付加する
 - `start_requests` をオーバーライドし `dont_filter=False` でリクエストを発行する。これにより start_url のフィンガープリントが重複フィルタに記録され、リンク辿りでの再取得を防止する
@@ -264,7 +271,7 @@ Scrapy プロセスの subprocess ラッパー。
 
 振る舞い:
 
-- `run()` メソッドはクロールモード（`start_url` 引数）と複数 URL モード（`start_urls` 引数）の 2 つの呼び出し方をサポートする
+- `run()` メソッドは引数の明示分離でモードを切り替える: `start_url` 指定 ⇒ クロールモード、`start_urls` 指定 ⇒ 取得モード（リンク辿りなし）。両方指定または両方未指定は `ValueError`
 - `asyncio.create_subprocess_exec` で Scrapy を起動し、インラインスクリプト内で `CrawlerProcess(settings=...)` を構成する
 - stdin は `DEVNULL` に設定する（MCP stdio モードでの親プロセス stdin 干渉を防止）
 - stderr はファイルにリダイレクトする（Twisted の子プロセス/スレッドが stderr パイプを継承し、メインプロセス終了後もパイプが閉じない Windows 固有の問題を回避）
@@ -285,7 +292,7 @@ Scrapy に渡す設定:
 | `SCHEDULER_MEMORY_QUEUE` | `scrapy.squeues.FifoMemoryQueue`（固定、BFS） |
 | `CLOSESPIDER_TIMEOUT` | `site_ingest_timeout_sec`（config.toml） |
 | `CLOSESPIDER_ERRORCOUNT` | `site_ingest_error_count`（config.toml） |
-| `JOBDIR` | クロールディレクトリ内の `jobdir/`（`{domain}/{crawl_key}/jobdir/`） |
+| `JOBDIR` | クロールディレクトリ内の `jobdir/`（`{domain}/{crawl_key}/jobdir/`）。**クロール入口経由のみ設定し、取得入口経由では未設定**（取得入口はレジューム不要） |
 | `FEEDS` | JSONL 出力パス |
 | `DOWNLOADER_MIDDLEWARES` | SSRF Middleware を有効化（優先度 50） |
 | `LOG_LEVEL` | `INFO` |
@@ -354,19 +361,20 @@ JSONL の各行から .meta サイドカーファイルへの変換:
 
 `status`, `depth` は .meta に含めない（source_store メタデータとして不要）。
 
-### 中断再開
+### 中断再開（クロール入口のみ）
 
 - JOBDIR にスケジューラキューと重複フィルタが永続化される
 - 同じ JOBDIR で再実行すると、処理済み URL をスキップして続きから取得
-- JOBDIR のレジュームは「重複スキップ付き再クロール」として動作する（Scrapy Issue #4106）。プロセス強制終了時にキューが失われる場合がある
-- `--force` オプション指定時はクロールディレクトリ全体（JOBDIR、HTML、JSONL）を削除して最初からクロールする
+- JOBDIR のレジュームは「重複スキップ付き再クロール」として動作する（Scrapy Issue 4106）。プロセス強制終了時にキューが失われる場合がある
+- `--restart` オプション指定時はクロールディレクトリ全体（JOBDIR、HTML、JSONL）を削除して最初からクロールする
+- 取得入口（`site-ingest`）では JOBDIR を使用しない（毎回指定 URL を取得）
 
 ### JOBDIR の分離
 
 一時保存ディレクトリは `{domain}/{crawl_key}/` の 2 階層で管理する。
 
-- **クロールモード**: `crawl_key` は `start_url` と effective `url_pattern`（自動生成後の値）の SHA-256 先頭 16 文字。同じパラメータなら同じディレクトリでレジューム可能
-- **複数 URL モード**: `crawl_key` はソート済み URL リストの SHA-256 先頭 16 文字。`domain` は `_multi_` 固定（複数ドメインの場合があるため）。JOBDIR は使用しない（レジューム不要）
+- **クロール入口経由**: `crawl_key` は `start_url` と effective `url_pattern`（自動生成後の値）の SHA-256 先頭 16 文字。同じパラメータなら同じディレクトリでレジューム可能
+- **取得入口経由**: `crawl_key` はソート済み URL リストの SHA-256 先頭 16 文字。`domain` は `_multi_` 固定（複数ドメインの場合があるため）。JOBDIR は使用しない（レジューム不要）
 
 ### 一時保存ディレクトリ
 
@@ -387,7 +395,8 @@ Scrapy 正常完了 + bridge 完了後、クロールディレクトリ（`{doma
 | 条件 | クリーンアップ |
 |------|-------------|
 | Scrapy 正常完了 + bridge 完了 | 実行する（`--skip-pipeline` の有無を問わない。bridge 完了時点で source_store に配置済み） |
-| Scrapy 異常終了（exit_code != 0） | 実行しない（JOBDIR によるレジュームを維持） |
+| Scrapy 異常終了（exit_code != 0、クロール入口経由） | 実行しない（JOBDIR によるレジュームを維持） |
+| Scrapy 異常終了（exit_code != 0、取得入口経由） | 実行しない（レジュームしない方針のため、次回呼び出し時に該当ディレクトリを上書きクリアして再取得する） |
 | クリーンアップ自体が失敗（Windows ファイルロック等） | 警告ログを出力し、処理全体は成功扱いとする |
 
 ### 処理フロー
@@ -402,7 +411,7 @@ sequenceDiagram
     participant SS as source_store
     participant PC as PipelineController
 
-    USER->>CMD: rag_site_ingest(url, ...)
+    USER->>CMD: rag_site_crawl(url, ...) or rag_site_ingest(urls)
     CMD->>CMD: URL バリデーション + SSRF チェック
     CMD->>CMD: 一時保存ディレクトリ準備
     CMD->>RUNNER: Scrapy 起動要求
@@ -449,21 +458,21 @@ Scrapy は独立した Python パッケージとして `pyproject.toml` に依�
 | ケース | 振る舞い |
 |--------|---------|
 | 非テキストレスポンス（動画埋め込み等） | Spider 内で Content-Type を検査し、テキスト系でないレスポンスはスキップする |
-| Scrapy プロセスが異常終了した場合 | Runner がエラーログを出力し、JSONL が部分的に出力されていれば、出力済み分を source_store に配置する。未出力分は次回再実行時に取得される（JOBDIR が残存している場合） |
-| JOBDIR が破損している場合 | Scrapy がエラーで終了する。`--force` で JOBDIR を削除して再実行する |
+| Scrapy プロセスが異常終了した場合 | Runner がエラーログを出力し、JSONL が部分的に出力されていれば、出力済み分を source_store に配置する。未出力分は次回再実行時に取得される（クロール入口は JOBDIR が残存している場合のみ） |
+| JOBDIR が破損している場合 | Scrapy がエラーで終了する。`--restart` で JOBDIR を削除して再実行する |
 | 一時保存ディレクトリのディスク容量不足 | Scrapy プロセスが I/O エラーで終了する。エラーログに記録する |
 | JSONL に記載されているが HTML ファイルが存在しない場合 | ブリッジ層で当該エントリをスキップし、エラーとして計上（`ingest.errors` / `error_details`）してエラーログを出力する |
 | 同一 URL が既に source_store に存在する場合 | `SourceStore.place_file_from_url` が既存ファイルを上書きする（通常の重複検出動作） |
 | `url_pattern` が無効な正規表現の場合 | バリデーションエラーとして拒否する |
-| Windows でのファイルロック | Scrapy プロセス終了後に JOBDIR のファイルがロックされている場合、`--force` による JOBDIR 削除が失敗する可能性がある。リトライまたは手動削除を案内する |
+| Windows でのファイルロック | Scrapy プロセス終了後に JOBDIR のファイルがロックされている場合、`--restart` による JOBDIR 削除が失敗する可能性がある。リトライまたは手動削除を案内する |
 | DNS リバインディングによるプライベート IP への誘導 | SSRF Middleware が各リクエストの DNS 解決結果を検証し、プライベート IP へのアクセスを `IgnoreRequest` で拒否する。該当リクエストは Scrapy の統計に失敗として記録される |
 | SSRF Middleware での DNS 解決失敗 | DNS 解決に失敗した場合、そのリクエストを `IgnoreRequest` で拒否する。ネットワーク障害等による一時的な DNS エラーは Scrapy のリトライ対象外となる |
 | `--skip-pipeline` 指定時にパイプライン処理が必要な場合 | MCP: `rag_rebuild`（mode: full, source_type: web）、CLI: `uv run python -m rag.cli rebuild --mode full --source-type web` で後からパイプライン処理を実行する。incremental モードでも可（source_store への配置が git commit されていれば差分検知される） |
 | 同一ドメインへの異なるパラメータでの複数回クロール | クロールキー（`start_url` + effective `url_pattern` のハッシュ）により JOBDIR が分離されるため、前回クロールの URL キューが残留しない |
-| 複数 URL モードで無効なスキームの URL が混在 | バリデーションで全 URL を検証し、不正な URL があればエラーを返す |
-| 複数 URL モードで SSRF 対象の URL が混在 | 全 URL に対して SSRF チェックを実行し、1 つでも違反があればエラーを返す |
-| 複数 URL モードで一部の URL が取得失敗 | 取得可能な URL のみ処理する。失敗した URL はエラーとして計上する |
-| `url` と `urls` の両方が指定された場合 | バリデーションエラーとして拒否する |
+| 取得入口（`site-ingest`）で無効なスキームの URL が混在 | バリデーションで全 URL を検証し、不正な URL があればエラーを返す |
+| 取得入口（`site-ingest`）で SSRF 対象の URL が混在 | 全 URL に対して SSRF チェックを実行し、1 つでも違反があればエラーを返す |
+| 取得入口（`site-ingest`）で一部の URL が取得失敗 | 取得可能な URL のみ処理する。失敗した URL はエラーとして計上する |
+| Runner.run に `start_url` と `start_urls` の両方が指定された場合 | `ValueError` を送出する（入口分離の不変条件） |
 | 正常完了後のクリーンアップ失敗（Windows ファイルロック等） | 警告ログを出力し、処理全体は成功扱いとする。一時ディレクトリは手動削除が必要 |
 
 ## 関連ドキュメント
@@ -473,4 +482,4 @@ Scrapy は独立した Python パッケージとして `pyproject.toml` に依�
 - [pipeline-controller.md](pipeline-controller.md) — パイプライン制御仕様
 - [converter.md](converter.md) — コンバーター仕様
 - [ingesters/common.md](ingesters/common.md) — インジェスター共通仕様
-- [ingesters/bluesky.md](ingesters/bluesky.md) — BlueSky インジェスター仕様（複数 URL モードの利用元）
+- [ingesters/bluesky.md](ingesters/bluesky.md) — BlueSky インジェスター仕様（取得入口の利用元）

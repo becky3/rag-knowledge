@@ -28,7 +28,7 @@ argument-hint: ""
 QA 検証グループ:
 
   A) Local    — add-document, crawl-documents, add-journal, migrate-journal
-  B) Web      — site-ingest（クロール + 複数URL）
+  B) Web      — site-crawl（クロール）と site-ingest（取得、リンク辿りなし）
   C) SNS      — crawl-zenn, crawl-bluesky
   D) YouTube  — ingest-youtube, ingest-youtube-playlist（実行前にユーザー確認）
   E) Aozora   — update-aozora-catalog, search-aozora, ingest-aozora
@@ -207,8 +207,8 @@ NG を検出した場合、Issue 起票を提案する。
 | A) Local | crawl-documents | リポジトリの `docs/specs/` ディレクトリ全体 |
 | A) Local | add-journal | `.qa/journal_add_test.md`（`--title "コンテンツ一覧取得機能の実装"` `--repository rag-knowledge`） |
 | A) Local | migrate-journal | `.qa/journals/`（古いジャーナル 10 件、`--repository rag-knowledge`） |
-| B) Web | site-ingest（クロール） | `https://www.stat.go.jp/`（`--max-pages 20`） |
-| B) Web | site-ingest（複数URL） | `https://www.stat.go.jp/data/jinsui/` と `https://www.stat.go.jp/data/roudou/` |
+| B) Web | site-crawl（クロール、リンク辿りあり） | `https://www.stat.go.jp/`（`--max-pages 20`） |
+| B) Web | site-ingest（取得、リンク辿りなし） | `https://www.stat.go.jp/data/jinsui/` と `https://www.stat.go.jp/data/roudou/` |
 | C) SNS | Zenn ユーザー | `testuser`（fake モード） / `rhythmcan`（real モード） |
 | C) SNS | BlueSky ハンドル | `rhythmcan.bsky.social` |
 | C) SNS | BlueSky --max-posts | `5`（メディア付き投稿を含むため増加） |
@@ -272,10 +272,15 @@ MCP 対応コマンド:
 
 | # | コマンド（CLI） | 期待結果 | 検証種別 |
 |---|----------------|---------|---------|
-| 1 | `site-ingest https://www.stat.go.jp/ --max-pages 20` | Scrapy クロールモード一括取り込み成功 | `ingest` |
-| 2 | `site-ingest https://www.stat.go.jp/data/jinsui/ https://www.stat.go.jp/data/roudou/` | 複数 URL モードで 2 件取得成功（クロールなし） | `ingest` |
+| 1 | `site-crawl https://www.stat.go.jp/ --max-pages 20` | Scrapy クロール（リンク辿りあり）で一括取り込み成功 | `ingest` |
+| 2 | `site-ingest https://www.stat.go.jp/data/jinsui/ https://www.stat.go.jp/data/roudou/` | 指定 2 URL を取得成功（リンク辿りが発生しないことを ingest 件数で確認: 取得 URL 数と配置件数が一致） | `ingest` |
+| 3 | `site-ingest https://www.stat.go.jp/data/jinsui/` | 単一 URL 投入で 1 件のみ取得成功（**サイト全体クロールが発動しないこと** を ingest 件数 = 1 で確認、Issue #797 回帰検証） | `ingest` |
 
-MCP 対応: `rag_site_ingest`（`url` パラメータ / `urls` パラメータ）
+MCP 対応: `rag_site_crawl`（クロール）/ `rag_site_ingest`（取得）
+
+**Issue #797 回帰検証ポイント:**
+
+- B-3 で配置件数が 1 件のみ（リンク辿りで増えていない）であることを確認する。複数件配置されている場合は no-crawl 経路が機能していない
 
 ### C) SNS
 

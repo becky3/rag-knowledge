@@ -87,7 +87,7 @@ from .tools.ingest_aozora import (  # noqa: E402, F401
     rag_search_aozora,
     rag_update_aozora_catalog,
 )
-from .tools.ingest_site import rag_site_ingest  # noqa: E402, F401
+from .tools.ingest_site import rag_site_crawl, rag_site_ingest  # noqa: E402, F401
 from .tools.delete import rag_delete  # noqa: E402, F401
 from .tools.rebuild import rag_rebuild  # noqa: E402, F401
 from .tools.listing import (  # noqa: E402, F401

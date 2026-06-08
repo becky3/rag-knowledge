@@ -4,16 +4,23 @@
 仕様: docs/specs/site-ingest.md
 
 テスト方針:
-- WebIngester.crawl_urls が ScrapyRunner と Bridge を正しく呼び出すこと
-- 単一 URL（クロールモード）と複数 URL（複数 URL モード）で正しい引数が渡ること
+- WebIngester.crawl_url（クロール、リンク辿りあり）が ScrapyRunner.run(start_url=...)
+  と Bridge を正しく呼び出すこと
+- WebIngester.fetch_urls（取得、リンク辿りなし）が ScrapyRunner.run(start_urls=...)
+  と Bridge を正しく呼び出すこと
+- 1 件のみの URL でも fetch_urls 経路はリンク辿りを発動しないこと（Issue #797 回帰防止）
 - JSONL 未出力時の早期 return（no_output=True）
-- 空 URL リストの拒否
+- 空 URL リスト / 空 URL の拒否
 - crawl_result が SiteIngestExecution に保持されること（cleanup 責務は呼び出し元）
 
-背景: #686 — site-ingest コア処理を Python API として切り出し、bluesky から
-subprocess を介さず直接呼び出せるようにした。
-#706 — site_ingest_runner.py を ingesters/web/ パッケージに統合し WebIngester に
-リネーム。ScrapyRunner Protocol を Fetcher 相当依存として注入する構造に整理。
+背景:
+- #686 — site-ingest コア処理を Python API として切り出し、bluesky から
+  subprocess を介さず直接呼び出せるようにした
+- #706 — site_ingest_runner.py を ingesters/web/ パッケージに統合し WebIngester に
+  リネーム。ScrapyRunner Protocol を Fetcher 相当依存として注入する構造に整理
+- #797 — 単一 URL 投入時に件数ヒューリスティックでクロールに化ける巻き込み事故を
+  構造的に排除するため crawl_urls を crawl_url（単一 URL）/ fetch_urls（複数 URL）に
+  物理分離
 """
 
 from __future__ import annotations
@@ -42,18 +49,18 @@ def _make_web_ingester(
 
 
 @pytest.mark.asyncio
-class TestWebIngesterCrawlUrls:
-    async def test_empty_urls_raises(self) -> None:
-        """URL 0 件で ValueError を送出すること."""
+class TestWebIngesterCrawlUrl:
+    """クロール入口（``crawl_url``）の検証."""
+
+    async def test_empty_url_raises(self) -> None:
+        """url 空文字で ValueError を送出すること."""
         scrapy_runner = MagicMock()
         ingester = WebIngester(MagicMock(), scrapy_runner=scrapy_runner)
-        with pytest.raises(ValueError, match="at least one URL"):
-            await ingester.crawl_urls(
-                urls=[],
-            )
+        with pytest.raises(ValueError, match="url is required"):
+            await ingester.crawl_url(url="")
 
-    async def test_single_url_dispatches_crawl_mode(self) -> None:
-        """1 URL でクロールモード（start_url）として ScrapyRunner.run を呼ぶこと."""
+    async def test_dispatches_crawl_mode(self) -> None:
+        """ScrapyRunner.run を start_url + クロール固有引数で呼ぶこと."""
         crawl_result = CrawlResult(
             exit_code=0,
             output_dir=Path("/tmp/out"),
@@ -62,11 +69,11 @@ class TestWebIngesterCrawlUrls:
         )
         ingester, scrapy_runner, _ = _make_web_ingester(crawl_result)
 
-        execution = await ingester.crawl_urls(
-            urls=["https://example.com/page"],
+        execution = await ingester.crawl_url(
+            url="https://example.com/page",
             url_pattern="^https://example\\.com/",
             max_pages=10,
-            force=True,
+            restart=True,
         )
 
         kwargs = scrapy_runner.run.await_args.kwargs
@@ -74,13 +81,13 @@ class TestWebIngesterCrawlUrls:
         assert kwargs["allowed_domains"] == "example.com"
         assert kwargs["url_pattern"] == "^https://example\\.com/"
         assert kwargs["max_pages"] == 10
-        assert kwargs["force"] is True
+        assert kwargs["restart"] is True
         assert "start_urls" not in kwargs
         assert execution.no_output is True
         assert execution.crawl_result is crawl_result
 
-    async def test_multi_url_dispatches_multi_mode(self) -> None:
-        """2 URL 以上で複数 URL モード（start_urls）として呼ぶこと."""
+    async def test_url_pattern_defaults_to_empty(self) -> None:
+        """url_pattern 未指定時に空文字列を渡すこと."""
         crawl_result = CrawlResult(
             exit_code=0,
             output_dir=Path("/tmp/out"),
@@ -89,7 +96,62 @@ class TestWebIngesterCrawlUrls:
         )
         ingester, scrapy_runner, _ = _make_web_ingester(crawl_result)
 
-        execution = await ingester.crawl_urls(
+        await ingester.crawl_url(url="https://example.com/")
+
+        kwargs = scrapy_runner.run.await_args.kwargs
+        assert kwargs["url_pattern"] == ""
+        assert kwargs["restart"] is False
+
+
+@pytest.mark.asyncio
+class TestWebIngesterFetchUrls:
+    """取得入口（``fetch_urls``）の検証."""
+
+    async def test_empty_urls_raises(self) -> None:
+        """URL 0 件で ValueError を送出すること."""
+        scrapy_runner = MagicMock()
+        ingester = WebIngester(MagicMock(), scrapy_runner=scrapy_runner)
+        with pytest.raises(ValueError, match="at least one URL"):
+            await ingester.fetch_urls(urls=[])
+
+    async def test_single_url_does_not_trigger_crawl(self) -> None:
+        """**Issue #797**: 単一 URL でも fetch_urls 経路は start_urls 系統で呼び出す.
+
+        従来は crawl_urls(urls=[single]) で件数ヒューリスティックにより
+        start_url 系統（クロール）にフォールバックしていたため、BlueSky 経路で
+        投稿内 web URL が 1 本だったときにサイト全体クロールに化けていた。
+        本テストは fetch_urls が**常に** start_urls 系統で Runner を呼び出す
+        ことを保証する。
+        """
+        crawl_result = CrawlResult(
+            exit_code=0,
+            output_dir=Path("/tmp/out"),
+            jsonl_path=Path("/tmp/out/nonexistent.jsonl"),
+            success=True,
+        )
+        ingester, scrapy_runner, _ = _make_web_ingester(crawl_result)
+
+        await ingester.fetch_urls(urls=["https://example.com/page"])
+
+        kwargs = scrapy_runner.run.await_args.kwargs
+        assert kwargs["start_urls"] == ["https://example.com/page"]
+        assert "start_url" not in kwargs
+        # クロール固有オプションは渡らない
+        assert "url_pattern" not in kwargs
+        assert "max_pages" not in kwargs
+        assert "restart" not in kwargs
+
+    async def test_multi_url_dispatches_with_allowed_domains_union(self) -> None:
+        """2 URL 以上で start_urls + ドメインの和集合で呼ぶこと."""
+        crawl_result = CrawlResult(
+            exit_code=0,
+            output_dir=Path("/tmp/out"),
+            jsonl_path=Path("/tmp/out/nonexistent.jsonl"),
+            success=True,
+        )
+        ingester, scrapy_runner, _ = _make_web_ingester(crawl_result)
+
+        await ingester.fetch_urls(
             urls=["https://a.example.com/x", "https://b.example.com/y"],
         )
 
@@ -97,13 +159,15 @@ class TestWebIngesterCrawlUrls:
         assert kwargs["start_urls"] == [
             "https://a.example.com/x", "https://b.example.com/y",
         ]
-        # ドメインの和集合
         assert set(kwargs["allowed_domains"].split(",")) == {
             "a.example.com", "b.example.com",
         }
         assert "start_url" not in kwargs
-        assert "url_pattern" not in kwargs
-        assert execution.no_output is True
+
+
+@pytest.mark.asyncio
+class TestWebIngesterBridge:
+    """Bridge 呼び出し・SiteIngestExecution 構築の検証."""
 
     async def test_invokes_bridge_when_jsonl_exists(self, tmp_path: Path) -> None:
         """JSONL が存在する場合、Bridge を呼び出して bridge 結果を保持すること."""
@@ -128,9 +192,7 @@ class TestWebIngesterCrawlUrls:
             "rag.pipeline.ingesters.web._facade.import_to_source_store",
             return_value=bridge_result,
         ) as mock_bridge:
-            execution = await ingester.crawl_urls(
-                urls=["https://example.com/page"],
-            )
+            execution = await ingester.fetch_urls(urls=["https://example.com/page"])
 
         mock_bridge.assert_called_once_with(
             jsonl_path=jsonl_path,
@@ -159,9 +221,7 @@ class TestWebIngesterCrawlUrls:
             "rag.pipeline.ingesters.web._facade.import_to_source_store",
             return_value=BridgeResult(),
         ):
-            execution = await ingester.crawl_urls(
-                urls=["https://example.com/p"],
-            )
+            execution = await ingester.fetch_urls(urls=["https://example.com/p"])
 
         crawl_result.cleanup.assert_not_called()
         assert execution.crawl_result is crawl_result

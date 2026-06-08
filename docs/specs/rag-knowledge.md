@@ -255,7 +255,7 @@ flowchart TD
 | `tools/ingest_youtube.py` | `rag_add_youtube`, `rag_crawl_youtube` |
 | `tools/ingest_local.py` | `rag_add_document`, `rag_crawl_documents`, `rag_add_journal` |
 | `tools/ingest_aozora.py` | `rag_update_aozora_catalog`, `rag_search_aozora`, `rag_add_aozora`, `rag_crawl_aozora` |
-| `tools/ingest_site.py` | `rag_site_ingest` |
+| `tools/ingest_site.py` | `rag_site_ingest`, `rag_site_crawl` |
 | `tools/delete.py` | `rag_delete` |
 | `tools/rebuild.py` | `rag_rebuild` |
 | `tools/listing.py` | `rag_list_recent`, `rag_stats` |
@@ -404,16 +404,27 @@ YouTube プレイリスト内の動画を一括取り込みする。詳細は [i
 
 #### rag_site_ingest
 
-Scrapy subprocess で対象サイトをクロールし、source_store に配置後、パイプライン処理を実行する。単一 URL はリンク追従クロール、複数 URL は指定 URL のみ取得。詳細は [site-ingest.md](site-ingest.md) を参照。
+指定 URL の Web ページを取得（リンク辿りなし）し source_store に配置後、パイプライン処理を実行する。
+リンク辿りクロールが必要な場合は [`rag_site_crawl`](#rag_site_crawl) を使用する
+（Issue #797 で入口分離。単一 URL 投入での意図しないサイト全体クロールを構造的に防止）。
+詳細は [site-ingest.md](site-ingest.md) を参照。
 
 | 引数 | 型 | 必須 | デフォルト | 説明 |
 |------|-----|------|-----------|------|
-| `url` | str | No | `""` | クロール開始 URL（クロールモード、`urls` と排他） |
-| `urls` | list[str] \| None | No | None | 取得対象 URL のリスト（複数 URL モード、`url` と排他） |
-| `url_pattern` | str | No | `""` | URL フィルタパターン（正規表現、クロールモードのみ） |
-| `max_pages` | int \| None | No | None（設定値を使用） | ページ数上限（クロールモードのみ） |
-| `force` | bool | No | `false` | JOBDIR を削除して最初からクロール（クロールモードのみ） |
-| `skip_pipeline` | bool | No | `false` | パイプライン処理をスキップし、Scrapy クロール + Bridge のみ実行（CLI の `--skip-pipeline` と等価。共通仕様は [ingesters/common.md](ingesters/common.md#--skip-pipeline-フラグ共通仕様)）|
+| `urls` | list[str] | Yes | — | 取得対象 URL のリスト（1 件以上必須） |
+| `skip_pipeline` | bool | No | `false` | パイプライン処理をスキップし、Scrapy 取得 + Bridge のみ実行（共通仕様は [ingesters/common.md](ingesters/common.md#--skip-pipeline-フラグ共通仕様)）|
+
+#### rag_site_crawl
+
+Scrapy subprocess で開始 URL からリンクを辿ってサイトをクロールし、source_store に配置後、パイプライン処理を実行する。詳細は [site-ingest.md](site-ingest.md) を参照。
+
+| 引数 | 型 | 必須 | デフォルト | 説明 |
+|------|-----|------|-----------|------|
+| `url` | str | Yes | — | クロール開始 URL（単一） |
+| `url_pattern` | str | No | `""` | URL フィルタパターン（正規表現） |
+| `max_pages` | int \| None | No | None（設定値を使用） | ページ数上限 |
+| `restart` | bool | No | `false` | JOBDIR + 一時 HTML/JSONL を削除して最初から再クロール |
+| `skip_pipeline` | bool | No | `false` | パイプライン処理をスキップし、Scrapy クロール + Bridge のみ実行 |
 
 #### rag_delete
 
@@ -483,7 +494,7 @@ Scrapy subprocess で対象サイトをクロールし、source_store に配置�
 ### 取り込みツールの出力形式
 
 取り込みツール（rag_crawl_zenn、rag_crawl_bluesky、rag_add_youtube、rag_crawl_youtube、
-rag_add_document、rag_crawl_documents、rag_add_journal、rag_site_ingest、
+rag_add_document、rag_crawl_documents、rag_add_journal、rag_site_ingest、rag_site_crawl、
 rag_add_aozora、rag_crawl_aozora）は、
 source_store への配置結果とパイプライン処理結果を統合したサマリーを返す。
 配置結果には配置ファイル数・スキップ数・エラー数を含み、
@@ -626,7 +637,8 @@ MCP サーバーの全ツールは CLI サブプロセスに委譲する。設�
 | `rag_add_document` | `add-document` | stdin 入力（後述） |
 | `rag_crawl_documents` | `crawl-documents` | |
 | `rag_add_journal` | `add-journal` | stdin 入力（後述） |
-| `rag_site_ingest` | `site-ingest` | |
+| `rag_site_ingest` | `site-ingest` | bulk 対応 (`urls: list[str]`)、リンク辿りなし |
+| `rag_site_crawl` | `site-crawl` | 単一 URL 起点クロール（Issue #797 で新設） |
 | `rag_add_aozora` | `ingest-aozora` | bulk 対応 (`book_ids: list[str]`) |
 | `rag_crawl_aozora` | `ingest-aozora-author` | |
 | `rag_delete` | `delete` | bulk 対応 (`source_ids: list[str]`) |

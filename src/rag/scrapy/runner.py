@@ -99,17 +99,22 @@ class ScrapyRunner(Protocol):
         allowed_domains: str = "",
         url_pattern: str = "",
         max_pages: int | None = None,
-        force: bool = False,
+        restart: bool = False,
     ) -> CrawlResult:
         """Scrapy クロールを実行する.
 
+        モードは引数で明示的に切り替える。``start_url`` 指定はクロールモード
+        （リンク辿りあり、単一 URL 起点）、``start_urls`` 指定は取得モード
+        （リンク辿りなし、指定 URL のみ取得）。両方指定・両方未指定は ValueError。
+
         Args:
-            start_url: クロール開始 URL（クロールモード、start_urls と排他）
-            start_urls: 取得対象 URL のリスト（複数 URL モード、start_url と排他）
+            start_url: クロール開始 URL（クロールモード、``start_urls`` と排他）
+            start_urls: 取得対象 URL のリスト（取得モード、``start_url`` と排他）
             allowed_domains: ドメイン制約（カンマ区切り）
             url_pattern: URL フィルタ正規表現（クロールモードのみ）
             max_pages: ページ数上限（None の場合は実装依存のデフォルト）
-            force: True の場合、クロールディレクトリ全体を削除して最初からクロール
+            restart: True の場合、JOBDIR + 一時 HTML/JSONL を削除して最初から
+                再実行（クロールモードのみ有効。取得モードでは無視）
 
         Returns:
             クロール実行結果
@@ -149,48 +154,50 @@ class RealScrapyRunner:
         allowed_domains: str = "",
         url_pattern: str = "",
         max_pages: int | None = None,
-        force: bool = False,
+        restart: bool = False,
     ) -> CrawlResult:
         """Scrapy Spider を subprocess で起動してクロールを実行する.
 
+        モードは引数で明示的に切り替える。件数ヒューリスティック（Issue #797）は
+        廃止済み。``start_url`` 指定 ⇒ クロールモード、``start_urls`` 指定 ⇒
+        取得モード（リンク辿りなし）。
+
         Args:
-            start_url: クロール開始 URL（クロールモード、start_urls と排他）
-            start_urls: 取得対象 URL のリスト（複数 URL モード、start_url と排他）
+            start_url: クロール開始 URL（クロールモード、``start_urls`` と排他）
+            start_urls: 取得対象 URL のリスト（取得モード、``start_url`` と排他）
             allowed_domains: ドメイン制約（カンマ区切り）
             url_pattern: URL フィルタ正規表現（クロールモードのみ）
             max_pages: ページ数上限（None の場合はインスタンス設定値を使用）
-            force: True の場合、クロールディレクトリ全体を削除して最初からクロール
+            restart: True の場合、JOBDIR + 一時 HTML/JSONL を削除して最初から
+                再実行（クロールモードのみ有効。取得モードでは無視）
 
         Returns:
             クロール実行結果
         """
-        # 複数 URL モード判定
         _urls = start_urls or []
-        multi_url_mode = len(_urls) >= 2
+        if start_url and _urls:
+            raise ValueError("start_url と start_urls は排他です")
+        if not start_url and not _urls:
+            raise ValueError("start_url または start_urls は必須です")
 
-        if multi_url_mode:
-            # 複数 URL モード: リンク辿りなし
+        fetch_mode = bool(_urls)
+
+        if fetch_mode:
+            # 取得モード: リンク辿りなし、URL リストをそのまま取得
             effective_start_urls = _urls
             effective_start_url = ""
             no_follow = True
             effective_max_pages = 0  # 無制限（URL 数 = ページ数）
             url_pattern = ""  # パターンフィルタ無効
-        elif len(_urls) == 1:
-            # urls が 1 件のみ: クロールモードとして扱う
-            effective_start_url = _urls[0]
-            effective_start_urls = []
-            no_follow = False
-            effective_max_pages = max_pages if max_pages is not None else self._max_pages
-        elif start_url:
+        else:
+            # クロールモード: 単一 URL 起点、リンク辿りあり
             effective_start_url = start_url
             effective_start_urls = []
             no_follow = False
             effective_max_pages = max_pages if max_pages is not None else self._max_pages
-        else:
-            raise ValueError("start_url または start_urls は必須です")
 
         # クロールモード: url_pattern 未指定時は自動生成
-        if not multi_url_mode:
+        if not fetch_mode:
             parsed = urlparse(effective_start_url)
             if not url_pattern:
                 path = parsed.path.rstrip("/")
@@ -210,7 +217,7 @@ class RealScrapyRunner:
                     logger.info("url_pattern を自動生成: %s", url_pattern)
 
         # 一時保存ディレクトリの決定
-        if multi_url_mode:
+        if fetch_mode:
             domain = "_multi_"
             key = _multi_url_key(effective_start_urls)
         else:
@@ -223,28 +230,29 @@ class RealScrapyRunner:
         jsonl_path = crawl_dir / "metadata.jsonl"
         jobdir = crawl_dir / "jobdir"
 
-        # --force: クロールディレクトリ全体をクリア（クロールモードのみ有効）
-        if force and not multi_url_mode and crawl_dir.exists():
-            logger.info("--force: クロールディレクトリを削除します: %s", crawl_dir)
+        # --restart: クロールディレクトリ全体をクリア（クロールモードのみ有効）
+        if restart and not fetch_mode and crawl_dir.exists():
+            logger.info("--restart: クロールディレクトリを削除します: %s", crawl_dir)
             try:
                 shutil.rmtree(crawl_dir)
             except OSError as exc:
-                msg = f"--force 指定時にクロールディレクトリの削除に失敗しました: {crawl_dir}"
+                msg = (
+                    f"--restart 指定時にクロールディレクトリの削除に失敗しました: {crawl_dir}"
+                )
                 logger.error(msg, exc_info=True)
                 raise RuntimeError(msg) from exc
 
-        # 複数 URL モード: 前回の一時ディレクトリをクリア（レジューム不要）
-        if multi_url_mode and crawl_dir.exists():
+        # 取得モード: 前回の一時ディレクトリをクリア（レジューム不要）
+        if fetch_mode and crawl_dir.exists():
             try:
                 shutil.rmtree(crawl_dir)
             except OSError:
                 logger.warning(
-                    "複数 URL モードの一時ディレクトリ削除に失敗: %s", crawl_dir, exc_info=True,
+                    "取得モードの一時ディレクトリ削除に失敗: %s", crawl_dir, exc_info=True,
                 )
 
-        # ディレクトリ準備
+        # ディレクトリ準備（html_dir.mkdir で親の crawl_dir も自動生成される）
         html_dir.mkdir(parents=True, exist_ok=True)
-        crawl_dir.mkdir(parents=True, exist_ok=True)
 
         # パラメータを JSON ファイルに書き出し（コードインジェクション防止）
         params_path = crawl_dir / "spider_params.json"
@@ -261,7 +269,7 @@ class RealScrapyRunner:
             "error_count": self._error_count,
             "no_follow": no_follow,
         }
-        if multi_url_mode:
+        if fetch_mode:
             params["start_urls_json"] = json.dumps(effective_start_urls)
             params["start_url"] = ""
         else:
@@ -278,15 +286,18 @@ class RealScrapyRunner:
         env["PYTHONUTF8"] = "1"
         env["PYTHONIOENCODING"] = "utf-8"
 
-        if multi_url_mode:
+        if fetch_mode:
             preview = ", ".join(effective_start_urls[:3])
             log_url = f"{preview}..." if len(effective_start_urls) > 3 else preview
+            # 取得モードは max_pages=0（無制限）固定。値だけだと「上限ゼロ」と誤読されうるため補足する
+            max_pages_display = "0 (mode=fetch, unlimited)"
         else:
             log_url = effective_start_url
+            max_pages_display = str(effective_max_pages)
         logger.info(
-            "Scrapy Spider を起動: url=%s, max_pages=%d, delay=%.2f, no_follow=%s",
+            "Scrapy Spider を起動: url=%s, max_pages=%s, delay=%.2f, no_follow=%s",
             log_url,
-            effective_max_pages,
+            max_pages_display,
             self._delay_sec,
             no_follow,
         )
