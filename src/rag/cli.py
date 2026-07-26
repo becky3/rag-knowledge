@@ -926,6 +926,34 @@ def _build_parser() -> "_JsonAwareArgumentParser":
     _add_skip_pipeline_option(crawldoc_parser)
     _add_output_option(crawldoc_parser)
 
+    # reduce-pptx: pptx/ppsx の埋め込みメディア除去コピー生成（配置前の事前処理）
+    reduce_pptx_parser = subparsers.add_parser(
+        "reduce-pptx",
+        help="pptx/ppsx の埋め込みメディアを除去した軽量コピーを生成（source_store 配置前の事前処理）",
+    )
+    reduce_pptx_parser.add_argument(
+        "paths",
+        nargs="+",
+        help="対象ファイルまたはディレクトリのパス（1 件以上。ディレクトリは再帰走査）",
+    )
+    reduce_pptx_parser.add_argument(
+        "--output-dir",
+        default=None,
+        help="削減コピーの出力先ディレクトリ（--alongside と排他。存在しない場合は作成）",
+    )
+    reduce_pptx_parser.add_argument(
+        "--alongside",
+        action="store_true",
+        default=False,
+        help="原本と同じフォルダに <元名>.reduced.<拡張子> で削減コピーを出力する（--output-dir と排他）",
+    )
+    reduce_pptx_parser.add_argument(
+        "--report-only",
+        action="store_true",
+        default=False,
+        help="削減対象パート占有量レポートの表示のみで削減コピーを生成しない",
+    )
+
     # site-ingest: 指定 URL のページ取得（リンク辿りなし、複数 URL OK）
     siteingest_parser = subparsers.add_parser(
         "site-ingest",
@@ -1054,6 +1082,7 @@ def main() -> None:
         "migrate-journal": run_migrate_journal,
         "migrate": run_migrate,
         "generate-api-key": run_generate_api_key,
+        "reduce-pptx": run_reduce_pptx,
     }
 
     if args.command in _ASYNC_COMMANDS:
@@ -2827,6 +2856,159 @@ def _format_cli_size(size_bytes: int) -> str:
     from .admin.formatting import format_file_size
 
     return format_file_size(size_bytes)
+
+
+def _collect_pptx_targets(raw_paths: list[str]) -> tuple[list[Path], int]:
+    """reduce-pptx の対象ファイルを収集する.
+
+    Args:
+        raw_paths: CLI で指定されたパス（ファイルまたはディレクトリ）
+
+    Returns:
+        (対象ファイルのリスト, パス解決エラー数)
+    """
+    from .converter.pptx_extractor import PPTX_EXTENSIONS, REDUCED_STEM_SUFFIX
+
+    def _is_target(p: Path) -> bool:
+        # .reduced 付きは本ツールの出力物のため対象から除外する（削減版の再削減を防ぐ）
+        return (
+            p.suffix.lower() in PPTX_EXTENSIONS
+            and not p.stem.lower().endswith(REDUCED_STEM_SUFFIX)
+        )
+
+    targets: list[Path] = []
+    errors = 0
+    for raw in raw_paths:
+        path = Path(raw).resolve()
+        if path.is_dir():
+            targets.extend(sorted(
+                p for p in path.rglob("*") if p.is_file() and _is_target(p)
+            ))
+        elif path.is_file():
+            if _is_target(path):
+                targets.append(path)
+            else:
+                print(f"警告: pptx/ppsx ではない（または削減済み）ためスキップ: {path}")
+        else:
+            print(f"エラー: パスが存在しません: {path}", file=sys.stderr)
+            errors += 1
+    return targets, errors
+
+
+def run_reduce_pptx(args: argparse.Namespace) -> None:
+    """pptx/ppsx の埋め込みメディア等（メディア・OLE・フォント）を除去した軽量コピーを生成する.
+
+    仕様: docs/specs/infrastructure/pptx-media-reduction.md
+
+    入力は読み取り専用で開き、削減コピーは --output-dir 配下、または
+    --alongside 指定時は原本と同じフォルダに <元名>.reduced.<拡張子> の
+    別ファイルとして生成する（非破壊）。出力先の既存ファイルは上書きしない。
+    """
+    from .converter.pptx_extractor import (
+        REDUCED_STEM_SUFFIX,
+        PptxExtractionError,
+        analyze_pptx_media,
+        reduce_pptx,
+    )
+
+    if not args.report_only:
+        if args.output_dir is not None and args.alongside:
+            print(
+                "エラー: --output-dir と --alongside は同時に指定できません",
+                file=sys.stderr,
+            )
+            raise SystemExit(1)
+        if args.output_dir is None and not args.alongside:
+            print(
+                "エラー: 削減実行には --output-dir または --alongside が必要です"
+                "（レポートのみの場合は --report-only を指定）",
+                file=sys.stderr,
+            )
+            raise SystemExit(1)
+
+    targets, path_errors = _collect_pptx_targets(args.paths)
+    if not targets:
+        print("対象の pptx/ppsx ファイルがありません")
+        if path_errors:
+            raise SystemExit(1)
+        return
+
+    output_dir: Path | None = None
+    if not args.report_only and args.output_dir is not None:
+        output_dir = Path(args.output_dir).resolve()
+        output_dir.mkdir(parents=True, exist_ok=True)
+
+    reduced = 0
+    reported = 0
+    skipped = 0
+    errors = path_errors
+    produced: set[Path] = set()
+    for target in targets:
+        try:
+            report = analyze_pptx_media(target)
+        except PptxExtractionError as exc:
+            print(f"エラー: {exc}", file=sys.stderr)
+            errors += 1
+            continue
+        reported += 1
+
+        ext_summary = ", ".join(
+            f"{ext}: {count}" for ext, count in sorted(report.media_ext_counts.items())
+        ) or "なし"
+        print(f"{target}")
+        print(f"  全体: {_format_cli_size(report.total_bytes)}")
+        print(
+            f"  削減対象: {report.media_count} 件 "
+            f"{_format_cli_size(report.media_bytes)} ({ext_summary})",
+        )
+        print(f"  削減後推定: {_format_cli_size(report.reduced_estimate_bytes)}")
+
+        if args.report_only:
+            continue
+
+        if output_dir is not None:
+            out_path = output_dir / target.name
+        else:
+            # --alongside: 原本と同じフォルダに <元名>.reduced.<拡張子> で出力
+            out_path = target.with_name(
+                f"{target.stem}{REDUCED_STEM_SUFFIX}{target.suffix}",
+            )
+        if out_path in produced:
+            print(
+                f"  警告: 同一実行内で出力名が衝突するためスキップ: {out_path}"
+                f"（入力: {target}）",
+            )
+            skipped += 1
+            continue
+        if out_path.exists():
+            print(f"  警告: 出力先に同名ファイルが存在するためスキップ: {out_path}")
+            skipped += 1
+            continue
+        try:
+            reduce_pptx(target, out_path)
+        except PptxExtractionError as exc:
+            print(f"  エラー: 削減に失敗しました: {exc}", file=sys.stderr)
+            errors += 1
+            continue
+        print(
+            f"  削減完了: {out_path} "
+            f"({_format_cli_size(report.total_bytes)} -> "
+            f"{_format_cli_size(out_path.stat().st_size)})",
+        )
+        produced.add(out_path)
+        reduced += 1
+
+    if args.report_only:
+        print(f"\nレポート完了: 対象 {len(targets)} 件 / エラー {errors} 件")
+        if reported == 0 and errors > 0:
+            raise SystemExit(1)
+    else:
+        print(
+            f"\n削減完了: 生成 {reduced} 件 / スキップ {skipped} 件 / "
+            f"エラー {errors} 件",
+        )
+        if reduced == 0 and errors > 0:
+            raise SystemExit(1)
 
 
 # --- インジェスト系 CLI コマンド ---

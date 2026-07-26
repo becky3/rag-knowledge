@@ -123,6 +123,8 @@ converter 側で source_type 固有処理を持つ既存例:
 | `.html` | HTML | Markdown | `.md` | HTML → Markdown 変換 |
 | `.htm` | HTML | Markdown | `.md` | HTML → Markdown 変換（`.html` と同一処理） |
 | `.pdf` | PDF | Markdown | `.md` | PDF テキスト抽出 |
+| `.pptx` | PowerPoint | Markdown | `.md` | PPTX テキスト抽出 |
+| `.ppsx` | PowerPoint（スライドショー形式） | Markdown | `.md` | PPTX テキスト抽出（`.pptx` と同一処理。content-type を正規化して処理する） |
 | `.json` | JSON | Markdown | `.md` | source_type に応じた構造化テキスト抽出 |
 | `.md` | Markdown | Markdown | `.md` | パススルー（コピー） |
 | `.txt` | プレーンテキスト | プレーンテキスト | `.txt` | パススルー（コピー） |
@@ -138,7 +140,7 @@ converter 側で source_type 固有処理を持つ既存例:
 ### 変換フロー
 
 1. source_store からファイルを読み込む
-2. 拡張子に応じた変換処理を選択する（HTML → Markdown / PDF → テキスト抽出 / JSON → テキスト抽出 / パススルー）
+2. 拡張子に応じた変換処理を選択する（HTML → Markdown / PDF → テキスト抽出 / PPTX → テキスト抽出 / JSON → テキスト抽出 / パススルー）
 3. 変換結果にテキスト正規化を適用する（パススルーは正規化なし）
 4. converted_store に配置する
 
@@ -150,6 +152,7 @@ flowchart TD
     subgraph CONVERT["変換処理"]
         HTML["HTML → Markdown 変換"]
         PDF["PDF テキスト抽出"]
+        PPTX["PPTX テキスト抽出"]
         JSON["JSON → テキスト抽出"]
         MEDIA["メディア解析（画像/動画→テキスト）"]
         PASS["パススルー（コピー）"]
@@ -161,12 +164,14 @@ flowchart TD
     INPUT --> EXT
     EXT -->|.html, .htm| HTML
     EXT -->|.pdf| PDF
+    EXT -->|.pptx, .ppsx| PPTX
     EXT -->|.json| JSON
     EXT -->|.webp, .jpg, .jpeg, .png| MEDIA
     EXT -->|.ts, .mp4| MEDIA
     EXT -->|.md, .txt, .adoc| PASS
     HTML --> NORM
     PDF --> NORM
+    PPTX --> NORM
     JSON --> NORM
     MEDIA --> NORM
     PASS --> OUTPUT
@@ -202,6 +207,7 @@ source_store のディレクトリ構成をミラーする。source_store 内の
 | `youtube/UCxxx/video_id.json` | `youtube/UCxxx/video_id.md` |
 | `aozora/000035/001567.html` | `aozora/000035/001567.md` |
 | `local/my-notes/memo.md` | `local/my-notes/memo.md` |
+| `local/docs/talk.pptx` | `local/docs/talk.md` |
 | `local/my-notes/note.txt` | `local/my-notes/note.txt` |
 | `local/docs/guide.adoc` | `local/docs/guide.adoc` |
 | `local/photos/image.jpg` | `local/photos/image.md` |
@@ -377,6 +383,55 @@ PDF の特性を 3 段階で評価し、バックエンドと処理モードを�
 | 5 | 数式フォントを検出 | MinerU（テキストモード） |
 | 6 | TeX 由来メタデータを検出 | MinerU（テキストモード） |
 | 7 | 上記のいずれにも該当しない | pymupdf4llm |
+
+### PPTX テキスト抽出
+
+PowerPoint ファイル（`.pptx` / `.ppsx`）からスライド本文・テーブル・スピーカーノートを抽出し、Markdown 形式で出力する。
+
+#### 前処理（zip 選択読み出し）
+
+pptx は zip コンテナであり、テキストはスライド XML 等に、動画・画像はメディアパート（`ppt/media/*`）に格納される。変換時は以下の前処理を in-memory で行い、メディア実体を一切読み込まない:
+
+1. zip エントリのうち削減対象パート（`ppt/media/*`・`ppt/embeddings/*`・`ppt/fonts/*`。いずれもテキスト抽出に使われない）の実体を空データに置換した in-memory パッケージを構築する（動画埋め込みで GB 級のファイルでも処理量はテキスト XML 分のみ）
+2. `.ppsx`（スライドショー形式）の場合、`[Content_Types].xml` の main part content-type を presentation 形式に正規化する（pptx 処理ライブラリがスライドショー形式の content-type を認識しないため）
+
+削減対象パートの空置換ロジックは pptx メディア削減ツール（[infrastructure/pptx-media-reduction.md](infrastructure/pptx-media-reduction.md)）と共有する。
+
+#### 抽出対象
+
+| 対象 | 抽出方法 |
+|------|---------|
+| スライド本文（図形のテキスト） | スライド XML の図形定義順に抽出する。グループ図形は再帰的に展開する |
+| テーブル | Markdown テーブルとして出力する |
+| スピーカーノート | 各スライドのノートスライドから抽出する |
+
+抽出対象外:
+
+- 埋め込みメディア（動画・画像）の内容解析（PDF の埋め込み画像と同じ扱いで、メディア解析モジュールの対象にしない）
+- SmartArt 内のテキスト（pptx 処理ライブラリの非対応領域）
+
+#### 出力構造
+
+スライドごとに以下の構造で出力する。
+
+```markdown
+## Slide 1: スライドタイトル
+
+本文テキスト
+
+| 列 1 | 列 2 |
+| --- | --- |
+| セル | セル |
+
+### Notes:
+
+スピーカーノートのテキスト
+```
+
+- スライド区切りは `## Slide N: <タイトル>` 見出しとする（タイトルプレースホルダーが無い・空・テキストを持たない図形に置換されている（画像化されたタイトル等）スライドは `## Slide N`）。見出しベースのチャンキングにより、検索結果の section にスライド位置が記録される
+- タイトルは見出しに含め、本文には重複出力しない
+- ノートが存在するスライドのみ、本文の直後に `### Notes:` 見出しでノートを付加する
+- 本文・ノートが空のスライドも `## Slide N` 見出しは出力する（スライド番号の連続性維持）。ただしデッキ全体でテキストが 1 文字も無い場合は変換をスキップする
 
 ### JSON → テキスト抽出
 
@@ -569,6 +624,8 @@ source_type が `local` のメディアファイル（画像・動画）は、�
 | 0 バイトのファイル | 変換をスキップし、警告ログを出力する |
 | HTML ファイルの文字エンコーディングが UTF-8 以外 | charset_normalizer ベースのエンコーディング自動推定で元のエンコーディングを検出し、UTF-8 に変換する。ただし `source_type=aozora` の HTML は source_type 固有の前処理として XML 宣言 / meta タグの charset を優先採用し、抽出失敗時は `cp932` にフォールバックする（charset_normalizer の誤検出回避。詳細は [ingesters/aozora.md](ingesters/aozora.md) を参照） |
 | PDF のテキスト抽出結果が空 | 変換をスキップし、警告ログを出力する。converted_store にはファイルを配置しない |
+| pptx/ppsx が zip として開けない（壊れファイル・パスワード保護された OLE 形式等） | `ConvertBatchResult.errors` に計上し、`error_files` に診断情報を記録する（壊れファイル検出を下流で浮上させるため） |
+| pptx/ppsx の全スライドでテキスト（タイトル・本文・ノート）が空 | 変換をスキップし、警告ログを出力する。converted_store にはファイルを配置しない |
 | MinerU が未インストールの環境で `rag_pdf_backend` が `auto` | auto 判定で MinerU が必要と判断された場合、pymupdf4llm にフォールバックし、警告ログを出力する |
 | MinerU が未インストールの環境で `rag_pdf_backend` が `mineru` | エラーログを出力し、当該ファイルの変換をスキップする |
 | Zenn 記事 JSON に `body_html` フィールドがない、または空 | 変換をスキップし、警告ログを出力する |

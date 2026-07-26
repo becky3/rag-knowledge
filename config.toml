@@ -51,7 +51,7 @@ rag_zenn_request_timeout = 30
 rag_zenn_request_interval = 0.1
 
 # ドキュメントインジェスター
-rag_document_supported_extensions = ".md,.txt,.pdf,.adoc,.jpg,.jpeg,.png,.webp,.mp4,.ts"
+rag_document_supported_extensions = ".md,.txt,.pdf,.pptx,.ppsx,.adoc,.jpg,.jpeg,.png,.webp,.mp4,.ts"
 # HTTP モードでのドキュメント取り込みを許可するか
 rag_document_http_mode_enabled = false
 # ドキュメント取り込みで許可するディレクトリ（カンマ区切り、空 = 制限なし）

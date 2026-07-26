@@ -30,6 +30,11 @@ from rag.converter.handlers import (
 )
 from rag.converter.normalize import normalize_text
 from rag.converter.pdf_extractor import PdfBackendConfig, extract_pdf
+from rag.converter.pptx_extractor import (
+    PPTX_EXTENSIONS,
+    PptxExtractionError,
+    extract_pptx,
+)
 from rag.converter.site_rules import CompiledSiteRules, extract_web_host
 from rag.store.meta import read_meta
 from rag.store.models import SourceType
@@ -44,6 +49,8 @@ _EXTENSION_OUTPUT_MAP: dict[str, str] = {
     ".html": ".md",
     ".htm": ".md",
     ".pdf": ".md",
+    ".pptx": ".md",
+    ".ppsx": ".md",
     ".json": ".md",
     # メディア解析対象（画像）
     ".webp": ".md",
@@ -406,6 +413,15 @@ class Converter:
 
         if ext == ".pdf":
             return extract_pdf(source_path, self._pdf_config)
+
+        if ext in PPTX_EXTENSIONS:
+            try:
+                return extract_pptx(source_path)
+            except PptxExtractionError:
+                logger.exception("PPTX conversion failed: %s", file_path)
+                raise ConversionFailedError(
+                    f"PPTX parse failed: {file_path}",
+                ) from None
 
         if ext == ".json":
             return self._convert_json(source_path, file_path, source_store_dir)

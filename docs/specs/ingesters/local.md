@@ -93,6 +93,7 @@ Local インジェスターは、ローカルファイルシステム上のテ�
 | `.md` | Markdown ファイル |
 | `.txt` | プレーンテキストファイル |
 | `.pdf` | PDF ファイル（テキスト変換はコンバーターが実行） |
+| `.pptx`, `.ppsx` | PowerPoint ファイル（スライド本文・ノートのテキスト変換はコンバーターが実行。動画埋め込み等で巨大なファイルは、配置前に pptx メディア削減ツール（[../infrastructure/pptx-media-reduction.md](../infrastructure/pptx-media-reduction.md)）で軽量化する運用を推奨） |
 | `.adoc` | AsciiDoc ファイル |
 | `.jpg`, `.jpeg`, `.png`, `.webp` | 画像ファイル（メディア解析モジュールで Vision モデルによるテキスト変換） |
 | `.mp4`, `.ts` | 動画ファイル（MPEG-TS。メディア解析モジュールでフレーム抽出 + Vision モデルによるテキスト変換） |
@@ -329,4 +330,5 @@ flowchart TD
 - [../infrastructure/content-upload.md](../infrastructure/content-upload.md) — コンテンツアップロード層（デコード・バリデーション）
 - [../source-store.md](../source-store.md) — source_store 仕様（ディレクトリ構成、local 媒体のメタデータ導出）
 - [../pipeline-controller.md](../pipeline-controller.md) — パイプライン制御仕様（git 操作、ステージ間連携）
-- [../converter.md](../converter.md) — コンバーター仕様（テキスト変換、PDF バックエンド選択）
+- [../converter.md](../converter.md) — コンバーター仕様（テキスト変換、PDF バックエンド選択、PPTX テキスト抽出）
+- [../infrastructure/pptx-media-reduction.md](../infrastructure/pptx-media-reduction.md) — pptx メディア削減ツール（配置前の事前軽量化）
