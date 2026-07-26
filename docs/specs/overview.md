@@ -22,7 +22,7 @@ RAG Knowledge は、外部 Web ページから収集した知識をベクトル 
 | 12 | インジェスター共通仕様 | インジェスターの共通制約・重複検出・パイプライン通知 | [ingesters/common.md](ingesters/common.md) |
 | 13 | BlueSky インジェスター | AT Protocol API 経由の投稿取得 | [ingesters/bluesky.md](ingesters/bluesky.md) |
 | 14 | Zenn インジェスター | Zenn API 経由の記事・スクラップ取得 | [ingesters/zenn.md](ingesters/zenn.md) |
-| 15 | ドキュメントインジェスター | テキストドキュメント（Markdown、テキスト、PDF、AsciiDoc）の取り込み | [ingesters/local.md](ingesters/local.md) |
+| 15 | ドキュメントインジェスター | テキストドキュメント（Markdown、テキスト、PDF、PowerPoint、AsciiDoc）の取り込み | [ingesters/local.md](ingesters/local.md) |
 | 16 | 検索レスポンス + 全文取得 | チャンク単位検索レスポンスと全文取得ツール | [search-response.md](search-response.md) |
 | 17 | 再構築・統計・バックアップ | パイプライン再構築の MCP/CLI 公開・統計拡張・バックアップ手順 | [rebuild-stats.md](rebuild-stats.md) |
 | 18 | サイト一括取り込み（Scrapy subprocess） | Scrapy subprocess による大規模サイトの一括取り込み | [site-ingest.md](site-ingest.md) |
@@ -45,6 +45,7 @@ RAG Knowledge は、外部 Web ページから収集した知識をベクトル 
 | 35 | Aozora Fake Adapter | 青空文庫用 FakeAozoraFetcher（カタログ ZIP / XHTML を fixture から bytes 返却） | [infrastructure/fake-adapters/aozora.md](infrastructure/fake-adapters/aozora.md) |
 | 36 | LM Studio 管理基盤 | `lmstudio.toml` を SSoT とした LM Studio モデル key の集約と CLI リファレンス | [infrastructure/lmstudio-reference.md](infrastructure/lmstudio-reference.md) |
 | 37 | Raw HTTP クライアント検出 | `src/` 配下で ConstrainedClient を経由しない直接 HTTP クライアント利用を CI で検出する AST ベース検出器 | [workflows/check-raw-http.md](workflows/check-raw-http.md) |
+| 38 | pptx メディア削減ツール | pptx/ppsx の埋め込みメディアを除去した軽量コピーの生成（source_store 配置前の事前処理） | [infrastructure/pptx-media-reduction.md](infrastructure/pptx-media-reduction.md) |
 
 ## 3. 技術スタック
 

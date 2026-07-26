@@ -21,6 +21,7 @@ dependencies = [
     "scrapy>=2.11,<3",
     "tzdata>=2024.1",
     "pymupdf4llm>=0.0.17",
+    "python-pptx>=1.0,<2",
     "py-common-lib",
     "youtube-transcript-api>=1.0,<2",
     "yt-dlp>=2024.0",
