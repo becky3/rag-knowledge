@@ -3098,8 +3098,10 @@ def run_reduce_pdf(args: argparse.Namespace) -> None:
     テキスト層の乏しい PDF（スキャン文書等）は画像がテキスト抽出の入力に
     なるため、既定では削減対象から除外する（--include-scanned で解除）。
     """
+    from .config import get_settings
     from .converter.media_reduction import alongside_output_path
     from .converter.pdf_media_reducer import (
+        PdfMediaReport,
         PdfReductionError,
         analyze_pdf_media,
         reduce_pdf,
@@ -3133,20 +3135,14 @@ def run_reduce_pdf(args: argparse.Namespace) -> None:
         output_dir = Path(args.output_dir).resolve()
         output_dir.mkdir(parents=True, exist_ok=True)
 
-    reduced = 0
-    reported = 0
-    skipped = 0
-    errors = path_errors
-    produced: set[Path] = set()
-    for target in targets:
-        try:
-            report = analyze_pdf_media(target, dpi_threshold=args.dpi_threshold)
-        except PdfReductionError as exc:
-            print(f"エラー: {exc}", file=sys.stderr)
-            errors += 1
-            continue
-        reported += 1
+    # テキスト層の判定閾値は、PDF テキスト抽出の事前判定と同じ設定値を使う
+    settings = get_settings()
+    scan_args = {
+        "scan_sample_pages": settings.rag_pdf_quality_sample_pages,
+        "scan_min_chars_per_page": settings.rag_pdf_quality_min_chars_per_page,
+    }
 
+    def _print_report(target: Path, report: PdfMediaReport) -> None:
         ext_summary = ", ".join(
             f"{ext}: {count}" for ext, count in sorted(report.image_ext_counts.items())
         ) or "なし"
@@ -3171,10 +3167,62 @@ def run_reduce_pdf(args: argparse.Namespace) -> None:
                 "（画像がテキスト抽出の入力になるため削減で抽出品質が劣化しうる）",
             )
 
+    reduced = 0
+    reported = 0
+    skipped = 0
+    errors = path_errors
+    produced: set[Path] = set()
+    for target in targets:
         if args.report_only:
+            try:
+                report = analyze_pdf_media(
+                    target, dpi_threshold=args.dpi_threshold, **scan_args,
+                )
+            except PdfReductionError as exc:
+                print(f"エラー: {exc}", file=sys.stderr)
+                errors += 1
+                continue
+            reported += 1
+            _print_report(target, report)
             continue
 
-        if report.is_low_text_layer and not args.include_scanned:
+        # 出力先の決定は PDF を開く前に行う（衝突なら解析ごと不要になるため）
+        if output_dir is not None:
+            out_path = output_dir / target.name
+        else:
+            # --alongside: 原本と同じフォルダに <元名>.reduced.pdf で出力
+            out_path = alongside_output_path(target)
+        if out_path in produced:
+            print(f"{target}")
+            print(
+                f"  警告: 同一実行内で出力名が衝突するためスキップ: {out_path}",
+            )
+            skipped += 1
+            continue
+        if out_path.exists():
+            print(f"{target}")
+            print(f"  警告: 出力先に同名ファイルが存在するためスキップ: {out_path}")
+            skipped += 1
+            continue
+
+        try:
+            result = reduce_pdf(
+                target,
+                out_path,
+                dpi_threshold=args.dpi_threshold,
+                dpi_target=args.dpi_target,
+                quality=args.quality,
+                include_low_text_layer=args.include_scanned,
+                **scan_args,
+            )
+        except PdfReductionError as exc:
+            print(f"エラー: {exc}", file=sys.stderr)
+            errors += 1
+            continue
+        reported += 1
+        _print_report(target, result.report)
+
+        if not result.reduced:
             print(
                 "  スキップ: テキスト層が乏しいため削減対象から除外しました"
                 "（--include-scanned で削減できます）",
@@ -3182,37 +3230,9 @@ def run_reduce_pdf(args: argparse.Namespace) -> None:
             skipped += 1
             continue
 
-        if output_dir is not None:
-            out_path = output_dir / target.name
-        else:
-            # --alongside: 原本と同じフォルダに <元名>.reduced.pdf で出力
-            out_path = alongside_output_path(target)
-        if out_path in produced:
-            print(
-                f"  警告: 同一実行内で出力名が衝突するためスキップ: {out_path}"
-                f"（入力: {target}）",
-            )
-            skipped += 1
-            continue
-        if out_path.exists():
-            print(f"  警告: 出力先に同名ファイルが存在するためスキップ: {out_path}")
-            skipped += 1
-            continue
-        try:
-            reduce_pdf(
-                target,
-                out_path,
-                dpi_threshold=args.dpi_threshold,
-                dpi_target=args.dpi_target,
-                quality=args.quality,
-            )
-        except PdfReductionError as exc:
-            print(f"  エラー: 削減に失敗しました: {exc}", file=sys.stderr)
-            errors += 1
-            continue
         print(
             f"  削減完了: {out_path} "
-            f"({_format_cli_size(report.total_bytes)} -> "
+            f"({_format_cli_size(result.report.total_bytes)} -> "
             f"{_format_cli_size(out_path.stat().st_size)})",
         )
         produced.add(out_path)

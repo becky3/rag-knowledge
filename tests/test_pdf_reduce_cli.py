@@ -33,6 +33,10 @@ from rag.converter.pdf_media_reducer import (
 )
 
 
+# テキスト層判定の閾値（本番では設定値を CLI から渡す）
+_SCAN = {"scan_sample_pages": 10, "scan_min_chars_per_page": 10}
+
+
 def _high_res_image_bytes(width: int = 2400, height: int = 1800) -> bytes:
     """再圧縮で明確に縮む高解像度画像（ノイズ入り PNG）を生成する."""
     from PIL import Image
@@ -454,22 +458,22 @@ class TestPdfMediaReducerModule:
     def test_analyze_counts_embedded_streams(self, tmp_path: Path) -> None:
         pdf = _make_pdf_with_embedded_file(tmp_path / "media.pdf")
 
-        report = analyze_pdf_media(pdf)
+        report = analyze_pdf_media(pdf, **_SCAN)
 
         assert report.embedded_count >= 1
         assert report.embedded_bytes > 0
         assert report.reducible_bytes >= report.embedded_bytes
 
     def test_analyze_flags_low_text_layer(self, tmp_path: Path) -> None:
-        assert analyze_pdf_media(_make_scanned_pdf(tmp_path / "s.pdf")).is_low_text_layer
-        assert not analyze_pdf_media(_make_pdf(tmp_path / "n.pdf")).is_low_text_layer
+        assert analyze_pdf_media(_make_scanned_pdf(tmp_path / "s.pdf"), **_SCAN).is_low_text_layer
+        assert not analyze_pdf_media(_make_pdf(tmp_path / "n.pdf"), **_SCAN).is_low_text_layer
 
     def test_analyze_raises_for_broken_pdf(self, tmp_path: Path) -> None:
         broken = tmp_path / "broken.pdf"
         broken.write_bytes(b"not a pdf at all")
 
         with pytest.raises(PdfReductionError):
-            analyze_pdf_media(broken)
+            analyze_pdf_media(broken, **_SCAN)
 
     def test_reduce_raises_for_broken_pdf(self, tmp_path: Path) -> None:
         broken = tmp_path / "broken.pdf"
@@ -477,7 +481,7 @@ class TestPdfMediaReducerModule:
         dst = tmp_path / "out.pdf"
 
         with pytest.raises(PdfReductionError):
-            reduce_pdf(broken, dst)
+            reduce_pdf(broken, dst, **_SCAN)
 
         assert not dst.exists()
 
@@ -491,7 +495,7 @@ class TestPdfMediaReducerModule:
         before = pdf.read_bytes()
 
         with pytest.raises(PdfReductionError):
-            reduce_pdf(pdf, pdf)
+            reduce_pdf(pdf, pdf, **_SCAN)
 
         assert pdf.read_bytes() == before
 
@@ -508,7 +512,7 @@ class TestPdfMediaReducerModule:
 
         # 書き込めないパス（ディレクトリを出力先に指定）で save を失敗させる
         with pytest.raises(PdfReductionError):
-            reduce_pdf(pdf, tmp_path)
+            reduce_pdf(pdf, tmp_path, **_SCAN)
 
         assert existing.read_bytes() == b"existing content"
 
@@ -530,7 +534,7 @@ class TestPdfMediaReducerModule:
             doc.close()
 
         before = _image_shape(stripped)
-        reduce_pdf(stripped, tmp_path / "out.pdf")
+        reduce_pdf(stripped, tmp_path / "out.pdf", **_SCAN)
 
         # 差し替えられていれば縮小されて寸法が変わる。変わらない = 対象外にできている
         assert _image_shape(tmp_path / "out.pdf") == before
@@ -565,7 +569,7 @@ class TestPdfMediaReducerModule:
         doc.close()
 
         before = _image_shape(pdf)
-        reduce_pdf(pdf, tmp_path / "out.pdf")
+        reduce_pdf(pdf, tmp_path / "out.pdf", **_SCAN)
 
         assert _image_shape(tmp_path / "out.pdf") == before
 
@@ -593,7 +597,7 @@ class TestPdfMediaReducerModule:
 
         before = _image_shape(pdf)
         monkeypatch.setattr(pymupdf.Document, "extract_image", failing_extract)
-        reduce_pdf(pdf, tmp_path / "out.pdf")
+        reduce_pdf(pdf, tmp_path / "out.pdf", **_SCAN)
         monkeypatch.undo()
 
         assert _image_shape(tmp_path / "out.pdf") == before
@@ -602,6 +606,6 @@ class TestPdfMediaReducerModule:
         pdf = _make_pdf(tmp_path / "textonly.pdf", with_image=False, pages=3)
         dst = tmp_path / "textonly.reduced.pdf"
 
-        reduce_pdf(pdf, dst)
+        reduce_pdf(pdf, dst, **_SCAN)
 
         assert dst.stat().st_size <= pdf.stat().st_size

@@ -44,11 +44,10 @@ DEFAULT_DPI_THRESHOLD = 200
 DEFAULT_DPI_TARGET = 150
 DEFAULT_JPEG_QUALITY = 75
 
-# スキャン PDF 判定のサンプルページ数と 1 ページあたり文字数の下限。
-# PDF テキスト抽出の事前判定（rag_pdf_quality_sample_pages /
-# rag_pdf_quality_min_chars_per_page）と同じ観点で、テキスト層の有無を見る。
-DEFAULT_SCAN_SAMPLE_PAGES = 10
-DEFAULT_SCAN_MIN_CHARS_PER_PAGE = 10
+# スキャン PDF 判定のサンプルページ数と 1 ページあたり文字数の下限は、
+# PDF テキスト抽出の事前判定と同じ設定値（rag_pdf_quality_sample_pages /
+# rag_pdf_quality_min_chars_per_page）を呼び出し元から渡す。同じ観点の判定を
+# 二重に定義しないため、本モジュールは既定値を持たない。
 
 # 再エンコードを試みる最小サイズ。これ未満の画像はファイルサイズへの寄与が小さく、
 # デコード・再エンコードのコストに見合わない
@@ -175,8 +174,8 @@ def _page_dpi(width_px: int, height_px: int, rect: Any) -> float:
 def _is_low_text_layer(
     doc: Any,
     *,
-    sample_pages: int = DEFAULT_SCAN_SAMPLE_PAGES,
-    min_chars_per_page: int = DEFAULT_SCAN_MIN_CHARS_PER_PAGE,
+    sample_pages: int,
+    min_chars_per_page: int,
 ) -> bool:
     """テキスト層の乏しい PDF（スキャン文書等）かを判定する.
 
@@ -206,76 +205,105 @@ def _is_low_text_layer(
     return (total_chars / sampled) < min_chars_per_page
 
 
+def _build_report(
+    doc: Any,
+    total_bytes: int,
+    *,
+    dpi_threshold: int,
+    scan_sample_pages: int,
+    scan_min_chars_per_page: int,
+) -> PdfMediaReport:
+    """開いている Document から削減対象の占有量レポートを組み立てる.
+
+    削減実行時にも同じ Document 上で再利用する（解析のために PDF を
+    開き直すと、画像の取り出しと表示矩形の解決が二重に走るため）。
+    """
+    image_count = 0
+    image_bytes = 0
+    oversized_count = 0
+    oversized_bytes = 0
+    ext_counts: dict[str, int] = {}
+    seen_xrefs: set[int] = set()
+
+    # 縮小対象の判定は削減時とまったく同じ条件で行う
+    # （レポートに出た件数と、実際に削減される件数がずれないように）
+    for xref, ref in _collect_image_refs(doc).items():
+        if xref in seen_xrefs:
+            continue
+        seen_xrefs.add(xref)
+        try:
+            image = doc.extract_image(xref)
+        except Exception:
+            continue
+        # ファイルサイズへの寄与は zip 内の圧縮後占有量で測る。取り出した
+        # バイト列の長さはデコード・再エンコード後の値で、実占有量とは桁が違う
+        size = _stream_size(doc, xref) + _stream_size(doc, ref.smask_xref)
+        image_count += 1
+        image_bytes += size
+        ext = str(image.get("ext") or "(none)").lower()
+        ext_counts[ext] = ext_counts.get(ext, 0) + 1
+
+        if _has_unsupported_colorspace(doc, xref):
+            continue
+        if len(image["image"]) + _mask_size(doc, ref.smask_xref) < MIN_RECOMPRESS_BYTES:
+            continue
+        rect = _resolve_placement(doc, xref, ref)
+        dpi = _page_dpi(int(image["width"]), int(image["height"]), rect)
+        if dpi > dpi_threshold:
+            oversized_count += 1
+            oversized_bytes += size
+
+    embedded_xrefs = list(_iter_embedded_stream_xrefs(doc))
+    embedded_bytes = sum(_stream_size(doc, x) for x in embedded_xrefs)
+
+    return PdfMediaReport(
+        total_bytes=total_bytes,
+        page_count=doc.page_count,
+        image_count=image_count,
+        image_bytes=image_bytes,
+        oversized_image_count=oversized_count,
+        oversized_image_bytes=oversized_bytes,
+        embedded_count=len(embedded_xrefs),
+        embedded_bytes=embedded_bytes,
+        image_ext_counts=ext_counts,
+        is_low_text_layer=_is_low_text_layer(
+            doc,
+            sample_pages=scan_sample_pages,
+            min_chars_per_page=scan_min_chars_per_page,
+        ),
+    )
+
+
 def analyze_pdf_media(
     path: Path,
     *,
     dpi_threshold: int = DEFAULT_DPI_THRESHOLD,
+    scan_sample_pages: int,
+    scan_min_chars_per_page: int,
 ) -> PdfMediaReport:
     """PDF の削減対象（画像・埋め込みファイル）の占有量を解析する.
 
     Args:
         path: 対象ファイルパス
         dpi_threshold: この実効 DPI を超える画像を再圧縮対象として計上する
+        scan_sample_pages: テキスト層の判定でサンプリングするページ数
+        scan_min_chars_per_page: テキスト層ありと見なす 1 ページあたり文字数の下限
 
     Returns:
         削減対象の占有量レポート
 
     Raises:
-        PdfReductionError: PDF として開けない場合
+        PdfReductionError: PDF として開けない場合・解析に失敗した場合
     """
     total_bytes = path.stat().st_size
     doc = _open_pdf(path)
-
     try:
-        image_count = 0
-        image_bytes = 0
-        oversized_count = 0
-        oversized_bytes = 0
-        ext_counts: dict[str, int] = {}
-        seen_xrefs: set[int] = set()
-
-        # 縮小対象の判定は削減時とまったく同じ条件で行う
-        # （レポートに出た件数と、実際に削減される件数がずれないように）
-        for xref, ref in _collect_image_refs(doc).items():
-            if xref in seen_xrefs:
-                continue
-            seen_xrefs.add(xref)
-            try:
-                image = doc.extract_image(xref)
-            except Exception:
-                continue
-            # ファイルサイズへの寄与は zip 内の圧縮後占有量で測る。取り出した
-            # バイト列の長さはデコード・再エンコード後の値で、実占有量とは桁が違う
-            size = _stream_size(doc, xref) + _stream_size(doc, ref.smask_xref)
-            image_count += 1
-            image_bytes += size
-            ext = str(image.get("ext") or "(none)").lower()
-            ext_counts[ext] = ext_counts.get(ext, 0) + 1
-
-            if _has_unsupported_colorspace(doc, xref):
-                continue
-            if len(image["image"]) + _mask_size(doc, ref.smask_xref) < MIN_RECOMPRESS_BYTES:
-                continue
-            rect = _resolve_placement(doc, xref, ref)
-            dpi = _page_dpi(int(image["width"]), int(image["height"]), rect)
-            if dpi > dpi_threshold:
-                oversized_count += 1
-                oversized_bytes += size
-
-        embedded_xrefs = list(_iter_embedded_stream_xrefs(doc))
-        embedded_bytes = sum(_stream_size(doc, x) for x in embedded_xrefs)
-
-        return PdfMediaReport(
-            total_bytes=total_bytes,
-            page_count=doc.page_count,
-            image_count=image_count,
-            image_bytes=image_bytes,
-            oversized_image_count=oversized_count,
-            oversized_image_bytes=oversized_bytes,
-            embedded_count=len(embedded_xrefs),
-            embedded_bytes=embedded_bytes,
-            image_ext_counts=ext_counts,
-            is_low_text_layer=_is_low_text_layer(doc),
+        return _build_report(
+            doc,
+            total_bytes,
+            dpi_threshold=dpi_threshold,
+            scan_sample_pages=scan_sample_pages,
+            scan_min_chars_per_page=scan_min_chars_per_page,
         )
     except Exception as e:
         # 個別ファイルの異常でバッチ全体を止めないため、解析中の例外は
@@ -284,6 +312,7 @@ def analyze_pdf_media(
         raise PdfReductionError(msg) from e
     finally:
         doc.close()
+
 
 
 @dataclass(frozen=True)
@@ -500,6 +529,14 @@ def _downscale_images(
     return replaced, failed
 
 
+@dataclass(frozen=True)
+class PdfReductionResult:
+    """削減の実行結果（レポートと、削減コピーを生成したかどうか）."""
+
+    report: PdfMediaReport
+    reduced: bool
+
+
 def reduce_pdf(
     src: Path,
     dst: Path,
@@ -507,12 +544,18 @@ def reduce_pdf(
     dpi_threshold: int = DEFAULT_DPI_THRESHOLD,
     dpi_target: int = DEFAULT_DPI_TARGET,
     quality: int = DEFAULT_JPEG_QUALITY,
-) -> None:
+    scan_sample_pages: int,
+    scan_min_chars_per_page: int,
+    include_low_text_layer: bool = False,
+) -> PdfReductionResult:
     """削減対象の実体を除去した削減コピーを生成する（非破壊）.
 
-    入力は読み取り専用で開き、一切変更しない。埋め込みファイルストリームは
-    エントリを残したまま実体を空に置換するため、参照構造が壊れず削減後も
-    正当な PDF として開ける（動画の再生・添付の取り出しはできなくなる）。
+    入力は変更しない。埋め込みファイルストリームはエントリを残したまま実体を
+    空に置換するため、参照構造が壊れず削減後も正当な PDF として開ける
+    （動画の再生・添付の取り出しはできなくなる）。
+
+    レポートは同じ Document 上で組み立てて返す。解析のために PDF を開き直すと、
+    画像の取り出しと表示矩形の解決が二重に走るため。
 
     Args:
         src: 入力 PDF のパス
@@ -520,6 +563,12 @@ def reduce_pdf(
         dpi_threshold: この実効 DPI を超える画像を再圧縮する
         dpi_target: 再圧縮後の目標 DPI
         quality: 再圧縮時の JPEG 品質
+        scan_sample_pages: テキスト層の判定でサンプリングするページ数
+        scan_min_chars_per_page: テキスト層ありと見なす 1 ページあたり文字数の下限
+        include_low_text_layer: テキスト層の乏しい PDF も削減対象に含めるか
+
+    Returns:
+        レポートと、削減コピーを生成したかどうか
 
     Raises:
         PdfReductionError: 入力を開けない場合・出力の書き出しに失敗した場合
@@ -530,9 +579,21 @@ def reduce_pdf(
         raise PdfReductionError(msg)
 
     created_output = not dst.exists()
+    total_bytes = src.stat().st_size
     doc = _open_pdf(src)
 
     try:
+        report = _build_report(
+            doc,
+            total_bytes,
+            dpi_threshold=dpi_threshold,
+            scan_sample_pages=scan_sample_pages,
+            scan_min_chars_per_page=scan_min_chars_per_page,
+        )
+        # テキスト層の乏しい PDF は画像がテキスト抽出の入力になるため既定で除外する
+        if report.is_low_text_layer and not include_low_text_layer:
+            return PdfReductionResult(report=report, reduced=False)
+
         for xref in _iter_embedded_stream_xrefs(doc):
             try:
                 doc.update_stream(
@@ -563,6 +624,9 @@ def reduce_pdf(
         # use_objstms=1: オブジェクトストリームで再構築する。これを省くと削減対象の
         # 少ない PDF で構造が展開されて元より大きくなる
         doc.save(str(dst), garbage=4, deflate=True, clean=True, use_objstms=1)
+        return PdfReductionResult(report=report, reduced=True)
+    except PdfReductionError:
+        raise
     except Exception as e:
         # 後始末は本呼び出しが作ったファイルに限る。無条件に消すと、既存の
         # 出力先ファイルや（src == dst の場合は）入力ファイル自体を削除しうる
