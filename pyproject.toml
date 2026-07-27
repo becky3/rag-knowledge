@@ -20,7 +20,10 @@ dependencies = [
     "pyyaml>=6.0,<7",
     "scrapy>=2.11,<3",
     "tzdata>=2024.1",
-    "pymupdf4llm>=0.0.17",
+    # バージョン固定: pymupdf4llm の更新は to_markdown() の抽出結果を変え、
+    # 既存 RAG インデックス全体の再構築が必要になる（pymupdf / pymupdf-layout も
+    # == で連動固定される）。更新はインデックス再構築とセットで明示的に行うこと
+    "pymupdf4llm==1.27.2.1",
     "python-pptx>=1.0,<2",
     "py-common-lib",
     "youtube-transcript-api>=1.0,<2",

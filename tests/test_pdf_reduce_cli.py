@@ -482,19 +482,20 @@ class TestRunReducePdf:
 
         assert exc_info.value.code == 1
 
+    @pytest.mark.parametrize("jobs", [1, 2])
     def test_password_protected_pdf_does_not_abort_the_batch(
-        self, tmp_path: Path, capsys: pytest.CaptureFixture[str],
+        self, tmp_path: Path, capsys: pytest.CaptureFixture[str], jobs: int,
     ) -> None:
         """パスワード保護 PDF はエラー計上のうえスキップし、他のファイルを処理し続ける.
 
         パスワード保護 PDF は open 自体は成功し、ページアクセス時に例外が出る。
-        これを捕捉し損ねるとバッチ全体が中断する。
+        これを捕捉し損ねるとバッチ全体が中断する（直列・並列の両経路で検証する）。
         """
         _make_encrypted_pdf(tmp_path / "locked.pdf")
         _make_pdf(tmp_path / "normal.pdf")
         out_dir = tmp_path / "reduced"
 
-        run_reduce_pdf(_args([str(tmp_path)], output_dir=str(out_dir)))
+        run_reduce_pdf(_args([str(tmp_path)], output_dir=str(out_dir), jobs=jobs))
 
         captured = capsys.readouterr()
         assert (out_dir / "normal.pdf").exists()

@@ -3148,6 +3148,10 @@ def _pdf_reduce_worker(
         )
     except PdfReductionError as exc:
         return ("error", str(exc))
+    except Exception as exc:  # noqa: BLE001
+        # 想定外の例外もエラー計上に落とす。ここで送出するとプール全体が
+        # 中断し、他のファイルの結果まで失われる
+        return ("error", f"{src}: 予期しないエラー ({type(exc).__name__}: {exc})")
     return ("ok", result)
 
 
@@ -3291,8 +3295,19 @@ def run_reduce_pdf(args: argparse.Namespace) -> None:
     if args.jobs > 1 and len(payloads) > 1:
         from concurrent.futures import ProcessPoolExecutor
 
+        # map ではなく submit + 個別 result で受ける。ワーカープロセス自体が
+        # 異常終了した場合（PDF ライブラリの C 層クラッシュ等）でも、
+        # 完了済みファイルの結果を保全し、残りをエラー計上に落とすため
         with ProcessPoolExecutor(max_workers=args.jobs) as executor:
-            outcomes = list(executor.map(_pdf_reduce_worker, payloads, chunksize=1))
+            futures = [executor.submit(_pdf_reduce_worker, p) for p in payloads]
+            outcomes = []
+            for future in futures:
+                try:
+                    outcomes.append(future.result())
+                except Exception as exc:  # noqa: BLE001, PERF203
+                    outcomes.append(
+                        ("error", f"ワーカープロセスが異常終了しました ({exc})"),
+                    )
     else:
         outcomes = [_pdf_reduce_worker(payload) for payload in payloads]
 

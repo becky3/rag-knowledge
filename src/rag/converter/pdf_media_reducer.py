@@ -247,15 +247,18 @@ def _build_report(
             continue
         seen_xrefs.add(xref)
         dims = _image_dimensions(doc, xref)
-        if dims is None:
-            continue
-        width, height = dims
         # ファイルサイズへの寄与は圧縮後のストリーム占有量で測る
         size = _stream_size(doc, xref) + _stream_size(doc, ref.smask_xref)
         image_count += 1
         image_bytes += size
         ext = _image_format_label(doc, xref)
         ext_counts[ext] = ext_counts.get(ext, 0) + 1
+
+        # 寸法を解決できない画像（Width/Height が間接参照の場合等）は
+        # 縮小対象の判定のみスキップする（件数・占有量には計上済み）
+        if dims is None:
+            continue
+        width, height = dims
 
         if _has_unsupported_colorspace(doc, xref):
             continue
@@ -309,7 +312,11 @@ def analyze_pdf_media(
     Raises:
         PdfReductionError: PDF として開けない場合・解析に失敗した場合
     """
-    total_bytes = path.stat().st_size
+    try:
+        total_bytes = path.stat().st_size
+    except OSError as e:
+        msg = f"PDF にアクセスできません: {path.name} ({e})"
+        raise PdfReductionError(msg) from e
     doc = _open_pdf(path)
     try:
         return _build_report(
@@ -389,16 +396,6 @@ def _image_format_label(doc: Any, xref: int) -> str:
         if name in (filters or ""):
             return label
     return "(other)"
-
-
-def _mask_size(doc: Any, smask_xref: int) -> int:
-    """ソフトマスク画像の実体サイズを返す（存在しない・取得できない場合は 0）."""
-    if not smask_xref:
-        return 0
-    try:
-        return len(doc.extract_image(smask_xref)["image"])
-    except Exception:
-        return 0
 
 
 def _resolve_placement(doc: Any, xref: int, ref: _ImageRef) -> Any:
@@ -622,13 +619,22 @@ def reduce_pdf(
     Raises:
         PdfReductionError: 入力を開けない場合・出力の書き出しに失敗した場合
     """
-    # 入力と同じパスへの出力は非破壊の前提を壊すため、処理前に弾く
-    if src.resolve() == dst.resolve():
-        msg = f"入力と同じパスには出力できません: {src}"
-        raise PdfReductionError(msg)
+    try:
+        # 入力と同じパスへの出力は非破壊の前提を壊すため、処理前に弾く
+        if src.resolve() == dst.resolve():
+            msg = f"入力と同じパスには出力できません: {src}"
+            raise PdfReductionError(msg)
+        # 既存の出力先は上書きしない（仕様の制約。呼び出し元のチェックに依存しない）
+        if dst.exists():
+            msg = f"出力先に同名ファイルが存在するため書き出しません: {dst}"
+            raise PdfReductionError(msg)
+        total_bytes = src.stat().st_size
+    except PdfReductionError:
+        raise
+    except OSError as e:
+        msg = f"PDF にアクセスできません: {src.name} ({e})"
+        raise PdfReductionError(msg) from e
 
-    created_output = not dst.exists()
-    total_bytes = src.stat().st_size
     doc = _open_pdf(src)
 
     try:
@@ -667,24 +673,31 @@ def reduce_pdf(
                 src.name,
             )
 
+        # 実行開始から書き出しまでの間に出力先が作られた場合も上書きしない
+        if dst.exists():
+            msg = f"出力先に同名ファイルが作成されたため書き出しません: {dst}"
+            raise PdfReductionError(msg)
+
         # garbage=4: 参照されなくなったオブジェクトの回収と重複の統合
         # clean=True: コンテンツストリームを再構築する。これを省くと画像差し替え後の
         # 残骸が残り、画像が縮んでもファイル全体が元より大きくなる
         # use_objstms=1: オブジェクトストリームで再構築する。これを省くと削減対象の
         # 少ない PDF で構造が展開されて元より大きくなる
-        doc.save(str(dst), garbage=4, deflate=True, clean=True, use_objstms=1)
-        return PdfReductionResult(report=report, reduced=True)
-    except PdfReductionError:
-        raise
-    except Exception as e:
-        # 後始末は本呼び出しが作ったファイルに限る。無条件に消すと、既存の
-        # 出力先ファイルや（src == dst の場合は）入力ファイル自体を削除しうる
-        if created_output:
+        try:
+            doc.save(str(dst), garbage=4, deflate=True, clean=True, use_objstms=1)
+        except Exception:
+            # 後始末は書き出しに失敗した部分出力に限る（存在チェックを通過してから
+            # 書き始めているため、ここにあるファイルは本呼び出しが作ったもの）
             try:
                 dst.unlink(missing_ok=True)
             except OSError:
                 # 後始末の失敗で元の失敗理由を隠さない
                 logger.debug("Failed to remove partial output: %s", dst)
+            raise
+        return PdfReductionResult(report=report, reduced=True)
+    except PdfReductionError:
+        raise
+    except Exception as e:
         msg = f"PDF の削減コピー生成に失敗しました: {src.name} -> {dst} ({e})"
         raise PdfReductionError(msg) from e
     finally:
