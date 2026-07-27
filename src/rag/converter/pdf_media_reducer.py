@@ -233,30 +233,30 @@ def _build_report(
     ext_counts: dict[str, int] = {}
     seen_xrefs: set[int] = set()
 
-    # 縮小対象の判定は削減時とまったく同じ条件で行う
-    # （レポートに出た件数と、実際に削減される件数がずれないように）
+    # レポートは xref のメタデータ（寸法・ストリーム占有量・圧縮形式）のみで組み立てる。
+    # extract_image は画像データのデコードを伴い、直後の削減処理でも同じデコードが
+    # 走るため、レポートで呼ぶと画像量に比例した時間を二重に払うことになる
     for xref, ref in _collect_image_refs(doc).items():
         if xref in seen_xrefs:
             continue
         seen_xrefs.add(xref)
-        try:
-            image = doc.extract_image(xref)
-        except Exception:
+        dims = _image_dimensions(doc, xref)
+        if dims is None:
             continue
-        # ファイルサイズへの寄与は zip 内の圧縮後占有量で測る。取り出した
-        # バイト列の長さはデコード・再エンコード後の値で、実占有量とは桁が違う
+        width, height = dims
+        # ファイルサイズへの寄与は圧縮後のストリーム占有量で測る
         size = _stream_size(doc, xref) + _stream_size(doc, ref.smask_xref)
         image_count += 1
         image_bytes += size
-        ext = str(image.get("ext") or "(none)").lower()
+        ext = _image_format_label(doc, xref)
         ext_counts[ext] = ext_counts.get(ext, 0) + 1
 
         if _has_unsupported_colorspace(doc, xref):
             continue
-        if len(image["image"]) + _mask_size(doc, ref.smask_xref) < MIN_RECOMPRESS_BYTES:
+        if size < MIN_RECOMPRESS_BYTES:
             continue
         rect = _resolve_placement(doc, xref, ref)
-        dpi = _page_dpi(int(image["width"]), int(image["height"]), rect)
+        dpi = _page_dpi(width, height, rect)
         if dpi > dpi_threshold:
             oversized_count += 1
             oversized_bytes += size
@@ -348,6 +348,41 @@ def _collect_image_refs(doc: Any) -> dict[int, _ImageRef]:
                 smask_xref=int(info[1]) if len(info) > 1 else 0,
             )
     return refs
+
+
+def _image_dimensions(doc: Any, xref: int) -> tuple[int, int] | None:
+    """画像のピクセル寸法を xref のメタデータから読む（デコードしない）."""
+    try:
+        width = int(doc.xref_get_key(xref, "Width")[1])
+        height = int(doc.xref_get_key(xref, "Height")[1])
+    except Exception:
+        return None
+    if width <= 0 or height <= 0:
+        return None
+    return width, height
+
+
+# PDF の画像圧縮フィルタ名 → レポート表示用の形式ラベル
+_FILTER_LABELS = {
+    "DCTDecode": "jpeg",
+    "JPXDecode": "jpx",
+    "FlateDecode": "png",
+    "CCITTFaxDecode": "ccitt",
+    "JBIG2Decode": "jbig2",
+    "RunLengthDecode": "rle",
+}
+
+
+def _image_format_label(doc: Any, xref: int) -> str:
+    """画像の圧縮フィルタからレポート表示用の形式ラベルを得る（デコードしない）."""
+    try:
+        _, filters = doc.xref_get_key(xref, "Filter")
+    except Exception:
+        return "(unknown)"
+    for name, label in _FILTER_LABELS.items():
+        if name in (filters or ""):
+            return label
+    return "(other)"
 
 
 def _mask_size(doc: Any, smask_xref: int) -> int:
