@@ -46,6 +46,7 @@ RAG Knowledge は、外部 Web ページから収集した知識をベクトル 
 | 36 | LM Studio 管理基盤 | `lmstudio.toml` を SSoT とした LM Studio モデル key の集約と CLI リファレンス | [infrastructure/lmstudio-reference.md](infrastructure/lmstudio-reference.md) |
 | 37 | Raw HTTP クライアント検出 | `src/` 配下で ConstrainedClient を経由しない直接 HTTP クライアント利用を CI で検出する AST ベース検出器 | [workflows/check-raw-http.md](workflows/check-raw-http.md) |
 | 38 | pptx メディア削減ツール | pptx/ppsx の埋め込みメディアを除去した軽量コピーの生成（source_store 配置前の事前処理） | [infrastructure/pptx-media-reduction.md](infrastructure/pptx-media-reduction.md) |
+| 39 | PDF メディア削減ツール | PDF の高解像度画像再圧縮・埋め込みメディア除去による軽量コピーの生成（source_store 配置前の事前処理） | [infrastructure/pdf-media-reduction.md](infrastructure/pdf-media-reduction.md) |
 
 ## 3. 技術スタック
 

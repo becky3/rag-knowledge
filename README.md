@@ -19,6 +19,7 @@
 | **YouTube インジェスター** | YouTube 動画の字幕・音声文字起こしを取得・ナレッジベースに取り込み |
 | **ドキュメントインジェスター** | テキストドキュメント（Markdown、テキスト、PDF、PowerPoint、AsciiDoc）をナレッジベースに取り込み |
 | **pptx メディア削減ツール** | PowerPoint ファイルの埋め込みメディアを除去した軽量コピーを生成（source_store 配置前の事前処理） |
+| **PDF メディア削減ツール** | PDF の高解像度画像を再圧縮し埋め込みメディアを除去した軽量コピーを生成（source_store 配置前の事前処理） |
 | **Journal インジェスター** | 開発ジャーナル（セッション作業記録）をナレッジベースに登録・検索 |
 | **サイト一括取り込み（Scrapy）** | Scrapy subprocess による大規模サイトの一括取り込み |
 | **青空文庫インジェスター** | 青空文庫の著作権切れ作品をカタログ検索・取り込み |
@@ -320,6 +321,7 @@ HTTP モード（`/mcp` パスが必要）:
 | `ingest-aozora` | 青空文庫の作品を取り込み |
 | `ingest-aozora-author` | 青空文庫の著者作品を一括取り込み |
 | `reduce-pptx` | pptx/ppsx の埋め込みメディアを除去した軽量コピーを生成（source_store 配置前の事前処理） |
+| `reduce-pdf` | PDF の高解像度画像を再圧縮し埋め込みメディアを除去した軽量コピーを生成（source_store 配置前の事前処理） |
 | `add-journal` | ジャーナルエントリを登録 |
 | `migrate-journal` | 既存ジャーナルファイルを一括配置 |
 | `stats` | ナレッジベースの統計情報を表示 |
@@ -509,6 +511,7 @@ git-flow ベースのブランチ戦略を採用。詳細は `~/.claude/docs/spe
 - [定期 index rebuild](docs/specs/infrastructure/scheduled-rebuild.md)
 - [メディア解析](docs/specs/infrastructure/media-analysis.md)
 - [pptx メディア削減ツール](docs/specs/infrastructure/pptx-media-reduction.md)
+- [PDF メディア削減ツール](docs/specs/infrastructure/pdf-media-reduction.md)
 - [Fake モード基盤](docs/specs/infrastructure/fake-mode.md)
 - [YouTube Fake Adapter](docs/specs/infrastructure/fake-adapters/youtube.md)
 - [QA 戦略](docs/specs/workflows/qa-strategy.md)
