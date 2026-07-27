@@ -216,29 +216,28 @@ def analyze_pdf_media(
         ext_counts: dict[str, int] = {}
         seen_xrefs: set[int] = set()
 
-        for pno in range(doc.page_count):
-            page = doc[pno]
-            for info in page.get_images(full=True):  # type: ignore[no-untyped-call]
-                xref = info[0]
-                if xref in seen_xrefs:
-                    continue
-                seen_xrefs.add(xref)
-                try:
-                    image = doc.extract_image(xref)  # type: ignore[no-untyped-call]
-                except Exception:
-                    continue
-                size = len(image["image"])
-                image_count += 1
-                image_bytes += size
-                ext = str(image.get("ext") or "(none)").lower()
-                ext_counts[ext] = ext_counts.get(ext, 0) + 1
+        # 表示サイズの見積もりは削減時と同じ基準を使う（レポートと実際の削減対象がずれないように）
+        for xref, ref in _collect_image_refs(doc).items():
+            if xref in seen_xrefs:
+                continue
+            seen_xrefs.add(xref)
+            try:
+                image = doc.extract_image(xref)  # type: ignore[no-untyped-call]
+            except Exception:
+                continue
+            size = len(image["image"])
+            image_count += 1
+            image_bytes += size
+            ext = str(image.get("ext") or "(none)").lower()
+            ext_counts[ext] = ext_counts.get(ext, 0) + 1
 
-                rects = page.get_image_rects(xref)
-                rect = rects[0] if rects else None
-                dpi = _page_dpi(int(image["width"]), int(image["height"]), rect)
-                if dpi > dpi_threshold:
-                    oversized_count += 1
-                    oversized_bytes += size
+            if size < MIN_RECOMPRESS_BYTES:
+                continue
+            rect = _resolve_placement(doc, xref, ref)
+            dpi = _page_dpi(int(image["width"]), int(image["height"]), rect)
+            if dpi > dpi_threshold:
+                oversized_count += 1
+                oversized_bytes += size
 
         embedded_xrefs = list(_iter_embedded_stream_xrefs(doc))
         embedded_bytes = sum(_stream_size(doc, x) for x in embedded_xrefs)
@@ -260,39 +259,51 @@ def analyze_pdf_media(
 
 
 @dataclass(frozen=True)
-class _ImagePlacement:
-    """画像の配置情報（縮小率の決定と差し替えに必要な最小情報）."""
+class _ImageRef:
+    """画像への参照（配置矩形の解決前）."""
 
     page_no: int
-    rect: Any
     smask_xref: int
 
 
-def _collect_image_placements(doc: Any) -> dict[int, _ImagePlacement]:
-    """画像 xref ごとに、最大の配置矩形・ページ番号・透過マスクの xref を集める.
+def _collect_image_refs(doc: Any) -> dict[int, _ImageRef]:
+    """画像 xref ごとに、最初に参照するページ番号と透過マスクの xref を集める.
 
-    同じ画像が複数ページ・複数箇所に配置される場合は、最も大きく表示される箇所を
-    基準に縮小率を決める（小さい配置に合わせると、大きく表示される箇所が粗くなるため）。
+    配置矩形はここでは解決しない。矩形の問い合わせはコンテンツストリームの走査を伴い
+    高価なため、実際に処理する画像に対してのみ後から解決する（``_resolve_placement``）。
     """
-    placements: dict[int, _ImagePlacement] = {}
+    refs: dict[int, _ImageRef] = {}
     for pno in range(doc.page_count):
-        page = doc[pno]
-        for info in page.get_images(full=True):
+        for info in doc[pno].get_images(full=True):
             xref = info[0]
-            smask_xref = int(info[1]) if len(info) > 1 else 0
-            rects = page.get_image_rects(xref)
-            if not rects:
+            if xref in refs:
                 continue
-            biggest = max(rects, key=lambda r: abs(r.width) * abs(r.height))
-            current = placements.get(xref)
-            if current is not None and abs(biggest.width) * abs(biggest.height) <= abs(
-                current.rect.width,
-            ) * abs(current.rect.height):
-                continue
-            placements[xref] = _ImagePlacement(
-                page_no=pno, rect=biggest, smask_xref=smask_xref,
+            refs[xref] = _ImageRef(
+                page_no=pno,
+                smask_xref=int(info[1]) if len(info) > 1 else 0,
             )
-    return placements
+    return refs
+
+
+def _resolve_placement(doc: Any, xref: int, ref: _ImageRef) -> Any:
+    """画像の表示矩形を解決する.
+
+    最初にその画像を参照するページ 1 枚だけを調べる。全ページを走査して最大の配置を
+    求めると、ページ数 × 画像数の組み合わせでコンテンツストリームの走査が走り、
+    100 ページ規模の資料で 1 ファイルあたり数百秒を要する（実測 424 秒）。
+
+    矩形を取得できない場合（リソースに登録されているが当該ページで描画されていない等）は
+    ページ全面を上限として扱う。実際の表示より大きく見積もるため、縮小の判定は保守的になり、
+    縮小率も安全側（粗くなりすぎない方向）に倒れる。
+    """
+    page = doc[ref.page_no]
+    try:
+        rects = page.get_image_rects(xref)
+    except Exception:
+        return page.rect
+    if not rects:
+        return page.rect
+    return max(rects, key=lambda r: abs(r.width) * abs(r.height))
 
 
 def _has_unsupported_colorspace(doc: Any, xref: int) -> bool:
@@ -398,7 +409,7 @@ def _downscale_images(
         差し替えた画像の枚数
     """
     replaced = 0
-    for xref, placement in _collect_image_placements(doc).items():
+    for xref, ref in _collect_image_refs(doc).items():
         if _has_unsupported_colorspace(doc, xref):
             continue
         try:
@@ -409,9 +420,9 @@ def _downscale_images(
 
         payload = info["image"]
         mask_payload: bytes | None = None
-        if placement.smask_xref:
+        if ref.smask_xref:
             try:
-                mask_payload = doc.extract_image(placement.smask_xref)["image"]
+                mask_payload = doc.extract_image(ref.smask_xref)["image"]
             except Exception:
                 # マスクを取り出せない画像は透過を保証できないため差し替えない
                 logger.debug("Failed to extract smask for xref=%d: %s", xref, label)
@@ -425,7 +436,8 @@ def _downscale_images(
 
         # 解像度が閾値を超える場合は縮小する。閾値以下でも再エンコードは試みる
         # （可逆圧縮のまま埋め込まれた画像は、縮小せずとも再エンコードで大きく縮む）
-        dpi = _page_dpi(int(info["width"]), int(info["height"]), placement.rect)
+        rect = _resolve_placement(doc, xref, ref)
+        dpi = _page_dpi(int(info["width"]), int(info["height"]), rect)
         scale = dpi_target / dpi if dpi > dpi_threshold else 1.0
 
         new_payload = _recompress_image(
@@ -438,7 +450,7 @@ def _downscale_images(
         if len(new_payload) >= original_bytes:
             continue
         try:
-            doc[placement.page_no].replace_image(xref, stream=new_payload)
+            doc[ref.page_no].replace_image(xref, stream=new_payload)
             replaced += 1
         except Exception:
             logger.debug("Failed to replace image xref=%d: %s", xref, label)
