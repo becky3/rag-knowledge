@@ -176,7 +176,10 @@ def _args(
     dpi_target: int = DEFAULT_DPI_TARGET,
     quality: int = DEFAULT_JPEG_QUALITY,
     include_scanned: bool = False,
+    min_size_mb: int = 0,
 ) -> argparse.Namespace:
+    # min_size_mb はテストでは既定 0（無効）とする。フィクスチャ PDF は
+    # すべて実運用の既定下限より小さく、既定値のままでは全テストが空振りするため
     return argparse.Namespace(
         paths=paths,
         output_dir=output_dir,
@@ -186,6 +189,7 @@ def _args(
         dpi_target=dpi_target,
         quality=quality,
         include_scanned=include_scanned,
+        min_size_mb=min_size_mb,
     )
 
 
@@ -383,6 +387,34 @@ class TestRunReducePdf:
         out = capsys.readouterr().out
         assert "出力名が衝突" in out
         assert "生成 1 件 / スキップ 1 件" in out
+
+    def test_small_files_are_excluded_by_min_size(
+        self, tmp_path: Path, capsys: pytest.CaptureFixture[str],
+    ) -> None:
+        """サイズ下限未満のファイルは対象から除外される.
+
+        削減は非可逆な再エンコードを伴い、小さいファイルでは画質を落とす割に
+        削減量がわずかなため、既定で除外する。
+        """
+        pdf = _make_pdf(tmp_path / "small.pdf")
+        out_dir = tmp_path / "reduced"
+
+        run_reduce_pdf(_args([str(pdf)], output_dir=str(out_dir), min_size_mb=20))
+
+        out = capsys.readouterr().out
+        assert "対象外にしました" in out
+        assert "対象の PDF ファイルがありません" in out
+        assert not (out_dir / "small.pdf").exists()
+
+    def test_cli_parser_defaults_min_size_to_module_constant(self) -> None:
+        """CLI の既定値が削減モジュールの定数（SSoT）と一致している."""
+        from rag.cli import _build_parser
+        from rag.converter.pdf_media_reducer import DEFAULT_MIN_FILE_SIZE_MB
+
+        args = _build_parser().parse_args(["reduce-pdf", "x.pdf", "--report-only"])
+
+        assert args.min_size_mb == DEFAULT_MIN_FILE_SIZE_MB
+        assert DEFAULT_MIN_FILE_SIZE_MB > 0  # 既定で「全件対象」にならないこと
 
     def test_missing_output_dir_without_report_only_exits(
         self, tmp_path: Path,

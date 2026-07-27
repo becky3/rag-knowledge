@@ -531,6 +531,9 @@ def _build_parser() -> "_JsonAwareArgumentParser":
     from .converter.pdf_media_reducer import (
         DEFAULT_JPEG_QUALITY as PDF_DEFAULT_JPEG_QUALITY,
     )
+    from .converter.pdf_media_reducer import (
+        DEFAULT_MIN_FILE_SIZE_MB as PDF_DEFAULT_MIN_FILE_SIZE_MB,
+    )
 
     parser = _JsonAwareArgumentParser(description="RAG Knowledge CLI")
     # サブパーサーにも _JsonAwareArgumentParser を使わせる。
@@ -1015,6 +1018,16 @@ def _build_parser() -> "_JsonAwareArgumentParser":
         action="store_true",
         default=False,
         help="テキスト層の乏しい PDF（スキャン文書等）も削減対象に含める（既定では除外する）",
+    )
+    reduce_pdf_parser.add_argument(
+        "--min-size-mb",
+        type=int,
+        default=PDF_DEFAULT_MIN_FILE_SIZE_MB,
+        help=(
+            "このサイズ（MB）未満のファイルを対象から除外する"
+            f"（既定: {PDF_DEFAULT_MIN_FILE_SIZE_MB}。小さいファイルは画質を落とす割に"
+            "削減量がわずかなため。0 で除外なし）"
+        ),
     )
 
     # site-ingest: 指定 URL のページ取得（リンク辿りなし、複数 URL OK）
@@ -3115,6 +3128,7 @@ def run_reduce_pdf(args: argparse.Namespace) -> None:
         ("--quality", args.quality, 1, 100),
         ("--dpi-target", args.dpi_target, 1, 10000),
         ("--dpi-threshold", args.dpi_threshold, 1, 10000),
+        ("--min-size-mb", args.min_size_mb, 0, 100000),
     ):
         if not low <= value <= high:
             print(
@@ -3124,6 +3138,18 @@ def run_reduce_pdf(args: argparse.Namespace) -> None:
             raise SystemExit(1)
 
     targets, path_errors = _collect_pdf_targets(args.paths)
+
+    if args.min_size_mb > 0:
+        min_bytes = args.min_size_mb * 1024 * 1024
+        before_count = len(targets)
+        targets = [t for t in targets if t.stat().st_size >= min_bytes]
+        excluded = before_count - len(targets)
+        if excluded:
+            print(
+                f"サイズ下限 {args.min_size_mb} MB 未満の {excluded} 件を対象外にしました"
+                "（--min-size-mb 0 で全件を対象にできます）",
+            )
+
     if not targets:
         print("対象の PDF ファイルがありません")
         if path_errors:
