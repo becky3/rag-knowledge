@@ -69,10 +69,16 @@ pptx には動画埋め込みにより数百 MB〜GB 級になるファイルが
 
 zip 解析・メディア置換のコアロジックはコンバーターの pptx テキスト抽出（[../converter.md](../converter.md)）と共有する。本ツールはコアロジックをファイル出力向けに呼び出す薄い CLI 層である。
 
+対象ファイルの収集・出力パスの解決・削減コピーの命名は、[PDF メディア削減ツール](pdf-media-reduction.md) と共通の定義を用いる。両ツールは同じ運用位置（source_store 配置前の事前処理）に立ち、同じ CLI インターフェースを提供するため、形式に依存しない部分を共有して振る舞いのずれを防ぐ。
+
 ```mermaid
 flowchart TB
     subgraph CLI["CLI（rag.cli）"]
         CMD["reduce-pptx コマンド"]
+    end
+
+    subgraph Shared["削減ツール共通定義"]
+        COLLECT["対象ファイル収集・出力パス解決"]
     end
 
     subgraph Core["pptx zip コアロジック（コンバーターと共有）"]
@@ -87,6 +93,7 @@ flowchart TB
     SRC["入力 pptx/ppsx（読み取り専用）"]
     DST["削減コピー（--output-dir / --alongside）"]
 
+    CMD --> COLLECT
     CMD --> ANALYZE
     CMD --> REDUCE
     ANALYZE --> SRC
