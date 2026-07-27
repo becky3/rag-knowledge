@@ -24,6 +24,7 @@ PDF から削減対象（高解像度画像・埋め込みファイルストリ�
 from __future__ import annotations
 
 import logging
+import os
 import re
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -60,6 +61,11 @@ MIN_RECOMPRESS_BYTES = 16 * 1024
 # 1 件あたりの削減量が数 MB 以下に落ちる一方、20 MB 以上は 1〜3 割まで縮む。
 # 0 を指定するとサイズによる除外を行わない。
 DEFAULT_MIN_FILE_SIZE_MB = 20
+
+# 並列に処理するファイル数の既定値。処理は画像のデコード・再エンコードが支配的な
+# CPU バウンドのため、ファイル単位の並列化がそのまま短縮に効く。上限 8 は
+# メモリ使用量（ワーカーごとに処理中の PDF と画像を展開する）を抑えるための保守値
+DEFAULT_JOBS = max(1, min(8, os.cpu_count() or 1))
 
 # /Type /Filespec の /EF エントリ（埋め込みファイルストリームの参照）
 _FILESPEC_MARKER = "/Filespec"

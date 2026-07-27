@@ -177,6 +177,7 @@ def _args(
     quality: int = DEFAULT_JPEG_QUALITY,
     include_scanned: bool = False,
     min_size_mb: int = 0,
+    jobs: int = 1,
 ) -> argparse.Namespace:
     # min_size_mb はテストでは既定 0（無効）とする。フィクスチャ PDF は
     # すべて実運用の既定下限より小さく、既定値のままでは全テストが空振りするため
@@ -190,6 +191,7 @@ def _args(
         quality=quality,
         include_scanned=include_scanned,
         min_size_mb=min_size_mb,
+        jobs=jobs,
     )
 
 
@@ -415,6 +417,35 @@ class TestRunReducePdf:
 
         assert args.min_size_mb == DEFAULT_MIN_FILE_SIZE_MB
         assert DEFAULT_MIN_FILE_SIZE_MB > 0  # 既定で「全件対象」にならないこと
+
+    def test_cli_parser_defaults_jobs_to_module_constant(self) -> None:
+        """並列数の既定値が削減モジュールの定数（SSoT）と一致している."""
+        from rag.cli import _build_parser
+        from rag.converter.pdf_media_reducer import DEFAULT_JOBS
+
+        args = _build_parser().parse_args(["reduce-pdf", "x.pdf", "--report-only"])
+
+        assert args.jobs == DEFAULT_JOBS
+        assert DEFAULT_JOBS >= 1
+
+    def test_parallel_jobs_produce_same_outputs(
+        self, tmp_path: Path, capsys: pytest.CaptureFixture[str],
+    ) -> None:
+        """並列実行でも全ファイルが処理され、集計が一致する."""
+        src_dir = tmp_path / "corpus"
+        src_dir.mkdir()
+        _make_pdf(src_dir / "a.pdf")
+        _make_pdf(src_dir / "b.pdf")
+        _make_pdf(src_dir / "c.pdf")
+        out_dir = tmp_path / "reduced"
+
+        run_reduce_pdf(_args([str(src_dir)], output_dir=str(out_dir), jobs=2))
+
+        out = capsys.readouterr().out
+        assert (out_dir / "a.pdf").exists()
+        assert (out_dir / "b.pdf").exists()
+        assert (out_dir / "c.pdf").exists()
+        assert "生成 3 件" in out
 
     def test_missing_output_dir_without_report_only_exits(
         self, tmp_path: Path,
