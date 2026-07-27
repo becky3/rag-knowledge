@@ -8,6 +8,7 @@ MCP サーバーが公開するツール一覧（expected_tools.py の EXPECTED_
 
 from __future__ import annotations
 
+from collections.abc import Iterator
 from importlib import import_module
 from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock, patch
@@ -22,9 +23,34 @@ from rag.server.safe_browsing_wiring import _reset_safe_browsing_client
 
 
 @pytest.fixture(autouse=True)
-def _reset_rag_global_state() -> None:
-    """各テスト前にRAGサービスのグローバル状態をリセットする."""
+def _reset_rag_global_state() -> Iterator[None]:
+    """各テスト前後でRAGサービスのグローバル状態をリセット・復元する.
+
+    _configure_and_run はサーバー起動処理として rag ロガーのグローバル状態
+    （propagate=False・ハンドラ追加・レベル）を変更する。復元しないと、同一
+    プロセスで後続するテストのうち rag.* ロガーのルート伝播に依存するもの
+    （caplog を使うログ検証テスト）が空振りする。この汚染はテストの実行分配に
+    依存して発症するため、CI とローカルで結果が食い違う順序依存バグになる。
+    """
     _reset_safe_browsing_client()
+
+    rag_logger = logging.getLogger("rag")
+    server_logger = logging.getLogger("rag.server")
+    saved_handlers = list(rag_logger.handlers)
+    saved_propagate = rag_logger.propagate
+    saved_level = rag_logger.level
+    saved_server_level = server_logger.level
+
+    yield
+
+    # テスト中に追加されたハンドラ（ストリーム・ログファイル）は閉じてから外す
+    for handler in rag_logger.handlers:
+        if handler not in saved_handlers:
+            handler.close()
+    rag_logger.handlers = saved_handlers
+    rag_logger.propagate = saved_propagate
+    rag_logger.setLevel(saved_level)
+    server_logger.setLevel(saved_server_level)
 
 
 @pytest.mark.asyncio

@@ -38,9 +38,7 @@ logger = logging.getLogger(__name__)
 # pptx/ppsx の拡張子（converter のディスパッチからも参照される public 定数）
 PPTX_EXTENSIONS: frozenset[str] = frozenset({".pptx", ".ppsx"})
 
-# 削減コピーの別名出力サフィックス（reduce-pptx --alongside が使用。
-# このサフィックスを持つファイルは削減対象の収集から除外される）
-REDUCED_STEM_SUFFIX = ".reduced"
+# 削減コピーの別名出力サフィックスは削減ツール共通定義（media_reduction）が SSoT。
 
 # 削減対象パートの zip エントリプレフィックス
 # （メディア実体・埋め込みオブジェクト・埋め込みフォント。テキスト抽出には使われない）

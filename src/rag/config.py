@@ -305,7 +305,7 @@ class RAGSettings(BaseModel):
     rag_pdf_quality_greek_threshold: float = Field(ge=0.0, le=1.0)
     rag_pdf_quality_cjk_min_threshold: float = Field(ge=0.0, le=1.0)
     rag_pdf_quality_min_chars_per_page: int = Field(ge=1, le=10000)
-    # 全ページ走査のコスト回避（先頭 N ページで品質を推定）
+    # 全ページ走査のコスト回避（文書全体から等間隔に N ページを抽出して品質を推定）
     rag_pdf_quality_sample_pages: int = Field(ge=1, le=100)
 
     # YouTube インジェスター — API BAN 回避のためのレート制限

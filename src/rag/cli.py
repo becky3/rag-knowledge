@@ -521,6 +521,23 @@ def _build_parser() -> "_JsonAwareArgumentParser":
     main() から argparse 構築部分を切り出した関数。
     テストから直接 parse_args するために公開する。
     """
+    # reduce-pdf の既定値は削減モジュールが SSoT（help 表示にも使う）
+    from .converter.pdf_media_reducer import (
+        DEFAULT_DPI_TARGET as PDF_DEFAULT_DPI_TARGET,
+    )
+    from .converter.pdf_media_reducer import (
+        DEFAULT_DPI_THRESHOLD as PDF_DEFAULT_DPI_THRESHOLD,
+    )
+    from .converter.pdf_media_reducer import (
+        DEFAULT_JPEG_QUALITY as PDF_DEFAULT_JPEG_QUALITY,
+    )
+    from .converter.pdf_media_reducer import (
+        DEFAULT_JOBS as PDF_DEFAULT_JOBS,
+    )
+    from .converter.pdf_media_reducer import (
+        DEFAULT_MIN_FILE_SIZE_MB as PDF_DEFAULT_MIN_FILE_SIZE_MB,
+    )
+
     parser = _JsonAwareArgumentParser(description="RAG Knowledge CLI")
     # サブパーサーにも _JsonAwareArgumentParser を使わせる。
     # argparse のデフォルトは ArgumentParser 固定で、親クラスを継承しない。
@@ -954,6 +971,74 @@ def _build_parser() -> "_JsonAwareArgumentParser":
         help="削減対象パート占有量レポートの表示のみで削減コピーを生成しない",
     )
 
+    # reduce-pdf: PDF の高解像度画像・埋め込みメディア削減（配置前の事前処理）
+    reduce_pdf_parser = subparsers.add_parser(
+        "reduce-pdf",
+        help="PDF の高解像度画像を再圧縮し埋め込みメディアを除去した軽量コピーを生成（source_store 配置前の事前処理）",
+    )
+    reduce_pdf_parser.add_argument(
+        "paths",
+        nargs="+",
+        help="対象ファイルまたはディレクトリのパス（1 件以上。ディレクトリは再帰走査）",
+    )
+    reduce_pdf_parser.add_argument(
+        "--output-dir",
+        default=None,
+        help="削減コピーの出力先ディレクトリ（--alongside と排他。存在しない場合は作成）",
+    )
+    reduce_pdf_parser.add_argument(
+        "--alongside",
+        action="store_true",
+        default=False,
+        help="原本と同じフォルダに <元名>.reduced.pdf で削減コピーを出力する（--output-dir と排他）",
+    )
+    reduce_pdf_parser.add_argument(
+        "--report-only",
+        action="store_true",
+        default=False,
+        help="削減対象の占有量レポートの表示のみで削減コピーを生成しない",
+    )
+    reduce_pdf_parser.add_argument(
+        "--dpi-threshold",
+        type=int,
+        default=PDF_DEFAULT_DPI_THRESHOLD,
+        help=f"この実効 DPI を超える画像を再圧縮対象とする（既定: {PDF_DEFAULT_DPI_THRESHOLD}）",
+    )
+    reduce_pdf_parser.add_argument(
+        "--dpi-target",
+        type=int,
+        default=PDF_DEFAULT_DPI_TARGET,
+        help=f"再圧縮後の目標 DPI（既定: {PDF_DEFAULT_DPI_TARGET}）",
+    )
+    reduce_pdf_parser.add_argument(
+        "--quality",
+        type=int,
+        default=PDF_DEFAULT_JPEG_QUALITY,
+        help=f"再圧縮時の JPEG 品質（既定: {PDF_DEFAULT_JPEG_QUALITY}）",
+    )
+    reduce_pdf_parser.add_argument(
+        "--include-scanned",
+        action="store_true",
+        default=False,
+        help="テキスト層の乏しい PDF（スキャン文書等）も削減対象に含める（既定では除外する）",
+    )
+    reduce_pdf_parser.add_argument(
+        "--min-size-mb",
+        type=int,
+        default=PDF_DEFAULT_MIN_FILE_SIZE_MB,
+        help=(
+            "このサイズ（MB）未満のファイルを対象から除外する"
+            f"（既定: {PDF_DEFAULT_MIN_FILE_SIZE_MB}。小さいファイルは画質を落とす割に"
+            "削減量がわずかなため。0 で除外なし）"
+        ),
+    )
+    reduce_pdf_parser.add_argument(
+        "--jobs",
+        type=int,
+        default=PDF_DEFAULT_JOBS,
+        help=f"並列に処理するファイル数（既定: {PDF_DEFAULT_JOBS}。1 で直列実行）",
+    )
+
     # site-ingest: 指定 URL のページ取得（リンク辿りなし、複数 URL OK）
     siteingest_parser = subparsers.add_parser(
         "site-ingest",
@@ -1083,6 +1168,7 @@ def main() -> None:
         "migrate": run_migrate,
         "generate-api-key": run_generate_api_key,
         "reduce-pptx": run_reduce_pptx,
+        "reduce-pdf": run_reduce_pdf,
     }
 
     if args.command in _ASYNC_COMMANDS:
@@ -2867,32 +2953,17 @@ def _collect_pptx_targets(raw_paths: list[str]) -> tuple[list[Path], int]:
     Returns:
         (対象ファイルのリスト, パス解決エラー数)
     """
-    from .converter.pptx_extractor import PPTX_EXTENSIONS, REDUCED_STEM_SUFFIX
+    from .converter.media_reduction import collect_reduce_targets
+    from .converter.pptx_extractor import PPTX_EXTENSIONS
 
-    def _is_target(p: Path) -> bool:
-        # .reduced 付きは本ツールの出力物のため対象から除外する（削減版の再削減を防ぐ）
-        return (
-            p.suffix.lower() in PPTX_EXTENSIONS
-            and not p.stem.lower().endswith(REDUCED_STEM_SUFFIX)
-        )
-
-    targets: list[Path] = []
-    errors = 0
-    for raw in raw_paths:
-        path = Path(raw).resolve()
-        if path.is_dir():
-            targets.extend(sorted(
-                p for p in path.rglob("*") if p.is_file() and _is_target(p)
-            ))
-        elif path.is_file():
-            if _is_target(path):
-                targets.append(path)
-            else:
-                print(f"警告: pptx/ppsx ではない（または削減済み）ためスキップ: {path}")
-        else:
-            print(f"エラー: パスが存在しません: {path}", file=sys.stderr)
-            errors += 1
-    return targets, errors
+    return collect_reduce_targets(
+        raw_paths,
+        PPTX_EXTENSIONS,
+        on_skip=lambda p: print(
+            f"警告: pptx/ppsx ではない（または削減済み）ためスキップ: {p}",
+        ),
+        on_error=lambda p: print(f"エラー: パスが存在しません: {p}", file=sys.stderr),
+    )
 
 
 def run_reduce_pptx(args: argparse.Namespace) -> None:
@@ -2904,27 +2975,14 @@ def run_reduce_pptx(args: argparse.Namespace) -> None:
     --alongside 指定時は原本と同じフォルダに <元名>.reduced.<拡張子> の
     別ファイルとして生成する（非破壊）。出力先の既存ファイルは上書きしない。
     """
+    from .converter.media_reduction import alongside_output_path
     from .converter.pptx_extractor import (
-        REDUCED_STEM_SUFFIX,
         PptxExtractionError,
         analyze_pptx_media,
         reduce_pptx,
     )
 
-    if not args.report_only:
-        if args.output_dir is not None and args.alongside:
-            print(
-                "エラー: --output-dir と --alongside は同時に指定できません",
-                file=sys.stderr,
-            )
-            raise SystemExit(1)
-        if args.output_dir is None and not args.alongside:
-            print(
-                "エラー: 削減実行には --output-dir または --alongside が必要です"
-                "（レポートのみの場合は --report-only を指定）",
-                file=sys.stderr,
-            )
-            raise SystemExit(1)
+    _validate_reduce_output_args(args, label="pptx/ppsx")
 
     targets, path_errors = _collect_pptx_targets(args.paths)
     if not targets:
@@ -2970,9 +3028,7 @@ def run_reduce_pptx(args: argparse.Namespace) -> None:
             out_path = output_dir / target.name
         else:
             # --alongside: 原本と同じフォルダに <元名>.reduced.<拡張子> で出力
-            out_path = target.with_name(
-                f"{target.stem}{REDUCED_STEM_SUFFIX}{target.suffix}",
-            )
+            out_path = alongside_output_path(target)
         if out_path in produced:
             print(
                 f"  警告: 同一実行内で出力名が衝突するためスキップ: {out_path}"
@@ -2996,6 +3052,290 @@ def run_reduce_pptx(args: argparse.Namespace) -> None:
             f"{_format_cli_size(out_path.stat().st_size)})",
         )
         produced.add(out_path)
+        reduced += 1
+
+    if args.report_only:
+        print(f"\nレポート完了: 対象 {len(targets)} 件 / エラー {errors} 件")
+        if reported == 0 and errors > 0:
+            raise SystemExit(1)
+    else:
+        print(
+            f"\n削減完了: 生成 {reduced} 件 / スキップ {skipped} 件 / "
+            f"エラー {errors} 件",
+        )
+        if reduced == 0 and errors > 0:
+            raise SystemExit(1)
+
+
+def _collect_pdf_targets(raw_paths: list[str]) -> tuple[list[Path], int]:
+    """reduce-pdf の対象ファイルを収集する.
+
+    Args:
+        raw_paths: CLI で指定されたパス（ファイルまたはディレクトリ）
+
+    Returns:
+        (対象ファイルのリスト, パス解決エラー数)
+    """
+    from .converter.media_reduction import collect_reduce_targets
+    from .converter.pdf_media_reducer import PDF_EXTENSIONS
+
+    return collect_reduce_targets(
+        raw_paths,
+        PDF_EXTENSIONS,
+        on_skip=lambda p: print(
+            f"警告: PDF ではない（または削減済み）ためスキップ: {p}",
+        ),
+        on_error=lambda p: print(f"エラー: パスが存在しません: {p}", file=sys.stderr),
+    )
+
+
+def _validate_reduce_output_args(args: argparse.Namespace, *, label: str) -> None:
+    """削減系コマンドの出力先指定を検証する（--output-dir と --alongside は排他必須）."""
+    if args.report_only:
+        return
+    if args.output_dir is not None and args.alongside:
+        print(
+            "エラー: --output-dir と --alongside は同時に指定できません",
+            file=sys.stderr,
+        )
+        raise SystemExit(1)
+    if args.output_dir is None and not args.alongside:
+        print(
+            f"エラー: {label} の削減実行には --output-dir または --alongside が必要です"
+            "（レポートのみの場合は --report-only を指定）",
+            file=sys.stderr,
+        )
+        raise SystemExit(1)
+
+
+def _pdf_reduce_worker(
+    payload: tuple[str, str, str, int, int, int, int, int, bool],
+) -> tuple[str, Any]:
+    """reduce-pdf の 1 ファイル分を処理するワーカー.
+
+    並列実行時はプロセス境界を越えて呼ばれるためトップレベル関数とし、
+    引数・戻り値は pickle 可能な値に限る。
+    戻り値は ("report", レポート) / ("ok", 削減結果) / ("error", メッセージ)。
+    """
+    (
+        mode, src, dst, dpi_threshold, dpi_target, quality,
+        scan_sample_pages, scan_min_chars_per_page, include_scanned,
+    ) = payload
+    from .converter.pdf_media_reducer import (
+        PdfReductionError,
+        analyze_pdf_media,
+        reduce_pdf,
+    )
+
+    try:
+        if mode == "report":
+            report = analyze_pdf_media(
+                Path(src),
+                dpi_threshold=dpi_threshold,
+                scan_sample_pages=scan_sample_pages,
+                scan_min_chars_per_page=scan_min_chars_per_page,
+            )
+            return ("report", report)
+        result = reduce_pdf(
+            Path(src),
+            Path(dst),
+            dpi_threshold=dpi_threshold,
+            dpi_target=dpi_target,
+            quality=quality,
+            scan_sample_pages=scan_sample_pages,
+            scan_min_chars_per_page=scan_min_chars_per_page,
+            include_low_text_layer=include_scanned,
+        )
+    except PdfReductionError as exc:
+        return ("error", str(exc))
+    except Exception as exc:  # noqa: BLE001
+        # 想定外の例外もエラー計上に落とす。ここで送出するとプール全体が
+        # 中断し、他のファイルの結果まで失われる
+        return ("error", f"{src}: 予期しないエラー ({type(exc).__name__}: {exc})")
+    return ("ok", result)
+
+
+def run_reduce_pdf(args: argparse.Namespace) -> None:
+    """PDF の高解像度画像を再圧縮し、埋め込みメディアを除去した軽量コピーを生成する.
+
+    仕様: docs/specs/infrastructure/pdf-media-reduction.md
+
+    入力は読み取り専用で開き、削減コピーは --output-dir 配下、または
+    --alongside 指定時は原本と同じフォルダに <元名>.reduced.pdf の
+    別ファイルとして生成する（非破壊）。出力先の既存ファイルは上書きしない。
+
+    テキスト層の乏しい PDF（スキャン文書等）は画像がテキスト抽出の入力に
+    なるため、既定では削減対象から除外する（--include-scanned で解除）。
+    """
+    from .config import get_settings
+    from .converter.media_reduction import alongside_output_path
+    from .converter.pdf_media_reducer import PdfMediaReport
+
+    _validate_reduce_output_args(args, label="PDF")
+
+    # 範囲外の値は静かに全画像の再エンコードを失敗させる（quality）、
+    # または 1x1 px まで縮める（dpi_target=0）ため、実行前に弾く
+    for name, value, low, high in (
+        ("--quality", args.quality, 1, 100),
+        ("--dpi-target", args.dpi_target, 1, 10000),
+        ("--dpi-threshold", args.dpi_threshold, 1, 10000),
+        ("--min-size-mb", args.min_size_mb, 0, 100000),
+        ("--jobs", args.jobs, 1, 64),
+    ):
+        if not low <= value <= high:
+            print(
+                f"エラー: {name} は {low}〜{high} の範囲で指定してください（指定値: {value}）",
+                file=sys.stderr,
+            )
+            raise SystemExit(1)
+
+    targets, path_errors = _collect_pdf_targets(args.paths)
+
+    if args.min_size_mb > 0:
+        min_bytes = args.min_size_mb * 1024 * 1024
+        before_count = len(targets)
+        targets = [t for t in targets if t.stat().st_size >= min_bytes]
+        excluded = before_count - len(targets)
+        if excluded:
+            print(
+                f"サイズ下限 {args.min_size_mb} MB 未満の {excluded} 件を対象外にしました"
+                "（--min-size-mb 0 で全件を対象にできます）",
+            )
+
+    if not targets:
+        print("対象の PDF ファイルがありません")
+        if path_errors:
+            raise SystemExit(1)
+        return
+
+    output_dir: Path | None = None
+    if not args.report_only and args.output_dir is not None:
+        output_dir = Path(args.output_dir).resolve()
+        output_dir.mkdir(parents=True, exist_ok=True)
+
+    # テキスト層の判定閾値は、PDF テキスト抽出の事前判定と同じ設定値を使う
+    settings = get_settings()
+    scan_args = {
+        "scan_sample_pages": settings.rag_pdf_quality_sample_pages,
+        "scan_min_chars_per_page": settings.rag_pdf_quality_min_chars_per_page,
+    }
+
+    def _print_report(target: Path, report: PdfMediaReport) -> None:
+        ext_summary = ", ".join(
+            f"{ext}: {count}" for ext, count in sorted(report.image_ext_counts.items())
+        ) or "なし"
+        print(f"{target}")
+        print(f"  全体: {_format_cli_size(report.total_bytes)} / {report.page_count} ページ")
+        print(
+            f"  画像: {report.image_count} 件 "
+            f"{_format_cli_size(report.image_bytes)} ({ext_summary})",
+        )
+        print(
+            f"  うち {args.dpi_threshold} DPI 超: {report.oversized_image_count} 件 "
+            f"{_format_cli_size(report.oversized_image_bytes)}",
+        )
+        print(
+            f"  埋め込みメディア: {report.embedded_count} 件 "
+            f"{_format_cli_size(report.embedded_bytes)}",
+        )
+        print(f"  削減対象合計: {_format_cli_size(report.reducible_bytes)}")
+        if report.is_low_text_layer:
+            print(
+                "  注意: テキスト層が乏しい PDF です"
+                "（画像がテキスト抽出の入力になるため削減で抽出品質が劣化しうる）",
+            )
+
+    reduced = 0
+    reported = 0
+    skipped = 0
+    errors = path_errors
+
+    # 実行計画を先に確定する（出力先の衝突・既存はここでスキップし、実行対象から外す）
+    plan: list[tuple[Path, Path | None]] = []  # (入力, 出力先)。レポートのみは出力先 None
+    if args.report_only:
+        plan = [(target, None) for target in targets]
+    else:
+        planned_outputs: set[Path] = set()
+        for target in targets:
+            if output_dir is not None:
+                out_path = output_dir / target.name
+            else:
+                # --alongside: 原本と同じフォルダに <元名>.reduced.pdf で出力
+                out_path = alongside_output_path(target)
+            if out_path in planned_outputs:
+                print(f"{target}")
+                print(f"  警告: 同一実行内で出力名が衝突するためスキップ: {out_path}")
+                skipped += 1
+                continue
+            if out_path.exists():
+                print(f"{target}")
+                print(f"  警告: 出力先に同名ファイルが存在するためスキップ: {out_path}")
+                skipped += 1
+                continue
+            planned_outputs.add(out_path)
+            plan.append((target, out_path))
+
+    payloads = [
+        (
+            "report" if out_path is None else "reduce",
+            str(target),
+            str(out_path) if out_path is not None else "",
+            args.dpi_threshold,
+            args.dpi_target,
+            args.quality,
+            scan_args["scan_sample_pages"],
+            scan_args["scan_min_chars_per_page"],
+            args.include_scanned,
+        )
+        for target, out_path in plan
+    ]
+
+    # ファイル単位で並列処理する（画像のデコード・再エンコードが支配的な CPU バウンド
+    # 処理のため、並列数がそのまま短縮に効く）。結果は投入順に受け取り、表示は入力順を保つ
+    if args.jobs > 1 and len(payloads) > 1:
+        from concurrent.futures import ProcessPoolExecutor
+
+        # map ではなく submit + 個別 result で受ける。ワーカープロセス自体が
+        # 異常終了した場合（PDF ライブラリの C 層クラッシュ等）でも、
+        # 完了済みファイルの結果を保全し、残りをエラー計上に落とすため
+        with ProcessPoolExecutor(max_workers=args.jobs) as executor:
+            futures = [executor.submit(_pdf_reduce_worker, p) for p in payloads]
+            outcomes = []
+            for future in futures:
+                try:
+                    outcomes.append(future.result())
+                except Exception as exc:  # noqa: BLE001, PERF203
+                    outcomes.append(
+                        ("error", f"ワーカープロセスが異常終了しました ({exc})"),
+                    )
+    else:
+        outcomes = [_pdf_reduce_worker(payload) for payload in payloads]
+
+    for (target, planned_out), (status, value) in zip(plan, outcomes):
+        if status == "error":
+            print(f"エラー: {value}", file=sys.stderr)
+            errors += 1
+            continue
+        reported += 1
+        if status == "report" or planned_out is None:
+            _print_report(target, value)
+            continue
+        result = value
+        _print_report(target, result.report)
+
+        if not result.reduced:
+            print(
+                "  スキップ: テキスト層が乏しいため削減対象から除外しました"
+                "（--include-scanned で削減できます）",
+            )
+            skipped += 1
+            continue
+
+        print(
+            f"  削減完了: {planned_out} "
+            f"({_format_cli_size(result.report.total_bytes)} -> "
+            f"{_format_cli_size(planned_out.stat().st_size)})",
+        )
         reduced += 1
 
     if args.report_only:
