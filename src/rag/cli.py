@@ -3107,6 +3107,20 @@ def run_reduce_pdf(args: argparse.Namespace) -> None:
 
     _validate_reduce_output_args(args, label="PDF")
 
+    # 範囲外の値は静かに全画像の再エンコードを失敗させる（quality）、
+    # または 1x1 px まで縮める（dpi_target=0）ため、実行前に弾く
+    for name, value, low, high in (
+        ("--quality", args.quality, 1, 100),
+        ("--dpi-target", args.dpi_target, 1, 10000),
+        ("--dpi-threshold", args.dpi_threshold, 1, 10000),
+    ):
+        if not low <= value <= high:
+            print(
+                f"エラー: {name} は {low}〜{high} の範囲で指定してください（指定値: {value}）",
+                file=sys.stderr,
+            )
+            raise SystemExit(1)
+
     targets, path_errors = _collect_pdf_targets(args.paths)
     if not targets:
         print("対象の PDF ファイルがありません")

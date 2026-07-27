@@ -27,8 +27,6 @@ from pptx.shapes.autoshape import Shape
 from pptx.shapes.graphfrm import GraphicFrame
 from pptx.shapes.group import GroupShape
 
-from rag.converter.media_reduction import REDUCED_STEM_SUFFIX
-
 if TYPE_CHECKING:
     from collections.abc import Iterable
 
@@ -41,16 +39,6 @@ logger = logging.getLogger(__name__)
 PPTX_EXTENSIONS: frozenset[str] = frozenset({".pptx", ".ppsx"})
 
 # 削減コピーの別名出力サフィックスは削減ツール共通定義（media_reduction）が SSoT。
-# 既存の import 経路を保つため、本モジュールからも参照できるよう再エクスポートする。
-__all__ = [
-    "PPTX_EXTENSIONS",
-    "REDUCED_STEM_SUFFIX",
-    "PptxExtractionError",
-    "PptxMediaReport",
-    "analyze_pptx_media",
-    "extract_pptx",
-    "reduce_pptx",
-]
 
 # 削減対象パートの zip エントリプレフィックス
 # （メディア実体・埋め込みオブジェクト・埋め込みフォント。テキスト抽出には使われない）

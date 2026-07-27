@@ -64,6 +64,27 @@ class PdfReductionError(Exception):
     """PDF をドキュメントとして開けない・削減コピーを生成できない場合の例外."""
 
 
+def _open_pdf(path: Path) -> Any:
+    """PDF を開く（開けない場合・パスワード保護の場合は PdfReductionError）.
+
+    パスワード保護された PDF は open 自体は成功し、ページにアクセスした時点で
+    例外が出る。呼び出し側がスキップ扱いにできるよう、開いた直後に判定する。
+    """
+    import pymupdf
+
+    try:
+        doc = pymupdf.open(str(path))  # type: ignore[no-untyped-call]
+    except Exception as e:
+        msg = f"PDF を開けません: {path.name} ({e})"
+        raise PdfReductionError(msg) from e
+
+    if doc.needs_pass:
+        doc.close()  # type: ignore[no-untyped-call]
+        msg = f"PDF がパスワードで保護されているため処理できません: {path.name}"
+        raise PdfReductionError(msg)
+    return doc
+
+
 @dataclass(frozen=True)
 class PdfMediaReport:
     """PDF の削減対象（画像・埋め込みファイル）の占有量レポート.
@@ -127,9 +148,12 @@ def _iter_embedded_stream_xrefs(doc: Any) -> Iterator[int]:
 
 def _stream_size(doc: Any, xref: int) -> int:
     """ストリームの圧縮後サイズ（ファイルサイズへの寄与分）を返す."""
+    if not xref:
+        return 0
     try:
         raw = doc.xref_stream_raw(xref)
     except Exception:
+        logger.warning("Failed to read stream size for xref=%d", xref)
         return 0
     return len(raw) if raw else 0
 
@@ -199,14 +223,8 @@ def analyze_pdf_media(
     Raises:
         PdfReductionError: PDF として開けない場合
     """
-    import pymupdf
-
     total_bytes = path.stat().st_size
-    try:
-        doc = pymupdf.open(str(path))  # type: ignore[no-untyped-call]
-    except Exception as e:
-        msg = f"PDF を開けません: {path.name} ({e})"
-        raise PdfReductionError(msg) from e
+    doc = _open_pdf(path)
 
     try:
         image_count = 0
@@ -216,22 +234,27 @@ def analyze_pdf_media(
         ext_counts: dict[str, int] = {}
         seen_xrefs: set[int] = set()
 
-        # 表示サイズの見積もりは削減時と同じ基準を使う（レポートと実際の削減対象がずれないように）
+        # 縮小対象の判定は削減時とまったく同じ条件で行う
+        # （レポートに出た件数と、実際に削減される件数がずれないように）
         for xref, ref in _collect_image_refs(doc).items():
             if xref in seen_xrefs:
                 continue
             seen_xrefs.add(xref)
             try:
-                image = doc.extract_image(xref)  # type: ignore[no-untyped-call]
+                image = doc.extract_image(xref)
             except Exception:
                 continue
-            size = len(image["image"])
+            # ファイルサイズへの寄与は zip 内の圧縮後占有量で測る。取り出した
+            # バイト列の長さはデコード・再エンコード後の値で、実占有量とは桁が違う
+            size = _stream_size(doc, xref) + _stream_size(doc, ref.smask_xref)
             image_count += 1
             image_bytes += size
             ext = str(image.get("ext") or "(none)").lower()
             ext_counts[ext] = ext_counts.get(ext, 0) + 1
 
-            if size < MIN_RECOMPRESS_BYTES:
+            if _has_unsupported_colorspace(doc, xref):
+                continue
+            if len(image["image"]) + _mask_size(doc, ref.smask_xref) < MIN_RECOMPRESS_BYTES:
                 continue
             rect = _resolve_placement(doc, xref, ref)
             dpi = _page_dpi(int(image["width"]), int(image["height"]), rect)
@@ -254,8 +277,13 @@ def analyze_pdf_media(
             image_ext_counts=ext_counts,
             is_low_text_layer=_is_low_text_layer(doc),
         )
+    except Exception as e:
+        # 個別ファイルの異常でバッチ全体を止めないため、解析中の例外は
+        # すべて PdfReductionError に包んで呼び出し元がスキップできるようにする
+        msg = f"PDF の解析に失敗しました: {path.name} ({e})"
+        raise PdfReductionError(msg) from e
     finally:
-        doc.close()  # type: ignore[no-untyped-call]
+        doc.close()
 
 
 @dataclass(frozen=True)
@@ -283,6 +311,16 @@ def _collect_image_refs(doc: Any) -> dict[int, _ImageRef]:
                 smask_xref=int(info[1]) if len(info) > 1 else 0,
             )
     return refs
+
+
+def _mask_size(doc: Any, smask_xref: int) -> int:
+    """ソフトマスク画像の実体サイズを返す（存在しない・取得できない場合は 0）."""
+    if not smask_xref:
+        return 0
+    try:
+        return len(doc.extract_image(smask_xref)["image"])
+    except Exception:
+        return 0
 
 
 def _resolve_placement(doc: Any, xref: int, ref: _ImageRef) -> Any:
@@ -390,7 +428,7 @@ def _downscale_images(
     dpi_target: int,
     quality: int,
     label: str,
-) -> int:
+) -> tuple[int, int]:
     """実効解像度が閾値を超える画像を縮小・再エンコードして差し替える.
 
     pymupdf の ``Document.rewrite_images`` は同一入力でも非決定的に
@@ -406,9 +444,10 @@ def _downscale_images(
         label: ログ出力に使う識別名
 
     Returns:
-        差し替えた画像の枚数
+        (差し替えた画像の枚数, 差し替えに失敗した枚数)
     """
     replaced = 0
+    failed = 0
     for xref, ref in _collect_image_refs(doc).items():
         if _has_unsupported_colorspace(doc, xref):
             continue
@@ -416,6 +455,7 @@ def _downscale_images(
             info = doc.extract_image(xref)
         except Exception:
             logger.debug("Failed to extract image xref=%d: %s", xref, label)
+            failed += 1
             continue
 
         payload = info["image"]
@@ -426,6 +466,7 @@ def _downscale_images(
             except Exception:
                 # マスクを取り出せない画像は透過を保証できないため差し替えない
                 logger.debug("Failed to extract smask for xref=%d: %s", xref, label)
+                failed += 1
                 continue
 
         # 判定はマスクの分を含めた実サイズで行う（本体だけでは小さくても、
@@ -445,6 +486,7 @@ def _downscale_images(
         )
         if new_payload is None:
             logger.debug("Failed to recompress image xref=%d: %s", xref, label)
+            failed += 1
             continue
         # 再エンコードで大きくなる場合は元のまま残す（縮小が逆効果になるのを防ぐ）
         if len(new_payload) >= original_bytes:
@@ -454,7 +496,8 @@ def _downscale_images(
             replaced += 1
         except Exception:
             logger.debug("Failed to replace image xref=%d: %s", xref, label)
-    return replaced
+            failed += 1
+    return replaced, failed
 
 
 def reduce_pdf(
@@ -481,42 +524,55 @@ def reduce_pdf(
     Raises:
         PdfReductionError: 入力を開けない場合・出力の書き出しに失敗した場合
     """
-    import pymupdf
+    # 入力と同じパスへの出力は非破壊の前提を壊すため、処理前に弾く
+    if src.resolve() == dst.resolve():
+        msg = f"入力と同じパスには出力できません: {src}"
+        raise PdfReductionError(msg)
 
-    try:
-        doc = pymupdf.open(str(src))  # type: ignore[no-untyped-call]
-    except Exception as e:
-        msg = f"PDF を開けません: {src.name} ({e})"
-        raise PdfReductionError(msg) from e
+    created_output = not dst.exists()
+    doc = _open_pdf(src)
 
     try:
         for xref in _iter_embedded_stream_xrefs(doc):
             try:
-                doc.update_stream(  # type: ignore[no-untyped-call]
+                doc.update_stream(
                     xref, b"", new=False, compress=False,
                 )
             except Exception:
-                logger.debug("Failed to empty embedded stream xref=%d: %s", xref, src.name)
+                logger.warning(
+                    "埋め込みメディアの除去に失敗しました (xref=%d): %s", xref, src.name,
+                )
 
-        _downscale_images(
+        _, failed = _downscale_images(
             doc,
             dpi_threshold=dpi_threshold,
             dpi_target=dpi_target,
             quality=quality,
             label=src.name,
         )
+        if failed:
+            logger.warning(
+                "%d 枚の画像を差し替えられませんでした（元の画像を残します）: %s",
+                failed,
+                src.name,
+            )
 
         # garbage=4: 参照されなくなったオブジェクトの回収と重複の統合
         # clean=True: コンテンツストリームを再構築する。これを省くと画像差し替え後の
         # 残骸が残り、画像が縮んでもファイル全体が元より大きくなる
         # use_objstms=1: オブジェクトストリームで再構築する。これを省くと削減対象の
         # 少ない PDF で構造が展開されて元より大きくなる
-        doc.save(  # type: ignore[no-untyped-call]
-            str(dst), garbage=4, deflate=True, clean=True, use_objstms=1,
-        )
+        doc.save(str(dst), garbage=4, deflate=True, clean=True, use_objstms=1)
     except Exception as e:
-        dst.unlink(missing_ok=True)
+        # 後始末は本呼び出しが作ったファイルに限る。無条件に消すと、既存の
+        # 出力先ファイルや（src == dst の場合は）入力ファイル自体を削除しうる
+        if created_output:
+            try:
+                dst.unlink(missing_ok=True)
+            except OSError:
+                # 後始末の失敗で元の失敗理由を隠さない
+                logger.debug("Failed to remove partial output: %s", dst)
         msg = f"PDF の削減コピー生成に失敗しました: {src.name} -> {dst} ({e})"
         raise PdfReductionError(msg) from e
     finally:
-        doc.close()  # type: ignore[no-untyped-call]
+        doc.close()

@@ -138,6 +138,20 @@ def _soft_mask_count(path: Path) -> int:
         doc.close()
 
 
+def _make_encrypted_pdf(path: Path) -> Path:
+    """パスワード保護された PDF を生成する."""
+    doc = pymupdf.open()
+    doc.new_page().insert_text((72, 72), "protected document", fontsize=11)
+    doc.save(
+        str(path),
+        encryption=pymupdf.PDF_ENCRYPT_AES_256,
+        owner_pw="owner",
+        user_pw="user",
+    )
+    doc.close()
+    return path
+
+
 def _make_scanned_pdf(path: Path) -> Path:
     """テキスト層を持たない（画像のみの）PDF を生成する."""
     doc = pymupdf.open()
@@ -169,6 +183,21 @@ def _args(
         quality=quality,
         include_scanned=include_scanned,
     )
+
+
+def _image_shape(path: Path, index: int = 0) -> tuple[int, int, str]:
+    """PDF 内の index 番目の画像の (幅, 高さ, 形式) を返す.
+
+    差し替えの有無はストリームの生バイト列では判定できない（保存時に
+    コンテナが再圧縮されるため）。差し替えられていれば寸法か形式が変わる。
+    """
+    doc = pymupdf.open(str(path))
+    try:
+        xref = doc[0].get_images(full=True)[index][0]
+        info = doc.extract_image(xref)
+        return int(info["width"]), int(info["height"]), str(info["ext"])
+    finally:
+        doc.close()
 
 
 def _page_text(path: Path) -> str:
@@ -386,6 +415,26 @@ class TestRunReducePdf:
 
         assert exc_info.value.code == 1
 
+    def test_password_protected_pdf_does_not_abort_the_batch(
+        self, tmp_path: Path, capsys: pytest.CaptureFixture[str],
+    ) -> None:
+        """パスワード保護 PDF はエラー計上のうえスキップし、他のファイルを処理し続ける.
+
+        パスワード保護 PDF は open 自体は成功し、ページアクセス時に例外が出る。
+        これを捕捉し損ねるとバッチ全体が中断する。
+        """
+        _make_encrypted_pdf(tmp_path / "locked.pdf")
+        _make_pdf(tmp_path / "normal.pdf")
+        out_dir = tmp_path / "reduced"
+
+        run_reduce_pdf(_args([str(tmp_path)], output_dir=str(out_dir)))
+
+        captured = capsys.readouterr()
+        assert (out_dir / "normal.pdf").exists()
+        assert "生成 1 件" in captured.out
+        assert "エラー 1 件" in captured.out
+        assert "パスワード" in captured.err
+
     def test_broken_pdf_is_counted_as_error(
         self, tmp_path: Path, capsys: pytest.CaptureFixture[str],
     ) -> None:
@@ -422,9 +471,7 @@ class TestPdfMediaReducerModule:
         with pytest.raises(PdfReductionError):
             analyze_pdf_media(broken)
 
-    def test_reduce_raises_and_removes_partial_output_for_broken_pdf(
-        self, tmp_path: Path,
-    ) -> None:
+    def test_reduce_raises_for_broken_pdf(self, tmp_path: Path) -> None:
         broken = tmp_path / "broken.pdf"
         broken.write_bytes(b"not a pdf at all")
         dst = tmp_path / "out.pdf"
@@ -434,23 +481,122 @@ class TestPdfMediaReducerModule:
 
         assert not dst.exists()
 
+    def test_reduce_rejects_writing_over_the_source(self, tmp_path: Path) -> None:
+        """入力と同じパスへの出力を拒否する（非破壊の担保）.
+
+        後始末で出力先を削除する経路があるため、入力と同一パスを許すと
+        原本を削除しうる。処理前に弾く。
+        """
+        pdf = _make_pdf(tmp_path / "deck.pdf")
+        before = pdf.read_bytes()
+
+        with pytest.raises(PdfReductionError):
+            reduce_pdf(pdf, pdf)
+
+        assert pdf.read_bytes() == before
+
+    def test_reduce_keeps_existing_output_when_saving_fails(
+        self, tmp_path: Path,
+    ) -> None:
+        """書き出しに失敗しても、既存の出力先ファイルを削除しない.
+
+        後始末の対象は本呼び出しが作ったファイルに限る。
+        """
+        pdf = _make_pdf(tmp_path / "deck.pdf")
+        existing = tmp_path / "existing.pdf"
+        existing.write_bytes(b"existing content")
+
+        # 書き込めないパス（ディレクトリを出力先に指定）で save を失敗させる
+        with pytest.raises(PdfReductionError):
+            reduce_pdf(pdf, tmp_path)
+
+        assert existing.read_bytes() == b"existing content"
+
     def test_image_without_colorspace_is_left_untouched(self, tmp_path: Path) -> None:
         """ColorSpace を持たない画像（ステンシルマスク等）は差し替えない.
 
         差し替えるとエラーを出さずに表示が崩れるため、対象から除外する。
         """
-        from rag.converter.pdf_media_reducer import _has_unsupported_colorspace
-
         pdf = _make_pdf(tmp_path / "deck.pdf")
+        stripped = tmp_path / "stripped.pdf"
+
+        # ColorSpace を落とした PDF を用意する（ステンシルマスク相当の状態）
         doc = pymupdf.open(str(pdf))
         try:
             xref = doc[0].get_images(full=True)[0][0]
-            assert not _has_unsupported_colorspace(doc, xref)
-            # ColorSpace を落とした状態を再現する
             doc.xref_set_key(xref, "ColorSpace", "null")
-            assert _has_unsupported_colorspace(doc, xref)
+            doc.save(str(stripped))
         finally:
             doc.close()
+
+        before = _image_shape(stripped)
+        reduce_pdf(stripped, tmp_path / "out.pdf")
+
+        # 差し替えられていれば縮小されて寸法が変わる。変わらない = 対象外にできている
+        assert _image_shape(tmp_path / "out.pdf") == before
+
+    def test_recompression_keeps_original_when_result_is_larger(
+        self, tmp_path: Path,
+    ) -> None:
+        """再エンコードで大きくなる画像は元のまま残す（縮小が逆効果になるのを防ぐ）."""
+        from PIL import Image
+
+        # 低品質で圧縮済みの JPEG は、既定品質での再エンコードでかえって大きくなる
+        image = Image.new("RGB", (900, 700))
+        pixels = image.load()
+        assert pixels is not None
+        for y in range(0, 700, 3):
+            for x in range(0, 900, 3):
+                color = ((x * 3) % 256, (y * 7) % 256, ((x + y) * 5) % 256)
+                for dy in range(3):
+                    for dx in range(3):
+                        if x + dx < 900 and y + dy < 700:
+                            pixels[x + dx, y + dy] = color
+        buf = io.BytesIO()
+        image.save(buf, format="JPEG", quality=20)
+
+        pdf = tmp_path / "lowq.pdf"
+        doc = pymupdf.open()
+        page = doc.new_page()
+        page.insert_text((72, 72), "low quality jpeg deck", fontsize=11)
+        # ページ全面に配置して解像度を閾値以下にし、縮小ではなく再エンコードのみを走らせる
+        page.insert_image(page.rect, stream=buf.getvalue())
+        doc.save(str(pdf))
+        doc.close()
+
+        before = _image_shape(pdf)
+        reduce_pdf(pdf, tmp_path / "out.pdf")
+
+        assert _image_shape(tmp_path / "out.pdf") == before
+
+    def test_unreadable_soft_mask_leaves_image_untouched(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """ソフトマスクを取り出せない画像は透過を保証できないため差し替えない."""
+        pdf = _make_pdf_with_transparency(tmp_path / "alpha.pdf")
+
+        doc = pymupdf.open(str(pdf))
+        try:
+            smask_xref = doc[0].get_images(full=True)[0][1]
+        finally:
+            doc.close()
+        assert smask_xref
+
+        # マスクの取り出しだけが失敗する状態を作る
+        original = pymupdf.Document.extract_image
+
+        def failing_extract(self: pymupdf.Document, xref: int) -> object:
+            if xref == smask_xref:
+                msg = "mask unreadable"
+                raise RuntimeError(msg)
+            return original(self, xref)
+
+        before = _image_shape(pdf)
+        monkeypatch.setattr(pymupdf.Document, "extract_image", failing_extract)
+        reduce_pdf(pdf, tmp_path / "out.pdf")
+        monkeypatch.undo()
+
+        assert _image_shape(tmp_path / "out.pdf") == before
 
     def test_reduce_does_not_inflate_pdf_without_media(self, tmp_path: Path) -> None:
         pdf = _make_pdf(tmp_path / "textonly.pdf", with_image=False, pages=3)
